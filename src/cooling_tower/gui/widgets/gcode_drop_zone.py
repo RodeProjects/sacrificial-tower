@@ -81,15 +81,19 @@ class GCodeDropZone(QFrame):
 
         # Compatibility for callers that previously read the combined info
         # label.  The visible UI uses the four dedicated rows above.
-        self.file_info_label = QLabel("")
+        self.file_info_label = QLabel("", self)
         self.file_info_label.hide()
-        self.browse_button = QPushButton("G-Code auswählen …")
+        # These controls change visibility while the drop zone is still being
+        # constructed.  Giving them an owner immediately prevents Qt from
+        # treating them as temporary top-level windows before the action layout
+        # reparents them.
+        self.browse_button = QPushButton("G-Code auswählen …", self)
         self.browse_button.clicked.connect(self.select_file)
-        self.remove_button = QPushButton("G-Code entfernen")
+        self.remove_button = QPushButton("G-Code entfernen", self)
         self.remove_button.setObjectName("removeGcodeButton")
         self.remove_button.setEnabled(False)
         self.remove_button.clicked.connect(self.remove_requested)
-        self.reload_button = QPushButton("G-Code neu einlesen")
+        self.reload_button = QPushButton("G-Code neu einlesen", self)
         self.reload_button.setObjectName("reloadGcodeButton")
         self.reload_button.setEnabled(False)
         self.reload_button.setToolTip(

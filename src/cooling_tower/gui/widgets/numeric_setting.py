@@ -193,7 +193,10 @@ class NumericSettingWidget(QWidget):
         self._warning_messages: tuple[str, ...] = self._message_lines(helper_text)
         self._feedback_enabled = True
 
-        self.range_label = QLabel()
+        # The range text is made visible immediately below, before the layout
+        # gets a chance to reparent it.  Without this owner Qt briefly exposes
+        # every range label as an independent native window during startup.
+        self.range_label = QLabel(self)
         self.range_label.setObjectName("numericRangeHint")
         self.range_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter

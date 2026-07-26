@@ -1669,7 +1669,6 @@ class MainWindow(QMainWindow):
         self.progress_bar.setObjectName("mainProgressBar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.show()
         self.progress_bar.setFormat("%p %")
         self.progress_bar.hide()
         self.status_label = QLabel("Bitte G-Code auswählen")
@@ -1937,10 +1936,13 @@ class MainWindow(QMainWindow):
         self.footer_action_layout.addStretch(1)
         self.footer_action_layout.addLayout(main_actions)
 
-        self.footer_vertical_divider = QFrame()
+        # Responsive layout code toggles these dividers before inserting them
+        # into the current grid position.  Owning them from the hidden footer
+        # prevents that initial toggle from creating a native top-level window.
+        self.footer_vertical_divider = QFrame(footer)
         self.footer_vertical_divider.setObjectName("footerVerticalDivider")
         self.footer_vertical_divider.setFixedWidth(1)
-        self.footer_horizontal_divider = QFrame()
+        self.footer_horizontal_divider = QFrame(footer)
         self.footer_horizontal_divider.setObjectName("footerHorizontalDivider")
         self.footer_horizontal_divider.setFixedHeight(1)
 
