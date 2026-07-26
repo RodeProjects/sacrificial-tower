@@ -1,0 +1,167 @@
+name: Build Windows update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version im Format x.x.x
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Validate requested version
+        shell: pwsh
+        run: |
+          $appVersion = python -c "import sys; sys.path.insert(0, 'src'); from cooling_tower.version import APP_VERSION; print(APP_VERSION)"
+          if ($appVersion -ne '${{ inputs.version }}') {
+            throw "Requested version ${{ inputs.version }} does not match APP_VERSION $appVersion."
+          }
+          "APP_VERSION=$appVersion" >> $env:GITHUB_ENV
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -q
+
+      - name: Build application directory
+        run: pyinstaller --noconfirm --clean SacrificialTower.spec
+
+      - name: Import Authenticode certificate
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)) {
+            throw 'The WINDOWS_SIGNING_CERTIFICATE_BASE64 secret is required.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
+            throw 'The WINDOWS_SIGNING_CERTIFICATE_PASSWORD secret is required.'
+          }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.pfx'
+          try {
+            $certificateBytes = [Convert]::FromBase64String(
+              $env:WINDOWS_SIGNING_CERTIFICATE_BASE64
+            )
+            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+            $password = ConvertTo-SecureString `
+              $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD `
+              -AsPlainText `
+              -Force
+            $certificate = Import-PfxCertificate `
+              -FilePath $certificatePath `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -Password $password `
+              -Exportable:$false
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          }
+          if ($null -eq $certificate -or -not $certificate.HasPrivateKey) {
+            throw 'The Authenticode certificate could not be imported with its private key.'
+          }
+
+          $signTool = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Filter 'signtool.exe' `
+            -Recurse |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signTool) {
+            throw 'signtool.exe was not found in the Windows SDK.'
+          }
+
+          "WINDOWS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+          "SIGNTOOL_PATH=$($signTool.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $innoRoot = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $expectedHash = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          $actualHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "Unexpected Inno Setup installer hash: $actualHash"
+          }
+          $arguments = "/PORTABLE=1 /VERYSILENT /CURRENTUSER /DIR=`"$innoRoot`""
+          Start-Process -FilePath $installer -ArgumentList $arguments -Wait -WindowStyle Hidden
+          "INNO_ROOT=$innoRoot" >> $env:GITHUB_ENV
+
+      - name: Build per-user installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
+          $signCommand = (
+            '$q{0}$q sign /sha1 {1} /fd SHA256 /td SHA256 ' +
+            '/tr http://timestamp.digicert.com /d $qSacrificial Tower$q $f'
+          ) -f $env:SIGNTOOL_PATH, $env:WINDOWS_SIGNING_THUMBPRINT
+          & $iscc `
+            "/DAppVersion=$env:APP_VERSION" `
+            '/DSignBuild=1' `
+            "/Sauthenticode=$signCommand" `
+            'installer\SacrificialTower.iss'
+
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        run: |
+          $files = @(
+            'dist\SacrificialTower\SacrificialTower.exe',
+            "dist\installer\SacrificialTowerSetup-$env:APP_VERSION.exe"
+          )
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+              throw "Invalid Authenticode signature on ${file}: $($signature.StatusMessage)"
+            }
+            if ($signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_SIGNING_THUMBPRINT) {
+              throw "Unexpected Authenticode signer on $file."
+            }
+          }
+
+      - name: Create verified update metadata
+        shell: pwsh
+        run: |
+          $installer = Get-Item "dist\installer\SacrificialTowerSetup-$env:APP_VERSION.exe"
+          $metadata = @{
+            version = $env:APP_VERSION
+            installer_name = $installer.Name
+            sha256 = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            size_bytes = $installer.Length
+            signer_thumbprint = $env:WINDOWS_SIGNING_THUMBPRINT.ToLowerInvariant()
+          }
+          $metadata | ConvertTo-Json | Set-Content 'dist\installer\update-metadata.json' -Encoding utf8
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SacrificialTower-${{ inputs.version }}-windows-x64
+          path: |
+            dist/installer/SacrificialTowerSetup-${{ inputs.version }}.exe
+            dist/installer/update-metadata.json
+          if-no-files-found: error
+          retention-days: 14

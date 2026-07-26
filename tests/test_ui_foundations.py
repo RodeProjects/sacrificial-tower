@@ -16,9 +16,9 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QLocale, Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLabel
 
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.main_window import MainWindow
@@ -27,6 +27,7 @@ from cooling_tower.gui.workflow_controller import (
     WorkflowStage,
 )
 from cooling_tower.gui.widgets import (
+    NumericSettingWidget,
     ResponsiveCardGrid,
     SectionCard,
     SectionState,
@@ -63,6 +64,30 @@ class UiFoundationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.app.processEvents()
         self.temporary.cleanup()
+
+    def test_numeric_settings_use_german_format_on_english_systems(self) -> None:
+        previous_locale = QLocale()
+        QLocale.setDefault(
+            QLocale(
+                QLocale.Language.English,
+                QLocale.Country.UnitedStates,
+            )
+        )
+        editor = QDoubleSpinBox()
+        editor.setDecimals(2)
+        try:
+            widget = NumericSettingWidget(
+                setting_name="test_value",
+                label="Testwert",
+                editor=editor,
+                default_provider=lambda: 0.0,
+            )
+            editor.setValue(12.5)
+            self.assertEqual(editor.locale().decimalPoint(), ",")
+            self.assertEqual(editor.text(), "12,50")
+            widget.close()
+        finally:
+            QLocale.setDefault(previous_locale)
 
     def test_acceptance_matrix_covers_all_agreed_states_and_rules(self) -> None:
         path = PROJECT_ROOT / "tests" / "references" / "ui_overhaul_acceptance.json"

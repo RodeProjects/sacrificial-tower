@@ -15,10 +15,11 @@ from PySide6.QtCore import QtMsgType, QTimer, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui import MainWindow
+from cooling_tower.runtime_paths import INSTALL_ROOT
 from cooling_tower.version import APP_VERSION
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = INSTALL_ROOT
 DEFAULT_STARTUP_LOG = PROJECT_ROOT / "output" / "logs" / "application_startup.log"
 DEFAULT_NATIVE_CRASH_LOG = PROJECT_ROOT / "output" / "logs" / "native_crash.log"
 DEFAULT_RUNTIME_LOG = PROJECT_ROOT / "output" / "logs" / "application_runtime.log"

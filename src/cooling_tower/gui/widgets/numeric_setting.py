@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QLocale, Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
@@ -47,6 +47,12 @@ class NumericSettingWidget(QWidget):
         self.setting_name = setting_name
         self.editor = editor
         self.default_provider = default_provider
+        self.editor.setLocale(
+            QLocale(
+                QLocale.Language.German,
+                QLocale.Country.Germany,
+            )
+        )
 
         layout = QGridLayout(self)
         layout.setContentsMargins(
@@ -187,7 +193,10 @@ class NumericSettingWidget(QWidget):
         self._warning_messages: tuple[str, ...] = self._message_lines(helper_text)
         self._feedback_enabled = True
 
-        self.range_label = QLabel()
+        # The range text is made visible immediately below, before the layout
+        # gets a chance to reparent it.  Without this owner Qt briefly exposes
+        # every range label as an independent native window during startup.
+        self.range_label = QLabel(self)
         self.range_label.setObjectName("numericRangeHint")
         self.range_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter

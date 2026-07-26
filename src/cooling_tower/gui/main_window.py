@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import replace
 from html import escape
 from pathlib import Path
@@ -14,6 +15,7 @@ from PySide6.QtGui import (
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -52,6 +54,7 @@ from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
     SETTING_INFO_TEXTS,
 )
+from cooling_tower.gui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
 from cooling_tower.gui.widgets import (
@@ -102,6 +105,8 @@ from cooling_tower.slicers import (
     SlicerProfileProbeValidator,
 )
 from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
+from cooling_tower.update import UpdateInfo, UpdateService
+from cooling_tower.runtime_paths import INSTALL_ROOT, RESOURCE_ROOT
 from cooling_tower.tower.hollow_profile import (
     MAXIMUM_EXPANSION_ANGLE_DEG,
     validate_hollow_settings,
@@ -113,7 +118,7 @@ from cooling_tower.tower.base_calculator import (
 from cooling_tower.tower.wall_calculator import calculate_wall_path_bounds
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = INSTALL_ROOT
 PREVIEW_QUALITY_ITERATIONS = {
     "fast": 1,
     "balanced": 3,
@@ -331,6 +336,8 @@ class MainWindow(QMainWindow):
         profile_service: ProfileMatchingService | None = None,
         preview_service: PreviewService | None = None,
         export_service: PreviewExportService | None = None,
+        update_service: UpdateService | None = None,
+        enable_update_check: bool | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -356,6 +363,26 @@ class MainWindow(QMainWindow):
         )
         self.preview_service = preview_service or PreviewService()
         self.export_service = export_service or PreviewExportService()
+        update_service_was_injected = update_service is not None
+        self.update_service = update_service or UpdateService()
+        self._update_check_enabled = (
+            enable_update_check
+            if enable_update_check is not None
+            else update_service_was_injected
+            or (
+                bool(getattr(sys, "frozen", False))
+                and os.environ.get("COOLING_TOWER_DISABLE_UPDATE_CHECK") != "1"
+            )
+        )
+        self.available_update: UpdateInfo | None = None
+        self._update_check_request_id = 0
+        self._update_check_jobs: dict[
+            int, tuple[QThread, UpdateCheckWorker]
+        ] = {}
+        self._update_download_request_id = 0
+        self._update_download_jobs: dict[
+            int, tuple[QThread, UpdateDownloadWorker]
+        ] = {}
         self._slicer_request_id = 0
         self._slicer_jobs: dict[
             int, tuple[QThread, SlicerDiscoveryWorker]
@@ -431,9 +458,9 @@ class MainWindow(QMainWindow):
         self.settings_store = UserSettingsStore(
             user_settings_path
             or os.environ.get("COOLING_TOWER_USER_SETTINGS_PATH")
-            or PROJECT_ROOT / "config" / "user_settings.json",
+            or INSTALL_ROOT / "config" / "user_settings.json",
             default_settings_path
-            or PROJECT_ROOT / "config" / "default_settings.json",
+            or RESOURCE_ROOT / "config" / "default_settings.json",
         )
         self.default_settings = self.settings_store.load_defaults()
         self.default_output_root = self.settings_store.load_default_output_root()
@@ -478,6 +505,8 @@ class MainWindow(QMainWindow):
         self.validate_form()
         self.workflow.reset()
         QTimer.singleShot(0, self._update_slicer_combo_widths)
+        if self._update_check_enabled:
+            QTimer.singleShot(750, self.start_update_check)
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -556,6 +585,15 @@ class MainWindow(QMainWindow):
         subtitle_row.addWidget(subtitle)
         subtitle_row.addStretch(1)
         subtitle_row.addWidget(self.version_label)
+        self.update_button = QPushButton("Aktualisieren")
+        self.update_button.setObjectName("updateButton")
+        self.update_button.setAccessibleName("Programm aktualisieren")
+        self.update_button.setToolTip(
+            "Die neueste Programmversion herunterladen und installieren"
+        )
+        self.update_button.clicked.connect(self.start_update_download)
+        self.update_button.hide()
+        subtitle_row.addWidget(self.update_button)
         header_layout.addLayout(title_row)
         header_layout.addLayout(subtitle_row)
         root_layout.addWidget(header)
@@ -1631,7 +1669,6 @@ class MainWindow(QMainWindow):
         self.progress_bar.setObjectName("mainProgressBar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.show()
         self.progress_bar.setFormat("%p %")
         self.progress_bar.hide()
         self.status_label = QLabel("Bitte G-Code auswählen")
@@ -1899,10 +1936,13 @@ class MainWindow(QMainWindow):
         self.footer_action_layout.addStretch(1)
         self.footer_action_layout.addLayout(main_actions)
 
-        self.footer_vertical_divider = QFrame()
+        # Responsive layout code toggles these dividers before inserting them
+        # into the current grid position.  Owning them from the hidden footer
+        # prevents that initial toggle from creating a native top-level window.
+        self.footer_vertical_divider = QFrame(footer)
         self.footer_vertical_divider.setObjectName("footerVerticalDivider")
         self.footer_vertical_divider.setFixedWidth(1)
-        self.footer_horizontal_divider = QFrame()
+        self.footer_horizontal_divider = QFrame(footer)
         self.footer_horizontal_divider.setObjectName("footerHorizontalDivider")
         self.footer_horizontal_divider.setFixedHeight(1)
 
@@ -2069,6 +2109,129 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(setting_widget)
         return setting_widget
+
+    def start_update_check(self) -> None:
+        if (
+            self._closing
+            or not self._update_check_enabled
+            or self._update_check_jobs
+        ):
+            return
+        self._update_check_request_id += 1
+        request_id = self._update_check_request_id
+        worker = UpdateCheckWorker(
+            request_id,
+            APP_VERSION,
+            self.update_service,
+        )
+        worker.succeeded.connect(self._on_update_check_succeeded)
+        worker.failed.connect(self._on_update_check_failed)
+        start_background_job(
+            parent=self,
+            request_id=request_id,
+            worker=worker,
+            jobs=self._update_check_jobs,
+            on_thread_finished=self._on_background_thread_finished,
+        )
+
+    def _on_update_check_succeeded(
+        self,
+        request_id: int,
+        update_info: UpdateInfo | None,
+    ) -> None:
+        if request_id != self._update_check_request_id or self._closing:
+            return
+        self.available_update = update_info
+        if update_info is None:
+            self.update_button.hide()
+            return
+        self.update_button.setText("Aktualisieren")
+        self.update_button.setToolTip(
+            f"Version {update_info.version} herunterladen und installieren"
+        )
+        self.update_button.setEnabled(True)
+        self.update_button.show()
+
+    def _on_update_check_failed(
+        self,
+        request_id: int,
+        _message: str,
+        _details: str,
+    ) -> None:
+        if request_id != self._update_check_request_id or self._closing:
+            return
+        # Update checks must never disturb offline use of the application.
+        self.available_update = None
+        self.update_button.hide()
+
+    def start_update_download(self) -> None:
+        if (
+            self._closing
+            or self.available_update is None
+            or self._update_download_jobs
+        ):
+            return
+        self._update_download_request_id += 1
+        request_id = self._update_download_request_id
+        self.update_button.setEnabled(False)
+        self.update_button.setText("Lädt … 0 %")
+        worker = UpdateDownloadWorker(
+            request_id,
+            self.available_update,
+            self.update_service,
+        )
+        worker.progress.connect(self._on_update_download_progress)
+        worker.succeeded.connect(self._on_update_download_succeeded)
+        worker.failed.connect(self._on_update_download_failed)
+        start_background_job(
+            parent=self,
+            request_id=request_id,
+            worker=worker,
+            jobs=self._update_download_jobs,
+            on_thread_finished=self._on_background_thread_finished,
+        )
+
+    def _on_update_download_progress(self, request_id: int, percent: int) -> None:
+        if request_id != self._update_download_request_id or self._closing:
+            return
+        self.update_button.setText(f"Lädt … {max(0, min(100, percent))} %")
+
+    def _on_update_download_succeeded(
+        self,
+        request_id: int,
+        installer_path: Path,
+    ) -> None:
+        if request_id != self._update_download_request_id or self._closing:
+            return
+        self.update_button.setText("Installation startet …")
+        try:
+            self.update_service.launch_installer(installer_path)
+        except Exception as error:
+            self._show_update_error(str(error))
+            return
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
+
+    def _on_update_download_failed(
+        self,
+        request_id: int,
+        message: str,
+        _details: str,
+    ) -> None:
+        if request_id != self._update_download_request_id or self._closing:
+            return
+        self._show_update_error(message)
+
+    def _show_update_error(self, message: str) -> None:
+        self.update_button.setText("Aktualisieren")
+        self.update_button.setEnabled(True)
+        QMessageBox.warning(
+            self,
+            "Aktualisierung fehlgeschlagen",
+            "Das Programm konnte nicht automatisch aktualisiert werden.\n\n"
+            f"{message}",
+        )
 
     def _apply_style(self) -> None:
         style_path = Path(__file__).with_name("styles.qss")
@@ -3126,6 +3289,8 @@ class MainWindow(QMainWindow):
             ("preview", self._preview_jobs),
             ("prediction", self._slicer_prediction_jobs),
             ("export", self._export_jobs),
+            ("update-check", self._update_check_jobs),
+            ("update-download", self._update_download_jobs),
         )
         for kind, jobs in job_groups:
             for request_id, (thread, _worker) in tuple(jobs.items()):
@@ -6540,6 +6705,9 @@ class MainWindow(QMainWindow):
         for thread, worker in tuple(self._export_jobs.values()):
             worker.cancel()
             thread.requestInterruption()
+        for thread, worker in tuple(self._update_download_jobs.values()):
+            worker.cancel()
+            thread.requestInterruption()
 
         background_threads = (
             *(thread for thread, _worker in self._analysis_jobs.values()),
@@ -6549,6 +6717,8 @@ class MainWindow(QMainWindow):
             *(thread for thread, _worker in self._preview_jobs.values()),
             *(thread for thread, _worker in self._slicer_prediction_jobs.values()),
             *(thread for thread, _worker in self._export_jobs.values()),
+            *(thread for thread, _worker in self._update_check_jobs.values()),
+            *(thread for thread, _worker in self._update_download_jobs.values()),
         )
         for thread in background_threads:
             thread.requestInterruption()

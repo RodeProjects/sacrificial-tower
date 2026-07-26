@@ -34,6 +34,7 @@ from cooling_tower.slicers import (
     SlicerInstallation,
 )
 from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
+from cooling_tower.update import UpdateInfo
 
 
 class RequestedGuiChangesTests(unittest.TestCase):
@@ -57,7 +58,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        self.assertEqual(APP_VERSION, "0.4.1")
+        self.assertEqual(APP_VERSION, "0.4.4")
         self.assertEqual(window.version_label.text(), APP_VERSION_LABEL)
         self.assertEqual(window.version_label.objectName(), "versionLabel")
         self.assertNotIn("alpha", window.version_label.text().casefold())
@@ -72,6 +73,37 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.options_button.mapTo(window, QPoint(0, 0)).x()
             + window.options_button.width(),
         )
+        window.close()
+
+    def test_update_button_appears_right_of_version_only_for_an_update(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        self.assertTrue(window.update_button.isHidden())
+
+        window._update_check_request_id = 7
+        window._on_update_check_succeeded(
+            7,
+            UpdateInfo(
+                version="0.4.2",
+                installer_url=(
+                    "https://github.com/RodeProjects/"
+                    "sacrificial-tower-updates/releases/download/v0.4.2/"
+                    "SacrificialTowerSetup-0.4.2.exe"
+                ),
+                sha256="0" * 64,
+                size_bytes=123,
+            ),
+        )
+        self.app.processEvents()
+        self.assertFalse(window.update_button.isHidden())
+        self.assertGreater(
+            window.update_button.mapTo(window, QPoint(0, 0)).x(),
+            window.version_label.mapTo(window, QPoint(0, 0)).x(),
+        )
+
+        window._on_update_check_succeeded(7, None)
+        self.assertTrue(window.update_button.isHidden())
         window.close()
 
     def test_slicer_titles_are_left_aligned(self) -> None:

@@ -18,13 +18,14 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractSpinBox,
     QStyle,
     QStyleOptionSpinBox,
+    QWidget,
 )
 
 from cooling_tower.application import show_startup_error
@@ -47,6 +48,49 @@ from test_phase9 import SAMPLE_GCODE, make_snapshot
 
 
 DEFAULTS_PATH = PROJECT_ROOT / "config" / "default_settings.json"
+
+
+class _TopLevelShowRecorder(QObject):
+    def __init__(self) -> None:
+        super().__init__()
+        self.shown: list[tuple[str, str]] = []
+
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
+        if (
+            event.type() == QEvent.Type.Show
+            and isinstance(watched, QWidget)
+            and watched.isWindow()
+        ):
+            self.shown.append(
+                (watched.metaObject().className(), watched.objectName())
+            )
+        return False
+
+
+class StartupWindowVisibilityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_constructor_does_not_flash_temporary_top_level_widgets(self) -> None:
+        """Only run_application may expose the completed main window."""
+
+        with tempfile.TemporaryDirectory() as temporary:
+            recorder = _TopLevelShowRecorder()
+            self.app.installEventFilter(recorder)
+            window = None
+            try:
+                window = MainWindow(
+                    user_settings_path=Path(temporary) / "user.json",
+                    enable_update_check=False,
+                )
+            finally:
+                self.app.removeEventFilter(recorder)
+                if window is not None:
+                    window.close()
+                self.app.processEvents()
+
+        self.assertEqual(recorder.shown, [])
 
 
 class SettingsSchemaTests(unittest.TestCase):
@@ -664,8 +708,9 @@ class StartupLayoutAndLifecycleTests(GuiCase):
             )
 
     def test_pythonw_entry_point_starts_and_closes_cleanly(self) -> None:
-        pythonw = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
-        self.assertTrue(pythonw.is_file())
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        if not pythonw.is_file():
+            self.skipTest("Der aktuelle Python-Build enthält kein pythonw.exe.")
         environment = os.environ.copy()
         environment["QT_QPA_PLATFORM"] = "offscreen"
         environment["COOLING_TOWER_TEST_AUTOCLOSE_MS"] = "250"
