@@ -17,6 +17,9 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("styles.qss", spec)
         self.assertIn('name="SacrificialTower"', spec)
         self.assertIn("console=False", spec)
+        self.assertIn("windows_version_info.txt", spec)
+        self.assertIn("version=str(version_info_path)", spec)
+        self.assertIn("StringStruct(u'CompanyName', u'RodeProjects')", spec)
 
     def test_installer_is_per_user_and_restarts_the_application(self) -> None:
         installer = (
@@ -33,6 +36,24 @@ class UpdatePackagingTests(unittest.TestCase):
             installer,
         )
         self.assertIn('WorkingDir: "{app}"', installer)
+        self.assertIn("VersionInfoVersion={#AppVersion}", installer)
+
+    def test_release_build_signs_every_windows_executable(self) -> None:
+        installer = (
+            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
+        ).read_text(encoding="utf-8")
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("SignTool=authenticode", installer)
+        self.assertIn("SignedUninstaller=yes", installer)
+        self.assertIn("Flags: ignoreversion signonce", installer)
+        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_BASE64", workflow)
+        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_PASSWORD", workflow)
+        self.assertIn("/DSignBuild=1", workflow)
+        self.assertIn("Get-AuthenticodeSignature", workflow)
+        self.assertIn("signer_thumbprint", workflow)
 
     def test_packaged_resources_and_persistent_files_use_separate_roots(self) -> None:
         main_window = (
@@ -64,6 +85,8 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("auth status", script)
         self.assertIn("RodeProjects/sacrificial-tower-updates", script)
         self.assertIn("update-metadata.json", script)
+        self.assertIn("Get-AuthenticodeSignature", script)
+        self.assertIn("signer_thumbprint", script)
         self.assertNotIn("Authorization: Bearer", script)
         self.assertNotIn("personal_access_token", script.casefold())
 

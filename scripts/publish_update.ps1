@@ -101,6 +101,20 @@ try {
     if ($actualHash -ne $metadata.sha256 -or $installer.Length -ne $metadata.size_bytes) {
         throw "Die Integritätsprüfung des Build-Artefakts ist fehlgeschlagen."
     }
+    $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        throw (
+            "Der Update-Installer besitzt keine gültige Authenticode-Signatur: " +
+            $signature.StatusMessage
+        )
+    }
+    $signerThumbprint = $signature.SignerCertificate.Thumbprint.ToLowerInvariant()
+    if (
+        [string]::IsNullOrWhiteSpace($metadata.signer_thumbprint) -or
+        $signerThumbprint -ne $metadata.signer_thumbprint.ToLowerInvariant()
+    ) {
+        throw "Der Authenticode-Unterzeichner des Build-Artefakts stimmt nicht überein."
+    }
 
     & $gh release create $tag $installer.FullName `
         --repo $UpdateRepository `
@@ -116,6 +130,7 @@ try {
         )
         sha256 = $actualHash
         size_bytes = $installer.Length
+        signer_thumbprint = $signerThumbprint
         release_notes = "Sacrificial Tower $version"
     } | ConvertTo-Json
     $manifestBytes = [System.Text.Encoding]::UTF8.GetBytes($manifest + "`n")
