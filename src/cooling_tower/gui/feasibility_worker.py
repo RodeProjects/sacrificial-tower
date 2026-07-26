@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import traceback
+
+from PySide6.QtCore import QObject, QThread, Signal, Slot
+
+from cooling_tower.models import (
+    GCodeAnalysisSnapshot,
+    GenerationSettings,
+    TowerNeedAssessment,
+)
+from cooling_tower.services import (
+    FeasibilityCancelled,
+    assess_profile_feasibility,
+)
+
+
+class FeasibilityWorker(QObject):
+    """Cancelable worker for one debounced, output-free profile check."""
+
+    succeeded = Signal(int, object)
+    failed = Signal(int, str, str)
+    finished = Signal(int)
+
+    def __init__(
+        self,
+        request_id: int,
+        snapshot: GCodeAnalysisSnapshot,
+        settings: GenerationSettings,
+        assessment: TowerNeedAssessment,
+    ) -> None:
+        super().__init__()
+        self.request_id = request_id
+        self.snapshot = snapshot
+        self.settings = settings
+        self.assessment = assessment
+
+    @Slot()
+    def run(self) -> None:
+        thread = QThread.currentThread()
+        try:
+            result = assess_profile_feasibility(
+                self.snapshot,
+                self.settings,
+                self.assessment,
+                cancellation_callback=thread.isInterruptionRequested,
+            )
+        except FeasibilityCancelled:
+            pass
+        except Exception as error:
+            self.failed.emit(
+                self.request_id,
+                str(error),
+                traceback.format_exc(),
+            )
+        else:
+            if not thread.isInterruptionRequested():
+                self.succeeded.emit(self.request_id, result)
+        finally:
+            self.finished.emit(self.request_id)

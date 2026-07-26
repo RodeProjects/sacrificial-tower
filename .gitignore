@@ -1,0 +1,65 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtuelle Umgebungen und lokale Umgebungsvariablen
+.venv/
+.venv*/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Test-, Analyse- und Werkzeug-Caches
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+
+# Build- und Paketartefakte
+build/
+dist/
+*.egg-info/
+
+# IDEs und lokale Editor-Einstellungen
+.idea/
+.vscode/
+.vs/
+.fleet/
+.spyproject/
+.ropeproject/
+*.code-workspace
+*.iml
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+
+# Lokale Codex-/Agent-Metadaten
+.agents/
+.codex/
+
+# Betriebssystem- und temporäre Dateien
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.bak
+*.swp
+*.log
+
+# Laufzeitausgaben und persönliche Programmeinstellungen
+output/
+config/user_settings.json
+config/profile_inventory_cache.json
+config/profile_mappings.json
+config/slicer_settings.json

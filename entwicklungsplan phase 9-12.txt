@@ -1,0 +1,2586 @@
+# Erweiterter Entwicklungsplan: Phasen 9 bis 12
+
+## Ziel der Erweiterung
+
+Die bestehende Kühlturm-Anwendung soll so weiterentwickelt werden, dass ein Kühlturm nur noch dann erzeugt wird, wenn der analysierte G-Code tatsächlich zusätzliche Layerzeit benötigt.
+
+Die Form des Kühlturms soll sich stärker an der beigefügten Referenz orientieren:
+
+* breiter, stabiler Standfuß,
+* durchgehender Mindestquerschnitt,
+* nur an den erforderlichen Höhen lokale Verbreiterungen,
+* kurvenförmige statt linearer Übergänge,
+* gemeinsames Verschieben von Außen- und Innenwand,
+* zusätzliche Wandstärke erst nach Erreichen der maximalen Außenbreite,
+* möglichst geringe Turmhöhe,
+* möglichst geringer Material- und Zeitverbrauch.
+
+Zusätzlich sollen die Bedienbarkeit und die Rückmeldungen der GUI verbessert werden:
+
+* sofortige Bedarfsprüfung bei Änderung der Ziel-Layerzeit,
+* Hinweise direkt unter den betroffenen Eingaben,
+* rote Markierung technisch nicht erfüllbarer Einstellungen,
+* eigener Reset-Button hinter jedem einstellbaren Wert,
+* zuverlässig anklickbare Pfeil- und Eingabefelder,
+* keine überlappenden Bedienelemente,
+* kein dauerhaft sichtbares Konsolenfenster beim normalen GUI-Start.
+
+Die folgenden Phasen bauen auf den Phasen 1 bis 8 auf. Wo frühere Regeln den neuen Anforderungen widersprechen, gelten die hier beschriebenen Regeln.
+
+---
+
+# Bedeutung des Referenzbildes
+
+Das beigefügte Bild stellt keine unveränderliche Zielgeometrie dar. Es dient als visuelle Referenz für das grundsätzliche Verhalten des Kühlturms.
+
+Die wesentlichen Merkmale sind:
+
+* Der Turm beginnt mit einem deutlich verbreiterten Standfuß.
+* Oberhalb des Standfußes verjüngt er sich fließend auf eine Mindestbreite.
+* Die Mindestbreite wird in Bereichen ohne zusätzlichen Zeitbedarf beibehalten.
+* Wo zusätzliche Layerzeit benötigt wird, erweitert sich der Turm lokal.
+* Die Erweiterung beginnt bereits vor dem betreffenden Layer.
+* Der maximale Radius wird am benötigten Höhenbereich erreicht.
+* Anschließend wird die Erweiterung mit einer spiegelbildlich vergleichbaren Kurvenform zurückgeführt.
+* Folgen mehrere Bereiche mit zusätzlichem Zeitbedarf dicht aufeinander, müssen die Erweiterungen miteinander verschmelzen.
+* In diesem Fall darf der Turm zwischen den Bereichen nicht künstlich auf die Mindestbreite zurückkehren.
+* Die Anzahl und Position der Erweiterungen ergeben sich ausschließlich aus dem analysierten G-Code.
+* Der Turm endet, sobald oberhalb des letzten kritischen Layers keine weitere Turmgeometrie mehr benötigt wird.
+
+Die Referenz zeigt damit vor allem eine rotationssymmetrische, glatte und datenabhängige Außenkontur.
+
+---
+
+# Verbindliche Änderungen gegenüber den bisherigen Phasen
+
+Folgende ältere Annahmen werden ersetzt oder präzisiert:
+
+## Kein Turm ohne Zeitdefizit
+
+Die bisherige Regel, auch bei ausreichender Layerzeit einen Turm mit Mindestradius über die gesamte Modellhöhe zu erzeugen, entfällt.
+
+Neue Regel:
+
+```text
+Wenn kein analysierter Layer zusätzliche Zeit benötigt,
+wird überhaupt kein Kühlturm erzeugt.
+```
+
+Es werden in diesem Fall insbesondere nicht erzeugt:
+
+* keine Kühlturm-STL,
+* kein leerer Standfuß,
+* kein Turm mit Mindestdurchmesser,
+* kein unnötiger Laufordner für eine vermeintlich erfolgreiche STL-Generierung.
+
+## Begrenzte Turmhöhe
+
+Ein benötigter Kühlturm reicht nicht mehr automatisch bis zur maximalen Höhe des Hauptmodells.
+
+Neue Regel:
+
+```text
+Turmende = letzter Layer mit Zeitdefizit + ein zusätzlicher Layer
+```
+
+## Neuer Mindest-Außenradius
+
+Der Standardwert des Mindest-Außenradius wird geändert auf:
+
+```text
+5,0 mm = 0,5 cm
+```
+
+Intern werden weiterhin Millimeter verwendet.
+
+## Spline statt linearer Übergänge
+
+Die reine lineare Verbindung benachbarter Profilpunkte wird für sichtbare Aufweitungen und Verjüngungen ersetzt.
+
+Die neue Geometrie verwendet glatte Kurvensegmente mit kontinuierlichen Übergängen.
+
+## Getrennte Winkel für Aufweitung und Verjüngung
+
+Die bisherige gemeinsame Einstellung einer maximalen Radiusänderung pro Millimeter Z wird durch zwei verständlichere Winkelparameter ergänzt beziehungsweise ersetzt:
+
+```text
+Maximaler Aufweitungswinkel: 50°
+Maximaler Verjüngungswinkel: 50°
+```
+
+## Neuer Standfuß
+
+Die automatische Standfußbreite wird an der vollständigen Höhe des analysierten G-Code-Objekts ausgerichtet.
+
+Standardmäßig gilt:
+
+```text
+Mindest-Standfußbreite: 20 mm
+höhenabhängige Standfußbreite: 0,2 mm je 1 mm G-Code-Objekthöhe
+```
+
+Damit ergibt sich:
+
+```text
+automatische Standfußbreite =
+max(20 mm, G-Code-Objekthöhe × 0,2)
+```
+
+Die Standfußbreite bezeichnet den Außendurchmesser. Intern wird daraus der Radius berechnet.
+
+## Fehler statt bloßer nachträglicher Warnung
+
+Kann das Ziel mit den aktuellen Einstellungen nicht eingehalten werden, soll das möglichst bereits vor der STL-Erzeugung erkannt werden.
+
+Betroffene Eingaben erhalten:
+
+* einen roten Rahmen,
+* eine konkrete Fehlermeldung unmittelbar darunter,
+* gegebenenfalls einen Hinweis auf den betroffenen Layer,
+* wenn möglich einen Hinweis auf den mindestens erforderlichen Wert.
+
+Solange eine technisch unmögliche Kombination besteht, bleibt die Generierung deaktiviert.
+
+---
+
+# Einheitliche Begriffe und Maße
+
+Um Verwechslungen zwischen Breite, Durchmesser und Radius zu vermeiden, gelten folgende Begriffe:
+
+```text
+Außenradius:
+Abstand von der Mittelachse bis zur äußeren Turmwand.
+
+Innenradius:
+Abstand von der Mittelachse bis zur inneren Turmwand.
+
+Wandstärke:
+Außenradius − Innenradius.
+
+Außendurchmesser beziehungsweise Breite:
+2 × Außenradius.
+```
+
+Intern werden alle Längen in Millimetern gespeichert.
+
+Die GUI darf zusätzlich Zentimeterwerte erläutern, soll die eigentlichen Eingaben aber weiterhin in Millimetern anbieten.
+
+Beispiel:
+
+```text
+Mindest-Außenradius: 5,0 mm
+entspricht einem Außendurchmesser von 10,0 mm
+```
+
+---
+
+# Sicherheitsfaktor und Bedarfsentscheidung
+
+Der bisherige Sicherheitsfaktor ist dimensionslos. Ein Wert von `1,10` kann deshalb nicht direkt als Sekundenwert zur Layerzeit addiert werden.
+
+Die Berechnung bleibt einheitenrein:
+
+```text
+Zeitdefizit =
+max(0, Ziel-Layerzeit − vorhandene Layerzeit)
+```
+
+Danach:
+
+```text
+benötigte Zusatzstrecke =
+Zeitdefizit / Sekunden_pro_Millimeter
+```
+
+Mit Sicherheitsfaktor:
+
+```text
+abgesicherte Zusatzstrecke =
+benötigte Zusatzstrecke × Sicherheitsfaktor
+```
+
+Ein Turm ist nur erforderlich, wenn mindestens ein Layer eine positive abgesicherte Zusatzstrecke benötigt.
+
+Da die Multiplikation eines Defizits von null ebenfalls null ergibt, gilt:
+
+```text
+Wenn Ziel-Layerzeit <= vorhandene Layerzeit aller Layer:
+    kein Kühlturm erforderlich
+```
+
+Der Sicherheitsfaktor vergrößert einen vorhandenen Zusatzbedarf, erzeugt aber nicht künstlich einen Kühlturm, wenn überhaupt kein Zeitdefizit besteht.
+
+Soll später zusätzlich ein fester Sicherheitsaufschlag in Sekunden gewünscht werden, muss dieser als eigener Parameter eingeführt werden, beispielsweise:
+
+```text
+Zeit-Sicherheitsaufschlag [s]
+```
+
+Er darf nicht unbemerkt mit dem bestehenden dimensionslosen Sicherheitsfaktor vermischt werden.
+
+---
+
+# Neuer Gesamtprozess
+
+```text
+G-Code auswählen
+        ↓
+G-Code sofort im Hintergrund analysieren
+        ↓
+Layerdaten im Arbeitsspeicher zwischenspeichern
+        ↓
+Zielzeit und Einstellungen live auswerten
+        ↓
+Kein Layer mit Defizit?
+   ├── Ja: Hinweis „Kein Kühlturm erforderlich“
+   │       Generierung deaktiviert
+   │
+   └── Nein: Rohprofil berechnen
+               ↓
+           Splineprofil und Standfuß berechnen
+               ↓
+           Erreichbarkeit jedes Layers prüfen
+               ↓
+           Einstellungen erfüllbar?
+             ├── Nein: betroffene Felder rot markieren
+             └── Ja: Generierung freigeben
+```
+
+---
+
+# Phase 9: Live-Analyse, Bedarfsentscheidung und dynamische Turmhöhe
+
+## Ziel der Phase
+
+Die Anwendung soll den ausgewählten G-Code bereits vor der eigentlichen Generierung analysieren. Änderungen an Ziel-Layerzeit und Sicherheitsfaktor werden anschließend unmittelbar anhand der gespeicherten Layerdaten bewertet.
+
+Dadurch kann die GUI jederzeit anzeigen:
+
+* ob ein Kühlturm benötigt wird,
+* wie viele Layer betroffen sind,
+* wo der erste kritische Layer liegt,
+* wo der letzte kritische Layer liegt,
+* wie hoch der Kühlturm höchstens werden muss,
+* ob die aktuellen Einstellungen grundsätzlich ausreichend sind.
+
+---
+
+## 9.1 G-Code nach der Auswahl automatisch analysieren
+
+Die vollständige Layeranalyse darf nicht mehr ausschließlich nach Betätigung des Generierungsbuttons stattfinden.
+
+Sobald eine gültige G-Code-Datei per Drag & Drop oder Dateidialog ausgewählt wurde:
+
+1. wird die Datei im Hintergrund geöffnet,
+2. werden die Layer erkannt,
+3. werden die Layerzeiten berechnet,
+4. werden die lokalen Zeit-pro-Strecke-Referenzen vorbereitet,
+5. wird das Ergebnis im Arbeitsspeicher gespeichert,
+6. wird die Live-Bedarfsprüfung aktiviert.
+
+Währenddessen zeigt die GUI:
+
+```text
+G-Code wird analysiert …
+```
+
+Nach Abschluss beispielsweise:
+
+```text
+891 Layer analysiert
+Kleinste erkannte Layerzeit: 7,42 s
+Höchste erkannte Druckschicht: 160,40 mm
+```
+
+Die Oberfläche darf während der Analyse nicht einfrieren.
+
+---
+
+## 9.2 Analyse und STL-Generierung trennen
+
+Es werden zwei getrennte Vorgänge benötigt:
+
+```text
+G-Code-Analyse
+Turmgenerierung
+```
+
+Die Analyse liefert ausschließlich wiederverwendbare Eingangsdaten.
+
+Beispiel:
+
+```python
+@dataclass(frozen=True, slots=True)
+class GCodeAnalysisSnapshot:
+    gcode_path: Path
+    file_size: int
+    file_modified_ns: int
+    layers: tuple[LayerData, ...]
+    minimum_layer_time_s: float
+    maximum_layer_time_s: float
+    maximum_print_z_mm: float
+    global_seconds_per_deposition_mm: float | None
+```
+
+Die Turmgenerierung verwendet anschließend dieses Ergebnis, ohne die vollständige Datei bei jeder Änderung erneut einzulesen.
+
+---
+
+## 9.3 Analyseergebnis zwischenspeichern
+
+Ändert der Benutzer lediglich:
+
+* die Ziel-Layerzeit,
+* den Sicherheitsfaktor,
+* den Mindest- oder Maximalradius,
+* die Wandstärken,
+* die Übergangswinkel,
+* den Standfuß,
+
+darf der G-Code nicht erneut vollständig geparst werden.
+
+Das gespeicherte Analyseergebnis bleibt gültig, solange:
+
+* der Dateipfad unverändert ist,
+* die Dateigröße unverändert ist,
+* der Änderungszeitpunkt unverändert ist.
+
+Wurde die Datei außerhalb des Programms geändert, wird die Analyse verworfen und erneut ausgeführt.
+
+---
+
+## 9.4 Turmbedarf pro Layer bestimmen
+
+Für jeden analysierten Layer wird berechnet:
+
+```text
+Zeitdefizit_i =
+max(0, Ziel-Layerzeit − vorhandene Layerzeit_i)
+```
+
+Mit einer kleinen numerischen Toleranz:
+
+```text
+Zeitdefizit_i > epsilon
+```
+
+Ein sinnvoller Anfangswert ist:
+
+```text
+epsilon = 0,000001 s
+```
+
+Dadurch führen Rundungsfehler nicht versehentlich zu einem Kühlturm.
+
+Die Gesamtentscheidung lautet:
+
+```python
+tower_required = any(
+    layer.time_deficit_s > TIME_EPSILON
+    for layer in assessed_layers
+)
+```
+
+Bei exakt gleicher Ziel- und vorhandener Layerzeit gilt:
+
+```text
+kein Defizit
+```
+
+---
+
+## 9.5 Live-Reaktion auf die Ziel-Layerzeit
+
+Die Ziel-Layerzeit muss während der Eingabe ausgewertet werden.
+
+Wenn der Benutzer beispielsweise folgende Werte nacheinander eingibt:
+
+```text
+5
+10
+15
+20
+```
+
+aktualisiert sich der Bedarfsstatus nach jeder gültigen Eingabe.
+
+Die Neuberechnung sollte nicht bei jedem Tastendruck den G-Code neu analysieren. Sie arbeitet ausschließlich mit den bereits gespeicherten Layerdaten.
+
+Zur Vermeidung unnötiger GUI-Arbeit kann eine kurze Verzögerung verwendet werden:
+
+```text
+150 bis 300 Millisekunden
+```
+
+Nach der letzten Änderung wird nur die Bedarfs- und Profilvorschau neu berechnet.
+
+---
+
+## 9.6 Hinweis bei nicht benötigtem Kühlturm
+
+Wenn kein Layer die Ziel-Layerzeit unterschreitet, erscheint unmittelbar unter der Ziel-Layerzeit ein informativer Hinweis.
+
+Beispiel:
+
+```text
+Kein Kühlturm erforderlich.
+
+Keiner der 891 analysierten Layer unterschreitet die eingestellte
+Ziel-Layerzeit von 7,0 s. Es wird keine STL erzeugt.
+```
+
+Optional kann zusätzlich die kleinste vorhandene Layerzeit angezeigt werden:
+
+```text
+Kleinste erkannte Layerzeit: 7,42 s
+```
+
+Dieser Zustand ist kein Fehler. Die Darstellung soll daher nicht rot sein.
+
+Geeignet sind:
+
+* blaue Informationsdarstellung oder
+* grüne Bestätigung.
+
+Sobald ein größerer Zielwert eingegeben wird und mindestens ein Layer ein Defizit besitzt, verschwindet der Hinweis automatisch.
+
+Er wird beispielsweise ersetzt durch:
+
+```text
+Kühlturm erforderlich:
+37 Layer unterschreiten die Ziel-Layerzeit.
+```
+
+---
+
+## 9.7 Generierung ohne Bedarf verhindern
+
+Der Generierungsbutton wird im Zustand „kein Turm erforderlich“ deaktiviert.
+
+Mögliche Beschriftung:
+
+```text
+Kein Kühlturm erforderlich
+```
+
+Zusätzlich muss der zentrale Generierungsservice dieselbe Prüfung enthalten. Dadurch kann auch über CLI, Tests oder einen veralteten GUI-Zustand kein unnötiger Turm erzeugt werden.
+
+Beispiel:
+
+```python
+assessment = assess_tower_need(analysis, settings)
+
+if not assessment.tower_required:
+    return GenerationOutcome.no_tower_required(assessment)
+```
+
+Die Prüfung darf nicht nur in der GUI vorhanden sein.
+
+---
+
+## 9.8 Ersten und letzten kritischen Layer ermitteln
+
+Aus allen Layern mit positivem Zeitdefizit werden mindestens folgende Werte ermittelt:
+
+```text
+erster kritischer Layer
+letzter kritischer Layer
+Anzahl kritischer Layer
+maximales Zeitdefizit
+```
+
+Beispiel:
+
+```text
+Erster kritischer Layer:  318 bei Z = 63,80 mm
+Letzter kritischer Layer: 714 bei Z = 142,90 mm
+Kritische Layer gesamt:    83
+```
+
+Der Turm beginnt weiterhin auf dem Druckbett, da ein frei schwebender Beginn auf Höhe des ersten kritischen Layers nicht druckbar wäre.
+
+Vor dem ersten kritischen Layer besitzt er:
+
+* den Standfuß,
+* danach mindestens den eingestellten Mindest-Außenradius,
+* gegebenenfalls eine bereits vorausschauend beginnende Aufweitung.
+
+---
+
+## 9.9 Turmende aus dem letzten kritischen Layer berechnen
+
+Der Turm endet nach dem Layer, der unmittelbar auf den letzten kritischen Layer folgt.
+
+```text
+letzter kritischer Layer = i
+letzter Turmlayer = i + 1
+```
+
+Existiert der nachfolgende Layer im analysierten G-Code:
+
+```text
+Turm-Endhöhe = Z-Höhe von Layer i + 1
+```
+
+Beispiel:
+
+```text
+Letzter kritischer Layer: 714
+Z von Layer 714:          142,90 mm
+Z von Layer 715:          143,10 mm
+
+Turm-Endhöhe:             143,10 mm
+```
+
+Alle darüber liegenden Layer des Hauptmodells werden bei der Turmprofilberechnung ignoriert.
+
+---
+
+## 9.10 Sonderfall: Letzter Modelllayer ist kritisch
+
+Ist bereits der letzte vorhandene Modelllayer kritisch, existiert kein analysierter Layer `i + 1`.
+
+In diesem Fall wird ein synthetischer Abschlusslayer verwendet:
+
+```text
+Turm-Endhöhe =
+Z-Höhe des letzten Layers + Höhe des letzten Layers
+```
+
+Bei variabler Layerhöhe kann alternativ die zuletzt zuverlässig erkannte Layerhöhe verwendet werden.
+
+Dieser Sonderfall muss im Ergebnisbericht erkennbar sein:
+
+```text
+Der letzte Modelllayer benötigt zusätzliche Zeit.
+Für den oberen Abschluss wurde eine zusätzliche Layerhöhe von 0,20 mm verwendet.
+```
+
+---
+
+## 9.11 Geometrischer Abschluss an der verkürzten Höhe
+
+Die Höhenbegrenzung besitzt Vorrang vor einem unnötigen langen Rücklauf auf den Mindestradius.
+
+Wenn die letzte lokale Erweiterung an der berechneten Endhöhe noch nicht vollständig auf den Mindestradius zurückgeführt werden kann:
+
+* wird der Turm nicht über die erlaubte Endhöhe hinaus verlängert,
+* bleibt der an der Endhöhe erforderliche Außen- und Innenradius erhalten,
+* wird das hohle Volumen dort ringförmig geschlossen,
+* entsteht kein abrupter Radiuswechsel in der Seitenwand.
+
+Der obere Abschluss darf also breiter als der Mindestradius sein.
+
+Dadurch wird verhindert, dass nur für eine optische Rückkehr zum Mindestradius viele zusätzliche Layer erzeugt werden.
+
+---
+
+## 9.12 Neues Ergebnis für die Bedarfsprüfung
+
+Ein eigenes Datenmodell soll die Live-Bewertung beschreiben:
+
+```python
+@dataclass(frozen=True, slots=True)
+class TowerNeedAssessment:
+    tower_required: bool
+
+    target_layer_time_s: float
+    safety_factor: float
+
+    deficit_layer_count: int
+    first_deficit_layer_index: int | None
+    last_deficit_layer_index: int | None
+
+    first_deficit_z_mm: float | None
+    last_deficit_z_mm: float | None
+    tower_end_layer_index: int | None
+    tower_end_z_mm: float | None
+
+    maximum_time_deficit_s: float
+    synthetic_final_layer_used: bool
+```
+
+Dieses Objekt wird sowohl von der GUI als auch von der CLI verwendet.
+
+---
+
+## 9.13 Veraltete Hintergrundberechnungen verwerfen
+
+Ändert der Benutzer während einer laufenden Vorschau erneut einen Wert, darf das ältere Ergebnis nicht später den neueren GUI-Zustand überschreiben.
+
+Jede Analyse beziehungsweise Vorschau erhält eine fortlaufende Kennung:
+
+```text
+request_id
+```
+
+Nur das Ergebnis der aktuellsten Kennung darf übernommen werden.
+
+Dasselbe gilt, wenn während der Analyse eine andere G-Code-Datei ausgewählt wird.
+
+---
+
+## 9.14 Berichtsdaten erweitern
+
+Analyse- und Ergebnisberichte erhalten zusätzliche Angaben:
+
+```text
+Kühlturm benötigt: Ja/Nein
+Erster Layer mit Zeitdefizit
+Letzter Layer mit Zeitdefizit
+Berechneter letzter Turmlayer
+Berechnete Turmhöhe
+Ursprüngliche Modellhöhe
+Eingesparte Turmhöhe
+Synthetischer Abschlusslayer verwendet: Ja/Nein
+```
+
+Beispiel:
+
+```text
+Modellhöhe:                 180,00 mm
+Letzter kritischer Layer:   612 bei 122,40 mm
+Kühlturmhöhe:               122,60 mm
+Nicht erzeugte Turmhöhe:     57,40 mm
+```
+
+---
+
+## 9.15 Phase 9 testen
+
+Mindestens folgende Testfälle sind erforderlich:
+
+1. Kein Layer unterschreitet die Zielzeit.
+2. Ein Layer entspricht exakt der Zielzeit.
+3. Ein Layer liegt minimal unterhalb der Zielzeit.
+4. Eine Erhöhung der Zielzeit aktiviert den Turmbedarf live.
+5. Eine Verringerung der Zielzeit entfernt den Bedarfshinweis wieder.
+6. Der Sicherheitsfaktor vergrößert vorhandenen Zusatzbedarf.
+7. Der Sicherheitsfaktor erzeugt bei Defizit null keinen künstlichen Turm.
+8. Nur der erste Layer ist kritisch.
+9. Nur ein mittlerer Layer ist kritisch.
+10. Nur der letzte Layer ist kritisch.
+11. Mehrere getrennte kritische Bereiche sind vorhanden.
+12. Der letzte Turmlayer entspricht dem letzten kritischen Layer plus eins.
+13. Variable Layerhöhen werden korrekt berücksichtigt.
+14. Für einen kritischen letzten Modelllayer wird ein synthetischer Abschluss verwendet.
+15. Änderungen der Zielzeit lösen kein erneutes vollständiges G-Code-Parsing aus.
+16. Eine extern geänderte G-Code-Datei verwirft den Analyse-Cache.
+17. Veraltete Hintergrundberechnungen überschreiben keinen neueren Zustand.
+18. Bei nicht benötigtem Turm wird keine STL erzeugt.
+19. Bei nicht benötigtem Turm wird kein leerer Generierungslauf angelegt.
+20. GUI und CLI treffen dieselbe Bedarfsentscheidung.
+
+---
+
+## Zusammenfassung der Phase 9
+
+Phase 9 führt die grundlegende Bedarfsentscheidung ein:
+
+* Der G-Code wird unmittelbar nach der Auswahl analysiert.
+* Die Analyse wird zwischengespeichert.
+* Änderungen der Zielzeit werden live ausgewertet.
+* Ohne Zeitdefizit wird kein Turm erzeugt.
+* Die GUI zeigt diesen Zustand direkt unter der Zielzeit an.
+* Ein benötigter Turm endet beim letzten kritischen Layer plus einem Layer.
+* Die ursprüngliche vollständige Modellhöhe bestimmt nicht mehr automatisch die Turmhöhe.
+* GUI, CLI und Generierungsservice verwenden dieselbe Entscheidung.
+
+---
+
+# Phase 10: Splineprofil, getrennte Übergangswinkel und neuer Standfuß
+
+## Ziel der Phase
+
+Das bisherige geglättete, aber im Wesentlichen linear verbundene Profil wird durch ein kurvenförmiges Turmprofil ersetzt.
+
+Der Turm soll:
+
+* immer mindestens seinen konfigurierten Mindest-Außenradius einhalten,
+* Außen- und Innenwand zunächst gemeinsam verschieben,
+* erst am maximalen Außenradius dicker werden,
+* Erweiterungen vorausschauend beginnen,
+* Erweiterungen kurvenförmig zurückführen,
+* nahe beieinanderliegende Erweiterungen miteinander verbinden,
+* eine fließende Wandstärkenänderung besitzen,
+* einen höhenabhängigen Standfuß erhalten,
+* trotz zusätzlicher Stützpunkte ein wasserdichtes Mesh bleiben.
+
+---
+
+## 10.1 Rohbedarf pro Layer beibehalten
+
+Vor der geometrischen Glättung wird für jeden relevanten Layer weiterhin berechnet:
+
+```text
+vorhandene Layerzeit
+Zeitdefizit
+lokaler Zeit-pro-Millimeter-Faktor
+benötigte Zusatzstrecke
+abgesicherte Zusatzstrecke
+```
+
+Diese Werte bilden eine harte Mindestanforderung.
+
+Die spätere Spline-Glättung darf die geschätzte Druckweglänge an einem kritischen Layer nicht unter diesen Bedarf reduzieren.
+
+---
+
+## 10.2 Mindest-Außenradius auf 5 mm ändern
+
+Der neue Standardwert lautet:
+
+```json
+{
+  "minimum_outer_radius_mm": 5.0
+}
+```
+
+Der Mindest-Außenradius gilt für reguläre Turmbereiche, in denen keine größere Geometrie erforderlich ist.
+
+Er gilt nicht als Begründung dafür, überhaupt einen Turm zu erzeugen.
+
+Es muss unterschieden werden:
+
+```text
+Kein Layer benötigt Zusatzzeit:
+    kein Turm
+
+Mindestens ein Layer benötigt Zusatzzeit:
+    Turm vorhanden
+    reguläre schmale Bereiche mindestens 5 mm Außenradius
+```
+
+---
+
+## 10.3 Außen- und Innenwand gemeinsam verschieben
+
+Solange zusätzliche Druckzeit durch eine Vergrößerung des Außenradius erzeugt werden kann, bleibt die Wandstärke auf ihrem Mindestwert.
+
+Beispiel:
+
+```text
+Mindestwandstärke: 0,84 mm
+
+Außenradius:  5,00 mm → 10,00 mm → 18,00 mm
+Innenradius:  4,16 mm →  9,16 mm → 17,16 mm
+Wandstärke:   0,84 mm →  0,84 mm →  0,84 mm
+```
+
+Damit bewegen sich Außen- und Innenwand gemeinsam nach außen.
+
+Beim späteren Zurückführen gilt entsprechend:
+
+```text
+Außenradius wird kleiner
+Innenradius wird im gleichen Maß kleiner
+Wandstärke bleibt zunächst unverändert
+```
+
+Die Form bleibt hohl und materialeffizient.
+
+---
+
+## 10.4 Außenradius vor Wandstärke priorisieren
+
+Für jeden kritischen Layer wird zunächst geprüft, ob die benötigte Druckweglänge mit der Mindestwandstärke durch eine Radiusvergrößerung erreicht werden kann.
+
+Reihenfolge:
+
+1. Mindest-Außenradius und Mindestwandstärke verwenden.
+2. Geschätzte Druckweglänge berechnen.
+3. Außenradius erhöhen.
+4. Innenradius im gleichen Maß erhöhen.
+5. Maximalen Außenradius beachten.
+6. Erst danach zusätzliche Wandstärke verwenden.
+
+Diese Reihenfolge ist verbindlich.
+
+---
+
+## 10.5 Wandstärke erst am maximalen Außenradius erhöhen
+
+Wenn der maximale Außenradius nicht ausreicht:
+
+```text
+Außenradius = Maximaler Außenradius
+```
+
+Der zusätzliche Bedarf wird anschließend durch eine größere Wandstärke gedeckt.
+
+Dabei:
+
+* bleibt die Außenwand am Maximalradius,
+* bewegt sich die Innenwand fließend nach innen,
+* bleibt der Mindest-Hohlraumradius geschützt,
+* bleibt die Maximalwandstärke geschützt.
+
+Beispiel:
+
+```text
+Maximaler Außenradius: 40,00 mm
+
+Außenradius: 40,00 mm
+Innenradius: 39,16 mm → 38,74 mm → 38,32 mm
+Wandstärke:   0,84 mm →  1,26 mm →  1,68 mm
+```
+
+---
+
+## 10.6 Umgekehrte Reihenfolge bei sinkendem Zeitbedarf
+
+Wenn der benötigte Zusatzweg wieder abnimmt, erfolgt die Rückführung in umgekehrter Reihenfolge:
+
+1. zusätzliche Wandstärke fließend reduzieren,
+2. Mindestwandstärke erreichen,
+3. danach Außen- und Innenradius gemeinsam verkleinern,
+4. Mindest-Außenradius erreichen.
+
+Dadurch bleibt der Turm nicht unnötig dick, während seine Außenbreite bereits reduziert wird.
+
+---
+
+## 10.7 Wandstärkenübergänge geometrisch fließend ausführen
+
+Die für den Zeitbedarf notwendige Wandbahnanzahl darf weiterhin auf vollständige Bahnen bezogen werden.
+
+Die STL-Geometrie selbst soll jedoch keine treppenförmigen Sprünge zwischen diesen Sollwerten enthalten.
+
+Die benötigten Wandstärkenwerte bilden daher Mindeststützpunkte:
+
+```text
+Layer 100 benötigt mindestens 0,84 mm
+Layer 101 benötigt mindestens 1,26 mm
+Layer 102 benötigt mindestens 2,10 mm
+```
+
+Zwischen diesen Stützpunkten wird die Innenkontur kontinuierlich geführt.
+
+Der Slicer kann beim Überschreiten bestimmter Dicken weiterhin diskret eine zusätzliche Bahn ergänzen. Das ist slicerbedingt nicht vollständig vermeidbar. Die zugrunde liegende STL-Wand besitzt jedoch keinen abrupten geometrischen Absatz.
+
+---
+
+## 10.8 Geeignete Splineform definieren
+
+Es soll kein unbegrenzter Standardspline verwendet werden, der zwischen Stützpunkten überschwingen kann.
+
+Ein ungeprüfter kubischer Spline könnte:
+
+* den Mindestradius unterschreiten,
+* den Maximalradius überschreiten,
+* zwischen zwei Punkten einen zu großen Winkel erzeugen,
+* die Wandstärke lokal unter den Mindestbedarf senken.
+
+Geeignet ist beispielsweise eine monotone quintische Übergangsfunktion:
+
+```text
+s(t) = 6t⁵ − 15t⁴ + 10t³
+```
+
+mit:
+
+```text
+0 <= t <= 1
+```
+
+Eigenschaften:
+
+* Startwert `s(0) = 0`,
+* Endwert `s(1) = 1`,
+* Steigung an beiden Enden gleich null,
+* Krümmung an beiden Enden gleich null,
+* kein Überschwingen,
+* spiegelbildliche Rückführung möglich.
+
+Für eine Aufweitung:
+
+```text
+r(z) = r_start + (r_ziel − r_start) × s(t)
+```
+
+Für die Verjüngung:
+
+```text
+r(z) = r_ziel + (r_start − r_ziel) × s(t)
+```
+
+Alternativ kann eine monotone Hermite-Interpolation verwendet werden, sofern dieselben Randbedingungen garantiert sind.
+
+---
+
+## 10.9 Gleiche Kurvenform für Aufweitung und Rückführung
+
+Eine lokale Erweiterung soll nach Möglichkeit aus zwei zueinander passenden Segmenten bestehen:
+
+```text
+Mindestbreite
+    ↓
+gespiegelte Spline-Aufweitung
+    ↓
+benötigte Maximalbreite
+    ↓
+gespiegelte Spline-Verjüngung
+    ↓
+Mindestbreite
+```
+
+Die Rückführung verwendet dieselbe Kurvenfamilie wie die Aufweitung.
+
+Unterschiedliche Aufweitungs- und Verjüngungswinkel dürfen zu verschiedenen Übergangshöhen führen. Die grundlegende Kurvencharakteristik bleibt jedoch gleich.
+
+---
+
+## 10.10 Winkel eindeutig definieren
+
+Die Winkel werden relativ zur senkrechten Z-Achse gemessen.
+
+Damit gilt:
+
+```text
+0°:
+senkrechte Wand, keine Radiusänderung
+
+größerer Winkel:
+schnellere Radiusänderung
+
+nahe 90°:
+nahezu horizontaler und normalerweise unzulässiger Übergang
+```
+
+Die GUI-Bezeichnungen lauten:
+
+```text
+Maximaler Aufweitungswinkel zur Vertikalen [°]
+Maximaler Verjüngungswinkel zur Vertikalen [°]
+```
+
+Standardwerte:
+
+```text
+Aufweitungswinkel:  50°
+Verjüngungswinkel: 50°
+```
+
+Zulässiger Wertebereich beispielsweise:
+
+```text
+größer als 0°
+kleiner als 90°
+```
+
+Ein praktikabler GUI-Bereich kann enger gefasst werden:
+
+```text
+1° bis 85°
+```
+
+---
+
+## 10.11 Winkel in eine maximale Radiusänderung umrechnen
+
+Für einen Winkel relativ zur Vertikalen gilt:
+
+```text
+maximale radiale Änderung pro mm Z =
+tan(Winkel)
+```
+
+Beispiel:
+
+```text
+Winkel: 50°
+
+tan(50°) ≈ 1,1918
+```
+
+Damit darf sich der Radius lokal um höchstens ungefähr:
+
+```text
+1,1918 mm je 1 mm Z
+```
+
+ändern.
+
+Bei einer Layerhöhe von 0,2 mm:
+
+```text
+maximale lokale Radiusänderung ≈ 0,2384 mm
+```
+
+Da ein Spline in der Mitte eine höhere Ableitung als sein durchschnittlicher Anstieg besitzen kann, muss die benötigte Übergangshöhe anhand der maximalen Spline-Ableitung berechnet werden.
+
+Für die genannte quintische Funktion beträgt der maximale Ableitungsfaktor `1,875`.
+
+Damit:
+
+```text
+Mindest-Übergangshöhe =
+1,875 × Radiusänderung / tan(Winkel)
+```
+
+Dadurch wird der eingestellte Winkel auch innerhalb des Kurvensegments eingehalten und nicht nur zwischen dessen Endpunkten.
+
+---
+
+## 10.12 Aufweitungs- und Verjüngungswinkel getrennt anwenden
+
+Der Aufweitungswinkel begrenzt alle Übergänge, bei denen der Außenradius mit zunehmender Z-Höhe größer wird.
+
+Der Verjüngungswinkel begrenzt alle Übergänge, bei denen der Außenradius mit zunehmender Z-Höhe kleiner wird.
+
+Dadurch kann der Benutzer beispielsweise einstellen:
+
+```text
+Aufweitung:  45°
+Verjüngung: 60°
+```
+
+Das bedeutet:
+
+* Die Erweiterung beginnt früher und steigt langsamer an.
+* Nach dem kritischen Bereich darf der Turm schneller zur Mindestbreite zurückkehren.
+
+Die Begrenzungen müssen bei variablen Layerhöhen anhand der tatsächlichen Z-Abstände geprüft werden.
+
+---
+
+## 10.13 Vorausschauende Aufweitung
+
+Benötigt ein späterer Layer einen größeren Radius, muss der Turm früh genug mit der Aufweitung beginnen.
+
+Die Berechnung läuft daher rückwärts vom erforderlichen Zielpunkt.
+
+Für jeden Zielpunkt wird ermittelt:
+
+```text
+benötigte Radiusänderung
+zulässiger Aufweitungswinkel
+erforderliche Übergangshöhe
+frühestmöglicher Startpunkt
+```
+
+Der Startpunkt kann in einem Layer liegen, der selbst noch kein Zeitdefizit besitzt.
+
+Das ist beabsichtigt und für einen fließenden, druckbaren Übergang erforderlich.
+
+---
+
+## 10.14 Rückführung nach einem kritischen Bereich
+
+Nach dem letzten Layer eines lokalen Bedarfsbereichs wird geprüft, ab welcher Höhe die Geometrie wieder reduziert werden kann.
+
+Die Rückführung darf:
+
+* keinen späteren Mindestbedarf unterschreiten,
+* den Verjüngungswinkel nicht überschreiten,
+* nicht abrupt erfolgen,
+* nicht künstlich bis zur Mindestbreite zurücklaufen, wenn kurz danach wieder ein größerer Radius benötigt wird.
+
+---
+
+## 10.15 Überlappende Erweiterungen zusammenführen
+
+Liegen zwei kritische Bereiche nahe beieinander, können sich ihre Übergangsbereiche überlagern.
+
+Beispiel:
+
+```text
+Layer 100 benötigt 18 mm Radius
+Layer 120 benötigt 22 mm Radius
+```
+
+Wenn der erste Bereich noch nicht vollständig verjüngt werden kann, bevor die zweite Aufweitung beginnen muss:
+
+* werden beide Bereiche zu einem gemeinsamen Profil verbunden,
+* wird zwischen ihnen nur so weit verjüngt, wie Winkel und Mindestbedarf erlauben,
+* entsteht kein unnötiges schmales Zwischenstück,
+* bleiben alle Layeranforderungen erfüllt.
+
+Technisch kann dafür die obere Hüllkurve aller erforderlichen Splineeinflüsse verwendet werden.
+
+Die resultierende Kontur darf an den Schnittpunkten der Einflüsse keine sichtbaren Knicke erhalten. Nach dem Zusammenführen ist deshalb eine erneute stetige Ableitungsprüfung erforderlich.
+
+---
+
+## 10.16 Maximalen Außenradius verbindlich einhalten
+
+Außerhalb des Standfußbereichs gilt:
+
+```text
+Außenradius <= maximum_outer_radius_mm
+```
+
+Die Splineinterpolation darf diesen Wert auch zwischen zwei Stützpunkten nicht überschreiten.
+
+Die Prüfung darf deshalb nicht nur an Layerpositionen erfolgen. Es müssen zusätzlich Zwischenpunkte innerhalb jedes Splineabschnitts geprüft werden.
+
+---
+
+## 10.17 Mindest-Innenradius schützen
+
+Für jeden Layer und jeden zusätzlichen Spline-Abtastpunkt gilt:
+
+```text
+Innenradius >= minimum_inner_radius_mm
+```
+
+Außerdem:
+
+```text
+Innenradius < Außenradius
+```
+
+und:
+
+```text
+Wandstärke >= effektive Mindestwandstärke
+```
+
+Kann die notwendige Wandstärke wegen des Mindest-Innenradius nicht erreicht werden, ist das Profil technisch nicht erfüllbar.
+
+---
+
+## 10.18 Automatische Standfußbreite
+
+Wenn keine manuelle Standfußbreite festgelegt wurde, wird sie anhand der vollständigen G-Code-Objekthöhe berechnet.
+
+```text
+automatische Standfußbreite =
+max(
+    20 mm,
+    vollständige G-Code-Objekthöhe × 0,2
+)
+```
+
+Beispiele:
+
+```text
+G-Code-Objekthöhe:  20 mm
+Standfußbreite: 20 mm
+
+G-Code-Objekthöhe:  60 mm
+Standfußbreite: 20 mm
+
+G-Code-Objekthöhe: 100 mm
+Standfußbreite: 20 mm
+
+G-Code-Objekthöhe: 160 mm
+Standfußbreite: 32 mm
+```
+
+Der interne Radius lautet:
+
+```text
+Standfußradius = Standfußbreite / 2
+```
+
+Die Berechnung verwendet bewusst die vollständige G-Code-Objekthöhe und ist damit unabhängig von der verkürzten Kühlturmhöhe aus Phase 9.
+
+---
+
+## 10.19 Automatischen und manuellen Standfußmodus anbieten
+
+Die Einstellungen erhalten zwei Modi:
+
+```text
+Standfußbreite automatisch berechnen
+Standfußbreite manuell festlegen
+```
+
+Im Automatikmodus wird der berechnete Wert schreibgeschützt angezeigt.
+
+Im manuellen Modus kann der Benutzer einen eigenen Außendurchmesser eintragen.
+
+Der manuelle Wert muss mindestens betragen:
+
+```text
+20 mm
+```
+
+Wenn ein manueller Wert keinen sicheren Übergang zum regulären Turmprofil ermöglicht, wird er rot markiert und erhält einen konkreten Hinweis.
+
+---
+
+## 10.20 Ausnahme von der normalen Breitenbegrenzung
+
+Der Standfuß darf den regulären maximalen Außenradius überschreiten.
+
+Beispiel:
+
+```text
+Maximaler regulärer Außenradius: 30 mm
+Maximaler regulärer Durchmesser: 60 mm
+Automatische Standfußbreite:     80 mm
+```
+
+Das ist zulässig, weil die Standfußbreite der Stabilität dient und ausdrücklich die einzige Ausnahme von der normalen Außenbreitenbegrenzung darstellt.
+
+Der Übergang vom Standfuß zum regulären Turm muss anschließend wieder mit dem konfigurierten Verjüngungswinkel erfolgen.
+
+---
+
+## 10.21 Zeitbedarf innerhalb des Standfußes
+
+Auch die Layer innerhalb der Standfußhöhe können ein Zeitdefizit besitzen.
+
+Dabei gilt:
+
+1. Zunächst wird die reguläre automatische oder manuelle Standfußbreite verwendet.
+2. Diese Breite wird nicht allein wegen eines zusätzlichen Zeitdefizits weiter überschritten.
+3. Reicht die durch den Standfußumfang entstehende Druckweglänge nicht aus, wird die Wandstärke erhöht.
+4. Die Wandstärke steigt fließend über die Innenkontur.
+5. Maximalwandstärke und Mindest-Innenradius bleiben verbindlich.
+
+Der Standfuß ist damit breit genug für die Stabilität, wächst aber bei zusätzlichem Zeitbedarf nicht unbegrenzt weiter nach außen.
+
+---
+
+## 10.22 Standfuß und erstes reguläres Profil verbinden
+
+Am Ende des Standfußbereichs darf kein harter Absatz entstehen.
+
+Der Übergang wird in das normale Splineprofil integriert.
+
+Dabei sind möglich:
+
+* Verjüngung vom breiten Standfuß auf den Mindest-Außenradius,
+* Verjüngung vom Standfuß direkt auf eine bevorstehende lokale Erweiterung,
+* vorübergehend gleichbleibende Breite,
+* zusätzliche Wandstärke in kritischen unteren Layern.
+
+Die Standfußkontur und das normale Profil müssen Bestandteil derselben mathematischen Profilfunktion und desselben Meshes sein.
+
+---
+
+## 10.23 Erreichbarkeit des Profils prüfen
+
+Nach der Berechnung des Splineprofils wird für jeden Layer geprüft:
+
+```text
+geschätzte zusätzliche Druckzeit
+>=
+abgesichertes Zeitdefizit
+```
+
+Kann ein Layer das Ziel nicht erreichen, wird ein strukturiertes Problem erzeugt.
+
+Beispiel:
+
+```python
+@dataclass(frozen=True, slots=True)
+class FeasibilityIssue:
+    code: str
+    message: str
+    affected_layer_index: int | None
+    affected_z_mm: float | None
+    related_setting_names: tuple[str, ...]
+    required_value: float | None
+    achievable_value: float | None
+```
+
+Mögliche Fehlercodes:
+
+```text
+EXPANSION_ANGLE_TOO_SMALL
+MAXIMUM_OUTER_RADIUS_REACHED
+MAXIMUM_WALL_THICKNESS_REACHED
+MINIMUM_INNER_RADIUS_REACHED
+BASE_WIDTH_TOO_SMALL
+PROFILE_TRANSITION_NOT_REACHABLE
+INSUFFICIENT_TIME_REFERENCE
+```
+
+---
+
+## 10.24 Winkelbezogene Nichterfüllbarkeit erkennen
+
+Ein zu kleiner Aufweitungswinkel kann insbesondere dann problematisch sein, wenn:
+
+* bereits sehr frühe Layer einen großen Radius benötigen,
+* zwischen Standfuß und kritischem Bereich zu wenig Z-Höhe vorhanden ist,
+* ein sehr schneller Wechsel von geringer zu hoher Wandkapazität notwendig wäre.
+
+Die Meldung soll möglichst konkret sein:
+
+```text
+Der benötigte Außenradius von 24,8 mm kann bis Layer 17 bei
+Z = 3,40 mm mit einem Aufweitungswinkel von 20° nicht erreicht werden.
+
+Mindestens erforderlich: ungefähr 38,6°.
+```
+
+Betroffene Felder:
+
+* Aufweitungswinkel,
+* gegebenenfalls maximaler Außenradius,
+* gegebenenfalls Standfußbreite.
+
+---
+
+## 10.25 Adaptive Spline-Abtastung für das Mesh
+
+Eine STL kann keine mathematisch unendlich glatte Kurve speichern. Die Splinekontur muss durch ausreichend viele Ringe angenähert werden.
+
+Es reicht nicht, nur an den ursprünglichen Layerhöhen einen Ring zu erzeugen, da die Verbindung zwischen diesen Ringen wieder linear wäre.
+
+Zwischen zwei Stützpunkten werden zusätzliche Ringe eingefügt, bis beispielsweise gilt:
+
+```text
+maximaler radialer Approximationsfehler <= 0,02 bis 0,05 mm
+```
+
+Zusätzlich kann begrenzt werden:
+
+```text
+maximaler Z-Abstand zwischen zwei Meshringen
+```
+
+Außen- und Innenprofil müssen an denselben Z-Höhen abgetastet werden.
+
+---
+
+## 10.26 Mesh weiterhin hohl und wasserdicht erzeugen
+
+Das Mesh besteht weiterhin aus:
+
+1. äußerer Seitenfläche,
+2. innerer Seitenfläche,
+3. ringförmiger Unterseite,
+4. ringförmiger Oberseite.
+
+Die zusätzlichen Spline-Stützringe dürfen nicht zu folgenden Problemen führen:
+
+* doppelte Ringe auf identischer Z-Höhe,
+* nullgroße Dreiecke,
+* verdrehte Flächennormalen,
+* Überschneidung von Innen- und Außenfläche,
+* offene Kanten,
+* nicht zusammenhängende Teilvolumen.
+
+---
+
+## 10.27 Profilbericht erweitern
+
+Die Profil-CSV soll zusätzliche Spalten erhalten:
+
+```text
+Layer
+Z
+LayerTime
+TimeDeficit
+RequiredPath
+OuterRadiusRaw
+OuterRadiusSpline
+InnerRadiusSpline
+WallThickness
+WallPathEstimate
+ExpansionAngle
+ContractionAngle
+EstimatedAddedTime
+TargetReached
+ProfileRegion
+```
+
+Mögliche Werte für `ProfileRegion`:
+
+```text
+base
+minimum_trunk
+expansion
+time_peak
+wall_thickening
+contraction
+final_cap
+```
+
+Dadurch lässt sich später nachvollziehen, warum ein bestimmter Profilabschnitt entstanden ist.
+
+---
+
+## 10.28 Phase 10 testen
+
+Mindestens folgende Testfälle sind erforderlich:
+
+1. Standard-Mindest-Außenradius beträgt 5,0 mm.
+2. Ohne Turmbedarf wird auch kein Standfuß erzeugt.
+3. Außen- und Innenradius wachsen bei Mindestwandstärke um denselben Betrag.
+4. Die Wandstärke bleibt bis zum Maximalradius konstant.
+5. Nach Erreichen des Maximalradius wird die Innenwand nach innen verschoben.
+6. Bei sinkendem Bedarf wird zuerst die Wandstärke reduziert.
+7. Danach werden Außen- und Innenwand gemeinsam verjüngt.
+8. Eine einzelne Erweiterung besitzt eine glatte Aufweitung.
+9. Die Rückführung verwendet dieselbe Kurvenfamilie.
+10. Die erste Ableitung ist an Übergängen kontinuierlich.
+11. Die Kurve unterschreitet keinen erforderlichen Radius.
+12. Die Kurve überschreitet den Maximalradius nicht.
+13. Der Aufweitungswinkel wird an allen Zwischenpunkten eingehalten.
+14. Der Verjüngungswinkel wird an allen Zwischenpunkten eingehalten.
+15. Zwei entfernte Erweiterungen bleiben getrennt.
+16. Zwei nahe Erweiterungen verschmelzen sinnvoll.
+17. Zwischen verschmolzenen Erweiterungen entsteht kein scharfer Knick.
+18. Die Wandstärke nimmt geometrisch fließend zu.
+19. Der Mindest-Innenradius bleibt erhalten.
+20. Die automatische Standfußbreite beträgt mindestens 20 mm.
+21. Die automatische Standfußbreite folgt dem Faktor 0,2 der vollständigen G-Code-Objekthöhe.
+22. Der Standfuß darf den regulären Maximalradius überschreiten.
+23. Zusätzlicher Zeitbedarf im Standfuß wird nach Erreichen der Standfußbreite über Wandstärke kompensiert.
+24. Ein zu kleiner Aufweitungswinkel erzeugt ein strukturiertes Problem.
+25. Ein zu kleiner Maximalradius wird korrekt erkannt.
+26. Eine zu kleine Maximalwandstärke wird korrekt erkannt.
+27. Das verkürzte Profil wird oben korrekt geschlossen.
+28. Die adaptive Abtastung bildet die Splinekurve ausreichend genau ab.
+29. Das resultierende Mesh ist hohl und wasserdicht.
+30. Das Mesh besitzt keine degenerierten Dreiecke.
+
+---
+
+## Zusammenfassung der Phase 10
+
+Phase 10 ersetzt das bisherige Profil durch eine echte kurvenförmige Geometrie:
+
+* Der Mindest-Außenradius beträgt standardmäßig 5 mm.
+* Außen- und Innenwand werden zunächst gemeinsam verschoben.
+* Wandstärke wird erst nach Erreichen des maximalen Außenradius ergänzt.
+* Aufweitung und Verjüngung verwenden glatte, spiegelbare Splinefunktionen.
+* Beide Richtungen besitzen getrennte Winkel mit jeweils 50° Standardwert.
+* Nahe Erweiterungen werden zusammengeführt.
+* Die Wandstärke ändert sich fließend.
+* Der Standfuß richtet sich automatisch nach der vollständigen G-Code-Objekthöhe.
+* Der Standfuß darf die normale Breitenbegrenzung überschreiten.
+* Reicht seine Breite für die Layerzeit nicht aus, wird die Wand verstärkt.
+* Das Splineprofil wird adaptiv in ein hohles, wasserdichtes STL-Mesh überführt.
+
+---
+
+# Phase 11: Live-Validierung, Einzel-Reset, GUI-Korrekturen und unsichtbarer Programmstart
+
+## Ziel der Phase
+
+Die neuen Berechnungen werden vollständig in die GUI integriert. Gleichzeitig werden Bedienprobleme beseitigt.
+
+Jede Einstellung soll:
+
+* zuverlässig mit Maus und Tastatur bedienbar sein,
+* einen eigenen Reset-Button besitzen,
+* unmittelbar validiert werden,
+* eine eigene verständliche Fehlermeldung anzeigen können,
+* bei Problemen rot markiert werden,
+* ohne überlappende Klickbereiche dargestellt werden.
+
+Beim normalen Programmstart soll ausschließlich das Anwendungsfenster sichtbar sein.
+
+---
+
+## 11.1 GUI-Zustände eindeutig definieren
+
+Das Hauptfenster benötigt klar getrennte Zustände:
+
+```text
+Keine Datei ausgewählt
+G-Code wird analysiert
+Kein Kühlturm erforderlich
+Kühlturm erforderlich und Einstellungen gültig
+Kühlturm erforderlich, aber Einstellungen nicht erfüllbar
+Kühlturm wird generiert
+Generierung erfolgreich
+Generierung fehlgeschlagen
+```
+
+Zu jedem Zustand gehören:
+
+* Statustext,
+* Aktivierung oder Deaktivierung des Generierungsbuttons,
+* sichtbare Hinweise,
+* Fortschrittsanzeige,
+* Feldmarkierungen.
+
+---
+
+## 11.2 Live-Hinweis unter der Ziel-Layerzeit
+
+Direkt unter dem Eingabefeld der Ziel-Layerzeit befindet sich ein eigener dynamischer Hinweisbereich.
+
+Mögliche Zustände:
+
+```text
+Bitte zuerst einen G-Code auswählen.
+```
+
+```text
+G-Code wird analysiert …
+```
+
+```text
+Kein Kühlturm erforderlich.
+Die kleinste erkannte Layerzeit beträgt 12,4 s.
+```
+
+```text
+Kühlturm erforderlich.
+48 Layer unterschreiten die eingestellte Zielzeit.
+```
+
+```text
+Die Zielzeit kann mit den aktuellen Geometriegrenzen nicht erreicht werden.
+```
+
+Der Hinweis darf nicht ausschließlich im allgemeinen Statusbereich am unteren Fensterrand erscheinen.
+
+---
+
+## 11.3 Statische und dateiabhängige Validierung trennen
+
+Die Validierung besteht aus zwei Stufen.
+
+### Statische Eingabevalidierung
+
+Diese Prüfung funktioniert ohne geladenen G-Code.
+
+Beispiele:
+
+```text
+Ziel-Layerzeit muss größer als 0 sein.
+Sicherheitsfaktor muss mindestens 1,0 betragen.
+Mindest-Außenradius darf den Maximalradius nicht überschreiten.
+Aufweitungswinkel muss zwischen 0° und 90° liegen.
+Verjüngungswinkel muss zwischen 0° und 90° liegen.
+Maximalwandstärke darf die Mindestwandstärke nicht unterschreiten.
+```
+
+### Dateiabhängige Erfüllbarkeitsprüfung
+
+Diese Prüfung verwendet die analysierten Layer.
+
+Beispiele:
+
+```text
+Der eingestellte Aufweitungswinkel reicht vor Layer 42 nicht aus.
+Der Maximalradius reicht für Layer 517 nicht aus.
+Die Maximalwandstärke reicht für 3 Layer nicht aus.
+Der Mindest-Innenradius verhindert die notwendige Wandverdickung.
+```
+
+---
+
+## 11.4 Fehler direkt den verursachenden Feldern zuordnen
+
+Eine zentrale allgemeine Fehlermeldung reicht nicht aus.
+
+Jedes Problem enthält die Namen der betroffenen Einstellungen.
+
+Beispiel:
+
+```python
+related_setting_names = (
+    "maximum_expansion_angle_deg",
+    "maximum_outer_radius_mm",
+)
+```
+
+Die GUI markiert anschließend genau diese Felder.
+
+Wenn mehrere Einstellungen gemeinsam verantwortlich sein können, dürfen mehrere Felder gleichzeitig rot dargestellt werden.
+
+---
+
+## 11.5 Roter Rahmen und Inline-Hinweis
+
+Ein ungültiges oder nicht ausreichendes Feld erhält:
+
+* einen roten Rahmen,
+* einen leicht roten Hintergrund,
+* einen Fehlertext direkt unter der betreffenden Eingabe.
+
+Beispiel:
+
+```text
+Maximaler Aufweitungswinkel [°]   [20,0] [↺]
+Der Radius kann bis Layer 17 nicht schnell genug zunehmen.
+Erforderlich sind mindestens ungefähr 38,6°.
+```
+
+Die Fehlermeldung verschwindet automatisch, sobald:
+
+* der Wert korrigiert wurde oder
+* eine andere Einstellung das Problem gelöst hat.
+
+Es dürfen keine veralteten roten Rahmen zurückbleiben.
+
+---
+
+## 11.6 Generierungsbutton bei unmöglichen Werten deaktivieren
+
+Die Generierung ist nur möglich, wenn alle Bedingungen erfüllt sind:
+
+```text
+gültiger G-Code vorhanden
+Analyse abgeschlossen
+mindestens ein Layer benötigt einen Turm
+statische Einstellungen gültig
+Profil technisch erfüllbar
+keine Generierung läuft
+```
+
+Bei nicht erfüllbarer Geometrie bleibt der Button deaktiviert.
+
+Dadurch wird vermieden, eine STL zu erzeugen, von der bereits bekannt ist, dass sie die gewünschte Layerzeit nicht einhalten kann.
+
+---
+
+## 11.7 Eigenen Reset-Button für jedes Eingabefeld ergänzen
+
+Hinter jedem konfigurierbaren Wert befindet sich ein eigener Reset-Button.
+
+Beispiel:
+
+```text
+Mindest-Außenradius [mm]   [5,00] [↺]
+```
+
+Der Button setzt ausschließlich diesen einen Wert zurück.
+
+Beispiele:
+
+* Ziel-Layerzeit zurücksetzen,
+* Sicherheitsfaktor zurücksetzen,
+* Mindest-Außenradius zurücksetzen,
+* Maximalradius zurücksetzen,
+* Mindestwandstärke zurücksetzen,
+* Maximalwandstärke zurücksetzen,
+* Bahnbreite zurücksetzen,
+* Mindest-Innenradius zurücksetzen,
+* Aufweitungswinkel auf 50° zurücksetzen,
+* Verjüngungswinkel auf 50° zurücksetzen,
+* Standfußeinstellungen zurücksetzen,
+* Mesh-Segmente zurücksetzen,
+* lokales Referenzfenster zurücksetzen,
+* Ausgabeordner zurücksetzen.
+
+Der bisherige globale Button „Standardwerte wiederherstellen“ kann zusätzlich erhalten bleiben.
+
+---
+
+## 11.8 Standardwerte nicht mehrfach fest programmieren
+
+Die Reset-Buttons laden ihren Wert aus:
+
+```text
+config/default_settings.json
+```
+
+Sie dürfen keine separaten fest eingebauten Standardwerte in der GUI besitzen.
+
+Dadurch verwenden:
+
+* Einzel-Reset,
+* globaler Reset,
+* neue Installation,
+* CLI-Standardwerte,
+* Tests
+
+dieselben Vorgaben.
+
+Beispiel:
+
+```json
+{
+  "minimum_outer_radius_mm": 5.0,
+  "maximum_expansion_angle_deg": 50.0,
+  "maximum_contraction_angle_deg": 50.0
+}
+```
+
+---
+
+## 11.9 Wiederverwendbares Einstellungs-Widget erstellen
+
+Anstatt jedes Feld einzeln aus Label, Spinbox, Reset-Button und Fehlertext zusammenzubauen, soll ein gemeinsames Widget verwendet werden.
+
+Beispiel:
+
+```text
+gui/widgets/numeric_setting.py
+```
+
+Aufbau:
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ Beschriftung      Eingabefeld       Reset-Button     │
+│                   Hilfs- oder Fehlertext             │
+└──────────────────────────────────────────────────────┘
+```
+
+Mögliche Bestandteile:
+
+```python
+NumericSettingWidget(
+    setting_name="minimum_outer_radius_mm",
+    label="Mindest-Außenradius [mm]",
+    editor=QDoubleSpinBox(),
+    default_provider=...,
+)
+```
+
+Das Widget übernimmt:
+
+* Standardwert,
+* Reset,
+* Hilfetext,
+* Fehlermeldung,
+* roten Zustand,
+* Tooltip,
+* zugänglichen Namen,
+* einheitliche Abstände.
+
+---
+
+## 11.10 Reset-Button klar beschriften
+
+Der Reset-Button kann ein Symbol wie:
+
+```text
+↺
+```
+
+verwenden.
+
+Er erhält zusätzlich einen Tooltip:
+
+```text
+Auf Standardwert 5,00 mm zurücksetzen
+```
+
+Für Screenreader wird ein aussagekräftiger zugänglicher Name gesetzt:
+
+```text
+Mindest-Außenradius auf Standardwert zurücksetzen
+```
+
+Der Reset-Button darf nicht innerhalb des Eingabefeldes liegen und dessen Pfeilflächen nicht überdecken.
+
+---
+
+## 11.11 Überlappung der Spinbox-Bedienelemente beseitigen
+
+Die bestehenden Hoch- und Runter-Pfeile müssen vollständig anklickbar sein.
+
+Mögliche Fehlerursachen sind:
+
+* allgemeines Padding für `QSpinBox` und `QDoubleSpinBox`,
+* nicht reservierter Platz für native Unterelemente,
+* zu kleine Feldhöhe,
+* überlagerte Widgets,
+* negative Abstände,
+* ein zu breites internes Textfeld,
+* ungeeignete QSS-Unterelementdefinitionen.
+
+Die Styles für normale Textfelder und Spinboxen sollen getrennt werden.
+
+Beispielsweise darf nicht mehr derselbe pauschale Padding-Wert für alle Eingabefelder gelten, wenn dadurch die Spinbox-Pfeile überlagert werden.
+
+Für Spinboxen müssen reserviert werden:
+
+* ausreichend Platz für den Text,
+* vollständige Fläche für den Aufwärtspfeil,
+* vollständige Fläche für den Abwärtspfeil,
+* ein Abstand zum separaten Reset-Button.
+
+---
+
+## 11.12 Keine manuell überlappenden Geometrien verwenden
+
+Die Eingabezeilen werden ausschließlich über Qt-Layouts angeordnet.
+
+Geeignet sind:
+
+* `QGridLayout`,
+* `QHBoxLayout`,
+* `QVBoxLayout`,
+* sauber konfigurierte `QFormLayout`-Zeilen.
+
+Nicht verwendet werden sollen:
+
+* manuelle absolute Positionen,
+* negative Ränder,
+* absichtlich übereinandergelegte Widgets,
+* Reset-Buttons innerhalb der Spinbox,
+* Klickflächen, die sich geometrisch schneiden.
+
+---
+
+## 11.13 Mindestgrößen und Klickflächen definieren
+
+Für interaktive Bedienelemente werden ausreichende Mindestgrößen festgelegt.
+
+Beispielsweise:
+
+```text
+Spinbox-Mindesthöhe:       32 px
+Reset-Button-Mindestgröße: 28 × 28 px
+normaler Button:           mindestens 32 px Höhe
+```
+
+Die tatsächlichen Werte müssen mit Windows-Skalierungen geprüft werden.
+
+Die Reset-Buttons sollen nicht so klein sein, dass sie nur pixelgenau getroffen werden können.
+
+---
+
+## 11.14 Unterschiedliche DPI-Skalierungen testen
+
+Die Oberfläche muss mindestens unter folgenden Windows-Skalierungen geprüft werden:
+
+```text
+100 %
+125 %
+150 %
+175 %
+200 %
+```
+
+Dabei ist zu kontrollieren:
+
+* keine Überlappung der Felder,
+* Pfeilbuttons bleiben erreichbar,
+* Reset-Buttons bleiben sichtbar,
+* Fehlertexte werden vollständig umgebrochen,
+* Gruppenüberschriften werden nicht abgeschnitten,
+* horizontales Scrollen ist möglichst nicht erforderlich,
+* vertikales Scrollen funktioniert,
+* der Generierungsbutton bleibt erreichbar.
+
+---
+
+## 11.15 Fenstergrößen und responsives Layout
+
+Die Anwendung soll bei kleineren Displays weiterhin bedienbar bleiben.
+
+Dafür:
+
+* bleibt der Einstellungsbereich scrollbar,
+* wachsen Eingabefelder nur innerhalb sinnvoller Grenzen,
+* besitzen Beschriftungen eine definierte Mindestbreite,
+* können längere Hilfetexte umbrechen,
+* liegt der Statusbereich außerhalb oder am Ende des Scrollbereichs,
+* wird keine feste Fensterhöhe vorausgesetzt.
+
+Mindestens geprüft werden sollten:
+
+```text
+1024 × 768
+1280 × 720
+1920 × 1080
+```
+
+---
+
+## 11.16 Bedienung mit Tastatur prüfen
+
+Alle Eingabefelder müssen auch ohne Maus bedienbar sein.
+
+Zu prüfen sind:
+
+* sinnvolle Tab-Reihenfolge,
+* Eingabe numerischer Werte,
+* Pfeiltasten in Spinboxen,
+* `Page Up` und `Page Down`, sofern unterstützt,
+* Aktivierung des Reset-Buttons per Tastatur,
+* sichtbarer Fokusrahmen,
+* keine Fokusfalle im Scrollbereich.
+
+Eine Mauskorrektur darf die Tastaturbedienung nicht verschlechtern.
+
+---
+
+## 11.17 Live-Berechnung bei direkter Texteingabe
+
+Der aktuelle Zustand darf nicht erst nach dem Verlassen des Feldes aktualisiert werden.
+
+Bei einer gültigen vollständigen Zahl erfolgt die Berechnung nach kurzer Verzögerung.
+
+Unvollständige Zwischenzustände wie:
+
+```text
+leer
+-
+,
+.
+```
+
+dürfen keinen Absturz verursachen.
+
+Während einer noch nicht vollständigen Eingabe kann ein neutraler Zustand angezeigt werden:
+
+```text
+Bitte einen gültigen Zahlenwert eingeben.
+```
+
+---
+
+## 11.18 Keine Konsole beim normalen GUI-Start
+
+Der normale GUI-Start darf kein dauerhaft sichtbares schwarzes Konsolenfenster öffnen.
+
+Dafür wird ein eigener Windows-GUI-Einstiegspunkt verwendet, beispielsweise:
+
+```text
+start_gui.pyw
+```
+
+Dieser wird mit:
+
+```text
+pythonw.exe
+```
+
+gestartet.
+
+Alternativ kann später eine eigenständige Anwendung mit:
+
+```text
+PyInstaller --windowed
+```
+
+erstellt werden.
+
+Der bisherige Konsolenstart bleibt ausschließlich für:
+
+* CLI-Nutzung,
+* Entwicklung,
+* Diagnose,
+* Tests
+
+erhalten.
+
+---
+
+## 11.19 Primären Windows-Launcher anpassen
+
+Der für normale Benutzer dokumentierte Startweg soll direkt die fensterlose GUI-Variante verwenden.
+
+Geeignete Möglichkeiten:
+
+```text
+start_gui.pyw
+```
+
+oder eine Windows-Verknüpfung auf:
+
+```text
+.venv\Scripts\pythonw.exe start_gui.pyw
+```
+
+Ein `.bat`-Launcher kann für Entwickler erhalten bleiben, darf aber nicht mehr der empfohlene normale GUI-Start sein, wenn er ein sichtbares Konsolenfenster erzeugt.
+
+---
+
+## 11.20 Fehler ohne Konsole sichtbar machen
+
+Da `pythonw.exe` keine sichtbare Standardkonsole besitzt, müssen Start- und Laufzeitfehler anders behandelt werden.
+
+Erforderlich sind:
+
+* zentrale Logdatei,
+* globaler Exception-Handler,
+* verständliche Fehlermeldung in einem Dialog,
+* Pfadangabe zur Logdatei.
+
+Beispiel:
+
+```text
+Die Anwendung konnte nicht vollständig gestartet werden.
+
+Fehlerdetails wurden gespeichert unter:
+...\output\logs\application_startup.log
+```
+
+Technische Tracebacks werden vollständig in die Datei geschrieben.
+
+---
+
+## 11.21 Programm beim Schließen vollständig beenden
+
+Wird das GUI-Fenster geschlossen, müssen ebenfalls beendet werden:
+
+* Analyse-Worker,
+* Vorschau-Worker,
+* Generierungs-Worker,
+* Thread-Pools,
+* offene Dateihandles,
+* Timer,
+* Hintergrundprozesse.
+
+Es darf kein unsichtbarer Python-Prozess weiterlaufen.
+
+Findet gerade eine Generierung statt, kann eine Bestätigung angezeigt werden:
+
+```text
+Die Generierung läuft noch.
+Möchten Sie sie abbrechen und die Anwendung schließen?
+```
+
+Nach Bestätigung wird der Worker kontrolliert abgebrochen und die Anwendung vollständig beendet.
+
+---
+
+## 11.22 Einstellungen migrieren
+
+Die Konfigurationsstruktur erhält eine Versionsnummer:
+
+```json
+{
+  "settings_schema_version": 2
+}
+```
+
+Neue Felder werden ergänzt:
+
+```json
+{
+  "minimum_outer_radius_mm": 5.0,
+  "maximum_expansion_angle_deg": 50.0,
+  "maximum_contraction_angle_deg": 50.0,
+  "automatic_base_width": true,
+  "manual_base_width_mm": 20.0
+}
+```
+
+Nicht mehr benötigte alte Einstellungen werden:
+
+* kontrolliert migriert,
+* weiterhin für eine Übergangszeit gelesen oder
+* mit einer verständlichen Fallback-Regel ersetzt.
+
+Eine alte `user_settings.json` darf den Programmstart nicht verhindern.
+
+---
+
+## 11.23 GUI-Tests für Klickbereiche
+
+Die Spinbox-Pfeile werden nicht nur optisch, sondern funktional getestet.
+
+Mit Qt-Testwerkzeugen kann die Position der Unterelemente ermittelt werden:
+
+```text
+QStyle.SC_SpinBoxUp
+QStyle.SC_SpinBoxDown
+```
+
+Anschließend werden Mausklicks in deren Mittelpunkt simuliert.
+
+Zu prüfen:
+
+* Aufwärtspfeil erhöht den Wert,
+* Abwärtspfeil verringert den Wert,
+* linker beziehungsweise innerer Bereich der Pfeilfläche reagiert ebenfalls,
+* das Textfeld fängt den Klick nicht ab,
+* der Reset-Button beeinflusst die Pfeile nicht.
+
+---
+
+## 11.24 Phase 11 testen
+
+Mindestens folgende Testfälle sind erforderlich:
+
+1. Zielzeit-Hinweis erscheint nach erfolgreicher Analyse.
+2. Hinweis „Kein Kühlturm erforderlich“ erscheint live.
+3. Der Hinweis verschwindet bei höherer Zielzeit.
+4. Ein nicht erfüllbarer Aufweitungswinkel wird rot markiert.
+5. Der konkrete Fehlertext steht unter dem Winkel.
+6. Nach Korrektur verschwinden Rahmen und Text.
+7. Mehrere zusammenhängende Fehler können mehrere Felder markieren.
+8. Der Generierungsbutton ist ohne Bedarf deaktiviert.
+9. Der Generierungsbutton ist bei unmöglicher Geometrie deaktiviert.
+10. Jedes numerische Eingabefeld besitzt einen Reset-Button.
+11. Jeder Einzel-Reset verändert ausschließlich das zugehörige Feld.
+12. Jeder Reset lädt den Wert aus der Standardkonfiguration.
+13. Der globale Reset funktioniert weiterhin.
+14. Aufwärts- und Abwärtspfeile jeder Spinbox sind zuverlässig anklickbar.
+15. Eingabefeld und Pfeilflächen überlappen sich nicht.
+16. Reset-Button und Spinbox überlappen sich nicht.
+17. Alle Felder sind per Tastatur erreichbar.
+18. Die Tab-Reihenfolge ist logisch.
+19. Die GUI bleibt bei 100 bis 200 Prozent Skalierung bedienbar.
+20. Kleine Fenster verwenden den Scrollbereich korrekt.
+21. Der normale GUI-Start zeigt kein Konsolenfenster.
+22. Ein absichtlicher CLI-Start besitzt weiterhin Konsolenausgaben.
+23. Beim Schließen bleibt kein Python-Prozess zurück.
+24. Startfehler werden ohne Konsole in einer Logdatei gespeichert.
+25. Alte Benutzereinstellungen werden ohne Absturz migriert.
+
+---
+
+## Zusammenfassung der Phase 11
+
+Phase 11 überführt die neuen Funktionen in eine verlässlich bedienbare Oberfläche:
+
+* Die GUI besitzt klar definierte Analyse- und Generierungszustände.
+* Hinweise werden direkt unter der Zielzeit angezeigt.
+* Nicht erfüllbare Werte werden am verursachenden Feld rot markiert.
+* Fehlermeldungen verschwinden automatisch nach einer Korrektur.
+* Jedes Eingabefeld erhält einen eigenen Reset-Button.
+* Standardwerte stammen zentral aus der Konfigurationsdatei.
+* Spinbox-Pfeile und Eingabefelder dürfen sich nicht mehr überlappen.
+* Layout, DPI-Skalierung, Maus- und Tastaturbedienung werden geprüft.
+* Der normale Windows-Start erfolgt ohne sichtbares Konsolenfenster.
+* Beim Schließen werden alle Hintergrundkomponenten beendet.
+
+---
+
+# Phase 12: Gesamtintegration, Regressionstests und Abschlussprüfung
+
+> **Statushinweis:** Diese ursprüngliche Phase 12 ist veraltet und wird nicht mehr als eigenständige Implementierungsphase verwendet. Ihre weiterhin sinnvollen Integrations-, Test-, Performance-, Dokumentations- und Abschlussaufgaben wurden in den Entwicklungsplan der Phasen 13 bis 18 überführt. Maßgeblich ist die Datei `entwicklungsplan phase 13-18.txt`.
+
+## Ziel der Phase
+
+Alle neuen Regeln werden als gemeinsamer Ablauf getestet. Dabei muss sichergestellt werden, dass die Verbesserungen keine bereits funktionierenden Bestandteile beschädigen.
+
+Insbesondere werden geprüft:
+
+* G-Code-Erkennung,
+* Layerzeiten,
+* lokale Zeitreferenzen,
+* Radius- und Wandberechnung,
+* hohles Mesh,
+* Output-Struktur,
+* GUI und CLI,
+* Windows-Start,
+* tatsächliches Verhalten im Slicer.
+
+---
+
+## 12.1 Einheitliche zentrale Berechnung verwenden
+
+Die Live-Vorschau, CLI und endgültige Generierung dürfen keine unterschiedlichen Profilalgorithmen verwenden.
+
+Der gemeinsame Ablauf lautet:
+
+```python
+analysis = analysis_service.analyze(gcode_path)
+
+assessment = tower_need_service.assess(
+    analysis=analysis,
+    settings=settings,
+)
+
+preview = profile_service.build_preview(
+    analysis=analysis,
+    assessment=assessment,
+    settings=settings,
+)
+
+feasibility = profile_validator.validate(
+    preview=preview,
+    settings=settings,
+)
+```
+
+Erst wenn:
+
+```text
+assessment.tower_required == True
+```
+
+und:
+
+```text
+feasibility.is_valid == True
+```
+
+wird das endgültige Mesh erzeugt.
+
+---
+
+## 12.2 Frühere Referenztests erneut ausführen
+
+Alle Tests aus Phase 1 bis 8 werden erneut ausgeführt.
+
+Bewusst geänderte Ergebnisse werden dokumentiert.
+
+Erwartete Änderungen sind insbesondere:
+
+* Mindest-Außenradius standardmäßig 5 statt 6 mm,
+* kein Turm bei vollständig ausreichenden Layerzeiten,
+* geringere Turmhöhe,
+* neue Standfußbreite,
+* Spline statt linearer Profilsegmente,
+* getrennte Winkel,
+* zusätzliche Profilstützpunkte,
+* möglicherweise andere Mesh-Dreiecksanzahl,
+* keine Generierung bei bereits erkannten unerfüllbaren Einstellungen.
+
+Nicht unbeabsichtigt ändern dürfen sich:
+
+* Layererkennung,
+* Z-Hop-Behandlung,
+* Grundberechnung der Layerzeiten,
+* lokale Zeit-pro-Strecke-Referenz,
+* G-Code-Zustandsverarbeitung,
+* Ausgabepfad-Sicherheit,
+* Mesh-Wasserdichtigkeit.
+
+---
+
+## 12.3 Repräsentative Profilfälle erstellen
+
+Für die Integration werden synthetische Layerzeitprofile benötigt.
+
+### Fall A: Kein Turm erforderlich
+
+```text
+Alle Layerzeiten >= Zielzeit
+```
+
+Erwartung:
+
+```text
+keine STL
+kein Standfuß
+Hinweis in der GUI
+```
+
+### Fall B: Nur ein kurzer mittlerer Bereich
+
+Erwartung:
+
+* schmaler Turm bis vor den kritischen Bereich,
+* eine einzelne Spline-Aufweitung,
+* anschließende Rückführung,
+* Ende nach dem kritischen Bereich plus einem Layer.
+
+### Fall C: Mehrere weit getrennte Bereiche
+
+Erwartung:
+
+* mehrere getrennte Erweiterungen,
+* dazwischen Mindest-Außenradius.
+
+### Fall D: Mehrere nahe Bereiche
+
+Erwartung:
+
+* miteinander verschmolzene Erweiterungen,
+* keine unnötige vollständige Verjüngung dazwischen.
+
+### Fall E: Maximalradius reicht nicht
+
+Erwartung:
+
+* Außenradius erreicht sein Maximum,
+* Wandstärke nimmt fließend zu.
+
+### Fall F: Standfußlayer benötigt viel Zusatzzeit
+
+Erwartung:
+
+* Standfußbreite bleibt bei ihrem berechneten oder manuellen Wert,
+* zusätzliche Kompensation erfolgt über Wandstärke.
+
+### Fall G: Einstellungen nicht erfüllbar
+
+Erwartung:
+
+* betroffenes Feld rot,
+* konkrete Meldung,
+* Generierung deaktiviert.
+
+---
+
+## 12.4 Referenzform visuell kontrollieren
+
+Für ein geeignetes synthetisches Layerprofil soll eine Form entstehen, die dem beigefügten Bild grundsätzlich entspricht:
+
+* breiter Standfuß,
+* glatter Übergang zum schmalen Stamm,
+* mindestens zwei lokale Erweiterungen,
+* gekrümmte Aufweitungen,
+* gekrümmte Rückführungen,
+* keine linearen Kegelabschnitte,
+* keine scharfen Einschnürungen,
+* keine abrupten Wandstärkensprünge.
+
+Die Form muss nicht dieselben Proportionen oder dieselbe Anzahl von Erweiterungen besitzen. Diese ergeben sich aus dem G-Code.
+
+---
+
+## 12.5 Profil mathematisch validieren
+
+Für jeden Layer und zusätzliche Spline-Abtastpunkte werden geprüft:
+
+```text
+Außenradius >= Mindest-Außenradius
+Außenradius <= Maximalradius außerhalb des Standfußes
+Innenradius >= Mindest-Innenradius
+Wandstärke >= Mindestwandstärke
+Wandstärke <= Maximalwandstärke
+Aufweitungswinkel <= eingestellter Maximalwert
+Verjüngungswinkel <= eingestellter Maximalwert
+geschätzte Zusatzzeit >= abgesichertes Zeitdefizit
+```
+
+Zusätzlich:
+
+* keine NaN-Werte,
+* keine unendlichen Werte,
+* streng aufsteigende Z-Höhen,
+* keine doppelten Profilpunkte,
+* keine negativen Layerhöhen.
+
+---
+
+## 12.6 Mesh im Slicer prüfen
+
+Mehrere erzeugte STLs werden in einem real verwendeten Slicer kontrolliert.
+
+Zu prüfen sind:
+
+* STL wird als geschlossenes Volumen erkannt,
+* Turm ist hohl,
+* Standfuß liegt vollständig auf dem Druckbett,
+* Innen- und Außenwand werden erkannt,
+* Splinekontur erscheint ausreichend glatt,
+* keine unerwarteten massiven Bereiche,
+* keine fehlenden Layer,
+* keine selbstüberschneidenden Flächen,
+* korrekte verkürzte Turmhöhe,
+* obere Ringfläche wird korrekt geschlossen.
+
+---
+
+## 12.7 Tatsächliche Layerzeiten stichprobenartig vergleichen
+
+Die Anwendung arbeitet weiterhin mit einer Näherung. Der spätere Slicer bestimmt die wirkliche Druckbahn.
+
+Für ausgewählte Testfälle wird daher:
+
+1. der Kühlturm erzeugt,
+2. gemeinsam mit dem Hauptmodell geslict,
+3. der kombinierte G-Code erneut analysiert,
+4. die tatsächliche zusätzliche Layerzeit verglichen.
+
+Verglichen werden:
+
+```text
+vorhergesagte Zusatzzeit
+tatsächliche Zusatzzeit
+gewünschte Zielzeit
+erreichte kombinierte Layerzeit
+```
+
+Größere systematische Abweichungen können anschließend zur Kalibrierung des Sicherheitsfaktors oder der Pfadlängenschätzung verwendet werden.
+
+---
+
+## 12.8 Keine unnötigen Turmteile prüfen
+
+Für jedes Referenzprofil wird kontrolliert:
+
+* Unterhalb des ersten notwendigen Übergangs bleibt der reguläre Stamm minimal.
+* Erweiterungen beginnen nur so früh, wie Winkel und Splineform erfordern.
+* Nach Erweiterungen wird möglichst zur Mindestbreite zurückgekehrt.
+* Dicht folgende Erweiterungen werden verbunden.
+* Oberhalb des letzten kritischen Layers plus einem Layer existiert keine Geometrie.
+* Es wird keine vollständige Modellhöhe übernommen, wenn sie nicht benötigt wird.
+* Zusätzliche Wandstärke existiert nur dort, wo Maximalradius oder Übergangsglättung sie erfordern.
+
+---
+
+## 12.9 Output-Berichte vereinheitlichen
+
+GUI und CLI geben mindestens aus:
+
+```text
+G-Code-Datei
+erkannte Layer
+kleinste Layerzeit
+eingestellte Ziel-Layerzeit
+Sicherheitsfaktor
+Kühlturm erforderlich: Ja/Nein
+Anzahl kritischer Layer
+erster kritischer Layer
+letzter kritischer Layer
+ursprüngliche Modellhöhe
+erzeugte Kühlturmhöhe
+Mindest-Außenradius
+maximal verwendeter Außenradius
+maximal verwendete Wandstärke
+Standfußbreite
+Aufweitungswinkel
+Verjüngungswinkel
+nicht erfüllbare Layer
+Pfad zur STL
+Pfad zum Laufordner
+```
+
+Wenn kein Turm erforderlich ist:
+
+```text
+Pfad zur STL: nicht erzeugt
+Begründung: Kein analysierter Layer unterschreitet die Zielzeit.
+```
+
+---
+
+## 12.10 Performance prüfen
+
+Die Live-Funktion darf nicht dazu führen, dass große G-Code-Dateien bei jeder Eingabe erneut verarbeitet werden.
+
+Gemessen werden:
+
+* Dauer der ersten G-Code-Analyse,
+* Dauer einer Zielzeit-Neuberechnung,
+* Dauer einer Geometrievorschau,
+* Speicherbedarf des Analyse-Caches,
+* Dauer der Spline-Abtastung,
+* Dauer der Mesh-Erzeugung.
+
+Ziel:
+
+```text
+Änderungen normaler Eingabewerte sollen nach abgeschlossener
+G-Code-Analyse innerhalb kurzer Zeit sichtbar werden.
+```
+
+Bei sehr großen Profilen kann die Vorschau mit reduzierter Auflösung arbeiten. Die endgültige Generierung verwendet anschließend die vollständige Auflösung.
+
+---
+
+## 12.11 Fehler- und Abbruchszenarien prüfen
+
+Mindestens zu testen sind:
+
+* ungültige G-Code-Datei,
+* Datei während der Analyse gelöscht,
+* Datei während der Analyse verändert,
+* keine nutzbare Zeitreferenz,
+* Ausgabeordner nicht beschreibbar,
+* Worker während der Vorschau abgebrochen,
+* Anwendung während der Generierung geschlossen,
+* fehlerhafte alte Konfigurationsdatei,
+* unvollständige neue Konfigurationsdatei,
+* fehlender GUI-Style,
+* fehlende Python-Abhängigkeit beim fensterlosen Start.
+
+In allen Fällen muss entweder:
+
+* eine verständliche GUI-Meldung erscheinen oder
+* eine Logdatei mit verständlichem Pfad erzeugt werden.
+
+---
+
+## 12.12 Dokumentation aktualisieren
+
+Die README wird um folgende Punkte ergänzt:
+
+* neuer normaler GUI-Start ohne Konsole,
+* Unterschied zwischen GUI- und CLI-Start,
+* Live-Analyse nach G-Code-Auswahl,
+* Bedeutung des Hinweises „Kein Kühlturm erforderlich“,
+* neue Höhenbegrenzung,
+* Mindest-Außenradius 5 mm,
+* Aufweitungs- und Verjüngungswinkel,
+* Winkelbezug zur vertikalen Achse,
+* automatische Standfußbreite,
+* manuelle Standfußoption,
+* Einzel-Reset-Buttons,
+* Bedeutung roter Felder,
+* bekannte Abweichung zwischen Schätzung und späterem Slicer.
+
+---
+
+## 12.13 Abschlusskriterien
+
+Die Erweiterung gilt als abgeschlossen, wenn:
+
+* der G-Code nach der Auswahl automatisch analysiert wird,
+* Zielzeitänderungen live berücksichtigt werden,
+* ein nicht benötigter Turm nicht erzeugt wird,
+* der passende Hinweis unter der Zielzeit erscheint,
+* der Hinweis bei einem wieder vorhandenen Bedarf verschwindet,
+* der Turm beim letzten kritischen Layer plus einem Layer endet,
+* der Standard-Mindest-Außenradius 5 mm beträgt,
+* lokale Erweiterungen als Kurven statt als lineare Kegel entstehen,
+* Aufweitung und Verjüngung separat auf 50° zurücksetzbar sind,
+* Außen- und Innenwand zunächst gemeinsam breiter werden,
+* Wandstärke erst nach Erreichen der maximalen Außenbreite zunimmt,
+* Wandstärkenänderungen fließend sind,
+* nahe Erweiterungen sinnvoll verschmelzen,
+* der Standfuß automatisch mindestens 20 mm breit ist,
+* die Standfußbreite standardmäßig dem Faktor 0,2 der vollständigen G-Code-Objekthöhe folgt,
+* der Standfuß die reguläre Maximalbreite überschreiten darf,
+* zusätzlicher Zeitbedarf im Standfuß über Wandstärke kompensiert wird,
+* unerfüllbare Einstellungen vor der Generierung erkannt werden,
+* betroffene Felder einen roten Rahmen erhalten,
+* unter jedem betroffenen Feld ein konkreter Hinweis erscheint,
+* Fehlerdarstellungen nach Korrektur verschwinden,
+* jedes Eingabefeld einen eigenen Reset-Button besitzt,
+* Hoch- und Runter-Pfeile zuverlässig anklickbar sind,
+* sich keine GUI-Elemente überlappen,
+* die Oberfläche bei üblichen Windows-Skalierungen bedienbar bleibt,
+* beim normalen GUI-Start kein Konsolenfenster sichtbar ist,
+* beim Schließen keine Hintergrundprozesse zurückbleiben,
+* GUI und CLI dieselbe Berechnungslogik verwenden,
+* das erzeugte Mesh hohl und wasserdicht ist,
+* die STL im Slicer korrekt verarbeitet werden kann.
+
+---
+
+## Zusammenfassung der Phase 12
+
+Phase 12 schließt die Erweiterung ab:
+
+* Alle neuen Regeln werden gemeinsam getestet.
+* Frühere Parser-, Zeit- und Mesh-Funktionen werden auf Regressionen geprüft.
+* Synthetische Profile decken einzelne, mehrere und verschmolzene Erweiterungen ab.
+* Die Form wird mathematisch, visuell und im Slicer kontrolliert.
+* Die tatsächliche zusätzliche Layerzeit wird stichprobenartig nachgemessen.
+* Live-Vorschau und G-Code-Cache werden auf Performance geprüft.
+* Start-, Abbruch- und Fehlerfälle werden abgesichert.
+* README, GUI und CLI werden auf denselben Funktionsstand gebracht.
+
+---
+
+# Kurzübersicht der neuen Phasen
+
+## Phase 9: Live-Bedarf und verkürzte Turmhöhe
+
+* G-Code unmittelbar nach Auswahl analysieren.
+* Layerdaten zwischenspeichern.
+* Ziel-Layerzeit live bewerten.
+* Ohne Zeitdefizit keinen Turm erzeugen.
+* Dynamischen Hinweis unter der Zielzeit anzeigen.
+* Turm beim letzten kritischen Layer plus einem Layer beenden.
+
+## Phase 10: Splineprofil und Standfuß
+
+* Mindest-Außenradius auf 5 mm ändern.
+* Außen- und Innenwand zunächst gemeinsam verschieben.
+* Maximalradius vor zusätzlicher Wandstärke ausnutzen.
+* Wandstärke fließend erhöhen und reduzieren.
+* Splineförmige Aufweitungen und Verjüngungen erzeugen.
+* Getrennte Winkel mit jeweils 50° Standardwert verwenden.
+* Nahe Erweiterungen miteinander verschmelzen.
+* Standfußbreite aus der vollständigen G-Code-Objekthöhe berechnen.
+* Zusätzlichen Zeitbedarf im Standfuß über Wandstärke ausgleichen.
+
+## Phase 11: GUI, Validierung und Programmstart
+
+* Live-Hinweise direkt an den Eingaben anzeigen.
+* Technisch unmögliche Werte rot markieren.
+* Konkrete Fehlertexte unter den betroffenen Feldern ausgeben.
+* Jedem Eingabewert einen eigenen Reset-Button geben.
+* Spinbox-Pfeile und Klickflächen korrigieren.
+* Überlappungsfreies, DPI-taugliches Layout sicherstellen.
+* GUI ohne sichtbares Konsolenfenster starten.
+* Beim Schließen alle Hintergrundkomponenten beenden.
+
+## Phase 12: Integration und Abschluss
+
+* Neue und alte Funktionen gemeinsam testen.
+* Spline- und Winkelgrenzen mathematisch prüfen.
+* Referenzformen im Slicer kontrollieren.
+* Tatsächliche Layerzeiten stichprobenartig vergleichen.
+* Unnötige Turmhöhe und unnötiges Material ausschließen.
+* Output-Berichte, CLI, GUI und Dokumentation vereinheitlichen.
+* Alle definierten Abschlusskriterien nachweisen.

@@ -1,0 +1,19 @@
+.gitattributes text eol=lf
+* text=auto
+
+*.py text eol=lf
+*.pyw text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.qss text eol=lf
+*.svg text eol=lf
+
+*.bat text eol=crlf
+*.vbs text eol=crlf
+
+# Slicer-generierte Referenzdateien bleiben bytegetreu und werden nicht als
+# riesiger Text-Diff dargestellt.
+*.gcode -text -diff

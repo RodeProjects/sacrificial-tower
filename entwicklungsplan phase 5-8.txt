@@ -1,0 +1,1890 @@
+# Erweiterter Entwicklungsplan: Phasen 5 bis 8
+
+## Ziel der Erweiterung
+
+Die bestehende Anwendung soll um folgende Funktionen ergänzt werden:
+
+* wartbare Projekt- und Modulstruktur,
+* logisch strukturierte Ausgabeordner,
+* Migration bereits vorhandener Testdateien und Kühlturm-STLs,
+* hohler Kühlturm,
+* einstellbare Mindestwandstärke,
+* einstellbarer Mindestturmradius,
+* einstellbarer maximaler Turmradius,
+* Vergrößerung der Wandstärke, sobald der maximale Turmradius erreicht ist,
+* Wandstärkenänderung in Schritten, die jeweils ungefähr einer zusätzlichen Druckbahn entsprechen,
+* einstellbare effektive Linienbreite für eine 0,4-mm-Düse,
+* fließende Übergänge der Außenkontur,
+* fließende Übergänge der Innenkontur beziehungsweise Wandstärke,
+* einfache, logisch aufgebaute und optisch ansprechende GUI,
+* G-Code-Übergabe per Drag & Drop,
+* alternative Dateiauswahl über einen Dialog,
+* Button zum Starten der Kühlturmgenerierung,
+* Button zum Öffnen des Ausgabeordners der erzeugten STL,
+* Anzeige von Fortschritt, Ergebnissen, Warnungen und Fehlern.
+
+Die GUI soll zunächst eine lokale Desktopanwendung für Windows 11 sein. Als GUI-Framework bietet sich **PySide6** an, da es Drag & Drop, moderne Oberflächen, saubere Trennung von Oberfläche und Programmlogik sowie Hintergrundverarbeitung unterstützt.
+
+---
+
+# Vorgeschlagene neue Projektstruktur
+
+Die bisherige einfache Struktur sollte vor der GUI-Implementierung in eine Paketstruktur überführt werden.
+
+```text
+cooling_tower/
+│
+├── main.py
+├── requirements.txt
+├── README.md
+│
+├── config/
+│   └── default_settings.json
+│
+├── src/
+│   └── cooling_tower/
+│       │
+│       ├── __init__.py
+│       ├── application.py
+│       ├── config.py
+│       ├── paths.py
+│       │
+│       ├── models/
+│       │   ├── __init__.py
+│       │   ├── layer.py
+│       │   ├── generation_settings.py
+│       │   ├── tower_profile.py
+│       │   └── generation_result.py
+│       │
+│       ├── gcode/
+│       │   ├── __init__.py
+│       │   ├── parser.py
+│       │   ├── layer_detector.py
+│       │   └── time_analyzer.py
+│       │
+│       ├── tower/
+│       │   ├── __init__.py
+│       │   ├── time_reference.py
+│       │   ├── radius_calculator.py
+│       │   ├── wall_calculator.py
+│       │   ├── profile_smoothing.py
+│       │   ├── base_calculator.py
+│       │   ├── mesh_generator.py
+│       │   └── mesh_validator.py
+│       │
+│       ├── services/
+│       │   ├── __init__.py
+│       │   ├── generation_service.py
+│       │   ├── output_service.py
+│       │   └── migration_service.py
+│       │
+│       └── gui/
+│           ├── __init__.py
+│           ├── main_window.py
+│           ├── generation_worker.py
+│           ├── styles.qss
+│           │
+│           └── widgets/
+│               ├── __init__.py
+│               ├── gcode_drop_zone.py
+│               ├── numeric_setting.py
+│               └── result_panel.py
+│
+├── scripts/
+│   └── migrate_output_structure.py
+│
+├── tests/
+│   ├── test_gcode_parser.py
+│   ├── test_layer_detection.py
+│   ├── test_radius_calculator.py
+│   ├── test_wall_calculator.py
+│   ├── test_profile_smoothing.py
+│   ├── test_mesh_generator.py
+│   └── samples/
+│
+├── input/
+│
+└── output/
+    ├── runs/
+    └── migrated_legacy/
+```
+
+Die Unterteilung ist bewusst so gewählt, dass:
+
+* der G-Code-Parser nichts über die GUI wissen muss,
+* der Turmgenerator nichts über Dateidialoge wissen muss,
+* die GUI nur zentrale Services aufruft,
+* die Kommandozeilenversion weiterhin verwendet werden kann,
+* jede Berechnungsstufe separat getestet werden kann.
+
+---
+
+# Neue Output-Struktur
+
+Jeder Generierungsvorgang erhält einen eigenen Laufordner.
+
+```text
+output/
+└── runs/
+    └── 20260713_153025_rabe_koerper_18cm/
+        ├── stl/
+        │   └── cooling_tower.stl
+        │
+        ├── analysis/
+        │   ├── layer_analysis.csv
+        │   └── analysis_summary.json
+        │
+        ├── profiles/
+        │   └── tower_profile.csv
+        │
+        ├── config/
+        │   └── generation_settings.json
+        │
+        └── logs/
+            └── generation.log
+```
+
+Der Laufordnername besteht aus:
+
+```text
+Datum_Uhrzeit_NameDerGCodeDatei
+```
+
+Beispiel:
+
+```text
+20260713_153025_rabe_koerper_18cm
+```
+
+Vorteile:
+
+* keine Dateien werden versehentlich überschrieben,
+* alle Dateien eines Tests bleiben zusammen,
+* verschiedene Kühltürme können später verglichen werden,
+* der GUI-Button kann gezielt den `stl`-Ordner des letzten Laufs öffnen,
+* Konfiguration und Analyse bleiben nachvollziehbar.
+
+---
+
+# Phase 5: Projektstruktur, Konfiguration und Ausgabeverwaltung
+
+## Ziel der Phase
+
+Die vorhandene Programmlogik wird in eine wartbare Struktur überführt. Alle Ausgaben werden zentral verwaltet und vorhandene Dateien werden in die neue Struktur verschoben.
+
+In dieser Phase wird die eigentliche Turmgeometrie noch nicht verändert.
+
+---
+
+## 5.1 Aktuellen Funktionsstand sichern
+
+Vor dem Umbau muss der aktuelle Stand überprüft werden.
+
+Zu sichern sind insbesondere:
+
+* funktionierendes Einlesen des G-Codes,
+* erkannte Layeranzahl,
+* erkannte Z-Höhen,
+* berechnete Layerzeiten,
+* erzeugte Analyse-CSV,
+* aktuell erzeugte Kühlturm-STL,
+* bekannte Test-G-Codes.
+
+Die aktuellen Ergebnisse sollten als Referenz erhalten bleiben, damit nach dem Umbau geprüft werden kann, ob sich die Berechnung unbeabsichtigt verändert hat.
+
+---
+
+## 5.2 Gemeinsame Datenmodelle einführen
+
+Die bisher lose verwendeten Dictionaries sollten durch klar definierte Datenklassen ersetzt werden.
+
+### `LayerData`
+
+Enthält beispielsweise:
+
+```python
+@dataclass
+class LayerData:
+    index: int
+    z: float
+    height: float
+    total_time_s: float
+    extrusion_time_s: float
+    travel_time_s: float
+    extrusion_path_mm: float
+    time_deficit_s: float = 0.0
+```
+
+### `GenerationSettings`
+
+Enthält alle Einstellungen, die später sowohl von der GUI als auch von der Kommandozeile verwendet werden.
+
+```python
+@dataclass
+class GenerationSettings:
+    target_layer_time_s: float
+    safety_factor: float
+
+    minimum_outer_radius_mm: float
+    maximum_outer_radius_mm: float
+
+    minimum_wall_thickness_mm: float
+    maximum_wall_thickness_mm: float
+    wall_path_width_mm: float
+
+    minimum_inner_radius_mm: float
+
+    minimum_base_radius_mm: float
+    base_height_mm: float
+    base_margin_mm: float
+    base_height_factor: float
+
+    maximum_radius_change_per_mm_z: float
+    maximum_wall_change_per_mm_z: float
+
+    local_reference_window: int
+    mesh_segments: int
+```
+
+### `TowerLayerProfile`
+
+Enthält die finale Geometrie eines Turmlayers:
+
+```python
+@dataclass
+class TowerLayerProfile:
+    index: int
+    z: float
+
+    required_path_mm: float
+    available_path_mm: float
+
+    outer_radius_mm: float
+    inner_radius_mm: float
+    wall_thickness_mm: float
+    wall_path_count: int
+
+    target_reached: bool
+```
+
+### `GenerationResult`
+
+Enthält das Ergebnis eines vollständigen Laufs:
+
+```python
+@dataclass
+class GenerationResult:
+    run_directory: Path
+    stl_path: Path
+    analysis_path: Path
+    profile_path: Path
+    settings_path: Path
+    log_path: Path
+
+    layer_count: int
+    layers_below_target: int
+    maximum_outer_radius_mm: float
+    maximum_wall_thickness_mm: float
+
+    warnings: list[str]
+```
+
+---
+
+## 5.3 Zentrale Pfadverwaltung erstellen
+
+Alle Pfade werden künftig über `paths.py` und `output_service.py` erzeugt.
+
+Kein Parser und kein Turmgenerator darf selbst feste Pfade wie diese enthalten:
+
+```python
+"output/cooling_tower.stl"
+```
+
+Stattdessen erstellt der `OutputService` zu Beginn eines Laufs die vollständige Ordnerstruktur.
+
+Beispiel:
+
+```text
+create_run_directories(source_gcode_path)
+```
+
+Rückgabe:
+
+```python
+RunPaths(
+    root=...,
+    stl=...,
+    analysis=...,
+    profiles=...,
+    config=...,
+    logs=...
+)
+```
+
+---
+
+## 5.4 Eindeutige Laufordner erzeugen
+
+Der Name soll aus Zeitstempel und G-Code-Dateiname erzeugt werden.
+
+Regeln:
+
+1. Dateiendung entfernen.
+2. Leerzeichen durch Unterstriche ersetzen.
+3. für Windows ungültige Zeichen entfernen.
+4. Zeitstempel voranstellen.
+5. bei einer Kollision einen Zähler anhängen.
+
+Beispiel:
+
+```text
+20260713_153025_rabe_koerper_18cm
+20260713_153025_rabe_koerper_18cm_2
+```
+
+---
+
+## 5.5 Programmausgaben neu zuordnen
+
+Die Programmlogik wird so angepasst, dass folgende Dateien automatisch in den richtigen Unterordnern landen:
+
+| Datei                    | Zielordner  |
+| ------------------------ | ----------- |
+| Kühlturm-STL             | `stl/`      |
+| Layeranalyse-CSV         | `analysis/` |
+| Analysezusammenfassung   | `analysis/` |
+| berechnetes Turmprofil   | `profiles/` |
+| verwendete Einstellungen | `config/`   |
+| Protokoll und Warnungen  | `logs/`     |
+
+Die aktuell bereits vorhandene CSV-Ausgabe muss deshalb vom bisherigen festen Pfad auf den Pfad des `OutputService` umgestellt werden.
+
+Dasselbe gilt für die STL-Erzeugung.
+
+---
+
+## 5.6 Verwendete Einstellungen speichern
+
+Bei jeder Generierung wird die tatsächlich verwendete Konfiguration gespeichert.
+
+Beispiel:
+
+```json
+{
+    "source_gcode": "D:\\Prints\\rabe_koerper_18cm.gcode",
+    "target_layer_time_s": 30.0,
+    "safety_factor": 1.1,
+    "minimum_outer_radius_mm": 6.0,
+    "maximum_outer_radius_mm": 30.0,
+    "minimum_wall_thickness_mm": 0.84,
+    "maximum_wall_thickness_mm": 4.2,
+    "wall_path_width_mm": 0.42
+}
+```
+
+Dadurch lässt sich später nachvollziehen, mit welchen Einstellungen eine bestimmte STL erzeugt wurde.
+
+---
+
+## 5.7 Bestehende Output-Dateien migrieren
+
+Für die bereits im bisherigen `output`-Ordner liegenden Dateien wird ein einmaliges Migrationsscript erstellt:
+
+```text
+scripts/migrate_output_structure.py
+```
+
+Das Script soll:
+
+1. den alten flachen `output`-Ordner durchsuchen,
+2. Dateiendungen und Dateinamen auswerten,
+3. bestehende STL-Dateien verschieben,
+4. bestehende Analyse-CSV-Dateien verschieben,
+5. vorhandene JSON- und Logdateien passend einsortieren,
+6. keine Datei überschreiben,
+7. alle Verschiebungen protokollieren.
+
+Zielstruktur:
+
+```text
+output/
+└── migrated_legacy/
+    ├── stl/
+    ├── analysis/
+    ├── profiles/
+    ├── config/
+    └── logs/
+```
+
+Beispielsweise:
+
+```text
+output/cooling_tower_test.stl
+```
+
+wird verschoben nach:
+
+```text
+output/migrated_legacy/stl/cooling_tower_test.stl
+```
+
+Und:
+
+```text
+output/rabe_koerper_18cm_layer_analysis.csv
+```
+
+wird verschoben nach:
+
+```text
+output/migrated_legacy/analysis/rabe_koerper_18cm_layer_analysis.csv
+```
+
+Bei Namenskonflikten:
+
+```text
+cooling_tower_test_2.stl
+```
+
+Das Script soll außerdem eine Datei erzeugen:
+
+```text
+output/migrated_legacy/logs/migration_report.txt
+```
+
+Erst nachdem die Migration erfolgreich geprüft wurde, soll der alte flache Output-Bereich keine einzelnen Ergebnisdateien mehr enthalten.
+
+---
+
+## 5.8 CLI auf die neue Struktur umstellen
+
+Die bisherige Kommandozeilennutzung soll erhalten bleiben.
+
+Beispiel:
+
+```powershell
+py main.py `
+  --gcode "input\rabe_koerper_18cm.gcode" `
+  --target-time 30
+```
+
+Der Benutzer muss keinen vollständigen STL-Ausgabepfad mehr angeben. Das Programm erstellt automatisch einen Laufordner.
+
+Optional soll weiterhin ein abweichender Basisordner möglich sein:
+
+```powershell
+py main.py `
+  --gcode "input\rabe_koerper_18cm.gcode" `
+  --target-time 30 `
+  --output-root "D:\Kuehlturm-Ausgaben"
+```
+
+---
+
+## 5.9 Phase 5 testen
+
+Zu prüfen sind:
+
+* Laufordner wird korrekt erzeugt.
+* Alle Unterordner sind vorhanden.
+* CSV landet unter `analysis`.
+* STL landet unter `stl`.
+* Einstellungen landen unter `config`.
+* gleichnamige Läufe überschreiben sich nicht.
+* Migration verschiebt bestehende Dateien korrekt.
+* bestehende Parser- und Layerergebnisse bleiben unverändert.
+* CLI funktioniert weiterhin.
+
+---
+
+# Phase 6: Hohler Turm und dynamische Wandstärke
+
+## Ziel der Phase
+
+Der Kühlturm wird als echtes hohles Volumen erzeugt. Seine Außenbreite wird zunächst dynamisch vergrößert. Sobald der konfigurierte Maximalradius erreicht ist, wird zusätzlicher Zeitbedarf durch weitere Wandbahnen beziehungsweise eine größere Wandstärke erzeugt.
+
+---
+
+## 6.1 Außen- und Innenprofil getrennt verwalten
+
+Bisher reicht ein Radius pro Layer. Für einen hohlen Turm werden künftig drei Werte benötigt:
+
+```text
+Außenradius
+Wandstärke
+Innenradius
+```
+
+Zusammenhang:
+
+```text
+Innenradius = Außenradius − Wandstärke
+```
+
+Der Innenradius darf den eingestellten Mindestwert nicht unterschreiten:
+
+```text
+Innenradius >= Mindest-Innenradius
+```
+
+Dadurch bleibt der Turm tatsächlich hohl.
+
+---
+
+## 6.2 Effektive Bahnbreite definieren
+
+Eine 0,4-mm-Düse druckt nicht zwangsläufig eine exakt 0,4 mm breite Linie. Je nach Slicerprofil können beispielsweise 0,40 mm, 0,42 mm oder 0,45 mm verwendet werden.
+
+Deshalb benötigt das Programm nicht nur den Düsendurchmesser, sondern vor allem:
+
+```text
+Effektive Bahnbreite pro Wandlinie
+```
+
+GUI-Bezeichnung:
+
+```text
+Bahnbreite je zusätzlicher Wandlinie
+```
+
+Voreinstellung:
+
+```text
+0,42 mm
+```
+
+Der Benutzer sollte dort möglichst die im Slicer konfigurierte Außen- beziehungsweise Wandlinienbreite eintragen.
+
+Die Wandstärke wird intern in vollständige Bahnen umgerechnet:
+
+```text
+Anzahl Wandbahnen =
+ceil(Mindestwandstärke / Bahnbreite)
+```
+
+Effektive Wandstärke:
+
+```text
+Wandstärke =
+Anzahl Wandbahnen × Bahnbreite
+```
+
+Beispiel:
+
+```text
+Mindestwandstärke: 0,80 mm
+Bahnbreite:        0,42 mm
+
+ceil(0,80 / 0,42) = 2 Bahnen
+
+Effektive Wandstärke:
+2 × 0,42 mm = 0,84 mm
+```
+
+---
+
+## 6.3 Mindest- und Maximalwandstärke quantisieren
+
+Sowohl Mindest- als auch Maximalwandstärke werden auf vollständige Bahnen aufgerundet beziehungsweise begrenzt.
+
+Beispiel:
+
+```text
+Minimum: 0,84 mm = 2 Bahnen
+Maximum: 4,20 mm = 10 Bahnen
+```
+
+Die GUI zeigt neben dem eingegebenen Wert zusätzlich an:
+
+```text
+Entspricht voraussichtlich 2 Wandbahnen
+```
+
+Dadurch versteht der Benutzer unmittelbar, welche Auswirkung die Einstellung besitzt.
+
+---
+
+## 6.4 Benötigte zusätzliche Druckweglänge berechnen
+
+Für jeden Layer wird weiterhin zunächst die benötigte Zusatzstrecke bestimmt:
+
+```text
+Zeitdefizit =
+Zielzeit − vorhandene Layerzeit
+```
+
+Danach:
+
+```text
+benötigte Zusatzstrecke =
+Zeitdefizit / lokaler Zeit-pro-Millimeter-Faktor
+```
+
+Mit Sicherheitsfaktor:
+
+```text
+benötigte Zusatzstrecke *= Sicherheitsfaktor
+```
+
+Das Ergebnis beschreibt die ungefähre Druckweglänge, die der Turm in diesem Layer erzeugen soll.
+
+---
+
+## 6.5 Druckweglänge eines hohlen Turms abschätzen
+
+Bei mehreren Wandbahnen darf nicht einfach gerechnet werden:
+
+```text
+Anzahl Bahnen × äußerer Umfang
+```
+
+Die inneren Bahnen besitzen einen kleineren Umfang.
+
+Eine realistischere Näherung ist:
+
+```text
+Bahnradius 1 = Außenradius − 0,5 × Bahnbreite
+Bahnradius 2 = Außenradius − 1,5 × Bahnbreite
+Bahnradius 3 = Außenradius − 2,5 × Bahnbreite
+```
+
+Die gesamte geschätzte Druckweglänge lautet:
+
+```text
+L = Σ 2π × Bahnradius
+```
+
+Allgemein:
+
+```python
+def calculate_wall_path_length(
+    outer_radius: float,
+    path_count: int,
+    path_width: float
+) -> float:
+    total = 0.0
+
+    for path_index in range(path_count):
+        path_radius = outer_radius - (
+            path_index + 0.5
+        ) * path_width
+
+        if path_radius <= 0:
+            break
+
+        total += 2.0 * math.pi * path_radius
+
+    return total
+```
+
+Diese Berechnung wird nur als Schätzung verwendet. Die endgültige Bahnplanung bleibt Aufgabe des Slicers.
+
+---
+
+## 6.6 Außenradius zuerst vergrößern
+
+Für jeden Layer wird zunächst mit der Mindestanzahl an Wandbahnen gerechnet.
+
+Ablauf:
+
+1. Mindestradius verwenden.
+2. prüfen, wie viel Druckweg damit entsteht.
+3. Außenradius erhöhen, bis der benötigte Druckweg erreicht ist.
+4. maximalen Außenradius nicht überschreiten.
+
+Der benötigte Außenradius kann direkt mathematisch berechnet oder schrittweise gesucht werden.
+
+Der Radius darf dabei niemals kleiner sein als:
+
+```text
+minimum_outer_radius_mm
+```
+
+Und niemals größer als:
+
+```text
+maximum_outer_radius_mm
+```
+
+---
+
+## 6.7 Nach Erreichen der Maximalbreite Wandstärke erhöhen
+
+Wenn der maximale Außenradius erreicht ist und die geschätzte Druckweglänge weiterhin nicht ausreicht:
+
+1. Außenradius bleibt beim Maximalwert.
+2. Anzahl der Wandbahnen wird um eins erhöht.
+3. Wandstärke steigt um genau eine konfigurierte Bahnbreite.
+4. Druckweglänge wird erneut berechnet.
+5. Vorgang wird wiederholt, bis der Zeitbedarf gedeckt ist.
+
+Beispiel:
+
+```text
+Maximaler Außenradius: 25 mm
+Bahnbreite:            0,42 mm
+
+2 Bahnen = 0,84 mm Wandstärke
+3 Bahnen = 1,26 mm Wandstärke
+4 Bahnen = 1,68 mm Wandstärke
+```
+
+Damit führt jede Erhöhung ungefähr zu einer zusätzlichen Wandbahn im Slicer.
+
+---
+
+## 6.8 Maximalwandstärke und Hohlraum berücksichtigen
+
+Die Wandstärke darf nur erhöht werden, solange beide Bedingungen erfüllt sind:
+
+```text
+Wandstärke <= konfigurierte Maximalwandstärke
+```
+
+und:
+
+```text
+Außenradius − Wandstärke >= Mindest-Innenradius
+```
+
+Die tatsächlich mögliche Maximalwandstärke lautet daher:
+
+```text
+min(
+    konfigurierte Maximalwandstärke,
+    Außenradius − Mindest-Innenradius
+)
+```
+
+Wenn trotz maximalem Radius und maximal zulässiger Wandstärke nicht genügend Druckweg erzeugt werden kann, wird der Layer markiert:
+
+```text
+Zielzeit mit den aktuellen Grenzwerten nicht erreichbar
+```
+
+Die Generierung soll trotzdem fortgesetzt werden. Die GUI zeigt anschließend eine deutliche Warnung.
+
+---
+
+## 6.9 Effiziente Reihenfolge der Profilberechnung
+
+Um unnötig dicke Wände zu vermeiden, sollte die Berechnung in dieser Reihenfolge erfolgen:
+
+1. benötigte Zusatzstrecke je Layer bestimmen,
+2. Außenradius mit Mindestwandstärke berechnen,
+3. maximalen Außenradius anwenden,
+4. Standfuß in das Außenprofil integrieren,
+5. Außenprofil fließend glätten,
+6. mit dem bereits geglätteten Außenradius erneut prüfen, welche Wandstärke wirklich benötigt wird,
+7. nur den verbleibenden Zeitbedarf über zusätzliche Wandbahnen abdecken,
+8. Innenprofil berechnen,
+9. Wandstärkenübergänge glätten,
+10. Gesamtergebnis validieren.
+
+Das ist effizienter, weil die Radiusglättung den Turm in benachbarten Layern ohnehin breiter machen kann. Dadurch werden dort möglicherweise weniger zusätzliche Wandbahnen benötigt.
+
+---
+
+## 6.10 Außenprofil glätten
+
+Für den Außenradius gilt weiterhin:
+
+```text
+maximale Radiusänderung pro Layer =
+Layerhöhe × erlaubte Radiusänderung pro Millimeter Z
+```
+
+Der Rückwärts- und Vorwärtsdurchlauf bleibt bestehen.
+
+Die Glättung darf einen benötigten Radius niemals verkleinern.
+
+Sie darf den Radius nur früher erhöhen oder später reduzieren.
+
+---
+
+## 6.11 Wandstärkenübergänge glätten
+
+Auch die Wandstärke darf nicht abrupt von beispielsweise 0,84 mm auf 3,36 mm springen.
+
+Dafür wird eine zweite Übergangsgrenze eingeführt:
+
+```text
+maximum_wall_change_per_mm_z
+```
+
+Beispiel:
+
+```text
+maximale Wandstärkenänderung: 0,42 mm pro 1 mm Z
+```
+
+Bei einer Layerhöhe von 0,2 mm entsteht dadurch ein Übergang über mehrere Layer.
+
+Das Innenprofil bewegt sich dabei allmählich nach innen oder außen.
+
+Wichtig:
+
+* Außenradius bleibt unverändert.
+* Wandstärke wird über die Innenkontur verändert.
+* die geglättete Wandstärke darf nie unter dem berechneten Mindestbedarf liegen.
+* frühere und spätere Layer dürfen vorsorglich dicker werden.
+
+---
+
+## 6.12 Wandbahnen nach der Glättung erneut quantisieren
+
+Nach der geometrischen Glättung wird die Wandstärke wieder auf vollständige Bahnbreiten angehoben:
+
+```text
+Wandbahnen =
+ceil(geglättete Wandstärke / Bahnbreite)
+```
+
+Danach:
+
+```text
+effektive Wandstärke =
+Wandbahnen × Bahnbreite
+```
+
+Es wird immer aufgerundet, damit die benötigte Druckweglänge nicht unterschritten wird.
+
+---
+
+## 6.13 Standfuß für den hohlen Turm anpassen
+
+Der Standfuß besitzt ebenfalls:
+
+* Außenradius,
+* Innenradius,
+* Wandstärke.
+
+Der Außenradius wird wie bisher anhand von Turmhöhe und größtem Profilradius berechnet.
+
+```text
+Standfuß-Außenradius =
+max(
+    Mindeststandfußradius + Höhe × Höhenfaktor,
+    größter Turm-Außenradius + Rand
+)
+```
+
+Für die Wandstärke des Standfußes gibt es zwei sinnvolle Regeln:
+
+```text
+Standfuß-Wandstärke =
+max(
+    Mindestwandstärke,
+    Wandstärke des ersten regulären Turmbereichs
+)
+```
+
+Optional kann später eine separate Standfußwandstärke ergänzt werden. Für die erste Version reicht die automatische Regel.
+
+Der Turm bleibt auch im Standfußbereich innen hohl.
+
+---
+
+## 6.14 Innen- und Außenringe erzeugen
+
+Für jede Z-Höhe werden nun zwei Ringe erzeugt:
+
+```text
+äußerer Ring
+innerer Ring
+```
+
+Der äußere Ring verwendet:
+
+```text
+outer_radius_mm
+```
+
+Der innere Ring verwendet:
+
+```text
+inner_radius_mm
+```
+
+Das Mesh besteht aus:
+
+1. äußerer Seitenwand,
+2. innerer Seitenwand,
+3. unterem ringförmigem Abschluss,
+4. oberem ringförmigem Abschluss.
+
+Die Flächennormalen der Innenwand müssen nach innen in den Hohlraum zeigen.
+
+---
+
+## 6.15 Hohles Mesh korrekt schließen
+
+Die Unterseite wird nicht als vollständige Kreisscheibe geschlossen, sondern als Ringfläche zwischen Innen- und Außenradius.
+
+Dasselbe gilt für die Oberseite.
+
+Dadurch entsteht ein geschlossenes, wasserdichtes Volumen mit einer inneren Aussparung.
+
+Das Mesh soll folgende Bedingungen erfüllen:
+
+```text
+is_watertight == True
+is_volume == True
+keine negativen oder nullgroßen Dreiecke
+keine sich überschneidenden Innen- und Außenflächen
+```
+
+---
+
+## 6.16 Turmprofil als CSV ausgeben
+
+Zusätzlich zur Layeranalyse wird künftig das erzeugte Turmprofil gespeichert.
+
+Beispiel:
+
+```text
+Layer,Z,OuterRadius,InnerRadius,WallThickness,WallPaths,RequiredPath,EstimatedPath,TargetReached
+0,0.20,12.00,11.16,0.84,2,0.00,144.88,True
+1,0.40,12.00,11.16,0.84,2,0.00,144.88,True
+...
+420,84.20,25.00,22.90,2.10,5,706.30,714.12,True
+```
+
+Dadurch können Geometrie und Berechnung später leichter kontrolliert werden.
+
+---
+
+## 6.17 Warnungen definieren
+
+Mindestens folgende Warnungen sollen erzeugt werden:
+
+* Zielzeit wegen Maximalradius nicht erreichbar.
+* Zielzeit trotz maximaler Wandstärke nicht erreichbar.
+* Mindest-Innenradius würde unterschritten.
+* Wandstärke musste auf vollständige Bahnen aufgerundet werden.
+* Eingestellte Mindestwandstärke ist kleiner als eine Bahnbreite.
+* Maximalwandstärke ist kleiner als Mindestwandstärke.
+* maximaler Außenradius ist kleiner als Mindestradius.
+* Standfußradius überschreitet den erlaubten Maximalradius.
+* Mesh konnte nicht wasserdicht erzeugt werden.
+
+---
+
+## 6.18 Phase 6 testen
+
+Es werden mindestens folgende Testfälle benötigt:
+
+1. Kein Layer benötigt zusätzliche Zeit.
+2. Nur der Radius wird vergrößert.
+3. Maximalradius wird exakt erreicht.
+4. Nach Erreichen des Maximalradius steigt die Wandstärke.
+5. Wandstärke steigt um genau eine Bahnbreite.
+6. Maximalwandstärke wird erreicht.
+7. Mindest-Innenradius begrenzt die Wandstärke.
+8. Ziel kann nicht vollständig erreicht werden.
+9. variable Layerhöhen.
+10. große Radiusänderungen werden geglättet.
+11. große Wandstärkenänderungen werden geglättet.
+12. Mesh ist hohl und wasserdicht.
+13. Innenradius ist in jedem Layer positiv.
+14. Außenradius überschreitet nie den Maximalwert.
+15. Wandstärke unterschreitet nie den Mindestwert.
+
+---
+
+# Phase 7: Grafische Benutzeroberfläche
+
+## Ziel der Phase
+
+Es wird eine übersichtliche Desktopoberfläche erstellt, über die der G-Code geladen, alle relevanten Einstellungen vorgenommen, die Generierung gestartet und das Ergebnis geöffnet werden kann.
+
+---
+
+## 7.1 PySide6 einrichten
+
+In `requirements.txt` werden mindestens eingetragen:
+
+```text
+PySide6
+numpy
+trimesh
+```
+
+Der Programmstart erfolgt weiterhin über:
+
+```powershell
+py main.py
+```
+
+`main.py` startet die GUI:
+
+```python
+from cooling_tower.application import run_application
+
+if __name__ == "__main__":
+    run_application()
+```
+
+Die Kommandozeilenfunktion bleibt separat erhalten.
+
+---
+
+## 7.2 Hauptfenster aufbauen
+
+Das Hauptfenster wird in logisch getrennte Bereiche unterteilt:
+
+```text
+┌─────────────────────────────────────────────┐
+│ Kühlturm-Generator                          │
+├─────────────────────────────────────────────┤
+│ 1. Referenz-G-Code                          │
+│ Drag-&-Drop-Bereich / Datei auswählen       │
+├─────────────────────────────────────────────┤
+│ 2. Zielzeit und Berechnung                  │
+│ Ziel-Layerzeit / Sicherheitsfaktor          │
+├─────────────────────────────────────────────┤
+│ 3. Turmgeometrie                            │
+│ Radien / Wandstärken / Bahnbreite           │
+├─────────────────────────────────────────────┤
+│ 4. Stabilität und Übergänge                 │
+│ Standfuß / Radiusänderung / Wandänderung     │
+├─────────────────────────────────────────────┤
+│ 5. Ausgabe                                  │
+│ Ausgabeordner / Generieren / Ordner öffnen  │
+├─────────────────────────────────────────────┤
+│ Status, Fortschritt und Warnungen            │
+└─────────────────────────────────────────────┘
+```
+
+Bei kleineren Fensterhöhen wird der Einstellungsbereich scrollbar.
+
+---
+
+## 7.3 Drag-&-Drop-Bereich erstellen
+
+Ein eigener Widget-Typ wird erstellt:
+
+```text
+gui/widgets/gcode_drop_zone.py
+```
+
+Funktionen:
+
+* `setAcceptDrops(True)`
+* optische Hervorhebung beim Darüberziehen einer Datei,
+* Übernahme der gedroppten Datei,
+* Prüfung der Dateiendung,
+* Anzeige des vollständigen Pfads,
+* Anzeige von Dateiname und Dateigröße.
+
+Akzeptierte Dateitypen zunächst:
+
+```text
+.gcode
+```
+
+Optional später:
+
+```text
+.gco
+.gc
+```
+
+Bei mehreren abgelegten Dateien wird zunächst nur die erste gültige G-Code-Datei übernommen.
+
+---
+
+## 7.4 Alternative Dateiauswahl ergänzen
+
+Unterhalb oder innerhalb der Drop-Zone befindet sich:
+
+```text
+G-Code auswählen …
+```
+
+Der Dateidialog verwendet einen Filter:
+
+```text
+G-Code-Dateien (*.gcode);;Alle Dateien (*.*)
+```
+
+Nach erfolgreicher Auswahl wird derselbe interne Validierungsweg verwendet wie beim Drag & Drop.
+
+---
+
+## 7.5 G-Code-Informationen anzeigen
+
+Nach Auswahl der Datei können bereits grundlegende Informationen angezeigt werden:
+
+```text
+Datei: rabe_koerper_18cm.gcode
+Größe: 84,7 MB
+Pfad: D:\Prints\rabe_koerper_18cm.gcode
+```
+
+Eine vollständige Analyse erfolgt erst nach Betätigung des Generierungsbuttons oder optional über einen eigenen Button:
+
+```text
+G-Code analysieren
+```
+
+Für die erste GUI-Version reicht ein gemeinsamer Button:
+
+```text
+Kühlturm generieren
+```
+
+---
+
+## 7.6 Bereich „Zielzeit und Berechnung“
+
+Folgende Eingaben werden angeboten:
+
+### Gewünschte Mindest-Layerzeit
+
+```text
+Ziel-Layerzeit [s]
+```
+
+Beispielwert:
+
+```text
+30,0
+```
+
+### Sicherheitsfaktor
+
+```text
+Sicherheitsfaktor
+```
+
+Beispielwert:
+
+```text
+1,10
+```
+
+### Lokales Referenzfenster
+
+```text
+Nachbarlayer für lokale Zeitreferenz
+```
+
+Beispielwert:
+
+```text
+5
+```
+
+Optional kann ein Kontrollkästchen ergänzt werden:
+
+```text
+Lokale Referenzwerte verwenden
+```
+
+Ist es deaktiviert, wird der globale Zeit-pro-Strecke-Faktor verwendet.
+
+---
+
+## 7.7 Bereich „Turmgeometrie“
+
+Hier befinden sich die wichtigsten direkt einstellbaren Werte.
+
+### Mindest-Außenradius
+
+```text
+Mindest-Außenradius [mm]
+```
+
+### Maximaler Außenradius
+
+```text
+Maximaler Außenradius [mm]
+```
+
+Zusätzlich kann die GUI den daraus resultierenden Außendurchmesser anzeigen:
+
+```text
+Maximaler Außendurchmesser: 50,0 mm
+```
+
+Intern sollten alle Berechnungen konsequent mit Radien durchgeführt werden.
+
+### Mindestwandstärke
+
+```text
+Mindestwandstärke [mm]
+```
+
+### Maximalwandstärke
+
+```text
+Maximalwandstärke [mm]
+```
+
+### Bahnbreite je Wandlinie
+
+```text
+Bahnbreite je zusätzlicher Wandlinie [mm]
+```
+
+Voreinstellung:
+
+```text
+0,42 mm
+```
+
+Hinweis in der Oberfläche:
+
+```text
+Für eine 0,4-mm-Düse sollte hier die tatsächlich im Slicer verwendete Linienbreite eingetragen werden.
+```
+
+### Mindest-Innenradius
+
+```text
+Mindest-Hohlraumradius [mm]
+```
+
+Dadurch wird sichergestellt, dass der Kühlturm nicht vollständig massiv wird.
+
+### Mesh-Segmente
+
+```text
+Kreissegmente
+```
+
+Voreinstellung:
+
+```text
+32
+```
+
+Dieser Wert kann in einen Bereich „Erweitert“ verschoben werden.
+
+---
+
+## 7.8 Berechnete Wandbahnanzahl live anzeigen
+
+Neben Mindest- und Maximalwandstärke zeigt die GUI automatisch:
+
+```text
+Mindestwandstärke entspricht 2 Bahnen
+Maximalwandstärke entspricht 10 Bahnen
+```
+
+Die Anzeige aktualisiert sich, sobald Wandstärke oder Bahnbreite geändert wird.
+
+Die effektiven aufgerundeten Werte werden ebenfalls angezeigt:
+
+```text
+Effektive Mindestwandstärke: 0,84 mm
+```
+
+---
+
+## 7.9 Bereich „Standfuß und Stabilität“
+
+Folgende Werte werden angeboten:
+
+```text
+Mindest-Standfußradius [mm]
+Standfußhöhe [mm]
+zusätzlicher Standfußrand [mm]
+höhenabhängiger Standfußfaktor
+```
+
+Die GUI kann einen kurzen Hinweis anzeigen:
+
+```text
+Der tatsächliche Standfußradius wird aus Turmhöhe, maximalem Profilradius und Sicherheitsrand berechnet.
+```
+
+---
+
+## 7.10 Bereich „Fließende Übergänge“
+
+Folgende Einstellungen werden angeboten:
+
+```text
+Maximale Außenradiusänderung pro mm Z
+Maximale Wandstärkenänderung pro mm Z
+```
+
+Diese Werte sollten im normalen Bereich sichtbar sein, da sie einen direkten Einfluss auf die Druckbarkeit besitzen.
+
+Zusätzlich kann ein Infotext erklären:
+
+```text
+Kleinere Werte erzeugen längere und flachere Übergänge, vergrößern den Turm jedoch über mehr Layer.
+```
+
+---
+
+## 7.11 Erweiterte Einstellungen einklappbar gestalten
+
+Weniger häufig benötigte Werte werden in einem aufklappbaren Abschnitt untergebracht:
+
+```text
+Erweiterte Einstellungen
+```
+
+Darin:
+
+* Anzahl Mesh-Segmente,
+* lokales Referenzfenster,
+* manueller globaler Fallback-Zeitfaktor,
+* Warnschwelle,
+* Ausgabe zusätzlicher Debug-Dateien,
+* automatische Öffnung des Ausgabeordners nach Generierung.
+
+Dadurch bleibt die Hauptoberfläche trotz vieler Einstellmöglichkeiten übersichtlich.
+
+---
+
+## 7.12 Ausgabeordner auswählen
+
+Der Benutzer kann einen Basis-Ausgabeordner festlegen.
+
+Standard:
+
+```text
+<Projektordner>\output
+```
+
+GUI-Elemente:
+
+```text
+Ausgabeordner: D:\...\cooling_tower\output
+[Auswählen …]
+```
+
+Die eigentlichen Laufordner werden weiterhin automatisch innerhalb dieses Basisordners erzeugt.
+
+---
+
+## 7.13 Eingaben validieren
+
+Die GUI muss ungültige Kombinationen bereits vor der Generierung erkennen.
+
+Beispiele:
+
+```text
+Mindest-Außenradius muss kleiner oder gleich dem Maximalradius sein.
+Maximalwandstärke muss größer oder gleich der Mindestwandstärke sein.
+Bahnbreite muss größer als 0 sein.
+Mindest-Innenradius muss größer als 0 sein.
+Ziel-Layerzeit muss größer als 0 sein.
+Sicherheitsfaktor darf nicht kleiner als 1,0 sein.
+```
+
+Ungültige Felder werden optisch hervorgehoben.
+
+Der Generierungsbutton bleibt deaktiviert, solange:
+
+* kein gültiger G-Code gewählt wurde,
+* Einstellungen ungültig sind,
+* bereits eine Generierung läuft.
+
+---
+
+## 7.14 Zentrale Generierungslogik verwenden
+
+Die GUI darf Parser, Profilgenerator und STL-Generator nicht einzeln steuern.
+
+Sie erstellt ein `GenerationSettings`-Objekt und ruft ausschließlich den zentralen Service auf:
+
+```python
+result = generation_service.generate(
+    gcode_path=gcode_path,
+    settings=settings,
+    output_root=output_root
+)
+```
+
+Dadurch verwenden GUI und Kommandozeile exakt dieselbe Programmlogik.
+
+---
+
+## 7.15 Generierung im Hintergrund ausführen
+
+Große G-Code-Dateien können mehrere Sekunden oder länger benötigen.
+
+Die Oberfläche darf währenddessen nicht einfrieren.
+
+Dafür wird ein `GenerationWorker` verwendet, beispielsweise mit:
+
+```text
+QThread
+```
+
+oder:
+
+```text
+QRunnable + QThreadPool
+```
+
+Der Worker meldet Zustände wie:
+
+```text
+G-Code wird eingelesen …
+Layer werden analysiert …
+Zeitreferenz wird berechnet …
+Turmprofil wird erzeugt …
+Mesh wird erstellt …
+STL wird gespeichert …
+```
+
+---
+
+## 7.16 Fortschrittsanzeige ergänzen
+
+Die GUI erhält:
+
+* Fortschrittsbalken,
+* aktuelle Statusmeldung,
+* optional Prozentwert,
+* abbrechbaren Vorgang erst in einer späteren Version.
+
+Beispiel:
+
+```text
+[████████████████░░░░] 78 %
+Turmprofil wird geglättet …
+```
+
+Wenn kein genauer Fortschritt ermittelt werden kann, wird ein unbestimmter Fortschrittsbalken verwendet.
+
+---
+
+## 7.17 Ergebnisbereich erstellen
+
+Nach erfolgreicher Generierung zeigt die GUI:
+
+```text
+Kühlturm erfolgreich erzeugt
+
+Erkannte Layer:              891
+Layer unter Zielzeit:        214
+Maximaler Außenradius:       25,00 mm
+Maximale Wandstärke:          2,52 mm
+Maximale Wandbahnen:          6
+Nicht vollständig lösbare Layer: 3
+```
+
+Darunter:
+
+```text
+[STL-Ordner öffnen]
+[Laufordner öffnen]
+```
+
+---
+
+## 7.18 Button zum Öffnen des STL-Ordners
+
+Nach erfolgreicher Generierung wird der Button aktiviert:
+
+```text
+STL-Ordner öffnen
+```
+
+Unter Windows kann der Ordner geöffnet werden mit:
+
+```python
+os.startfile(result.stl_path.parent)
+```
+
+Alternativ:
+
+```python
+subprocess.run(
+    ["explorer", str(result.stl_path.parent)],
+    check=False
+)
+```
+
+Der Button soll immer den Ordner des aktuell letzten erfolgreichen Laufs öffnen, nicht nur den allgemeinen Output-Ordner.
+
+---
+
+## 7.19 Zusätzlicher Button für gesamten Laufordner
+
+Neben dem STL-Ordner ist ein zweiter Button sinnvoll:
+
+```text
+Gesamten Laufordner öffnen
+```
+
+Damit sind auch Analyse, Profil, Einstellungen und Logdateien direkt erreichbar.
+
+---
+
+## 7.20 Warnungen in der GUI darstellen
+
+Warnungen erscheinen in einem eigenen Ergebnisbereich.
+
+Beispiel:
+
+```text
+Warnungen
+
+3 Layer konnten mit den eingestellten Grenzwerten nicht vollständig auf die Zielzeit gebracht werden.
+
+Maximaler Außenradius erreicht: 25,00 mm
+Maximal zulässige Wandstärke erreicht: 4,20 mm
+```
+
+Warnungen verhindern nicht zwingend die STL-Erzeugung.
+
+Kritische Fehler hingegen brechen den Vorgang ab.
+
+---
+
+## 7.21 Fehlerbehandlung
+
+Technische Tracebacks sollen nicht ungefiltert im Hauptfenster erscheinen.
+
+Die GUI zeigt eine verständliche Meldung:
+
+```text
+Die G-Code-Datei konnte nicht vollständig analysiert werden.
+
+Details wurden unter folgendem Pfad gespeichert:
+...\logs\generation.log
+```
+
+Der vollständige Fehler wird in die Logdatei geschrieben.
+
+---
+
+## 7.22 Einstellungen speichern und wiederherstellen
+
+Die zuletzt verwendeten GUI-Einstellungen werden lokal gespeichert.
+
+Beispielsweise:
+
+```text
+config/user_settings.json
+```
+
+Gespeichert werden:
+
+* Ziel-Layerzeit,
+* Sicherheitsfaktor,
+* Radien,
+* Wandstärken,
+* Bahnbreite,
+* Standfußeinstellungen,
+* Übergangswerte,
+* letzter Ausgabeordner,
+* Fenstergröße.
+
+Der zuletzt geladene G-Code muss nicht zwingend automatisch erneut geöffnet werden.
+
+---
+
+## 7.23 Standardwerte zurücksetzen
+
+Ein Button:
+
+```text
+Standardwerte wiederherstellen
+```
+
+lädt die Werte aus:
+
+```text
+config/default_settings.json
+```
+
+Vorher kann eine kurze Bestätigung erfolgen.
+
+---
+
+## 7.24 Oberfläche optisch gestalten
+
+Die Oberfläche soll modern, aber nicht überladen wirken.
+
+Empfohlene Gestaltung:
+
+* klar getrennte Karten beziehungsweise Gruppen,
+* konsistente Innenabstände,
+* gleiche Feldbreiten,
+* aussagekräftige Überschriften,
+* Akzentfarbe für Hauptbutton und Drop-Zone,
+* grüne Erfolgsmeldung,
+* orange Warnmeldungen,
+* rote Eingabefehler,
+* keine unnötigen Animationen,
+* native Windows-Systemschrift,
+* skalierbare Oberfläche.
+
+Das Styling wird zentral in:
+
+```text
+gui/styles.qss
+```
+
+gespeichert.
+
+Es werden keine Formatierungen direkt über viele einzelne Widgets verteilt.
+
+---
+
+## 7.25 Phase 7 testen
+
+Zu prüfen sind:
+
+1. G-Code kann per Drag & Drop geladen werden.
+2. G-Code kann über Dateidialog geladen werden.
+3. ungültige Dateitypen werden abgelehnt.
+4. alle relevanten Einstellungen sind erreichbar.
+5. Wandbahnanzahl wird korrekt angezeigt.
+6. ungültige Werte deaktivieren den Generierungsbutton.
+7. große Dateien frieren die GUI nicht ein.
+8. Fortschritt wird angezeigt.
+9. erfolgreiche Generierung zeigt Ergebnisdaten.
+10. STL-Ordner-Button öffnet den richtigen Ordner.
+11. Laufordner-Button öffnet den richtigen Ordner.
+12. Warnungen werden verständlich angezeigt.
+13. Einstellungen werden beim Neustart wiederhergestellt.
+14. Standardwerte können zurückgesetzt werden.
+15. CLI und GUI erzeugen mit identischen Einstellungen dasselbe Profil.
+
+---
+
+# Phase 8: Gesamtintegration, Migration und Abschlussprüfung
+
+## Ziel der Phase
+
+Alle bisherigen Komponenten werden als vollständiger Ablauf getestet. Bestehende Dateien werden endgültig migriert und die Anwendung wird für die normale Verwendung unter Windows vorbereitet.
+
+---
+
+## 8.1 Vollständigen Ablauf testen
+
+Der komplette Ablauf lautet:
+
+1. Anwendung starten.
+2. G-Code per Drag & Drop laden.
+3. Zielzeit einstellen.
+4. Mindest- und Maximalradius einstellen.
+5. Mindest- und Maximalwandstärke einstellen.
+6. tatsächliche Slicer-Bahnbreite eintragen.
+7. Übergangs- und Standfußwerte einstellen.
+8. Kühlturm generieren.
+9. Ergebnis prüfen.
+10. STL-Ordner öffnen.
+11. STL in den Slicer importieren.
+
+---
+
+## 8.2 Bestehende Output-Dateien migrieren
+
+Das in Phase 5 erstellte Migrationsscript wird einmal ausgeführt.
+
+Danach wird kontrolliert:
+
+* alle bisherigen Kühlturm-STLs befinden sich unter `migrated_legacy/stl`,
+* alle bisherigen Analysedateien befinden sich unter `migrated_legacy/analysis`,
+* keine Datei ging verloren,
+* keine Datei wurde überschrieben,
+* der Migrationsbericht enthält alle Verschiebungen.
+
+---
+
+## 8.3 Referenz-G-Codes erneut verarbeiten
+
+Die bisherigen Test-G-Codes werden erneut analysiert.
+
+Verglichen werden:
+
+* Layeranzahl,
+* erste und letzte Z-Höhe,
+* minimale und maximale Layerhöhe,
+* berechnete Layerzeiten,
+* erkannte Zeitdefizite,
+* äußerer Radius,
+* Wandstärke,
+* erzeugte STL-Höhe.
+
+Die neue Struktur und GUI dürfen die bestehenden Analysewerte nicht ungewollt verändern.
+
+---
+
+## 8.4 Geometrie im Slicer kontrollieren
+
+Für mehrere Testprofile wird die erzeugte STL im Slicer geöffnet.
+
+Zu prüfen sind:
+
+* Turm wird als hohles Objekt erkannt.
+* Innenraum bleibt offen.
+* Mindestwandstärke führt zur erwarteten Bahnanzahl.
+* zusätzliche Wandstärkenschritte erzeugen jeweils ungefähr eine weitere Bahn.
+* Maximalradius wird nicht überschritten.
+* Übergänge sind fließend.
+* Standfuß ist ausreichend breit.
+* keine unerwarteten massiven Bereiche entstehen.
+* keine Lücken zwischen Außen- und Innenwand entstehen.
+
+---
+
+## 8.5 Linienbreiten-Presets prüfen
+
+Für eine 0,4-mm-Düse werden zunächst mehrere typische Werte getestet:
+
+```text
+0,40 mm
+0,42 mm
+0,45 mm
+```
+
+Dabei wird geprüft, welcher Wert im tatsächlich verwendeten Slicerprofil einer zusätzlichen Wandbahn entspricht.
+
+Der ermittelte sinnvolle Standardwert wird anschließend in:
+
+```text
+config/default_settings.json
+```
+
+eingetragen.
+
+---
+
+## 8.6 Grenzfälle prüfen
+
+Mindestens folgende Grenzfälle müssen getestet werden:
+
+* sehr niedriger Turm,
+* sehr hoher Turm,
+* ausschließlich lange Layer,
+* fast ausschließlich kurze Layer,
+* stark variable Layerhöhen,
+* sehr großes Zeitdefizit,
+* Maximalradius sofort erreicht,
+* Maximalwandstärke sofort erreicht,
+* Mindest-Innenradius verhindert weitere Wandverdickung,
+* G-Code ohne Layerkommentare,
+* G-Code mit vielen Z-Hops,
+* beschädigte oder unvollständige Datei,
+* schreibgeschützter Ausgabeordner,
+* bereits existierender Laufordnername.
+
+---
+
+## 8.7 Ergebnisberichte vereinheitlichen
+
+CLI und GUI sollen nach einer Generierung dieselben Kerndaten ausgeben:
+
+```text
+G-Code-Datei
+erkannte Layer
+Layer unter Zielzeit
+maximales Zeitdefizit
+minimaler und maximaler Außenradius
+minimale und maximale Wandstärke
+maximale Wandbahnanzahl
+nicht vollständig lösbare Layer
+Pfad zur STL
+Pfad zum Laufordner
+```
+
+---
+
+## 8.8 Start unter Windows vereinfachen
+
+Für die erste Version reicht:
+
+```powershell
+py main.py
+```
+
+Zusätzlich kann eine Datei erstellt werden:
+
+```text
+start_gui.bat
+```
+
+Inhalt:
+
+```bat
+@echo off
+call .venv\Scripts\activate.bat
+py main.py
+```
+
+Eine eigenständige EXE kann später mit PyInstaller erstellt werden. Das ist für die erste funktionsfähige GUI nicht notwendig.
+
+---
+
+## 8.9 Abschlusskriterien
+
+Die Erweiterung gilt als abgeschlossen, wenn:
+
+* die GUI zuverlässig startet,
+* Drag & Drop funktioniert,
+* alle wichtigen Parameter einstellbar sind,
+* ein hohler Turm erzeugt wird,
+* Mindestwandstärke eingehalten wird,
+* Mindestturmradius eingehalten wird,
+* Maximalradius eingehalten wird,
+* nach Erreichen des Maximalradius die Wandstärke bahnweise steigt,
+* der Turm immer einen ausreichenden Hohlraum behält,
+* Außen- und Innenübergänge fließend sind,
+* das Mesh wasserdicht ist,
+* alle Ergebnisdateien logisch strukturiert gespeichert werden,
+* bestehende Dateien migriert wurden,
+* der STL-Ordner über die GUI geöffnet werden kann,
+* GUI und CLI dieselbe Berechnungslogik verwenden.
+
+---
+
+# Kurzübersicht der neuen Phasen
+
+## Phase 5: Struktur und Output-Verwaltung
+
+* Projekt in wartbare Module aufteilen.
+* gemeinsame Datenmodelle einführen.
+* zentralen Output-Service erstellen.
+* für jeden Lauf einen eigenen Ordner erzeugen.
+* STL, Analyse, Profil, Einstellungen und Logs getrennt speichern.
+* vorhandene Dateien in `migrated_legacy` verschieben.
+* CLI auf die neue Struktur umstellen.
+
+## Phase 6: Hohler Turm und variable Wandstärke
+
+* Außen- und Innenradius getrennt berechnen.
+* Mindest- und Maximalwandstärke einführen.
+* Bahnbreite als konfigurierbaren Wert verwenden.
+* Wandstärke auf vollständige Druckbahnen aufrunden.
+* zunächst Außenradius vergrößern.
+* nach Erreichen des Maximalradius weitere Wandbahnen ergänzen.
+* Mindest-Hohlraumradius berücksichtigen.
+* Außen- und Innenprofil fließend glätten.
+* hohles, wasserdichtes STL-Mesh erzeugen.
+
+## Phase 7: Grafische Benutzeroberfläche
+
+* PySide6-Oberfläche erstellen.
+* G-Code per Drag & Drop oder Dateidialog laden.
+* alle relevanten Werte logisch gruppiert anzeigen.
+* Eingaben direkt validieren.
+* Generierung im Hintergrund ausführen.
+* Fortschritt, Ergebnisse und Warnungen anzeigen.
+* STL-Ordner und gesamten Laufordner per Button öffnen.
+* Einstellungen speichern und wiederherstellen.
+* Oberfläche zentral und ansprechend gestalten.
+
+## Phase 8: Integration und Abschlussprüfung
+
+* kompletten GUI-Ablauf testen.
+* bestehende Output-Dateien migrieren.
+* Referenz-G-Codes erneut verarbeiten.
+* hohle Geometrie im Slicer kontrollieren.
+* Bahnbreiten für 0,4-mm-Düse testen.
+* Grenzfälle und Fehlerbehandlung prüfen.
+* GUI- und CLI-Ausgaben vereinheitlichen.
+* einfachen Windows-Start bereitstellen.

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "animation_duration_ms": 0,
+  "first_success_animation_duration_ms": 0,
+  "responsive_breakpoint_px": 1040,
+  "global_rules": [
+    "no_horizontal_scroll_at_720px",
+    "equal_content_gutters_excluding_scrollbar",
+    "progress_has_percentage_icon_and_german_step",
+    "preview_progress_is_mirrored_in_both_windows",
+    "slicer_sources_are_read_only",
+    "analytical_mode_survives_missing_slicer",
+    "automatic_collapse_never_overrides_later_manual_choice",
+    "all_ui_state_changes_are_immediate",
+    "two_column_card_rows_have_equal_heights",
+    "all_interactive_controls_have_hover_feedback",
+    "hint_popovers_are_bounded_to_their_window",
+    "slicer_dropdowns_use_up_to_one_third_width",
+    "analytical_prediction_offers_fixed_five_pass_slicer_check",
+    "preview_starts_in_zoomed_out_side_view",
+    "preview_has_synchronized_export_action"
+  ],
+  "states": [
+    {"id": "no_gcode", "status": "pending", "must": ["gcode_is_primary", "preview_and_export_disabled", "status_requests_gcode", "gcode_creation_guide_visible"]},
+    {"id": "gcode_analysis", "status": "running", "must": ["gcode_progress_visible", "german_step_below_progress"]},
+    {"id": "gcode_ready", "status": "success", "must": ["file_summary_available", "configuration_collapsed"]},
+    {"id": "slicer_search", "status": "running", "must": ["slicer_progress_visible", "no_unverified_profile_claim"]},
+    {"id": "slicer_ready", "status": "success", "must": ["selected_slicer_in_summary", "confidence_is_explicit"]},
+    {"id": "slicer_unavailable", "status": "warning", "must": ["manual_retry_available", "analytical_continue_available"]},
+    {"id": "configuration_ready", "status": "ready", "must": ["core_settings_prominent", "expert_settings_available", "prediction_has_three_columns"]},
+    {"id": "geometry_valid", "status": "success", "must": ["no_error_panel", "no_invalid_fields"]},
+    {"id": "geometry_invalid", "status": "error", "must": ["issues_grouped_by_cause", "prediction_not_successful", "only_related_fields_invalid"]},
+    {"id": "preview_running", "status": "running", "must": ["main_progress_visible", "dialog_progress_visible", "progress_values_equal"]},
+    {"id": "preview_current", "status": "success", "must": ["current_state_visible", "export_available_if_other_inputs_valid", "zoomed_out_side_view", "dialog_export_action", "side_by_side_window_placement"]},
+    {"id": "preview_stale", "status": "warning", "must": ["stale_in_both_windows", "three_export_choices"]},
+    {"id": "export_running", "status": "running", "must": ["competing_actions_disabled", "german_step_visible"]},
+    {"id": "export_success", "status": "success", "must": ["stl_link_available", "summary_link_available", "technical_report_link_available", "notice_height_follows_content"]},
+    {"id": "responsive_scaled", "status": "layout", "must": ["no_overlap", "no_clipped_primary_actions", "one_or_two_columns_by_breakpoint"]}
+  ]
+}

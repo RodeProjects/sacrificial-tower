@@ -1,0 +1,927 @@
+# Projektzusammenfassung: Automatische Erzeugung eines dynamischen Kühlturms aus G-Code
+
+## Projektziel
+
+Es soll zunächst ein möglichst einfaches Programm beziehungsweise Python-Script entwickelt werden, das einen bereits von einem Slicer erzeugten FDM-G-Code analysiert und daraus automatisch ein zusätzliches 3D-Objekt in Form eines dynamischen Kühlturms generiert.
+
+Der Kühlturm dient als Opferobjekt. Er soll in jedem Layer zusätzliche Druckzeit erzeugen, wenn die Druckzeit des eigentlichen Modells eine vorher eingegebene Mindest-Layerzeit unterschreitet.
+
+Das Ziel ist, insbesondere bei kleinen, filigranen oder spitz zulaufenden Modellbereichen Druckfehler zu verhindern, die durch zu kurze Layerzeiten entstehen können, beispielsweise:
+
+* noch nicht ausreichend abgekühlte vorherige Schichten,
+* verformte oder verschmierte Spitzen,
+* glänzende oder ungleichmäßige Oberflächen,
+* aufgewölbte Bereiche,
+* instabile feine Geometrien,
+* Kollisionen der Düse mit noch weichem Material,
+* vollständiges Scheitern des Drucks.
+
+Der Kühlturm soll nicht einfach eine feste Form besitzen, sondern sich über seine gesamte Höhe dynamisch an den Zeitbedarf des konkreten G-Codes anpassen.
+
+---
+
+# Grundlegender Arbeitsablauf
+
+Der Benutzer:
+
+1. lädt sein gewünschtes Modell in einen normalen Slicer,
+2. verwendet dort seine normalen Druck-, Drucker- und Filamenteinstellungen,
+3. exportiert den fertigen G-Code,
+4. lädt diesen G-Code in das neue Programm,
+5. gibt eine gewünschte Mindest-Layerzeit ein,
+6. lässt daraus einen speziell angepassten Kühlturm erzeugen,
+7. importiert den erzeugten Kühlturm als STL gemeinsam mit dem ursprünglichen Modell in den Slicer,
+8. slicet beide Objekte gemeinsam.
+
+Das neue Programm soll den endgültigen kombinierten G-Code nicht selbst erzeugen. Diese Aufgabe übernimmt weiterhin der Slicer.
+
+Das Programm erzeugt ausschließlich eine möglichst geeignete STL-Geometrie, die beim gemeinsamen Slicen zusätzliche Layerzeit verursacht.
+
+---
+
+# Technischer Grundgedanke
+
+Der bereits exportierte G-Code enthält die Bewegungen, Geschwindigkeiten und Z-Höhen des konkreten Druckmodells.
+
+Daraus kann das Programm ermitteln:
+
+* welche Druck-Layer vorhanden sind,
+* auf welcher Z-Höhe sich jeder Layer befindet,
+* welche Layerhöhe verwendet wurde,
+* wie lange jeder Layer ungefähr dauert,
+* wie viel Zeit bis zur gewünschten Mindest-Layerzeit fehlt,
+* welche Extrusionsstrecken und Extrusionsgeschwindigkeiten in diesem konkreten Druckprofil verwendet werden.
+
+Der G-Code dient damit nicht nur zur Ermittlung der vorhandenen Layerzeiten, sondern auch als objektspezifische Kalibrierungsgrundlage für die benötigte Kühlturmgröße.
+
+Es muss zunächst kein bestimmter Slicer unterstützt werden. Relevant ist hauptsächlich, dass der G-Code übliche FDM-Bewegungsbefehle enthält.
+
+Slicerspezifische Kommentare wie:
+
+```gcode
+;LAYER:42
+;LAYER_CHANGE
+;Z:8.4
+```
+
+können optional zur Layererkennung verwendet werden, sollen jedoch nicht zwingend erforderlich sein.
+
+---
+
+# Bewusst nicht benötigte Informationen
+
+Für die erste Version soll das Programm möglichst unabhängig vom ursprünglichen Slicer und Modell arbeiten.
+
+Folgende Informationen müssen nicht separat bekannt sein:
+
+* ursprüngliche STL- oder 3MF-Datei,
+* verwendeter Slicer,
+* feste oder adaptive Layerhöhen,
+* Mehrfarbkonfiguration,
+* Timelapse-Einstellungen,
+* ursprüngliche Modellgeometrie,
+* Support-Einstellungen,
+* Infill-Muster des Hauptmodells,
+* Ursache einzelner Bewegungen.
+
+Alle tatsächlich ausgeführten Bewegungen liegen bereits im G-Code vor.
+
+Variable Layerhöhen sind ebenfalls direkt über die unterschiedlichen Z-Höhen im G-Code erkennbar.
+
+Mehrfarb-, Purge-, Timelapse- oder sonstige Zusatzbewegungen können einfach als Bestandteile der gesamten Layerzeit behandelt werden. Das Programm muss nicht wissen, warum eine Bewegung stattfindet.
+
+---
+
+# Wichtige Einschränkung
+
+Der später verwendete Slicer bestimmt endgültig, wie der erzeugte Kühlturm gedruckt wird.
+
+Das Programm muss die spätere Turmdruckzeit daher nicht exakt vorhersagen.
+
+Es benötigt jedoch eine realistische Näherung, um aus einem Zeitdefizit eine passende Turmgeometrie ableiten zu können.
+
+Diese Näherung soll aus dem bereits geladenen G-Code des Hauptmodells gewonnen werden.
+
+Der vorhandene G-Code dient somit als empirische Referenz für:
+
+* effektive Extrusionsgeschwindigkeiten,
+* Zeit pro Millimeter Extrusionsweg,
+* typische Segmentlängen,
+* Verhältnis zwischen Extrusionsstrecke und Druckzeit.
+
+---
+
+# Grundlage der Zeitberechnung
+
+Für jede lineare Bewegung können aus dem G-Code die Positionsänderungen und die Geschwindigkeit bestimmt werden.
+
+Für eine Bewegung:
+
+```text
+Strecke = √(ΔX² + ΔY² + ΔZ²)
+```
+
+Die Geschwindigkeit ergibt sich aus dem Feedrate-Wert:
+
+```text
+Geschwindigkeit in mm/s = F / 60
+```
+
+Eine einfache nominale Bewegungszeit ist:
+
+```text
+Bewegungszeit = Strecke / Geschwindigkeit
+```
+
+Alle Bewegungszeiten eines Layers werden addiert.
+
+Dabei müssen sowohl Extrusionsbewegungen als auch Travel-Bewegungen berücksichtigt werden, da beide zur tatsächlichen Layerzeit beitragen.
+
+Wartebefehle wie `G4` müssen ebenfalls zur Layerzeit addiert werden.
+
+Für die Ermittlung der Turmgeometrie ist jedoch vor allem die Extrusionsstrecke relevant, da diese später durch die Außenkontur des Kühlturms erzeugt wird.
+
+---
+
+# Objektspezifischer Zeitfaktor
+
+Aus allen geeigneten Extrusionsbewegungen des vorhandenen G-Codes kann ein effektiver Zeitfaktor berechnet werden:
+
+```text
+Sekunden pro Millimeter Extrusionsweg =
+gesamte Extrusionszeit / gesamte Extrusionsstrecke
+```
+
+Beispiel:
+
+```text
+Extrusionsstrecke: 82.000 mm
+Extrusionszeit:     3.280 s
+
+Zeitfaktor:
+3.280 s / 82.000 mm = 0,04 s/mm
+```
+
+Dies entspricht einer effektiven Geschwindigkeit von:
+
+```text
+1 / 0,04 s/mm = 25 mm/s
+```
+
+Fehlen einem Layer beispielsweise 8 Sekunden:
+
+```text
+benötigte zusätzliche Extrusionsstrecke =
+8 s / 0,04 s/mm
+= 200 mm
+```
+
+Bei einem runden Turm und einer angenommenen abgefahrenen Außenkontur pro Layer:
+
+```text
+Umfang = 200 mm
+Radius = Umfang / (2 × π)
+Radius ≈ 31,8 mm
+```
+
+Diese Berechnung soll zunächst als realistische Schätzung dienen.
+
+Die tatsächliche endgültige Zeit bestimmt anschließend der Slicer.
+
+---
+
+# Lokale statt ausschließlich globale Referenzwerte
+
+Das Programm sollte möglichst nicht nur einen einzigen globalen Durchschnittswert über den gesamten G-Code verwenden.
+
+Ein Druck kann beispielsweise in unteren großen Bereichen mit hohen Geschwindigkeiten und in oberen filigranen Bereichen deutlich langsamer gedruckt werden.
+
+Deshalb sollen pro Layer möglichst folgende Informationen gespeichert werden:
+
+```python
+{
+    "index": 120,
+    "z": 24.2,
+    "height": 0.2,
+    "layer_time": 11.3,
+    "extrusion_time": 8.7,
+    "travel_time": 2.6,
+    "extrusion_length": 236.4,
+    "effective_extrusion_speed": 27.17
+}
+```
+
+Für einen bestimmten Layer kann der Zeitfaktor beispielsweise aus folgenden Daten abgeleitet werden:
+
+* dem aktuellen Layer,
+* benachbarten Layern,
+* einem gleitenden Fenster,
+* vergleichbaren Extrusionsbewegungen,
+* einem globalen Fallback-Wert.
+
+Dadurch bleibt der erzeugte Kühlturm stärker an das konkrete Modell und den jeweiligen Höhenbereich angepasst.
+
+---
+
+# Konservative Berechnung
+
+Da der spätere Slicer die endgültigen Bahnen bestimmt, sollte das Programm einen Sicherheitsfaktor verwenden.
+
+Beispiel:
+
+```text
+berechnete Zusatzstrecke: 200 mm
+Sicherheitsfaktor:        1,10
+verwendete Zusatzstrecke: 220 mm
+```
+
+Der Sicherheitsfaktor soll konfigurierbar sein.
+
+Ein sinnvoller Anfangswert könnte beispielsweise zwischen 1,05 und 1,15 liegen.
+
+---
+
+# Zentrale Entwicklungsreihenfolge
+
+Die Entwicklung soll zunächst nur das Nötigste enthalten.
+
+## 1. G-Code einlesen
+
+Der G-Code wird zeilenweise verarbeitet.
+
+Die vollständige Datei muss nicht zwingend auf einmal in den Arbeitsspeicher geladen werden.
+
+Beispiel:
+
+```python
+with open(gcode_path, "r", encoding="utf-8", errors="ignore") as file:
+    for line in file:
+        process_line(line)
+```
+
+---
+
+## 2. G-Code analysieren
+
+Das Programm rekonstruiert fortlaufend den Maschinenzustand.
+
+Mindestens benötigte Zustände:
+
+```text
+aktuelle X-Position
+aktuelle Y-Position
+aktuelle Z-Position
+aktuelle E-Position
+aktuelle Feedrate F
+
+XYZ absolut oder relativ
+Extrusion absolut oder relativ
+aktuell bestätigte Druckhöhe
+mögliche neue Druckhöhe
+aktuelle Layerzeit
+aktuelle Extrusionszeit
+aktuelle Travel-Zeit
+aktuelle Extrusionsstrecke
+```
+
+Zunächst relevante G-Code-Befehle:
+
+```text
+G0 / G1    lineare Bewegungen
+G90        absolute XYZ-Koordinaten
+G91        relative XYZ-Koordinaten
+M82        absolute Extrusion
+M83        relative Extrusion
+G92        aktuelle Position setzen oder zurücksetzen
+G4         Wartezeit
+```
+
+Weitere Befehle können später ergänzt werden, beispielsweise:
+
+```text
+G2 / G3    Bogenbewegungen
+M204       Beschleunigung
+M205       Bewegungsparameter
+M220       Geschwindigkeitsfaktor
+T0 / T1    Werkzeugwechsel
+```
+
+Unbekannte Befehle können in der ersten Version ignoriert oder protokolliert werden.
+
+---
+
+## 3. Layer und Z-Höhen erkennen
+
+Eine reine Erhöhung der Z-Position darf nicht automatisch als Layerwechsel gelten, da Z-Hops ebenfalls die Z-Achse erhöhen.
+
+Robuste Grundregel:
+
+1. Steigt Z an, wird die neue Z-Höhe zunächst nur als mögliche neue Druckhöhe vorgemerkt.
+2. Erst wenn auf dieser erhöhten Z-Höhe positive Extrusion stattfindet, wird ein neuer Layer bestätigt.
+3. Sinkt Z vorher wieder auf die alte Druckhöhe zurück, war die Bewegung nur ein Z-Hop.
+
+Beispiel für einen Z-Hop:
+
+```gcode
+G1 Z10.20
+G1 X100 Y100
+G1 Z10.00
+```
+
+Dies darf nicht als neuer Layer erkannt werden.
+
+Beispiel für einen tatsächlichen Layerwechsel:
+
+```gcode
+G1 Z10.20
+G1 X100 Y100 E0.4
+```
+
+Hier beginnt auf der höheren Z-Position eine neue Extrusionsschicht.
+
+Eine einzelne G-Code-Zeile kann gleichzeitig X, Y, Z und E enthalten. Dies muss berücksichtigt werden.
+
+Slicerseitige Layerkommentare können als zusätzliche Hilfe verwendet werden, dürfen aber nicht die einzige Erkennungsmethode sein.
+
+---
+
+## 4. Layerzeit pro Layer berechnen
+
+Für jeden bestätigten Layer werden mindestens folgende Werte gespeichert:
+
+```python
+{
+    "index": 0,
+    "z": 0.2,
+    "height": 0.2,
+    "layer_time": 38.4,
+    "extrusion_time": 31.2,
+    "travel_time": 7.2,
+    "extrusion_length": 780.0
+}
+```
+
+Die Layerhöhe ergibt sich aus der Differenz der bestätigten Z-Höhen:
+
+```text
+Layerhöhe = aktuelle Z-Höhe − vorherige Z-Höhe
+```
+
+Variable Layerhöhen werden dadurch automatisch unterstützt.
+
+---
+
+## 5. Abweichung von der gewünschten Mindest-Layerzeit berechnen
+
+Für jeden Layer:
+
+```text
+Zeitdefizit =
+max(0, gewünschte Mindest-Layerzeit − vorhandene Layerzeit)
+```
+
+Beispiel:
+
+```text
+vorhandene Layerzeit: 14,8 s
+gewünschte Layerzeit: 25,0 s
+Zeitdefizit:          10,2 s
+```
+
+Wenn die vorhandene Layerzeit gleich oder größer als die gewünschte Mindestzeit ist, wird kein zusätzlicher Zeitbedarf angenommen.
+
+Wichtig:
+
+```text
+Wenn Layerzeit >= Zielzeit:
+    Turm erhält seinen Mindestradius.
+
+Wenn Layerzeit < Zielzeit:
+    Turmradius wird anhand des Zeitdefizits vergrößert.
+```
+
+---
+
+## 6. Turmradius pro Layer berechnen
+
+Aus dem Zeitdefizit wird mithilfe des objektspezifischen Zeitfaktors eine benötigte zusätzliche Extrusionsstrecke berechnet.
+
+```text
+benötigte Zusatzstrecke =
+Zeitdefizit / Sekunden_pro_Millimeter
+```
+
+Mit Sicherheitsfaktor:
+
+```text
+benötigte Zusatzstrecke *= Sicherheitsfaktor
+```
+
+Bei einer runden Turmkontur:
+
+```text
+Radius =
+benötigte Zusatzstrecke / (2 × π)
+```
+
+Der Radius wird anschließend begrenzt:
+
+```text
+Radius = max(Mindestradius, berechneter Radius)
+Radius = min(Maximalradius, Radius)
+```
+
+Wenn kein Zeitdefizit besteht:
+
+```text
+Radius = Mindestradius
+```
+
+Der Mindestradius darf nicht null sein, weil der Turm über seine gesamte Höhe stabil und zusammenhängend bleiben soll.
+
+---
+
+# Bedeutung des Mindestradius
+
+Auch in Layern, in denen keine zusätzliche Druckzeit benötigt wird, soll der Turm nicht vollständig verschwinden.
+
+Stattdessen reduziert er sich auf ein sicheres Mindestmaß.
+
+Der Mindestradius kann abhängig von der Gesamthöhe des Turms berechnet werden.
+
+Beispielsweise:
+
+```text
+Mindestradius =
+max(absoluter Mindestwert, Gesamthöhe × Höhenfaktor)
+```
+
+Mögliche erste Heuristik:
+
+```text
+absoluter Mindestradius: 5–6 mm
+Höhenfaktor:             etwa 0,03 bis 0,05
+```
+
+Die konkreten Werte sollen später durch Drucktests optimiert werden.
+
+---
+
+# Standfußradius
+
+Der Standfuß muss abhängig sein von:
+
+* Gesamthöhe des Kühlturms,
+* größtem benötigtem Turmradius,
+* optionalem Sicherheitsrand.
+
+Eine mögliche einfache Anfangsformel:
+
+```text
+höhenabhängiger Radius =
+Mindeststandfußradius + Gesamthöhe × Höhenfaktor
+
+profilabhängiger Radius =
+größter Turmradius + Sicherheitsrand
+
+Standfußradius =
+max(höhenabhängiger Radius, profilabhängiger Radius)
+```
+
+Beispiel:
+
+```python
+height_based_radius = minimum_base_radius + total_height * height_factor
+profile_based_radius = maximum_tower_radius + base_margin
+
+base_radius = max(height_based_radius, profile_based_radius)
+```
+
+Der Standfuß soll Bestandteil desselben geschlossenen Meshes sein und nicht als separates überlappendes Objekt erzeugt werden.
+
+Der Standfuß kann beispielsweise einige Millimeter hoch sein und anschließend fließend in das eigentliche Turmprofil übergehen.
+
+---
+
+# Fließende Übergänge
+
+Direkt berechnete Radien können abrupte Sprünge enthalten.
+
+Beispiel:
+
+```text
+6 mm
+6 mm
+18 mm
+20 mm
+6 mm
+```
+
+Ein solches Profil wäre schlecht oder gar nicht druckbar.
+
+Deshalb muss die maximale Radiusänderung pro Millimeter Z begrenzt werden.
+
+```text
+maximale Radiusänderung pro Layer =
+Layerhöhe × maximal erlaubte Radiusänderung pro Millimeter Z
+```
+
+Beispiel:
+
+```text
+maximal erlaubte Radiusänderung: 0,5 mm pro 1 mm Z
+Layerhöhe:                       0,2 mm
+maximale Änderung pro Layer:     0,1 mm
+```
+
+---
+
+# Vorausschauende Profilglättung
+
+Die Glättung darf den ursprünglich benötigten Radius niemals verkleinern.
+
+Sie darf das Profil nur:
+
+* bereits früher verbreitern,
+* nach einer breiten Stelle länger breit halten.
+
+Dafür wird das Radiusprofil in beide Richtungen bearbeitet.
+
+## Rückwärtsdurchlauf
+
+Vor einer späteren breiten Stelle muss der Turm rechtzeitig breiter werden.
+
+```python
+for i in range(len(radii) - 2, -1, -1):
+    dz = layers[i + 1]["z"] - layers[i]["z"]
+    max_change = dz * maximum_radius_change_per_mm
+
+    radii[i] = max(
+        radii[i],
+        radii[i + 1] - max_change
+    )
+```
+
+## Vorwärtsdurchlauf
+
+Nach einer breiten Stelle darf der Turm nicht sofort wieder schmal werden.
+
+```python
+for i in range(1, len(radii)):
+    dz = layers[i]["z"] - layers[i - 1]["z"]
+    max_change = dz * maximum_radius_change_per_mm
+
+    radii[i] = max(
+        radii[i],
+        radii[i - 1] - max_change
+    )
+```
+
+Durch die Verwendung von `max()` bleibt jeder ursprüngliche Mindestbedarf erhalten.
+
+Die Glättung kann den Turm größer machen, aber niemals kleiner als für die jeweilige Zusatzzeit berechnet.
+
+---
+
+# STL-Geometrie
+
+Der Turm soll zunächst als rotationssymmetrisches Objekt mit kreisförmigem Querschnitt erzeugt werden.
+
+Für jede relevante Z-Höhe wird ein Ring mit dem berechneten Radius erzeugt.
+
+Für jeden Ring:
+
+```python
+for segment in range(segment_count):
+    angle = 2.0 * math.pi * segment / segment_count
+
+    x = radius * math.cos(angle)
+    y = radius * math.sin(angle)
+    z = layer_z
+```
+
+Benachbarte Ringe werden mit Dreiecken verbunden.
+
+Je Segment zwischen zwei Ringen entstehen zwei Dreiecke.
+
+Zusätzlich müssen:
+
+* die Unterseite geschlossen,
+* die Oberseite geschlossen,
+* die Flächennormalen korrekt ausgerichtet,
+* das Mesh wasserdicht sein.
+
+Für die erste Version reichen ungefähr 32 bis 48 Kreissegmente.
+
+Zu viele Segmente sind zunächst nicht nötig und würden die STL sowie später den G-Code unnötig vergrößern.
+
+---
+
+# Zu beachtende Besonderheit bei den Layerhöhen
+
+Die STL selbst besitzt keine Layer.
+
+Die aus dem G-Code ermittelten Z-Höhen dienen daher als Höhenstützpunkte für das Turmprofil.
+
+Der Slicer schneidet das erzeugte STL später erneut in Layer.
+
+Das Profil sollte deshalb zwischen zwei Z-Stützpunkten kontinuierlich beziehungsweise linear verlaufen.
+
+Bei variablen Layerhöhen werden die Ringe genau an den aus dem G-Code ermittelten Druckhöhen positioniert.
+
+---
+
+# Slicer-Einstellungen für den späteren gemeinsamen Druck
+
+Die erste Programmversion soll keine direkte Slicersteuerung enthalten.
+
+Für reproduzierbare Tests sollte der Benutzer dem Kühlturm im Slicer möglichst einfache Objekteinstellungen geben, beispielsweise:
+
+```text
+Wandlinien:      1
+Infill:          0 %
+obere Schichten: 0
+untere Schichten: wenige notwendige Schichten
+Druckreihenfolge: nach Layer, nicht nach Objekt
+```
+
+Der Turm darf nicht vollständig vor oder nach dem Hauptmodell gedruckt werden, sondern muss layerweise gemeinsam mit dem Hauptmodell aufgebaut werden.
+
+Der später verwendete Slicer bestimmt die endgültige Druckbahn und damit die reale Zusatzzeit.
+
+---
+
+# Mögliche Abweichung durch automatische Slicer-Verlangsamung
+
+Wenn der ursprüngliche G-Code bereits durch eine Funktion wie „bei kurzen Layern verlangsamen“ beeinflusst wurde, kann sich nach dem Hinzufügen des Kühlturms Folgendes ändern:
+
+1. Der ursprüngliche kleine Layer wurde langsam gedruckt.
+2. Der Kühlturm wird hinzugefügt.
+3. Die gemeinsame Layerzeit wird länger.
+4. Der Slicer hebt die ursprüngliche Verlangsamung teilweise auf.
+5. Das Hauptmodell wird wieder schneller gedruckt.
+6. Die ursprünglich gemessene Layerzeit ist nicht mehr vollständig identisch.
+
+Für erste Tests sollte daher entweder:
+
+* die automatische Verlangsamung im Slicer deaktiviert werden,
+* oder ein ausreichender Sicherheitsfaktor verwendet werden.
+
+Diese Problematik muss nicht sofort programmatisch gelöst werden.
+
+---
+
+# Minimale Projektstruktur
+
+Die erste Version soll klein und übersichtlich bleiben.
+
+```text
+cooling_tower/
+├── main.py
+├── gcode_parser.py
+├── tower_generator.py
+├── config.json
+├── input/
+└── output/
+```
+
+## `gcode_parser.py`
+
+Verantwortlich für:
+
+```text
+G-Code einlesen
+Maschinenzustand rekonstruieren
+Layer erkennen
+Z-Hops herausfiltern
+Bewegungszeiten berechnen
+Extrusionsstrecken berechnen
+Layerdaten zurückgeben
+```
+
+## `tower_generator.py`
+
+Verantwortlich für:
+
+```text
+Zeitdefizite berechnen
+lokalen oder globalen Zeitfaktor bestimmen
+Sollradien berechnen
+Mindestradius anwenden
+Maximalradius anwenden
+Standfuß berechnen
+Radiusprofil glätten
+Mesh erzeugen
+STL speichern
+```
+
+## `main.py`
+
+Verantwortlich für:
+
+```text
+Konfiguration laden
+G-Code-Dateipfad entgegennehmen
+Parser aufrufen
+Analyseergebnisse ausgeben
+Turmgenerator aufrufen
+STL am gewünschten Ort speichern
+```
+
+---
+
+# Beispiel einer Konfigurationsdatei
+
+```json
+{
+    "input_gcode": "input/model.gcode",
+    "output_stl": "output/cooling_tower.stl",
+
+    "target_layer_time_s": 30.0,
+    "safety_factor": 1.10,
+
+    "minimum_radius_mm": 6.0,
+    "maximum_radius_mm": 40.0,
+
+    "minimum_base_radius_mm": 10.0,
+    "base_height_factor": 0.05,
+    "base_margin_mm": 2.0,
+    "base_height_mm": 4.0,
+
+    "maximum_radius_change_per_mm_z": 0.35,
+
+    "local_time_factor_window": 5,
+    "mesh_segments": 32
+}
+```
+
+Die konkreten Werte sind zunächst Platzhalter und sollen später durch Tests optimiert werden.
+
+---
+
+# Gewünschte Programmbedienung
+
+Eine GUI ist zunächst nicht erforderlich.
+
+Ausreichend sind:
+
+* Kommandozeilenparameter,
+* eine JSON- oder TOML-Konfigurationsdatei,
+* oder eine einfache Abfrage in der Shell.
+
+Beispiel:
+
+```powershell
+py main.py `
+  --gcode "D:\Prints\model.gcode" `
+  --target-time 30 `
+  --output "D:\Prints\cooling_tower.stl"
+```
+
+Alternativ können alle Parameter zunächst ausschließlich aus `config.json` gelesen werden.
+
+Der Benutzer arbeitet unter Windows 11 und verwendet VS Code.
+
+---
+
+# Empfohlene Programmiersprache und Bibliotheken
+
+Python eignet sich für die erste Version besonders gut.
+
+Mögliche Bibliotheken:
+
+```text
+numpy
+trimesh
+```
+
+`trimesh` kann zur Erzeugung und zum Export des STL-Meshes verwendet werden.
+
+Beispiel:
+
+```python
+mesh = trimesh.Trimesh(
+    vertices=vertices,
+    faces=faces,
+    process=True
+)
+
+mesh.export(output_path)
+```
+
+Zusätzlich können später Tests mit `pytest` ergänzt werden.
+
+---
+
+# Minimales erstes Entwicklungsziel
+
+Das erste funktionsfähige Zwischenziel soll noch keinen Kühlturm erzeugen.
+
+Es soll zunächst:
+
+1. einen G-Code einlesen,
+2. die tatsächlichen Druck-Layer erkennen,
+3. Z-Hops nicht als Layerwechsel interpretieren,
+4. pro Layer die Z-Höhe und Layerhöhe bestimmen,
+5. pro Layer die gesamte Bewegungszeit berechnen,
+6. Extrusionszeit und Travel-Zeit getrennt erfassen,
+7. Extrusionsstrecken erfassen,
+8. die Ergebnisse als Tabelle oder CSV ausgeben.
+
+Beispielausgabe:
+
+```text
+Layer  Z      Höhe   Gesamtzeit   Extrusionszeit   Travelzeit   Extrusionsweg
+1      0,20   0,20   42,5 s       35,1 s           7,4 s        920,4 mm
+2      0,40   0,20   29,1 s       23,8 s           5,3 s        651,2 mm
+3      0,60   0,20   11,3 s        8,7 s           2,6 s        236,4 mm
+```
+
+Erst wenn diese Analyse plausibel funktioniert, wird die Turmgeometrie ergänzt.
+
+---
+
+# Gesamte geplante Entwicklungsreihenfolge
+
+## Phase 1: G-Code-Analyse
+
+1. G-Code einlesen.
+2. Maschinenzustand verfolgen.
+3. Bewegungen analysieren.
+4. Layer und Z-Höhen erkennen.
+5. Z-Hops korrekt ignorieren.
+6. Layerzeiten berechnen.
+7. Extrusionszeit, Travel-Zeit und Extrusionsstrecke speichern.
+8. Analysebericht ausgeben.
+
+## Phase 2: Zeitbedarf und Radiusprofil
+
+9. gewünschte Mindest-Layerzeit einlesen.
+10. Zeitdefizit pro Layer berechnen.
+11. lokalen oder globalen Zeit-pro-Strecke-Faktor aus dem G-Code ableiten.
+12. benötigte zusätzliche Extrusionsstrecke berechnen.
+13. daraus den Turmradius pro Layer berechnen.
+14. Mindestradius und Maximalradius anwenden.
+15. Sicherheitsfaktor anwenden.
+
+## Phase 3: Stabilität
+
+16. Gesamthöhe ermitteln.
+17. größten Profilradius ermitteln.
+18. Standfußradius berechnen.
+19. Standfußhöhe festlegen.
+20. Standfuß in das Radiusprofil integrieren.
+21. abrupte Radiusänderungen durch Vorwärts- und Rückwärtsdurchlauf verhindern.
+
+## Phase 4: STL-Erzeugung
+
+22. Kreisringe an den ermittelten Z-Höhen erzeugen.
+23. benachbarte Ringe triangulieren.
+24. Boden und Oberseite schließen.
+25. Mesh prüfen.
+26. STL an dem gewünschten Ort speichern.
+
+---
+
+# Später mögliche Erweiterungen
+
+Diese Funktionen gehören ausdrücklich nicht zur ersten Version:
+
+* grafische Benutzeroberfläche,
+* automatische Slicersteuerung,
+* automatisches erneutes Slicen,
+* Iteration anhand des kombinierten G-Codes,
+* automatische Positionierung auf dem Druckbett,
+* direkter 3MF-Export,
+* automatische Erkennung des Slicerprofils,
+* mehrere Kühltürme,
+* gewellte oder sternförmige Turmquerschnitte,
+* spiralförmige Konturen,
+* automatische Anpassung der Wandanzahl,
+* direkte G-Code-Manipulation,
+* vollständige Beschleunigungssimulation,
+* firmwaregenaue Zeitberechnung.
+
+Falls ein runder Turm bei großen Zeitdefiziten zu breit werden würde, könnten später komplexere Querschnitte verwendet werden, die innerhalb einer kleineren Außenfläche eine größere Druckweglänge erzeugen.
+
+---
+
+# Kernaussagen für die weitere Entwicklung
+
+* Der fertige G-Code ist die zentrale Eingabedatei.
+* Das ursprüngliche 3D-Modell wird für die Analyse nicht benötigt.
+* Ein bestimmter Slicer muss zunächst nicht unterstützt werden.
+* Variable Layerhöhen sind bereits über die Z-Werte des G-Codes enthalten.
+* Mehrfarb- und Timelapse-Bewegungen können als normale Bestandteile der Layerzeit behandelt werden.
+* Z-Hops dürfen nicht als Layerwechsel erkannt werden.
+* Die Layerzeit ergibt sich aus allen Bewegungs- und Wartezeiten eines Layers.
+* Die Turmgröße soll aus dem konkreten G-Code des Hauptmodells abgeleitet werden.
+* Grundlage ist der effektive Zeitbedarf pro Millimeter Extrusionsweg.
+* Ein Zeitdefizit wird in zusätzliche Druckweglänge und anschließend in einen Kreisradius umgerechnet.
+* Bei ausreichender Layerzeit verwendet der Turm einen sicheren Mindestradius.
+* Standfuß und Mindestradius sollen von der Gesamthöhe abhängig sein.
+* Radiusänderungen müssen vorausschauend und fließend erfolgen.
+* Die Glättung darf niemals einen ursprünglich benötigten Radius verkleinern.
+* Der Kühlturm wird als geschlossenes STL-Mesh ausgegeben.
+* Die endgültige reale Zusatzzeit bestimmt der Slicer beim gemeinsamen Slicen.
+* Die erste Version soll bewusst einfach, modular und testbar bleiben.

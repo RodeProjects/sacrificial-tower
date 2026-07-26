@@ -1,0 +1,668 @@
+from __future__ import annotations
+
+import ctypes
+import json
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+from cooling_tower.models.gcode_metadata import SlicerFamily
+from cooling_tower.slicers.errors import (
+    SlicerProcessError,
+    SlicerVerificationTimeoutError,
+    UnsupportedSlicerExecutableError,
+)
+from cooling_tower.slicers.models import (
+    EffectiveProfile,
+    ProfileCandidate,
+    ProfileKind,
+    ProfileRecord,
+    SliceRequest,
+    SliceResult,
+    SlicerCandidate,
+    SlicerCapability,
+    SlicerDiscoverySource,
+    SlicerInstallation,
+    SlicerSupportLevel,
+)
+from cooling_tower.slicers.process import ProcessOutcome, SecureSlicerProcessRunner
+
+
+_VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,4})(?!\d)")
+
+
+def read_windows_version_information(path: Path) -> dict[str, str]:
+    """Read PE string resources without launching the executable."""
+
+    if os.name != "nt" or not path.is_file():
+        return {}
+    try:
+        version = ctypes.windll.version
+        size = version.GetFileVersionInfoSizeW(str(path), None)
+        if not size:
+            return {}
+        buffer = ctypes.create_string_buffer(size)
+        if not version.GetFileVersionInfoW(str(path), 0, size, buffer):
+            return {}
+
+        translations_pointer = ctypes.c_void_p()
+        translations_length = ctypes.c_uint()
+        translations: list[tuple[int, int]] = []
+        if version.VerQueryValueW(
+            buffer,
+            "\\VarFileInfo\\Translation",
+            ctypes.byref(translations_pointer),
+            ctypes.byref(translations_length),
+        ):
+            count = translations_length.value // 4
+            values = ctypes.cast(
+                translations_pointer,
+                ctypes.POINTER(ctypes.c_ushort),
+            )
+            translations = [
+                (values[index * 2], values[index * 2 + 1])
+                for index in range(count)
+            ]
+        if not translations:
+            translations = [(0x0409, 0x04B0), (0x0409, 0x04E4)]
+
+        result: dict[str, str] = {}
+        for key in ("ProductName", "FileDescription", "FileVersion", "ProductVersion"):
+            for language, codepage in translations:
+                pointer = ctypes.c_void_p()
+                length = ctypes.c_uint()
+                query = (
+                    f"\\StringFileInfo\\{language:04x}{codepage:04x}\\{key}"
+                )
+                if not version.VerQueryValueW(
+                    buffer,
+                    query,
+                    ctypes.byref(pointer),
+                    ctypes.byref(length),
+                ):
+                    continue
+                value = ctypes.wstring_at(pointer, max(0, length.value - 1)).strip()
+                if value:
+                    result[key] = value
+                    break
+        return result
+    except (AttributeError, OSError, ValueError):
+        return {}
+
+
+def _profile_kind_from_path(path: Path) -> ProfileKind:
+    parts = {part.casefold() for part in path.parts}
+    if "machine" in parts or "printer" in parts:
+        return ProfileKind.MACHINE
+    if "process" in parts or "print" in parts:
+        return ProfileKind.PROCESS
+    if "filament" in parts or "material" in parts:
+        return ProfileKind.FILAMENT
+    if "quality" in parts or "quality_changes" in parts:
+        return ProfileKind.QUALITY
+    if "definitions" in parts or "definition_changes" in parts:
+        return ProfileKind.DEFINITION
+    return ProfileKind.UNKNOWN
+
+
+def _normalise_inherits(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return tuple(item.strip() for item in value.split(";") if item.strip())
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return ()
+
+
+def classify_profile_source(
+    installation: SlicerInstallation,
+    path: Path,
+    declared_source: str = "",
+) -> str:
+    """Classify preset ownership conservatively from its actual location."""
+
+    resolved = path.resolve()
+    executable_root = installation.executable_path.parent.resolve()
+    if executable_root == resolved or executable_root in resolved.parents:
+        return "system"
+
+    parts = {part.casefold() for part in resolved.parts}
+    if parts.intersection({"system", "resources", "vendor"}):
+        return "system"
+    if "project" in parts or declared_source == "project":
+        return "project"
+    if "session" in parts or declared_source == "session":
+        return "session"
+    if "user" in parts or "quality_changes" in parts:
+        return "user"
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        appdata_root = Path(appdata).expanduser().resolve()
+        if (
+            appdata_root in resolved.parents
+            and (
+                declared_source == "user"
+                or resolved.parent.name.casefold()
+                in {"printer", "print", "filament"}
+            )
+        ):
+            return "user"
+    return "system"
+
+
+class BaseSlicerAdapter:
+    adapter_id = "base"
+    product_name = "Unknown slicer"
+    family = SlicerFamily.UNKNOWN
+    support_level = SlicerSupportLevel.DETECTION_ONLY
+    executable_names: tuple[str, ...] = ()
+    product_markers: tuple[str, ...] = ()
+    probe_arguments: tuple[str, ...] = ("--help",)
+    probe_timeout_s = 5.0
+    capabilities: frozenset[SlicerCapability] = frozenset()
+
+    def __init__(self, runner: SecureSlicerProcessRunner | None = None) -> None:
+        self.runner = runner or SecureSlicerProcessRunner()
+
+    def known_candidates(self) -> tuple[SlicerCandidate, ...]:
+        return ()
+
+    def matches_candidate(self, candidate: SlicerCandidate) -> bool:
+        if candidate.adapter_hint == self.adapter_id:
+            return True
+        filename = candidate.executable_path.name.casefold()
+        if filename in {name.casefold() for name in self.executable_names}:
+            return True
+        hint = (candidate.product_hint or "").casefold()
+        return any(marker.casefold() in hint for marker in self.product_markers)
+
+    def verify_installation(
+        self,
+        candidate: SlicerCandidate | Path,
+    ) -> SlicerInstallation:
+        if isinstance(candidate, Path):
+            candidate = SlicerCandidate(
+                candidate,
+                SlicerDiscoverySource.MANUAL,
+                adapter_hint=self.adapter_id,
+            )
+        path = candidate.executable_path.expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Slicer executable not found: {path}")
+
+        file_information = read_windows_version_information(path)
+        product_evidence = " ".join(
+            (
+                file_information.get("ProductName", ""),
+                file_information.get("FileDescription", ""),
+            )
+        ).strip()
+        version = (
+            candidate.version_hint
+            or file_information.get("ProductVersion")
+            or file_information.get("FileVersion")
+        )
+        product_verified = self._contains_product_marker(product_evidence)
+
+        # Starting a GUI-subsystem slicer with ``--help`` can create one or
+        # more visible native windows even when CREATE_NO_WINDOW is used; that
+        # flag only suppresses console windows.  Automatic discovery already
+        # has bounded registry/path/shortcut evidence, so validate it without
+        # executing the slicer.  An explicitly selected manual file may still
+        # use the process probe when its Windows version resource is missing.
+        automatic_candidate = (
+            candidate.discovery_source is not SlicerDiscoverySource.MANUAL
+        )
+        filename_matches = path.name.casefold() in {
+            name.casefold() for name in self.executable_names
+        }
+        hint_matches = (
+            candidate.adapter_hint == self.adapter_id
+            and candidate.discovery_source
+            in {
+                SlicerDiscoverySource.KNOWN_PATH,
+                SlicerDiscoverySource.APP_PATHS,
+                SlicerDiscoverySource.START_MENU,
+            }
+        )
+        product_hint_matches = self._contains_product_marker(
+            candidate.product_hint or ""
+        )
+        if automatic_candidate and (
+            filename_matches or hint_matches or product_hint_matches
+        ):
+            product_verified = True
+
+        probe_outcome: ProcessOutcome | None = None
+        if (
+            not product_verified
+            and not automatic_candidate
+            and self.probe_arguments
+        ):
+            probe_outcome = self.runner.run(
+                path,
+                self.probe_arguments,
+                working_directory=path.parent,
+                timeout_s=self.probe_timeout_s,
+            )
+            if probe_outcome.timed_out:
+                raise SlicerVerificationTimeoutError(
+                    f"Versionsprüfung für {path.name} hat das Zeitlimit überschritten."
+                )
+            probe_text = f"{probe_outcome.stdout}\n{probe_outcome.stderr}"
+            product_verified = self._contains_product_marker(probe_text)
+            if version is None:
+                version = self._extract_version(probe_text)
+
+        if not product_verified:
+            raise UnsupportedSlicerExecutableError(
+                f"Die Datei {path.name} konnte nicht als {self.product_name} "
+                "bestätigt werden."
+            )
+
+        roots = self.profile_roots_for(path)
+        engine = self.engine_path_for(path)
+        capabilities = self.capabilities_for(engine)
+        return SlicerInstallation(
+            adapter_id=self.adapter_id,
+            product_name=self.product_name,
+            version=self._normalise_version(version),
+            executable_path=path,
+            verified=True,
+            capabilities=capabilities,
+            discovery_source=candidate.discovery_source,
+            family=self.family,
+            support_level=self.support_level,
+            profile_roots=roots,
+            engine_path=engine,
+        )
+
+    def _contains_product_marker(self, value: str) -> bool:
+        folded = value.casefold()
+        return any(marker.casefold() in folded for marker in self.product_markers)
+
+    @staticmethod
+    def _extract_version(value: str) -> str | None:
+        match = _VERSION_PATTERN.search(value)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _normalise_version(value: str | None) -> str | None:
+        if not value:
+            return None
+        match = _VERSION_PATTERN.search(value)
+        return match.group(1) if match else value.strip() or None
+
+    def profile_roots_for(self, executable: Path) -> tuple[Path, ...]:
+        return ()
+
+    def engine_path_for(self, executable: Path) -> Path | None:
+        return executable
+
+    def capabilities_for(
+        self,
+        engine_path: Path | None,
+    ) -> frozenset[SlicerCapability]:
+        return self.capabilities
+
+    def discover_profiles(
+        self,
+        installation: SlicerInstallation,
+    ) -> list[ProfileRecord]:
+        records: list[ProfileRecord] = []
+        seen: set[Path] = set()
+        for root in installation.profile_roots:
+            if not root.is_dir():
+                continue
+            for pattern in ("*.json", "*.ini", "*.cfg"):
+                for path in root.rglob(pattern):
+                    resolved = path.resolve()
+                    if resolved in seen or not resolved.is_file():
+                        continue
+                    seen.add(resolved)
+                    record = self._read_profile_record(installation, resolved)
+                    if record is not None:
+                        records.append(record)
+        return sorted(
+            records,
+            key=lambda item: (item.kind.value, item.name.casefold(), str(item.path)),
+        )
+
+    def _read_profile_record(
+        self,
+        installation: SlicerInstallation,
+        path: Path,
+    ) -> ProfileRecord | None:
+        payload: Mapping[str, Any] = {}
+        if path.suffix.casefold() == ".json":
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                return None
+            if isinstance(loaded, Mapping):
+                payload = loaded
+        name = str(payload.get("name") or payload.get("id") or path.stem)
+        profile_id = str(payload.get("id") or name)
+        # Orca/Bambu/Anycubic JSON profiles use ``inherits`` for their
+        # parent chain.  ``from`` describes the profile origin (for example
+        # ``system`` or ``user``) and must never be interpreted as a parent
+        # profile name.
+        inherits = _normalise_inherits(payload.get("inherits", ()))
+        declared_source = str(payload.get("from", "")).strip().casefold()
+        source = classify_profile_source(
+            installation,
+            path,
+            declared_source,
+        )
+        return ProfileRecord(
+            adapter_id=self.adapter_id,
+            profile_id=profile_id,
+            name=name,
+            kind=_profile_kind_from_path(path),
+            path=path,
+            source=source,
+            inherits=inherits,
+            metadata={
+                key: payload[key]
+                for key in (
+                    "type",
+                    "from",
+                    "version",
+                    "instantiation",
+                    "setting_version",
+                    "setting_id",
+                    "printer_settings_id",
+                    "print_settings_id",
+                    "filament_settings_id",
+                    "printer_model",
+                    "printer_variant",
+                    "printer_technology",
+                    "nozzle_diameter",
+                    "gcode_flavor",
+                    "compatible_printers",
+                    "compatible_printers_condition",
+                    "printable_area",
+                    "printable_height",
+                    "extruder_count",
+                    "minimum_slicer_version",
+                    "maximum_slicer_version",
+                )
+                if key in payload
+            },
+        )
+    def profile_values(self, record: ProfileRecord) -> dict[str, object]:
+        return self._load_profile_values(record.path)
+
+    def resolve_profile_bundle(
+        self,
+        candidate: ProfileCandidate,
+    ) -> EffectiveProfile:
+        if candidate.installation.adapter_id != self.adapter_id:
+            raise ValueError("Profile candidate belongs to a different adapter.")
+        inventory = self.discover_profiles(candidate.installation)
+        index: dict[tuple[ProfileKind, str], ProfileRecord] = {}
+        for record in inventory:
+            index[(record.kind, record.profile_id.casefold())] = record
+            index[(record.kind, record.name.casefold())] = record
+
+        effective: dict[str, Any] = {}
+        notes: list[str] = []
+        machine = candidate.machine
+        if machine is not None:
+            chain = self._profile_chain(machine, index)
+            for record in chain:
+                effective.update(self._load_profile_values(record.path))
+            if len(chain) > 1:
+                machine = chain[0]
+                notes.append(
+                    "Abgeleitetes Maschinenprofil wurde auf das vollständige "
+                    f"Basisprofil '{machine.name}' zurückgeführt."
+                )
+        for record in (
+            *((candidate.process,) if candidate.process is not None else ()),
+            *candidate.filaments,
+            *candidate.definitions,
+        ):
+            for item in self._profile_chain(record, index):
+                effective.update(self._load_profile_values(item.path))
+
+        return EffectiveProfile(
+            installation=candidate.installation,
+            machine=machine,
+            process=candidate.process,
+            filaments=candidate.filaments,
+            definitions=candidate.definitions,
+            effective_values=effective,
+            resolution_notes=tuple(notes),
+        )
+
+    @staticmethod
+    def _profile_chain(
+        record: ProfileRecord,
+        index: Mapping[tuple[ProfileKind, str], ProfileRecord],
+    ) -> tuple[ProfileRecord, ...]:
+        chain: list[ProfileRecord] = []
+        visited: set[Path] = set()
+
+        def add(item: ProfileRecord) -> None:
+            if item.path in visited:
+                return
+            visited.add(item.path)
+            for parent_name in item.inherits:
+                parent = index.get((item.kind, parent_name.casefold()))
+                if parent is not None:
+                    add(parent)
+            chain.append(item)
+
+        add(record)
+        return tuple(chain)
+
+    @staticmethod
+    def _load_profile_values(path: Path) -> dict[str, Any]:
+        if path.suffix.casefold() != ".json":
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, Mapping):
+            return {}
+        values = payload.get("setting", payload)
+        return dict(values) if isinstance(values, Mapping) else {}
+
+    def slice_model(self, request: SliceRequest) -> SliceResult:
+        if not request.model_path.is_file():
+            raise FileNotFoundError(f"STL model not found: {request.model_path}")
+        if request.profile.installation.adapter_id != self.adapter_id:
+            raise ValueError("Slice request belongs to a different adapter.")
+        if not request.profile.installation.can_slice:
+            raise SlicerProcessError(
+                f"{request.profile.installation.product_name} ist nur für die "
+                "Erkennung verfügbar und kann nicht automatisiert slicen."
+            )
+
+        working_root = Path(tempfile.mkdtemp(prefix="cooling_tower_slicer_"))
+        work_input = working_root / "input"
+        work_output = working_root / "output"
+        work_input.mkdir()
+        work_output.mkdir()
+        copied_model = work_input / request.model_path.name
+        shutil.copy2(request.model_path, copied_model)
+        outcome: ProcessOutcome | None = None
+        try:
+            executable, arguments = self.build_slice_command(
+                request,
+                copied_model,
+                work_output,
+                working_root,
+            )
+            outcome = self.runner.run(
+                executable,
+                arguments,
+                working_directory=working_root,
+                timeout_s=request.timeout_s,
+                cancellation_event=request.cancellation_event,
+            )
+            produced = tuple(
+                sorted(path for path in work_output.rglob("*") if path.is_file())
+            )
+            failure_reason = self._failure_reason(outcome, produced)
+            if failure_reason is not None:
+                diagnostic = self._write_failure_diagnostic(
+                    request,
+                    outcome,
+                    failure_reason,
+                )
+                return SliceResult(
+                    success=False,
+                    return_code=outcome.return_code,
+                    command=outcome.command,
+                    output_files=(),
+                    gcode_path=None,
+                    metadata_paths=(),
+                    stdout=outcome.stdout,
+                    stderr=outcome.stderr,
+                    duration_s=outcome.duration_s,
+                    diagnostic_path=diagnostic,
+                    failure_reason=failure_reason,
+                    timed_out=outcome.timed_out,
+                    cancelled=outcome.cancelled,
+                )
+
+            request.output_directory.mkdir(parents=True, exist_ok=True)
+            copied_outputs: list[Path] = []
+            for source in produced:
+                relative = source.relative_to(work_output)
+                destination = request.output_directory / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                copied_outputs.append(destination.resolve())
+            gcode_path = next(
+                (
+                    path
+                    for path in copied_outputs
+                    if path.suffix.casefold() in {".gcode", ".gco"}
+                ),
+                None,
+            )
+            metadata_paths = tuple(
+                path
+                for path in copied_outputs
+                if path.name.casefold().endswith(
+                    (".gcode.metadata", ".gco.metadata", ".metadata")
+                )
+            )
+            return SliceResult(
+                success=True,
+                return_code=outcome.return_code,
+                command=outcome.command,
+                output_files=tuple(copied_outputs),
+                gcode_path=gcode_path,
+                metadata_paths=metadata_paths,
+                stdout=outcome.stdout,
+                stderr=outcome.stderr,
+                duration_s=outcome.duration_s,
+            )
+        finally:
+            shutil.rmtree(working_root, ignore_errors=True)
+
+    def build_slice_command(
+        self,
+        request: SliceRequest,
+        model_path: Path,
+        output_directory: Path,
+        working_root: Path,
+    ) -> tuple[Path, tuple[str, ...]]:
+        raise SlicerProcessError(
+            f"Automatisches Slicing ist für {self.product_name} nicht implementiert."
+        )
+
+    @staticmethod
+    def _failure_reason(
+        outcome: ProcessOutcome,
+        produced: Sequence[Path],
+    ) -> str | None:
+        if outcome.cancelled:
+            return "Der Slicervorgang wurde abgebrochen."
+        if outcome.timed_out:
+            return "Der Slicervorgang hat das Zeitlimit überschritten."
+        if outcome.return_code != 0:
+            return f"Der Slicer wurde mit Fehlercode {outcome.return_code} beendet."
+        if not any(path.suffix.casefold() in {".gcode", ".gco"} for path in produced):
+            return "Der Slicer meldete Erfolg, erzeugte aber keine G-Code-Datei."
+        return None
+
+    @staticmethod
+    def _write_failure_diagnostic(
+        request: SliceRequest,
+        outcome: ProcessOutcome,
+        failure_reason: str,
+    ) -> Path | None:
+        if not request.retain_failure_diagnostics:
+            return None
+        root = request.diagnostics_root or (
+            request.output_directory.parent / "slicer_diagnostics"
+        )
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "slicer_failure.json"
+        payload = {
+            "success": False,
+            "failure_reason": failure_reason,
+            "return_code": outcome.return_code,
+            "timed_out": outcome.timed_out,
+            "cancelled": outcome.cancelled,
+            "duration_s": outcome.duration_s,
+            "command": list(outcome.command),
+            "stdout": outcome.stdout,
+            "stderr": outcome.stderr,
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return path.resolve()
+
+    def extract_layer_times(self, result: SliceResult) -> tuple[float, ...]:
+        if not result.success or result.gcode_path is None:
+            return ()
+        from cooling_tower.services.analysis_service import GCodeAnalysisService
+
+        snapshot = GCodeAnalysisService().analyze(result.gcode_path, force=True)
+        return tuple(layer.total_time_s for layer in snapshot.layers)
+
+
+def environment_roots() -> tuple[Path, ...]:
+    values = (
+        os.environ.get("ProgramW6432"),
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+        os.environ.get("LOCALAPPDATA"),
+    )
+    roots: list[Path] = []
+    for value in values:
+        if not value:
+            continue
+        path = Path(value).expanduser()
+        if path not in roots:
+            roots.append(path)
+    return tuple(roots)
+
+
+def existing_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for path in paths:
+        try:
+            resolved = path.expanduser().resolve()
+            exists = resolved.exists()
+        except OSError:
+            # Protected profile folders are optional discovery evidence.  They
+            # must never invalidate an otherwise verified slicer executable.
+            continue
+        if resolved in seen or not exists:
+            continue
+        seen.add(resolved)
+        result.append(resolved)
+    return tuple(result)

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "case_id": "phase13_target_15s_observed_11s",
+  "source_gcode": "input/rabe_koerper_18cm.gcode",
+  "evidence_origin": "user-provided slicer layer-time and speed screenshots",
+  "target_layer_time_s": 15.0,
+  "observed_minimum_layer_time_s": 11.0,
+  "observed_minimum_shortfall_s": 4.0,
+  "slicer_reported": "AnycubicSlicerNext 1.4.1.2",
+  "profile_combination": "not fully verified from screenshot evidence",
+  "safety_factor": "not recorded in screenshot evidence",
+  "generated_stl": "original test artifact not retained as a stable fixture",
+  "observations": {
+    "persistent_deficit_above_widest_region": true,
+    "unexpected_profile_narrowing": true,
+    "nonuniform_slicer_speed_regions": true
+  },
+  "acceptance_rules": {
+    "capacity_must_not_shrink_while_deficit_remains": true,
+    "gcode_mode_requires_final_combined_timing_evidence": true,
+    "stl_mode_must_not_claim_a_guaranteed_final_time": true
+  }
+}

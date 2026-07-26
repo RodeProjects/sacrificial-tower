@@ -1,0 +1,1138 @@
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
+
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton
+
+from cooling_tower.gui.main_window import (
+    MAIN_FOOTER_MAX_HEIGHT_PX,
+    MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
+    MainWindow,
+)
+from cooling_tower.gui.user_messages import german_user_message
+from cooling_tower.gui.widgets.numeric_setting import (
+    LABEL_INFO_SAFETY_GAP_PX,
+)
+from cooling_tower.models.feasibility import (
+    FeasibilityIssue,
+    ProfileFeasibilityAssessment,
+)
+from cooling_tower.slicers.base import BaseSlicerAdapter
+from cooling_tower.slicers.models import (
+    SlicerCandidate,
+    SlicerDiscoverySource,
+)
+from cooling_tower.slicers.process import ProcessOutcome
+
+
+class RecordingProbeRunner:
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(
+        self,
+        executable,
+        arguments,
+        *,
+        working_directory,
+        timeout_s,
+        cancellation_event=None,
+    ) -> ProcessOutcome:
+        command = (str(executable), *(str(value) for value in arguments))
+        self.commands.append(command)
+        return ProcessOutcome(
+            command=command,
+            return_code=0,
+            stdout="Flash Safe Slicer 1.2.3",
+            stderr="",
+            duration_s=0.01,
+        )
+
+
+class FlashSafeAdapter(BaseSlicerAdapter):
+    adapter_id = "flash_safe"
+    product_name = "Flash Safe Slicer"
+    executable_names = ("FlashSafe.exe",)
+    product_markers = ("Flash Safe Slicer",)
+
+
+class LatestGuiRequirementsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.app.processEvents()
+        self.temporary.cleanup()
+
+    def window(self) -> MainWindow:
+        return MainWindow(user_settings_path=self.root / "settings.json")
+
+    def test_wide_geometry_is_remeasured_when_workflow_becomes_visible(self) -> None:
+        window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        window.workflow.analysis_succeeded("test.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        QTest.qWait(100)
+        self.app.processEvents()
+
+        self.assertTrue(window.geometry_split.is_two_column())
+        self.assertEqual(
+            window.geometry_split.height(),
+            window.geometry_split.content_height_hint(),
+        )
+        sections = (
+            window.stability_group,
+            window.overhang_group,
+            window.geometry_calculation_section,
+        )
+        for previous, following in zip(sections, sections[1:]):
+            self.assertEqual(
+                following.geometry().top(),
+                previous.geometry().bottom() + 1,
+            )
+        window.close()
+
+    def test_out_of_range_values_remain_visible_with_priority_feedback(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        setting = window.maximum_expansion_angle_setting
+        window.maximum_expansion_angle_spin.setValue(71.0)
+        self.app.processEvents()
+
+        self.assertEqual(window.maximum_expansion_angle_spin.value(), 71.0)
+        self.assertTrue(setting.editor.property("invalid"))
+        self.assertTrue(setting.editor.property("warning"))
+        self.assertIn("Maximalwert 70,0 °", setting.message_label.text())
+        self.assertIn("Vorsicht", setting.secondary_message_label.text())
+        self.assertFalse(setting.secondary_message_label.isHidden())
+        self.assertIn("Maximalwert 70,0 °", window.validation_label.text())
+
+        window.maximum_expansion_angle_spin.setValue(51.0)
+        self.app.processEvents()
+        self.assertFalse(setting.editor.property("invalid"))
+        self.assertTrue(setting.editor.property("warning"))
+        self.assertIn("Vorsicht", setting.message_label.text())
+        window.close()
+
+    def test_footer_is_responsive_prioritized_and_bounded(self) -> None:
+        window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        window.warning_text.setPlainText("Ein Warnhinweis")
+        window._refresh_issue_panels()
+        self.app.processEvents()
+
+        self.assertFalse(window._footer_narrow_layout)
+        self.assertEqual(window.footer.maximumHeight(), MAIN_FOOTER_MAX_HEIGHT_PX)
+        self.assertTrue(window.notice_panel.is_expanded())
+        self.assertEqual(
+            window.footer_notice_layout.indexOf(window.notice_panel), 0
+        )
+        self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
+
+        window.validation_label.setText("Ein kritischer Fehler")
+        window.error_panel.show()
+        window._refresh_footer_notice_layout()
+        self.assertFalse(window.error_panel.is_expanded())
+        self.assertFalse(window.notice_panel.is_expanded())
+        self.assertLess(
+            window.footer_notice_layout.indexOf(window.error_panel),
+            window.footer_notice_layout.indexOf(window.notice_panel),
+        )
+
+        window.resize(900, 800)
+        QTest.qWait(40)
+        self.app.processEvents()
+        self.assertTrue(window._footer_narrow_layout)
+        self.assertEqual(MAIN_FOOTER_NARROW_MAX_HEIGHT_PX, 400)
+        self.assertEqual(
+            window.footer.maximumHeight(),
+            MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
+        )
+        positions = [
+            window.footer_content_grid.getItemPosition(
+                window.footer_content_grid.indexOf(widget)
+            )[0]
+            for widget in (
+                window.footer_messages_scroll,
+                window.footer_horizontal_divider,
+                window.footer_action_area,
+            )
+        ]
+        self.assertEqual(positions, [0, 1, 2])
+        self.assertGreaterEqual(
+            window.error_panel.chevron_button.geometry().left(),
+            window.error_panel.header_button.geometry().right(),
+        )
+        self.assertFalse(hasattr(window, "error_solutions_toggle"))
+        self.assertFalse(hasattr(window, "error_solutions_label"))
+        window.close()
+
+    def test_setting_feedback_waits_for_both_workflow_prerequisites(self) -> None:
+        window = self.window()
+        window.target_time_spin.setValue(0.0)
+        window.maximum_expansion_angle_spin.setValue(51.0)
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_unavailable("Kein Slicer verfügbar")
+        self.app.processEvents()
+
+        target = window._setting_widgets["target_layer_time_s"]
+        expansion = window.maximum_expansion_angle_setting
+        self.assertTrue(target.message_container.isHidden())
+        self.assertTrue(target.range_label.isHidden())
+        self.assertFalse(bool(target.editor.property("invalid")))
+        self.assertFalse(bool(expansion.editor.property("warning")))
+        self.assertFalse(window.validation_label.text().strip())
+        self.assertTrue(window.error_panel.isHidden())
+
+        window.workflow.slicer_succeeded("Testslicer")
+        self.app.processEvents()
+        self.assertFalse(target.message_container.isHidden())
+        self.assertFalse(target.range_label.isHidden())
+        self.assertTrue(bool(target.editor.property("invalid")))
+        self.assertTrue(bool(expansion.editor.property("warning")))
+        window.close()
+
+    def test_ranges_are_visible_and_layer_time_is_limited_to_120_seconds(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        self.app.processEvents()
+
+        for setting in window._setting_widgets.values():
+            self.assertTrue(setting.range_label.text().strip())
+            self.assertFalse(setting.range_label.isHidden())
+        self.assertIn("Max. 120,00 s", window._setting_widgets[
+            "target_layer_time_s"
+        ].range_label.text())
+        window.target_time_spin.setValue(121.0)
+        self.app.processEvents()
+        self.assertEqual(window.target_time_spin.value(), 121.0)
+        self.assertTrue(window.target_time_spin.property("invalid"))
+        self.assertIn(
+            "120,00",
+            window.validation_label.text(),
+        )
+        self.assertIn("Gewünschte Mindest-Layerzeit: 121,00 s", window.validation_label.text())
+        window.close()
+
+    def test_safety_factor_has_no_unit_in_field_or_related_texts(self) -> None:
+        window = self.window()
+        setting = window._setting_widgets["safety_factor"]
+
+        self.assertEqual(setting.unit_label.text(), "")
+        self.assertNotIn("×", setting.range_label.text())
+        self.assertNotIn(
+            "×", window._setting_value_description("safety_factor")
+        )
+        window._last_changed_setting_name = "safety_factor"
+        window._feasibility_field_errors = {
+            "safety_factor": ["Testhinweis zum Sicherheitsfaktor."]
+        }
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.validate_form()
+        self.assertNotIn("×", window.validation_label.text())
+        window.close()
+
+    def test_equivalent_dependency_errors_are_unique_and_stay_marked(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.minimum_outer_spin.setValue(30.0)
+        window.maximum_outer_spin.setValue(20.0)
+        window._last_changed_setting_name = "minimum_outer_radius_mm"
+        window.validate_form()
+
+        relationship_errors = [
+            message
+            for message in window._static_error_causes
+            if "Größter Außenradius" in message
+            and "Kleinster Außenradius" in message
+        ]
+        self.assertEqual(len(relationship_errors), 1)
+        minimum_setting = window._setting_widgets["minimum_outer_radius_mm"]
+        self.assertTrue(minimum_setting.editor.property("invalid"))
+
+        minimum_setting.editor.setFocus()
+        self.app.processEvents()
+        self.assertTrue(minimum_setting.editor.property("invalid"))
+        self.assertIn(
+            'QDoubleSpinBox[invalid="true"]:focus',
+            window.styleSheet(),
+        )
+        window._last_changed_setting_name = "safety_factor"
+        window.validate_form()
+        self.assertTrue(minimum_setting.editor.property("invalid"))
+        window.close()
+
+    def test_optional_dialogs_are_not_created_during_startup(self) -> None:
+        window = self.window()
+        self.assertIsNone(window._preview_dialog)
+        self.assertIsNone(window._additional_options_dialog)
+        self.assertFalse(
+            any(isinstance(widget, QDialog) for widget in self.app.topLevelWidgets())
+        )
+
+        self.assertIsNotNone(window.preview_dialog)
+        self.assertIsNotNone(window.additional_options_dialog)
+        window.close()
+
+    def test_startup_exposes_only_the_main_window(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+
+        visible_top_levels = [
+            widget
+            for widget in self.app.topLevelWidgets()
+            if widget.isVisible()
+        ]
+        self.assertEqual(visible_top_levels, [window])
+        window.close()
+
+    def test_initial_footer_has_no_duplicate_right_notice_or_separator(self) -> None:
+        window = self.window()
+        window.resize(1300, 800)
+        window.show()
+        self.app.processEvents()
+
+        self.assertTrue(window.action_availability_widget.isHidden())
+        self.assertTrue(window.footer_action_area.isHidden())
+        self.assertTrue(window.footer_vertical_divider.isHidden())
+        self.assertTrue(window.footer_horizontal_divider.isHidden())
+        self.assertTrue(window.status_icon_label.property("prominent"))
+        self.assertGreaterEqual(
+            window.status_icon_label.height(),
+            window.status_label.height(),
+        )
+        window.close()
+
+    def test_footer_notice_header_uses_expected_arrow_directions(self) -> None:
+        window = self.window()
+        panel = window.error_panel
+        panel.show()
+        window.show()
+        self.app.processEvents()
+        panel.set_expanded(False)
+
+        self.assertEqual(panel.chevron_button.arrowType(), Qt.ArrowType.DownArrow)
+        self.assertIsInstance(panel.header_button, QPushButton)
+        self.assertIn(
+            "QPushButton#footerNoticeHeader",
+            window.styleSheet(),
+        )
+        self.assertIn("text-align: left", window.styleSheet())
+        self.assertGreaterEqual(
+            panel.chevron_button.geometry().left(),
+            panel.header_button.geometry().right(),
+        )
+        panel.set_expanded(True)
+        self.assertEqual(panel.chevron_button.arrowType(), Qt.ArrowType.UpArrow)
+        window.close()
+
+    def test_multiline_angle_fields_keep_the_standard_range_gap(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.resize(1300, 900)
+        window.show()
+        self.app.processEvents()
+
+        def range_gap(setting_name: str) -> int:
+            setting = window._setting_widgets[setting_name]
+            editor_bottom = setting.editor.mapTo(
+                setting,
+                setting.editor.rect().bottomLeft(),
+            ).y()
+            range_top = setting.range_label.mapTo(
+                setting,
+                setting.range_label.rect().topLeft(),
+            ).y()
+            return range_top - editor_bottom - 1
+
+        reference_gap = range_gap("maximum_wall_thickness_mm")
+        self.assertEqual(range_gap("maximum_expansion_angle_deg"), reference_gap)
+        self.assertEqual(range_gap("maximum_contraction_angle_deg"), reference_gap)
+        window.close()
+
+    def test_setting_info_buttons_are_centered_and_labels_use_available_width(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.resize(1500, 900)
+        window.show()
+        self.app.processEvents()
+
+        for setting in window._setting_widgets.values():
+            if not setting.isVisible() or setting.info_button.isHidden():
+                continue
+            editor_center = setting.editor.mapTo(
+                setting,
+                setting.editor.rect().center(),
+            )
+            info_center = setting.info_button.mapTo(
+                setting,
+                setting.info_button.rect().center(),
+            )
+            self.assertLessEqual(abs(editor_center.y() - info_center.y()), 1)
+            label_right = setting.label.mapTo(
+                setting,
+                setting.label.rect().topRight(),
+            ).x()
+            info_left = setting.info_button.mapTo(
+                setting,
+                setting.info_button.rect().topLeft(),
+            ).x()
+            self.assertGreaterEqual(
+                info_left - label_right - 1,
+                LABEL_INFO_SAFETY_GAP_PX,
+                setting.setting_name,
+            )
+        self.assertGreater(
+            window._setting_widgets["minimum_outer_radius_mm"].label.width(),
+            320,
+        )
+        window.close()
+
+    def test_multiple_inline_messages_are_bulleted(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        setting = window._setting_widgets["maximum_outer_radius_mm"]
+        setting.set_error(
+            "Erste kurze Fehlermeldung.\nZweite kurze Fehlermeldung."
+        )
+        self.assertEqual(
+            setting.message_label.text().splitlines(),
+            [
+                "• Erste kurze Fehlermeldung.",
+                "• Zweite kurze Fehlermeldung.",
+            ],
+        )
+        self.assertNotIn(";", setting.message_label.text())
+        window.close()
+
+    def test_automatic_slicer_verification_never_starts_the_gui_executable(self) -> None:
+        executable = self.root / "FlashSafe.exe"
+        executable.write_bytes(b"synthetic executable")
+        runner = RecordingProbeRunner()
+        adapter = FlashSafeAdapter(runner=runner)
+
+        automatic = adapter.verify_installation(
+            SlicerCandidate(
+                executable,
+                SlicerDiscoverySource.KNOWN_PATH,
+                adapter_hint=adapter.adapter_id,
+            )
+        )
+        self.assertTrue(automatic.verified)
+        self.assertEqual(runner.commands, [])
+
+        manual = adapter.verify_installation(
+            SlicerCandidate(
+                executable,
+                SlicerDiscoverySource.MANUAL,
+            )
+        )
+        self.assertTrue(manual.verified)
+        self.assertEqual(len(runner.commands), 1)
+
+    def test_unknown_english_gui_messages_are_replaced_by_german_text(self) -> None:
+        for message in (
+            "Profile adapter unavailable.",
+            "Scanning profile directories.",
+            "Something went wrong while reading the selected file.",
+        ):
+            rendered = german_user_message(message)
+            self.assertNotEqual(rendered, message)
+            self.assertIn("Die ", rendered)
+        self.assertEqual(
+            german_user_message("Die Profilzuordnung ist abgeschlossen."),
+            "Die Profilzuordnung ist abgeschlossen.",
+        )
+
+    def test_multiple_errors_use_bullets_and_field_specific_inline_text(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.minimum_outer_spin.setValue(30.0)
+        window.maximum_outer_spin.setValue(20.0)
+        window.minimum_wall_spin.setValue(5.0)
+        window.maximum_wall_spin.setValue(4.0)
+        window.validate_form()
+
+        lines = window.validation_label.text().splitlines()
+        self.assertGreaterEqual(len(lines), 4)
+        headings = [line for line in lines if not line.startswith("• ")]
+        bullets = [line for line in lines if line.startswith("• ")]
+        self.assertGreaterEqual(len(headings), 2)
+        self.assertGreaterEqual(len(bullets), 2)
+        self.assertNotIn(";", window.validation_label.text())
+        wall_setting = window._setting_widgets[
+            "maximum_wall_thickness_mm"
+        ]
+        self.assertFalse(wall_setting.message_container.isHidden())
+        self.assertIn(
+            "Muss mindestens so groß sein",
+            wall_setting.message_label.text(),
+        )
+        self.assertNotIn(
+            "Maximale Wandstärke",
+            wall_setting.message_label.text(),
+        )
+        window.close()
+
+    def test_footer_groups_feasibility_issues_below_the_changed_setting(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.target_time_spin.setValue(111.0)
+        window._last_changed_setting_name = "target_layer_time_s"
+        issues = (
+            FeasibilityIssue(
+                code="EXPANSION_ANGLE_TOO_SMALL",
+                message="Expansion angle is too small.",
+                affected_layer_index=10,
+                related_setting_names=("maximum_expansion_angle_deg",),
+                required_value=89.0,
+            ),
+            FeasibilityIssue(
+                code="MAXIMUM_WALL_THICKNESS_REACHED",
+                message="Maximum wall thickness reached.",
+                affected_layer_index=11,
+                related_setting_names=("maximum_wall_thickness_mm",),
+                required_value=5.0,
+            ),
+            FeasibilityIssue(
+                code="MAXIMUM_OUTER_RADIUS_REACHED",
+                message="Maximum outer radius reached.",
+                affected_layer_index=12,
+                related_setting_names=("maximum_outer_radius_mm",),
+                required_value=22.0,
+            ),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=False,
+                issues=issues,
+            ),
+        )
+
+        self.assertEqual(
+            window.validation_label.text().splitlines(),
+            [
+                "Gewünschte Mindest-Layerzeit: 111,00 s",
+                "• Maximaler Aufweitungswinkel reicht nicht aus.",
+                "• Eingestellte größte Wandstärke von 4,20 mm reicht nicht aus.",
+                "• Eingestellter größter Außenradius von 20,00 mm reicht nicht aus.",
+            ],
+        )
+        self.assertNotIn(";", window.validation_label.text())
+        self.assertNotIn("Betroffen", window.validation_label.text())
+        self.assertNotIn("Erforderlich", window.validation_label.text())
+        self.assertEqual(
+            window.validation_label.textFormat(),
+            Qt.TextFormat.RichText,
+        )
+        self.assertIn(
+            "<b>Gewünschte Mindest-Layerzeit: 111,00 s</b>",
+            window.validation_label._rendered_html,
+        )
+        self.assertIn(
+            '<td width="18"></td><td>• Maximaler Aufweitungswinkel',
+            window.validation_label._rendered_html,
+        )
+        inline = window._setting_widgets["target_layer_time_s"].message_label.text()
+        self.assertNotIn("Gewünschte Mindest-Layerzeit", inline)
+        self.assertNotIn(";", inline)
+        window.close()
+
+    def test_capacity_path_length_is_not_presented_as_a_required_radius(self) -> None:
+        window = self.window()
+        issue = FeasibilityIssue(
+            code="MAXIMUM_OUTER_RADIUS_REACHED",
+            message="Maximum outer radius reached.",
+            related_setting_names=("maximum_outer_radius_mm",),
+            required_value=5789.65,
+            achievable_value=180.0,
+        )
+
+        group = window._group_feasibility_issues((issue,))[0]
+
+        self.assertNotIn("Erforderlich", group["summary"])
+        self.assertFalse(
+            any("5789" in solution for solution in group["solutions"])
+        )
+        self.assertIn("Außenradius erhöhen", group["solutions"][0])
+        window.close()
+
+    def test_error_cards_keep_normal_background_and_footer_keeps_error_tone(self) -> None:
+        window = self.window()
+        stylesheet = window.styleSheet()
+        self.assertIn(
+            'QFrame#sectionCard[state="error"] {\n    background: #ffffff;',
+            stylesheet,
+        )
+        self.assertIn(
+            'QFrame#issuePanel[severity="error"] {\n    background: #fff1f0;',
+            stylesheet,
+        )
+        self.assertIn(
+            "QLabel#errorLabel {\n    color: #152536;",
+            stylesheet,
+        )
+        window.close()
+
+    def test_inline_hint_backgrounds_are_transparent(self) -> None:
+        window = self.window()
+        stylesheet = window.styleSheet()
+        for selector in (
+            'QLabel#settingMessage[error="true"]',
+            'QLabel#settingMessage[warning="true"]',
+            "QLabel#settingMessageDetails",
+            'QLabel#towerNeedLabel[state="notRequired"]',
+            'QLabel#towerNeedLabel[state="error"]',
+        ):
+            start = stylesheet.index(selector)
+            end = stylesheet.index("}", start)
+            rule = stylesheet[start:end]
+            self.assertIn("background: transparent;", rule, selector)
+            self.assertNotIn("background: #fff", rule, selector)
+        window.close()
+
+    def test_static_error_survives_an_action_in_another_section(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.target_time_spin.setValue(0.0)
+        self.app.processEvents()
+
+        timing_message = window._setting_widgets[
+            "target_layer_time_s"
+        ].message_label.text()
+        self.assertTrue(timing_message)
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertEqual(window.timing_group.state().value, "error")
+
+        window.maximum_outer_spin.setValue(
+            window.maximum_outer_spin.value() + 1.0
+        )
+        self.app.processEvents()
+
+        self.assertEqual(
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text(),
+            timing_message,
+        )
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertEqual(window.timing_group.state().value, "error")
+        window.close()
+
+    def test_feasibility_error_keeps_its_origin_until_resolved(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.target_time_spin.setValue(111.0)
+        window._last_changed_setting_name = "target_layer_time_s"
+        issue = FeasibilityIssue(
+            code="EXPANSION_ANGLE_TOO_SMALL",
+            message="Expansion angle is too small.",
+            affected_layer_index=10,
+            related_setting_names=("maximum_expansion_angle_deg",),
+            required_value=89.0,
+        )
+        unresolved = ProfileFeasibilityAssessment(
+            tower_required=True,
+            feasible=False,
+            issues=(issue,),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            unresolved,
+        )
+        original_message = window._setting_widgets[
+            "target_layer_time_s"
+        ].message_label.text()
+        self.assertTrue(original_message)
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+
+        window.maximum_outer_spin.setValue(
+            window.maximum_outer_spin.value() + 1.0
+        )
+        self.app.processEvents()
+        self.assertEqual(
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text(),
+            original_message,
+        )
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            unresolved,
+        )
+        self.assertEqual(
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text(),
+            original_message,
+        )
+        self.assertFalse(
+            window._setting_widgets[
+                "maximum_outer_radius_mm"
+            ].message_label.text()
+        )
+
+        window._last_changed_setting_name = "target_layer_time_s"
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=True,
+            ),
+        )
+        self.assertFalse(
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text()
+        )
+        self.assertFalse(window.timing_group.badge_label.text())
+        window.close()
+
+    def test_fixing_one_feasibility_error_keeps_unrelated_errors(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window._last_changed_setting_name = "target_layer_time_s"
+        expansion_issue = FeasibilityIssue(
+            code="EXPANSION_ANGLE_TOO_SMALL",
+            message="Expansion angle is too small.",
+            related_setting_names=("maximum_expansion_angle_deg",),
+        )
+        wall_issue = FeasibilityIssue(
+            code="MAXIMUM_WALL_THICKNESS_REACHED",
+            message="Maximum wall thickness reached.",
+            related_setting_names=("maximum_wall_thickness_mm",),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=False,
+                issues=(expansion_issue, wall_issue),
+            ),
+        )
+        self.assertEqual(len(window._feasibility_issue_summaries), 2)
+
+        window.maximum_expansion_angle_spin.setValue(
+            window.maximum_expansion_angle_spin.value() + 1.0
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=False,
+                issues=(wall_issue,),
+            ),
+        )
+        self.assertEqual(
+            window._feasibility_issue_summaries,
+            [
+                "Eingestellte größte Wandstärke von 4,20 mm reicht "
+                "nicht aus."
+            ],
+        )
+        self.assertIn(
+            "größte Wandstärke",
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text(),
+        )
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertFalse(window.preview_button.isEnabled())
+
+        window.maximum_wall_spin.setValue(
+            window.maximum_wall_spin.value() + 0.1
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=True,
+            ),
+        )
+        self.assertFalse(window._feasibility_issue_summaries)
+        self.assertFalse(
+            window._setting_widgets[
+                "target_layer_time_s"
+            ].message_label.text()
+        )
+        window.close()
+
+    def test_reset_rehomes_a_persistent_limit_issue_from_the_reset_field(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        issue = FeasibilityIssue(
+            code="MAXIMUM_OUTER_RADIUS_REACHED",
+            message="Maximum outer radius reached.",
+            related_setting_names=("maximum_outer_radius_mm",),
+            required_value=22.0,
+        )
+        issue_key = (
+            issue.code,
+            tuple(sorted(issue.related_setting_names)),
+        )
+        window._feasibility_issue_targets[issue_key] = (
+            "maximum_outer_radius_mm"
+        )
+        window._feasibility_request_source = (
+            window._feasibility_request_id,
+            "maximum_outer_radius_mm",
+            "maximum_outer_radius_mm",
+        )
+
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(
+                tower_required=True,
+                feasible=False,
+                issues=(issue,),
+            ),
+        )
+
+        self.assertFalse(
+            window._setting_widgets[
+                "maximum_outer_radius_mm"
+            ].message_label.text()
+        )
+        target_message = window._setting_widgets[
+            "target_layer_time_s"
+        ].message_label.text()
+        self.assertIn("größter Außenradius", target_message)
+        self.assertIn("20,00 mm", target_message)
+        self.assertIn("Max. 500,000 mm", window._setting_widgets[
+            "maximum_outer_radius_mm"
+        ].range_label.text())
+        window.close()
+
+    def test_latest_feasibility_result_is_the_only_issue_source(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window._last_changed_setting_name = "target_layer_time_s"
+        issue = FeasibilityIssue(
+            code="MAXIMUM_OUTER_RADIUS_REACHED",
+            message="Maximum outer radius reached.",
+            related_setting_names=("maximum_outer_radius_mm",),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, False, (issue,)),
+        )
+        self.assertTrue(window._feasibility_issue_summaries)
+
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, True),
+        )
+
+        self.assertFalse(window._feasibility_issue_summaries)
+        self.assertFalse(window._feasibility_field_errors)
+        self.assertFalse(window._feasibility_issue_targets)
+        self.assertFalse(window.validation_label.text())
+        window.close()
+
+    def test_changed_dependency_drops_only_its_stale_feasibility_issue(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window._last_changed_setting_name = "target_layer_time_s"
+        issues = (
+            FeasibilityIssue(
+                code="EXPANSION_ANGLE_TOO_SMALL",
+                message="Expansion angle is too small.",
+                related_setting_names=("maximum_expansion_angle_deg",),
+            ),
+            FeasibilityIssue(
+                code="MAXIMUM_WALL_THICKNESS_REACHED",
+                message="Maximum wall thickness reached.",
+                related_setting_names=("maximum_wall_thickness_mm",),
+            ),
+            FeasibilityIssue(
+                code="MAXIMUM_OUTER_RADIUS_REACHED",
+                message="Maximum outer radius reached.",
+                related_setting_names=("maximum_outer_radius_mm",),
+            ),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, False, issues),
+        )
+        self.assertIn("20,00 mm", window.validation_label.text())
+
+        window.maximum_outer_spin.setValue(520.0)
+        self.app.processEvents()
+
+        target_message = window._setting_widgets[
+            "target_layer_time_s"
+        ].message_label.text()
+        self.assertIn("Aufweitungswinkel", target_message)
+        self.assertIn("größte Wandstärke", target_message)
+        self.assertNotIn("Außenradius", target_message)
+        self.assertNotIn("20,00 mm", window.validation_label.text())
+        self.assertIn(
+            "Überschreitet den Maximalwert 500,000 mm",
+            window._setting_widgets[
+                "maximum_outer_radius_mm"
+            ].message_label.text(),
+        )
+        self.assertEqual(len(window._feasibility_issues), 2)
+        self.assertEqual(len(window._feasibility_issue_summaries), 2)
+        window.close()
+
+    def test_recalculated_dependency_notice_uses_its_current_value(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.maximum_outer_spin.setValue(500.0)
+        issue = FeasibilityIssue(
+            code="MAXIMUM_OUTER_RADIUS_REACHED",
+            message="Maximum outer radius reached.",
+            related_setting_names=("maximum_outer_radius_mm",),
+        )
+
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, False, (issue,)),
+        )
+
+        self.assertIn("500,00 mm", window.validation_label.text())
+        self.assertNotIn("20,00 mm", window.validation_label.text())
+        window.close()
+
+    def test_tower_need_message_is_above_the_prediction_footnote(self) -> None:
+        window = self.window()
+
+        self.assertEqual(
+            window.timing_group.content_layout.indexOf(
+                window.tower_need_label
+            ),
+            -1,
+        )
+        prediction_layout = window.prediction_frame.content_layout
+        tower_index = prediction_layout.indexOf(window.tower_need_label)
+        footnote_index = prediction_layout.indexOf(
+            window.layer_time_check_hint
+        )
+        self.assertGreaterEqual(tower_index, 0)
+        self.assertEqual(footnote_index, tower_index + 1)
+        self.assertIs(
+            window.tower_need_label.parentWidget(),
+            window.prediction_frame.content_widget,
+        )
+        window.close()
+
+    def test_failed_feasibility_check_replaces_old_calculated_errors(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window._last_changed_setting_name = "target_layer_time_s"
+        issue = FeasibilityIssue(
+            code="EXPANSION_ANGLE_TOO_SMALL",
+            message="Expansion angle is too small.",
+            related_setting_names=("maximum_expansion_angle_deg",),
+        )
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, False, (issue,)),
+        )
+
+        window._on_feasibility_failed(
+            window._feasibility_request_id,
+            "unexpected worker failure",
+            "details",
+        )
+
+        self.assertFalse(window._feasibility_field_errors)
+        self.assertFalse(window._feasibility_issue_targets)
+        self.assertEqual(
+            window._feasibility_issue_summaries,
+            ["Die Turmgeometrie konnte nicht vollständig geprüft werden."],
+        )
+        self.assertIn(
+            "Turmgeometrie konnte nicht vollständig geprüft werden",
+            window.validation_label.text(),
+        )
+        window.close()
+
+    def test_infeasible_result_without_details_still_shows_a_problem(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+
+        window._on_feasibility_succeeded(
+            window._feasibility_request_id,
+            ProfileFeasibilityAssessment(True, False),
+        )
+
+        self.assertEqual(
+            window._feasibility_issue_summaries,
+            [
+                "Die Turmgeometrie ist mit den aktuellen Einstellungen "
+                "nicht möglich."
+            ],
+        )
+        self.assertIn("nicht möglich", window.validation_label.text())
+        self.assertFalse(window.preview_button.isEnabled())
+        window.close()
+
+    def test_external_input_error_survives_central_form_validation(self) -> None:
+        window = self.window()
+
+        window._show_input_error("Die gewählte Datei ist nicht verfügbar.")
+        window.validate_form()
+
+        self.assertIn("nicht verfügbar", window.validation_label.text())
+        self.assertFalse(window.error_panel.isHidden())
+        self.assertIn("1 Problem", window.error_panel.title())
+        window.close()
+
+    def test_fixing_one_static_error_keeps_an_independent_static_error(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.target_time_spin.setValue(121.0)
+        window.maximum_expansion_angle_spin.setValue(71.0)
+        self.app.processEvents()
+        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertEqual(
+            window.geometry_settings_group.badge_label.text(),
+            "1 Fehler",
+        )
+
+        window.target_time_spin.setValue(11.0)
+        self.app.processEvents()
+        self.assertFalse(window.timing_group.badge_label.text())
+        self.assertEqual(
+            window.geometry_settings_group.badge_label.text(),
+            "1 Fehler",
+        )
+        self.assertIn(
+            "Maximalwert 70,0 °",
+            window.maximum_expansion_angle_setting.message_label.text(),
+        )
+        window.close()
+
+    def test_clean_footer_status_starts_at_the_action_controls_top_edge(self) -> None:
+        window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        window.error_panel.hide()
+        window.notice_panel.hide()
+        window.action_availability_widget.hide()
+        window.footer_action_area.show()
+        window._refresh_footer_notice_layout()
+        window._fit_footer_height()
+        self.app.processEvents()
+
+        status_top = window.status_label.mapTo(window.footer, window.status_label.rect().topLeft()).y()
+        quality_top = window.preview_quality_panel.mapTo(
+            window.footer,
+            window.preview_quality_panel.rect().topLeft(),
+        ).y()
+        self.assertLessEqual(abs(status_top - quality_top), 2)
+        window.close()
+
+    def test_maximum_diameter_uses_the_standard_help_text_style(self) -> None:
+        window = self.window()
+        self.assertEqual(window.maximum_diameter_label.objectName(), "helpText")
+        window.close()
+
+    def test_non_export_validation_does_not_write_a_gui_error_log(self) -> None:
+        window = self.window()
+        with patch.object(window, "_write_gui_error_log") as write_log:
+            window._on_feasibility_failed(
+                window._feasibility_request_id,
+                "Unexpected validation failed.",
+                "technical details",
+            )
+        write_log.assert_not_called()
+        window.close()
+
+    def test_range_lines_and_dynamic_layer_limit_are_compact(self) -> None:
+        window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window._update_local_window_layer_limit(891)
+
+        for setting in window._setting_widgets.values():
+            self.assertNotIn("Min.", setting.range_label.text())
+        wall_change = window._setting_widgets[
+            "maximum_wall_change_per_mm_z"
+        ]
+        self.assertEqual(wall_change.unit_label.text(), "mm/mm")
+        self.assertEqual(wall_change.range_label.text(), "Max. 100,00")
+        self.assertEqual(
+            window._setting_widgets[
+                "local_reference_window"
+            ].range_label.text(),
+            "Max. 891 Layer",
+        )
+        self.assertEqual(
+            window.local_window_spin.property("validationMaximum"),
+            891,
+        )
+        window.close()
+
+    def test_folder_and_generation_actions_form_two_aligned_groups(self) -> None:
+        window = self.window()
+        positions = {
+            widget: window.main_actions_layout.getItemPosition(
+                window.main_actions_layout.indexOf(widget)
+            )[1]
+            for widget in (
+                window.open_output_button,
+                window.open_stl_button,
+                window.preview_action_control,
+                window.export_button,
+            )
+        }
+        self.assertEqual(positions[window.open_output_button], 0)
+        self.assertEqual(positions[window.open_stl_button], 1)
+        self.assertEqual(positions[window.preview_action_control], 3)
+        self.assertEqual(positions[window.export_button], 4)
+        self.assertEqual(window.main_actions_layout.columnStretch(2), 1)
+        window.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
