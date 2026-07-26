@@ -15,14 +15,21 @@ from PySide6.QtCore import QtMsgType, QTimer, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui import MainWindow
-from cooling_tower.runtime_paths import INSTALL_ROOT
+from cooling_tower.distribution import detect_distribution_channel
+from cooling_tower.runtime_paths import IS_FROZEN, resolve_user_data_root
 from cooling_tower.version import APP_VERSION
 
 
-PROJECT_ROOT = INSTALL_ROOT
-DEFAULT_STARTUP_LOG = PROJECT_ROOT / "output" / "logs" / "application_startup.log"
-DEFAULT_NATIVE_CRASH_LOG = PROJECT_ROOT / "output" / "logs" / "native_crash.log"
-DEFAULT_RUNTIME_LOG = PROJECT_ROOT / "output" / "logs" / "application_runtime.log"
+_DISTRIBUTION_CHANNEL = detect_distribution_channel()
+_APPLICATION_DATA_ROOT = resolve_user_data_root(
+    instance_id=(
+        _DISTRIBUTION_CHANNEL.value if IS_FROZEN else "development"
+    )
+)
+_APPLICATION_LOG_ROOT = _APPLICATION_DATA_ROOT / "logs"
+DEFAULT_STARTUP_LOG = _APPLICATION_LOG_ROOT / "application_startup.log"
+DEFAULT_NATIVE_CRASH_LOG = _APPLICATION_LOG_ROOT / "native_crash.log"
+DEFAULT_RUNTIME_LOG = _APPLICATION_LOG_ROOT / "application_runtime.log"
 
 
 def enable_native_crash_log(

@@ -47,9 +47,18 @@ Die veröffentlichte Windows-Version wird über den per-user Installer
 `SacrificialTowerSetup-x.x.x.exe` installiert. Sie prüft einen öffentlichen,
 kostenlosen GitHub-Update-Kanal im Hintergrund. Ist dort eine numerisch höhere
 Version verfügbar, erscheint rechts neben der aktuellen Versionsnummer der
-Button `Aktualisieren`. Ein Klick lädt den Installer direkt herunter, prüft
-Dateigröße und SHA-256, installiert das Update still und startet das Programm
-anschließend neu. Endnutzer benötigen dafür weder Git noch GitHub-Zugangsdaten.
+Button `Aktualisieren`. Ein Klick lädt den Installer direkt herunter und prüft
+zuerst das eingebettete Ed25519-Vertrauensmodell des signierten Manifests,
+danach Dateigröße und SHA-256. Erst dann wird das Update still installiert und
+das Programm neu gestartet. Endnutzer benötigen dafür weder Git noch
+GitHub-Zugangsdaten.
+
+Veränderliche Einstellungen, Logs und Standardausgaben liegen getrennt vom
+Programm unter
+`%LOCALAPPDATA%\RodeProjects\SacrificialTower\<Instanz>\`. Python-Entwicklung,
+eigenständige Installation und ein späterer Store-Build verwenden getrennte
+Instanzen. Aufbau, sichere Legacy-Übernahme und Schema-Migration sind in
+[`docs/settings_migrations.md`](docs/settings_migrations.md) beschrieben.
 
 Build und Veröffentlichung des Installers sind in
 [`docs/update_channel.md`](docs/update_channel.md) dokumentiert.

@@ -14,6 +14,7 @@ class UpdatePackagingTests(unittest.TestCase):
         )
         self.assertIn("start_gui.pyw", spec)
         self.assertIn("default_settings.json", spec)
+        self.assertIn("distribution.json", spec)
         self.assertIn("styles.qss", spec)
         self.assertIn('name="SacrificialTower"', spec)
         self.assertIn("console=False", spec)
@@ -38,7 +39,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn('WorkingDir: "{app}"', installer)
         self.assertIn("VersionInfoVersion={#AppVersion}", installer)
 
-    def test_release_build_signs_every_windows_executable(self) -> None:
+    def test_release_build_uses_free_signed_update_manifest(self) -> None:
         installer = (
             PROJECT_ROOT / "installer" / "SacrificialTower.iss"
         ).read_text(encoding="utf-8")
@@ -49,11 +50,13 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("SignTool=authenticode", installer)
         self.assertIn("SignedUninstaller=yes", installer)
         self.assertIn("Flags: ignoreversion signonce", installer)
-        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_BASE64", workflow)
-        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_PASSWORD", workflow)
-        self.assertIn("/DSignBuild=1", workflow)
-        self.assertIn("Get-AuthenticodeSignature", workflow)
-        self.assertIn("signer_thumbprint", workflow)
+        self.assertIn("UPDATE_MANIFEST_SIGNING_KEY_BASE64", workflow)
+        self.assertIn("create_update_manifest.py", workflow)
+        self.assertIn("dist/installer/latest.json", workflow)
+        self.assertNotIn("WINDOWS_SIGNING_CERTIFICATE_BASE64", workflow)
+        self.assertNotIn("WINDOWS_SIGNING_CERTIFICATE_PASSWORD", workflow)
+        self.assertNotIn("/DSignBuild=1", workflow)
+        self.assertNotIn("Get-AuthenticodeSignature", workflow)
 
     def test_packaged_resources_and_persistent_files_use_separate_roots(self) -> None:
         main_window = (
@@ -63,10 +66,9 @@ class UpdatePackagingTests(unittest.TestCase):
             'RESOURCE_ROOT / "config" / "default_settings.json"',
             main_window,
         )
-        self.assertIn(
-            'INSTALL_ROOT / "config" / "user_settings.json"',
-            main_window,
-        )
+        self.assertIn('user_config_root / "user_settings.json"', main_window)
+        self.assertIn("resolve_user_data_root", main_window)
+        self.assertIn("migrate_legacy_configuration", main_window)
 
     def test_workflow_builds_and_hashes_the_installer(self) -> None:
         workflow = (
@@ -76,7 +78,13 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("pyinstaller --noconfirm --clean", workflow)
         self.assertIn("Inno Setup", workflow)
         self.assertIn("Get-FileHash", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/checkout@v5", workflow)
+        self.assertIn("actions/setup-python@v6", workflow)
+        self.assertIn("actions/upload-artifact@v5", workflow)
+        self.assertIn(
+            "name: Windows-Installer für Sacrificial-Tower-Update bauen",
+            workflow,
+        )
 
     def test_publish_script_uses_local_gh_auth_and_public_channel(self) -> None:
         script = (
@@ -85,10 +93,21 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("auth status", script)
         self.assertIn("RodeProjects/sacrificial-tower-updates", script)
         self.assertIn("update-metadata.json", script)
-        self.assertIn("Get-AuthenticodeSignature", script)
-        self.assertIn("signer_thumbprint", script)
+        self.assertIn("verify_update_manifest.py", script)
+        self.assertIn("latest.json", script)
+        self.assertNotIn("Get-AuthenticodeSignature", script)
+        self.assertNotIn("signer_thumbprint", script)
+        self.assertIn("Assert-NativeSuccess \"Der Build-Workflow\"", script)
+        self.assertIn("Programmupdate-Kanal auf Version $version", script)
+        self.assertIn("release delete $tag", script)
         self.assertNotIn("Authorization: Bearer", script)
         self.assertNotIn("personal_access_token", script.casefold())
+
+    def test_runtime_dependency_contains_manifest_signature_support(self) -> None:
+        requirements = (PROJECT_ROOT / "requirements.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("cryptography>=49,<50", requirements)
 
 
 if __name__ == "__main__":

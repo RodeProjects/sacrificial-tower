@@ -1,4 +1,4 @@
-name: Build Windows update
+name: Windows-Installer für Sacrificial-Tower-Update bauen
 
 on:
   workflow_dispatch:
@@ -19,10 +19,10 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -48,55 +48,6 @@ jobs:
       - name: Build application directory
         run: pyinstaller --noconfirm --clean SacrificialTower.spec
 
-      - name: Import Authenticode certificate
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)) {
-            throw 'The WINDOWS_SIGNING_CERTIFICATE_BASE64 secret is required.'
-          }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
-            throw 'The WINDOWS_SIGNING_CERTIFICATE_PASSWORD secret is required.'
-          }
-
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.pfx'
-          try {
-            $certificateBytes = [Convert]::FromBase64String(
-              $env:WINDOWS_SIGNING_CERTIFICATE_BASE64
-            )
-            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
-            $password = ConvertTo-SecureString `
-              $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD `
-              -AsPlainText `
-              -Force
-            $certificate = Import-PfxCertificate `
-              -FilePath $certificatePath `
-              -CertStoreLocation Cert:\CurrentUser\My `
-              -Password $password `
-              -Exportable:$false
-          } finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-          }
-          if ($null -eq $certificate -or -not $certificate.HasPrivateKey) {
-            throw 'The Authenticode certificate could not be imported with its private key.'
-          }
-
-          $signTool = Get-ChildItem `
-            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
-            -Filter 'signtool.exe' `
-            -Recurse |
-            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if ($null -eq $signTool) {
-            throw 'signtool.exe was not found in the Windows SDK.'
-          }
-
-          "WINDOWS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
-          "SIGNTOOL_PATH=$($signTool.FullName)" >> $env:GITHUB_ENV
-
       - name: Install pinned Inno Setup compiler
         shell: pwsh
         run: |
@@ -116,32 +67,9 @@ jobs:
         shell: pwsh
         run: |
           $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
-          $signCommand = (
-            '$q{0}$q sign /sha1 {1} /fd SHA256 /td SHA256 ' +
-            '/tr http://timestamp.digicert.com /d $qSacrificial Tower$q $f'
-          ) -f $env:SIGNTOOL_PATH, $env:WINDOWS_SIGNING_THUMBPRINT
           & $iscc `
             "/DAppVersion=$env:APP_VERSION" `
-            '/DSignBuild=1' `
-            "/Sauthenticode=$signCommand" `
             'installer\SacrificialTower.iss'
-
-      - name: Verify Authenticode signatures
-        shell: pwsh
-        run: |
-          $files = @(
-            'dist\SacrificialTower\SacrificialTower.exe',
-            "dist\installer\SacrificialTowerSetup-$env:APP_VERSION.exe"
-          )
-          foreach ($file in $files) {
-            $signature = Get-AuthenticodeSignature -FilePath $file
-            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-              throw "Invalid Authenticode signature on ${file}: $($signature.StatusMessage)"
-            }
-            if ($signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_SIGNING_THUMBPRINT) {
-              throw "Unexpected Authenticode signer on $file."
-            }
-          }
 
       - name: Create verified update metadata
         shell: pwsh
@@ -152,16 +80,25 @@ jobs:
             installer_name = $installer.Name
             sha256 = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             size_bytes = $installer.Length
-            signer_thumbprint = $env:WINDOWS_SIGNING_THUMBPRINT.ToLowerInvariant()
           }
           $metadata | ConvertTo-Json | Set-Content 'dist\installer\update-metadata.json' -Encoding utf8
 
+      - name: Create signed update manifest
+        env:
+          UPDATE_MANIFEST_SIGNING_KEY_BASE64: ${{ secrets.UPDATE_MANIFEST_SIGNING_KEY_BASE64 }}
+        run: >-
+          python scripts/create_update_manifest.py
+          --metadata dist/installer/update-metadata.json
+          --output dist/installer/latest.json
+          --release-notes "Sacrificial Tower ${{ inputs.version }}"
+
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: SacrificialTower-${{ inputs.version }}-windows-x64
           path: |
             dist/installer/SacrificialTowerSetup-${{ inputs.version }}.exe
             dist/installer/update-metadata.json
+            dist/installer/latest.json
           if-no-files-found: error
           retention-days: 14

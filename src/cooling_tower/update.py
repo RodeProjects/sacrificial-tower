@@ -7,7 +7,7 @@ import re
 import ssl
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -16,6 +16,12 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import truststore
+
+from cooling_tower.update_keys import UPDATE_MANIFEST_PUBLIC_KEYS
+from cooling_tower.update_manifest import (
+    UpdateManifestSignatureError,
+    verify_update_manifest_signature,
+)
 
 
 DEFAULT_UPDATE_MANIFEST_URL = (
@@ -47,6 +53,7 @@ class UpdateInfo:
     sha256: str
     size_bytes: int
     release_notes: str = ""
+    signing_key_id: str = ""
 
 
 def version_key(value: str) -> tuple[int, int, int]:
@@ -62,15 +69,43 @@ def is_newer_version(candidate: str, current: str) -> bool:
     return version_key(candidate) > version_key(current)
 
 
-def parse_update_manifest(payload: bytes | str) -> UpdateInfo:
+def _reject_duplicate_json_keys(pairs):
+    parsed = {}
+    for key, value in pairs:
+        if key in parsed:
+            raise UpdateError(
+                f"Das Update-Manifest enthält den Schlüssel {key!r} mehrfach."
+            )
+        parsed[key] = value
+    return parsed
+
+
+def parse_update_manifest(
+    payload: bytes | str,
+    *,
+    public_keys: Mapping[str, str] | None = None,
+) -> UpdateInfo:
     try:
         if isinstance(payload, bytes):
             payload = payload.decode("utf-8")
-        raw = json.loads(payload)
+        raw = json.loads(payload, object_pairs_hook=_reject_duplicate_json_keys)
+    except UpdateError:
+        raise
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise UpdateError("Das Update-Manifest ist kein gültiges JSON.") from error
     if not isinstance(raw, dict):
         raise UpdateError("Das Update-Manifest muss ein JSON-Objekt sein.")
+    try:
+        verify_update_manifest_signature(
+            raw,
+            (
+                UPDATE_MANIFEST_PUBLIC_KEYS
+                if public_keys is None
+                else public_keys
+            ),
+        )
+    except UpdateManifestSignatureError as error:
+        raise UpdateError(str(error)) from error
     if raw.get("schema_version") != 1:
         raise UpdateError("Die Version des Update-Manifests wird nicht unterstützt.")
 
@@ -106,6 +141,7 @@ def parse_update_manifest(payload: bytes | str) -> UpdateInfo:
         sha256=sha256,
         size_bytes=size_bytes,
         release_notes=str(raw.get("release_notes", "")).strip(),
+        signing_key_id=str(raw["signing_key_id"]),
     )
 
 
@@ -119,6 +155,7 @@ class UpdateService:
         timeout_s: float = 5.0,
         temporary_root: str | Path | None = None,
         opener=None,
+        manifest_public_keys: Mapping[str, str] | None = None,
     ) -> None:
         self.manifest_url = manifest_url
         self.timeout_s = timeout_s
@@ -127,6 +164,11 @@ class UpdateService:
         )
         self._ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         self._opener = opener or self._open_with_system_trust
+        self._manifest_public_keys = dict(
+            UPDATE_MANIFEST_PUBLIC_KEYS
+            if manifest_public_keys is None
+            else manifest_public_keys
+        )
 
     def _open_with_system_trust(self, request: Request, *, timeout: float):
         return urlopen(request, timeout=timeout, context=self._ssl_context)
@@ -151,7 +193,10 @@ class UpdateService:
             raise UpdateError("Der Update-Kanal ist derzeit nicht erreichbar.") from error
         if len(payload) > MAXIMUM_MANIFEST_BYTES:
             raise UpdateError("Das Update-Manifest ist unerwartet groß.")
-        info = parse_update_manifest(payload)
+        info = parse_update_manifest(
+            payload,
+            public_keys=self._manifest_public_keys,
+        )
         return info if is_newer_version(info.version, current_version) else None
 
     def download_installer(

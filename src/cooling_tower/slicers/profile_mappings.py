@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from cooling_tower.models.gcode_metadata import SlicerFamily
+from cooling_tower.persistence import VersionedDocumentError, VersionedJsonStore
 from cooling_tower.slicers.profile_models import (
     PROFILE_MAPPING_SCHEMA_VERSION,
     ConfirmedProfileMapping,
@@ -14,6 +14,27 @@ from cooling_tower.slicers.profile_models import (
     ProfileMatchResult,
     stable_json_fingerprint,
 )
+
+
+def _migrate_profile_mappings_0_to_1(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Adopt mappings written before an explicit schema was required."""
+
+    return dict(payload)
+
+
+def _normalize_profile_mappings(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_mappings = payload.get("mappings", {})
+    if not isinstance(raw_mappings, Mapping):
+        raw_mappings = {}
+    return {
+        "mappings": {
+            str(key): dict(value)
+            for key, value in raw_mappings.items()
+            if isinstance(key, str) and isinstance(value, Mapping)
+        }
+    }
 
 
 def compatible_version_range(version: str | None) -> str:
@@ -44,6 +65,16 @@ def profile_mapping_key(
 class ProfileMappingStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self.last_load_warning: str | None = None
+        self.last_migration_backup: Path | None = None
+        self._document = VersionedJsonStore(
+            self.path,
+            schema_key="schema_version",
+            current_version=PROFILE_MAPPING_SCHEMA_VERSION,
+            migrations={0: _migrate_profile_mappings_0_to_1},
+            normalizer=_normalize_profile_mappings,
+            document_name="Die gespeicherten Profilzuordnungen",
+        )
 
     def confirm(self, result: ProfileMatchResult) -> ConfirmedProfileMapping:
         if result.selected is None:
@@ -149,33 +180,26 @@ class ProfileMappingStore:
         )
 
     def _read(self) -> dict[str, Any]:
+        self.last_load_warning = None
+        self.last_migration_backup = None
         if not self.path.is_file():
             return {
                 "schema_version": PROFILE_MAPPING_SCHEMA_VERSION,
                 "mappings": {},
             }
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(payload, dict)
-                or int(payload.get("schema_version", 0))
-                != PROFILE_MAPPING_SCHEMA_VERSION
-            ):
-                raise ValueError("Das Zuordnungsschema wird nicht unterstützt.")
-            if not isinstance(payload.get("mappings"), dict):
-                payload["mappings"] = {}
-            return payload
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            result = self._document.load()
+            self.last_migration_backup = result.backup_path
+            return result.payload
+        except (OSError, ValueError, TypeError, VersionedDocumentError) as error:
+            self.last_load_warning = (
+                "Die gespeicherten Profilzuordnungen konnten nicht sicher "
+                f"geladen werden: {error} Die Originaldatei bleibt unverändert."
+            )
             return {
                 "schema_version": PROFILE_MAPPING_SCHEMA_VERSION,
                 "mappings": {},
             }
 
     def _write(self, payload: Mapping[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(self.path)
+        self._document.save(payload)
