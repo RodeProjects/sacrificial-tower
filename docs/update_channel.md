@@ -30,5 +30,7 @@ Installer oder öffentlichen Manifest werden keine Tokens gespeichert.
 - Der Button `Aktualisieren` erscheint nur bei einer numerisch höheren Version.
 - Der Installer wird vollständig heruntergeladen und gegen Größe und SHA-256
   aus dem Manifest geprüft.
+- HTTPS-Zertifikate werden über den nativen Windows-Zertifikatsspeicher
+  geprüft.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung
   beendet, ersetzt und anschließend neu geöffnet.

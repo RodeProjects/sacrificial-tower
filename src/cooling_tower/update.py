@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -13,6 +14,8 @@ from threading import Event
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+import truststore
 
 
 DEFAULT_UPDATE_MANIFEST_URL = (
@@ -122,7 +125,11 @@ class UpdateService:
         self.temporary_root = (
             Path(temporary_root).resolve() if temporary_root is not None else None
         )
-        self._opener = opener or urlopen
+        self._ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self._opener = opener or self._open_with_system_trust
+
+    def _open_with_system_trust(self, request: Request, *, timeout: float):
+        return urlopen(request, timeout=timeout, context=self._ssl_context)
 
     @staticmethod
     def _request(url: str, accept: str) -> Request:
