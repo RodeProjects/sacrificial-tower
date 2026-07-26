@@ -1,0 +1,92 @@
+name: Build Windows update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version im Format x.x.x
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Validate requested version
+        shell: pwsh
+        run: |
+          $appVersion = python -c "import sys; sys.path.insert(0, 'src'); from cooling_tower.version import APP_VERSION; print(APP_VERSION)"
+          if ($appVersion -ne '${{ inputs.version }}') {
+            throw "Requested version ${{ inputs.version }} does not match APP_VERSION $appVersion."
+          }
+          "APP_VERSION=$appVersion" >> $env:GITHUB_ENV
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -q
+
+      - name: Build application directory
+        run: pyinstaller --noconfirm --clean SacrificialTower.spec
+
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $innoRoot = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $expectedHash = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          $actualHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "Unexpected Inno Setup installer hash: $actualHash"
+          }
+          $arguments = "/PORTABLE=1 /VERYSILENT /CURRENTUSER /DIR=`"$innoRoot`""
+          Start-Process -FilePath $installer -ArgumentList $arguments -Wait -WindowStyle Hidden
+          "INNO_ROOT=$innoRoot" >> $env:GITHUB_ENV
+
+      - name: Build per-user installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
+          & $iscc "/DAppVersion=$env:APP_VERSION" 'installer\SacrificialTower.iss'
+
+      - name: Create verified update metadata
+        shell: pwsh
+        run: |
+          $installer = Get-Item "dist\installer\SacrificialTowerSetup-$env:APP_VERSION.exe"
+          $metadata = @{
+            version = $env:APP_VERSION
+            installer_name = $installer.Name
+            sha256 = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            size_bytes = $installer.Length
+          }
+          $metadata | ConvertTo-Json | Set-Content 'dist\installer\update-metadata.json' -Encoding utf8
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SacrificialTower-${{ inputs.version }}-windows-x64
+          path: |
+            dist/installer/SacrificialTowerSetup-${{ inputs.version }}.exe
+            dist/installer/update-metadata.json
+          if-no-files-found: error
+          retention-days: 14

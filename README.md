@@ -41,6 +41,19 @@ anschließend exportieren.
 Die gewünschte Layerzeit wird in der GUI im Abschnitt
 `2. Zielzeit und Berechnung` unter `Ziel-Layerzeit [s]` eingestellt.
 
+### Installierte Version und automatische Updates
+
+Die veröffentlichte Windows-Version wird über den per-user Installer
+`SacrificialTowerSetup-x.x.x.exe` installiert. Sie prüft einen öffentlichen,
+kostenlosen GitHub-Update-Kanal im Hintergrund. Ist dort eine numerisch höhere
+Version verfügbar, erscheint rechts neben der aktuellen Versionsnummer der
+Button `Aktualisieren`. Ein Klick lädt den Installer direkt herunter, prüft
+Dateigröße und SHA-256, installiert das Update still und startet das Programm
+anschließend neu. Endnutzer benötigen dafür weder Git noch GitHub-Zugangsdaten.
+
+Build und Veröffentlichung des Installers sind in
+[`docs/update_channel.md`](docs/update_channel.md) dokumentiert.
+
 ## Entwicklung und Wartung
 
 Die Paketverantwortungen, der einheitliche Thread-Lebenszyklus und die Regeln

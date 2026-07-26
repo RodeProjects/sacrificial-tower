@@ -75,6 +75,25 @@ QLabel#versionLabel {
     padding-bottom: 3px;
 }
 
+QPushButton#updateButton {
+    color: #ffffff;
+    background: #1769aa;
+    border: 1px solid #0f568f;
+    border-radius: 5px;
+    min-height: 22px;
+    padding: 2px 9px;
+    font-size: 9pt;
+    font-weight: 600;
+}
+
+QPushButton#updateButton:hover { background: #125b96; }
+QPushButton#updateButton:pressed { background: #0d4c7e; }
+QPushButton#updateButton:disabled {
+    color: #dce7f0;
+    background: #5f83a3;
+    border-color: #527491;
+}
+
 QLabel#sectionHeading {
     color: #153b60;
     font-size: 13pt;
