@@ -664,8 +664,9 @@ class StartupLayoutAndLifecycleTests(GuiCase):
             )
 
     def test_pythonw_entry_point_starts_and_closes_cleanly(self) -> None:
-        pythonw = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
-        self.assertTrue(pythonw.is_file())
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        if not pythonw.is_file():
+            self.skipTest("Der aktuelle Python-Build enthält kein pythonw.exe.")
         environment = os.environ.copy()
         environment["QT_QPA_PLATFORM"] = "offscreen"
         environment["COOLING_TOWER_TEST_AUTOCLOSE_MS"] = "250"

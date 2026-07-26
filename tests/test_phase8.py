@@ -44,6 +44,27 @@ from cooling_tower.tower.wall_calculator import calculate_wall_path_length
 
 REFERENCE_GCODE = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
 MIGRATED = PROJECT_ROOT / "output" / "migrated_legacy"
+LEGACY_LAYER_REFERENCE = (
+    MIGRATED / "analysis" / "rabe_koerper_18cm_layer_analysis.csv"
+)
+LEGACY_PHASE2_REFERENCE = (
+    MIGRATED / "analysis" / "rabe_koerper_18cm_phase2.csv"
+)
+LEGACY_PHASE4_REFERENCE = (
+    MIGRATED / "analysis" / "rabe_koerper_18cm_phase4_analysis.csv"
+)
+LEGACY_STL_REFERENCE = (
+    MIGRATED / "stl" / "rabe_koerper_18cm_cooling_tower.stl"
+)
+MIGRATION_REFERENCES_AVAILABLE = all(
+    path.is_file()
+    for path in (
+        LEGACY_LAYER_REFERENCE,
+        LEGACY_PHASE2_REFERENCE,
+        LEGACY_PHASE4_REFERENCE,
+        LEGACY_STL_REFERENCE,
+    )
+) and any((MIGRATED / "logs").glob("migration_report_*.json"))
 
 
 def base_settings(**changes: object) -> GenerationSettings:
@@ -104,6 +125,10 @@ def make_phase2(
     )
 
 
+@unittest.skipUnless(
+    MIGRATION_REFERENCES_AVAILABLE,
+    "Benötigt lokale, absichtlich nicht versionierte Migrationsreferenzen.",
+)
 class MigrationCompletionTests(unittest.TestCase):
     def test_real_migration_is_complete_hash_preserving_and_reported(self) -> None:
         expected = {
@@ -154,10 +179,12 @@ class ReferenceEndToEndTests(unittest.TestCase):
     def test_reference_geometry_matches_legacy_and_timing_is_refined(
         self,
     ) -> None:
-        legacy_path = (
-            MIGRATED / "analysis" / "rabe_koerper_18cm_layer_analysis.csv"
-        )
-        with legacy_path.open(encoding="utf-8-sig", newline="") as handle:
+        if not LEGACY_LAYER_REFERENCE.is_file():
+            self.skipTest("Lokale Layer-Migrationsreferenz fehlt.")
+        with LEGACY_LAYER_REFERENCE.open(
+            encoding="utf-8-sig",
+            newline="",
+        ) as handle:
             legacy = list(csv.DictReader(handle, delimiter=";"))
         layers = self.result.analysis.layers
         self.assertEqual(len(layers), len(legacy), 891)
@@ -199,10 +226,12 @@ class ReferenceEndToEndTests(unittest.TestCase):
     def test_reference_time_deficits_use_acceleration_aware_analysis(
         self,
     ) -> None:
-        legacy_path = (
-            MIGRATED / "analysis" / "rabe_koerper_18cm_phase4_analysis.csv"
-        )
-        with legacy_path.open(encoding="utf-8-sig", newline="") as handle:
+        if not LEGACY_PHASE4_REFERENCE.is_file():
+            self.skipTest("Lokale Phase-4-Migrationsreferenz fehlt.")
+        with LEGACY_PHASE4_REFERENCE.open(
+            encoding="utf-8-sig",
+            newline="",
+        ) as handle:
             legacy = list(csv.DictReader(handle, delimiter=";"))
         for layer, profile, row in zip(
             self.result.analysis.layers,

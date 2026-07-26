@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QLocale, Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
@@ -47,6 +47,12 @@ class NumericSettingWidget(QWidget):
         self.setting_name = setting_name
         self.editor = editor
         self.default_provider = default_provider
+        self.editor.setLocale(
+            QLocale(
+                QLocale.Language.German,
+                QLocale.Country.Germany,
+            )
+        )
 
         layout = QGridLayout(self)
         layout.setContentsMargins(

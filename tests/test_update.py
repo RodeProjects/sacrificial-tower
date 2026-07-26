@@ -161,12 +161,19 @@ class UpdateServiceTests(unittest.TestCase):
             ):
                 UpdateService.launch_installer(installer)
             command = popen.call_args.args[0]
-            self.assertEqual(command[0], str(installer.resolve()))
-            self.assertIn("/SP-", command)
-            self.assertIn("/VERYSILENT", command)
-            self.assertIn("/CURRENTUSER", command)
-            self.assertIn("/CLOSEAPPLICATIONS", command)
-            self.assertIn("/NORESTARTAPPLICATIONS", command)
+            self.assertEqual(
+                command,
+                [
+                    str(installer.resolve()),
+                    "/SP-",
+                    "/VERYSILENT",
+                    "/SUPPRESSMSGBOXES",
+                    "/NORESTART",
+                    "/CURRENTUSER",
+                    "/CLOSEAPPLICATIONS",
+                    "/NORESTARTAPPLICATIONS",
+                ],
+            )
 
 
 if __name__ == "__main__":

@@ -321,7 +321,7 @@ class UxImprovementTests(unittest.TestCase):
     def test_08_export_folder_is_flat_timestamp_first_and_has_no_mode_suffix(self) -> None:
         request = self.request()
         preview = PreviewService().prepare(request)
-        output_root = self.root / "output"
+        output_root = (self.root / "output").resolve()
         result = PreviewExportService().export(preview, request, output_root)
         self.assertEqual(result.run_directory.parent, output_root.resolve())
         self.assertRegex(
