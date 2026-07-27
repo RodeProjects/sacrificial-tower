@@ -238,6 +238,7 @@ class UpdateServiceTests(unittest.TestCase):
                     "/CURRENTUSER",
                     "/CLOSEAPPLICATIONS",
                     "/NORESTARTAPPLICATIONS",
+                    "/SACRIFICIALTOWERUPDATE",
                 ],
             )
 

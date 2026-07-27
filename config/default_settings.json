@@ -1,5 +1,5 @@
 {
-  "settings_schema_version": 3,
+  "settings_schema_version": 4,
   "default_output_root": "output",
   "automatic_base_width": true,
   "base_height_factor": 0.05,

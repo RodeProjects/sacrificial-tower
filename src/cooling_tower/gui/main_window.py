@@ -54,6 +54,7 @@ from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
     SETTING_INFO_TEXTS,
 )
+from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
 from cooling_tower.gui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
@@ -2279,6 +2280,10 @@ class MainWindow(QMainWindow):
         installer_path: Path,
     ) -> None:
         if request_id != self._update_download_request_id or self._closing:
+            return
+        self.update_button.setText("Update geprüft")
+        UpdateRestartCountdownDialog(self, seconds=5).exec_countdown()
+        if self._closing:
             return
         self.update_button.setText("Installation startet …")
         try:

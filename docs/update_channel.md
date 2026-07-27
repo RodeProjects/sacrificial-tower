@@ -72,6 +72,39 @@ fehl, entfernt das Skript das unvollständige Release wieder. Es verwendet nur
 die lokale, interaktive GitHub-CLI-Anmeldung des Entwicklers. Im Programm,
 Installer oder öffentlichen Manifest werden keine GitHub-Tokens gespeichert.
 
+## Automatische Release-Aufbewahrung
+
+Nach einer vollständig erfolgreichen Veröffentlichung führt
+`scripts/publish_update.ps1` die Bereinigung des öffentlichen Update-Repositories
+aus. Die Regeln liegen nachvollziehbar in
+`config/release_retention.json`:
+
+- Die neuesten 100 veröffentlichten Releases bleiben immer erhalten.
+- Release-Assets dürfen zusammen höchstens 10 GiB belegen.
+- Ungeschützte Releases außerhalb der neuesten 100 werden nach 90 Tagen
+  entfernt.
+- Ist die 10-GiB-Grenze erreicht, werden die ältesten geeigneten Releases ohne
+  Rücksicht auf ihr Alter entfernt, bis die Größe wieder unter der Grenze liegt.
+- Jede Version `x.y.0` und die ausdrücklich eingetragene Version `0.4.8` sind
+  dauerhaft geschützt.
+- Das gerade veröffentlichte Release, Entwürfe, unveränderliche Releases und
+  nicht eindeutig als `x.y.z` erkennbare Tags werden ebenfalls nie automatisch
+  gelöscht.
+
+Die Mindestanzahl und die Schutzregeln haben Vorrang vor der Größenbegrenzung.
+Kann die Größenbegrenzung deshalb nicht eingehalten werden, bricht die
+Bereinigung mit einem eindeutigen Hinweis ab, statt ein geschütztes Release zu
+löschen. Git-Tags bleiben auch beim Löschen eines Release erhalten.
+
+Ein ungefährlicher Probelauf gegen ein beliebiges Repository ist möglich mit:
+
+```powershell
+.\scripts\cleanup_releases.ps1 `
+  -Repository RodeProjects/sacrificial-tower-updates `
+  -LatestVersion 0.4.8 `
+  -DryRun
+```
+
 ## Eigenständiger und späterer Store-Build
 
 `config/distribution.json` legt den Vertriebskanal eines Builds fest:

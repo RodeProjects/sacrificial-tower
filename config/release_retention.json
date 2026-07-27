@@ -1,0 +1,9 @@
+{
+  "maximum_total_asset_size_bytes": 10737418240,
+  "minimum_age_days": 90,
+  "minimum_releases": 100,
+  "protect_zero_patch_versions": true,
+  "protected_versions": [
+    "0.4.8"
+  ]
+}

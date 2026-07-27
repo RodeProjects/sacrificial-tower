@@ -58,7 +58,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        self.assertEqual(APP_VERSION, "0.4.7")
+        self.assertEqual(APP_VERSION, "0.4.8")
         self.assertEqual(window.version_label.text(), APP_VERSION_LABEL)
         self.assertEqual(window.version_label.objectName(), "versionLabel")
         self.assertNotIn("alpha", window.version_label.text().casefold())
@@ -104,6 +104,36 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         window._on_update_check_succeeded(7, None)
         self.assertTrue(window.update_button.isHidden())
+        window.close()
+
+    def test_verified_update_counts_down_before_installer_and_shutdown(self) -> None:
+        window = self.window()
+        window._update_download_request_id = 9
+        installer = self.root / "SacrificialTowerSetup-test.exe"
+        events: list[str] = []
+
+        with (
+            patch(
+                "cooling_tower.gui.main_window.UpdateRestartCountdownDialog"
+            ) as dialog_type,
+            patch.object(
+                window.update_service,
+                "launch_installer",
+                side_effect=lambda _path: events.append("installer"),
+            ),
+            patch.object(
+                QApplication,
+                "quit",
+                side_effect=lambda *_args: events.append("beenden"),
+            ),
+        ):
+            dialog_type.return_value.exec_countdown.side_effect = (
+                lambda: events.append("countdown")
+            )
+            window._on_update_download_succeeded(9, installer)
+
+        dialog_type.assert_called_once_with(window, seconds=5)
+        self.assertEqual(events, ["countdown", "installer", "beenden"])
         window.close()
 
     def test_slicer_titles_are_left_aligned(self) -> None:

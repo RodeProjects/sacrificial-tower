@@ -178,6 +178,11 @@ try {
     & $gh @apiArguments | Out-Null
     Assert-NativeSuccess "Das Aktualisieren des Programmupdate-Manifests"
     $manifestPublished = $true
+
+    & (Join-Path $PSScriptRoot 'cleanup_releases.ps1') `
+        -Repository $UpdateRepository `
+        -LatestVersion $version
+    Assert-NativeSuccess 'Die automatische Release-Bereinigung'
     Write-Host "Version $version wurde im öffentlichen Update-Kanal veröffentlicht."
 } finally {
     if ($releaseCreated -and -not $manifestPublished) {

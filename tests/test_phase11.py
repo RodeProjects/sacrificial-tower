@@ -38,7 +38,6 @@ from cooling_tower.models import (
     GenerationSettings,
     ProfileFeasibilityAssessment,
 )
-from cooling_tower.persistence import VersionedDocumentWriteBlockedError
 from cooling_tower.services import (
     AnalysisCancelled,
     GCodeAnalysisService,
@@ -208,7 +207,7 @@ class SettingsSchemaTests(unittest.TestCase):
         self.assertEqual(settings.safety_factor, 1.25)
         self.assertIsNotNone(self.store.last_migration_backup)
 
-    def test_future_schema_blocks_save_and_preserves_original(self) -> None:
+    def test_future_schema_uses_separate_journal_and_preserves_original(self) -> None:
         self.user_path.write_text(
             json.dumps(
                 {
@@ -223,15 +222,19 @@ class SettingsSchemaTests(unittest.TestCase):
         settings, state = self.store.load()
 
         self.assertEqual(settings, GenerationSettings())
-        self.assertEqual(state, {})
+        self.assertEqual(
+            state["settings_schema_version"],
+            SETTINGS_SCHEMA_VERSION,
+        )
         self.assertIn("nicht überschrieben", self.store.last_load_warning)
-        with self.assertRaises(VersionedDocumentWriteBlockedError):
-            self.store.save(
-                settings,
-                output_root="output",
-                window_width=900,
-                window_height=700,
-            )
+        journal = self.store.save(
+            settings,
+            output_root="output",
+            window_width=900,
+            window_height=700,
+        )
+        self.assertTrue(journal.is_file())
+        self.assertIn("downgrade-changes", journal.name)
         self.assertEqual(self.user_path.read_bytes(), original)
 
     def test_malformed_file_requires_explicit_recovery(self) -> None:

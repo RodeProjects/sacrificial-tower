@@ -24,6 +24,9 @@
 
 #define ApplicationMutexName "SacrificialTower-Standalone-D47169C5-9DE6-46AF-A8C9-72A394CD2949"
 
+[Languages]
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+
 [Setup]
 AppId={#AppIdValue}
 AppName=Sacrificial Tower
@@ -72,7 +75,8 @@ Name: "desktopicon"; Description: "Desktop-Verknüpfung erstellen"; GroupDescrip
 
 #ifndef UninstallIntegrationTest
 [Run]
-Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Description: "Sacrificial Tower starten"; Flags: nowait
+Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Description: "Sacrificial-Tower jetzt starten?"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Flags: nowait skipifnotsilent; Check: IsAutomaticUpdate
 #endif
 
 [UninstallDelete]
@@ -83,6 +87,88 @@ Type: dirifempty; Name: "{app}"
 [Code]
 var
   DeleteStandaloneUserData: Boolean;
+  ExistingReplacementPending: Boolean;
+  ExistingUninstallerPath: String;
+  ExistingReplacementDeletesUserData: Boolean;
+
+function InstalledApplicationRegistryKey(): String;
+var
+  RegistryId: String;
+begin
+  RegistryId := '{#AppIdValue}';
+  if Copy(RegistryId, 1, 2) = '{{' then
+    Delete(RegistryId, 1, 1);
+  Result :=
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
+    RegistryId + '_is1';
+end;
+
+function ReadInstalledApplicationValue(
+  const ValueName: String;
+  var Value: String
+): Boolean;
+var
+  RegistryKey: String;
+begin
+  RegistryKey := InstalledApplicationRegistryKey();
+  Result := False;
+  if IsWin64 then
+    Result := RegQueryStringValue(HKCU64, RegistryKey, ValueName, Value);
+  if not Result then
+    Result := RegQueryStringValue(HKCU32, RegistryKey, ValueName, Value);
+  if not Result then
+    Result := RegQueryStringValue(HKCU, RegistryKey, ValueName, Value);
+end;
+
+function ExtractExecutableFromCommand(const CommandLine: String): String;
+var
+  ClosingQuote: Integer;
+  ExecutableEnd: Integer;
+  Remainder: String;
+begin
+  Result := '';
+  if CommandLine = '' then
+    Exit;
+
+  if CommandLine[1] = '"' then
+  begin
+    Remainder := Copy(CommandLine, 2, Length(CommandLine) - 1);
+    ClosingQuote := Pos('"', Remainder);
+    if ClosingQuote > 0 then
+      Result := Copy(Remainder, 1, ClosingQuote - 1);
+    Exit;
+  end;
+
+  ExecutableEnd := Pos('.exe', Lowercase(CommandLine));
+  if ExecutableEnd > 0 then
+    Result := Copy(CommandLine, 1, ExecutableEnd + 3);
+end;
+
+function FindExistingApplication(
+  var InstalledVersion: String;
+  var UninstallerPath: String
+): Boolean;
+var
+  InstallLocation: String;
+  UninstallCommand: String;
+begin
+  Result :=
+    ReadInstalledApplicationValue('DisplayVersion', InstalledVersion) and
+    ReadInstalledApplicationValue('InstallLocation', InstallLocation) and
+    ReadInstalledApplicationValue('UninstallString', UninstallCommand);
+  if not Result then
+    Exit;
+
+  UninstallerPath := ExtractExecutableFromCommand(UninstallCommand);
+  InstallLocation := RemoveBackslashUnlessRoot(InstallLocation);
+  Result :=
+    FileExists(UninstallerPath) and
+    (CompareText(
+      RemoveBackslashUnlessRoot(ExtractFileDir(UninstallerPath)),
+      InstallLocation) = 0) and
+    (Pos('unins', Lowercase(ExtractFileName(UninstallerPath))) = 1) and
+    (CompareText(ExtractFileExt(UninstallerPath), '.exe') = 0);
+end;
 
 function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
@@ -107,6 +193,233 @@ begin
     HasCommandLineSwitch('SILENT') or
     HasCommandLineSwitch('VERYSILENT') or
     HasCommandLineSwitch('SUPPRESSMSGBOXES');
+end;
+
+function IsAutomaticUpdate(): Boolean;
+begin
+  Result := HasCommandLineSwitch('SACRIFICIALTOWERUPDATE');
+end;
+
+function TestReplacementWasAccepted(): Boolean;
+begin
+  Result := False;
+#ifdef UninstallIntegrationTest
+  Result := HasCommandLineSwitch('TESTACCEPTREPLACEMENT');
+#endif
+end;
+
+function TestUserDataShouldBeDeleted(): Boolean;
+begin
+  Result := False;
+#ifdef UninstallIntegrationTest
+  Result := HasCommandLineSwitch('TESTDELETEUSERDATA');
+#endif
+end;
+
+function ConfirmReplacement(
+  const InstalledVersion: String;
+  const Comparison: Integer
+): Boolean;
+var
+  MessageText: String;
+begin
+  if TestReplacementWasAccepted() then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if WizardSilent then
+  begin
+    Log(
+      'Installation abgebrochen: Eine gleiche oder neuere Version darf nicht ' +
+      'ohne ausdrückliche Bestätigung ersetzt werden.');
+    Result := False;
+    Exit;
+  end;
+
+  if Comparison = 0 then
+    MessageText :=
+      'Auf diesem Computer ist Sacrificial Tower Version ' +
+      InstalledVersion + ' bereits installiert.' #13#10#13#10 +
+      'Um dieselbe Version erneut vollständig einzurichten, werden zunächst ' +
+      'die vorhandenen Programmdateien deinstalliert und anschließend neu ' +
+      'installiert. Ihre persönlichen Daten bleiben dabei erhalten.' + #13#10#13#10 +
+      'Möchten Sie die Neuinstallation fortsetzen?'
+  else
+    MessageText :=
+      'Auf diesem Computer ist Sacrificial Tower Version ' +
+      InstalledVersion + ' installiert. Der ausgewählte Installer enthält ' +
+      'die ältere Version {#AppVersion}.' #13#10#13#10 +
+      'Damit nach der Installation ausschließlich die zu Version ' +
+      '{#AppVersion} gehörenden Programmdateien vorhanden sind, muss die ' +
+      'derzeit installierte Version zuerst deinstalliert werden.' + #13#10#13#10 +
+      'Möchten Sie fortfahren?';
+
+  Result :=
+    SuppressibleMsgBox(
+      MessageText,
+      mbConfirmation,
+      MB_YESNO or MB_DEFBUTTON2,
+      IDNO) = IDYES;
+end;
+
+function SelectReplacementUserDataPolicy(): Integer;
+begin
+  if TestReplacementWasAccepted() then
+  begin
+    if TestUserDataShouldBeDeleted() then
+      Result := IDYES
+    else
+      Result := IDNO;
+    Exit;
+  end;
+
+  Result := SuppressibleMsgBox(
+    'Sollen zusätzlich die persönlichen Daten der derzeit installierten ' +
+    'Version unwiderruflich gelöscht werden?' #13#10#13#10 +
+    'Dazu gehören Einstellungen, Profilzuordnungen, Logs und ' +
+    'Standardausgaben.' #13#10#13#10 +
+    'Das Beibehalten wird empfohlen. Falls die ältere Programmversion das ' +
+    'vorhandene Einstellungsformat nicht vollständig unterstützt, schützt ' +
+    'sie die bisherigen Einstellungen. Gemeinsam unterstützte, gültige ' +
+    'Änderungen können bei einer späteren Aktualisierung wieder übernommen ' +
+    'werden.' #13#10#13#10 +
+    'Ja löscht die persönlichen Daten unwiderruflich. Nein behält sie bei. ' +
+    'Abbrechen beendet die Installation ohne Änderungen.',
+    mbConfirmation,
+    MB_YESNOCANCEL or MB_DEFBUTTON2,
+    IDNO);
+end;
+
+function RunExistingUninstaller(
+  const UninstallerPath: String;
+  const DeleteUserData: Boolean
+): Boolean;
+var
+  Parameters: String;
+  ResultCode: Integer;
+begin
+  Parameters := '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
+  if DeleteUserData then
+    Parameters := Parameters + ' /DELETEUSERDATA';
+
+  Log('Deinstalliere die vorhandene Version über: ' + UninstallerPath);
+  Result := Exec(
+    UninstallerPath,
+    Parameters,
+    ExtractFileDir(UninstallerPath),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode);
+  if not Result then
+  begin
+    Log(
+      'Vorherige Deinstallation konnte nicht gestartet werden: ' +
+      SysErrorMessage(ResultCode));
+    Exit;
+  end;
+
+  Result := ResultCode = 0;
+  if not Result then
+    Log(
+      'Vorherige Deinstallation ist mit Rückgabecode ' +
+      IntToStr(ResultCode) + ' fehlgeschlagen.');
+end;
+
+function InitializeSetup(): Boolean;
+var
+  InstalledVersion: String;
+  UninstallerPath: String;
+  InstalledPackedVersion: Int64;
+  TargetPackedVersion: Int64;
+  Comparison: Integer;
+  UserDataChoice: Integer;
+  DeleteUserData: Boolean;
+begin
+  Result := True;
+  if not FindExistingApplication(InstalledVersion, UninstallerPath) then
+    Exit;
+
+  if not StrToVersion(InstalledVersion, InstalledPackedVersion) or
+     not StrToVersion('{#AppVersion}', TargetPackedVersion) then
+  begin
+    Log('Installierte oder ausgewählte Version konnte nicht verglichen werden.');
+    if not WizardSilent then
+      SuppressibleMsgBox(
+        'Die Version der vorhandenen Sacrificial-Tower-Installation konnte ' +
+        'nicht sicher bestimmt werden. Bitte deinstallieren Sie die vorhandene ' +
+        'Installation zunächst über die Windows-Einstellungen.',
+        mbError,
+        MB_OK,
+        IDOK);
+    Result := False;
+    Exit;
+  end;
+
+  Comparison := ComparePackedVersion(TargetPackedVersion, InstalledPackedVersion);
+  if Comparison > 0 then
+  begin
+    Log(
+      'Reguläre Aktualisierung von Version ' + InstalledVersion +
+      ' auf Version {#AppVersion}.');
+    Exit;
+  end;
+
+  if not ConfirmReplacement(InstalledVersion, Comparison) then
+  begin
+    Log('Neuinstallation oder Downgrade wurde nicht bestätigt.');
+    Result := False;
+    Exit;
+  end;
+
+  DeleteUserData := False;
+  if Comparison < 0 then
+  begin
+    UserDataChoice := SelectReplacementUserDataPolicy();
+    if UserDataChoice = IDCANCEL then
+    begin
+      Log('Downgrade wurde bei der Auswahl der persönlichen Daten abgebrochen.');
+      Result := False;
+      Exit;
+    end;
+    DeleteUserData := UserDataChoice = IDYES;
+  end;
+
+  { Erst unmittelbar vor der eigentlichen Installation deinstallieren. So }
+  { bleibt die vorhandene Version erhalten, falls der Assistent abgebrochen wird. }
+  ExistingReplacementPending := True;
+  ExistingUninstallerPath := UninstallerPath;
+  ExistingReplacementDeletesUserData := DeleteUserData;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not ExistingReplacementPending then
+    Exit;
+
+  if CheckForMutexes('{#ApplicationMutexName}') then
+  begin
+    Log('Ersetzung abgebrochen: Sacrificial Tower wird noch ausgeführt.');
+    Result :=
+      'Sacrificial Tower wird noch ausgeführt.' #13#10#13#10 +
+      'Bitte schließen Sie das Programm vollständig und versuchen Sie es erneut.';
+    Exit;
+  end;
+
+  if not RunExistingUninstaller(
+    ExistingUninstallerPath,
+    ExistingReplacementDeletesUserData) then
+  begin
+    Result :=
+      'Die vorhandene Sacrificial-Tower-Installation konnte nicht vollständig ' +
+      'deinstalliert werden. Die ausgewählte Version wurde deshalb nicht ' +
+      'installiert.';
+    Exit;
+  end;
+
+  ExistingReplacementPending := False;
 end;
 
 function InitializeUninstall(): Boolean;
@@ -157,7 +470,6 @@ begin
       'gelöscht werden?' #13#10#13#10 +
       'Dazu gehören Einstellungen, Profilzuordnungen, Logs und Standardausgaben ' +
       'unter:' #13#10 + UserDataRoot + #13#10#13#10 +
-      'Daten anderer Sacrificial-Tower-Instanzen bleiben unangetastet.' #13#10#13#10 +
       'Wählen Sie Nein, um die Daten für eine spätere Neuinstallation zu behalten.',
       mbConfirmation,
       MB_YESNO or MB_DEFBUTTON2,

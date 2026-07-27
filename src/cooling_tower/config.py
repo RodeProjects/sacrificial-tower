@@ -6,10 +6,11 @@ from pathlib import Path
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 3
+SETTINGS_SCHEMA_VERSION = 4
 _CONFIG_METADATA_KEYS = {
     "settings_schema_version",
     "default_output_root",
+    "setting_compatibility",
 }
 
 

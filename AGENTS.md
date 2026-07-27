@@ -39,6 +39,20 @@
 - Vor migrationsbedingten Umschreibungen muss das Original gesichert werden.
   Unbekannte neuere, beschädigte oder zwischenzeitlich extern veränderte Dateien
   dürfen nicht automatisch überschrieben werden.
+- Bei der Zusammenführung von Einstellungen nach einem Downgrade dürfen nur
+  Werte mit stabiler Kennung und ausdrücklich bestätigter semantischer
+  Kompatibilität übernommen werden. Jeder einzelne Kandidat muss zuvor nach
+  den Typen, Wertebereichen, Einheiten, Abhängigkeiten und sonstigen Regeln der
+  Zielversion normalisiert und validiert werden. Ein zuletzt geänderter Wert
+  hat niemals Vorrang vor diesen Sicherheitsregeln.
+- Ist ein während des Downgrades geänderter Wert in der neueren Zielversion
+  ungültig oder nicht eindeutig übersetzbar, darf er nicht übernommen werden.
+  Stattdessen bleibt der erhaltene gültige Wert der neueren Konfiguration
+  bestehen oder es wird kontrolliert deren sicherer Standardwert verwendet.
+  Diese Entscheidung muss pro Einstellung erfolgen und darf nicht durch eine
+  pauschale Zusammenführung anhand gleicher Feldnamen ersetzt werden.
 - Jede Schemaänderung benötigt Tests für den direkten und mehrstufigen
   Versionssprung, Sicherung und atomisches Schreiben sowie Fehler-, Downgrade-
-  und Wiederherstellungsfälle.
+  und Wiederherstellungsfälle. Downgrade-Tests müssen außerdem inkompatible
+  Typen, geänderte Einheiten und in der Zielversion verschärfte Minimal- und
+  Maximalwerte abdecken.

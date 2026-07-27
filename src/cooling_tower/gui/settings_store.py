@@ -13,6 +13,11 @@ from cooling_tower.persistence import (
     VersionedDocumentError,
     VersionedJsonStore,
 )
+from cooling_tower.persistence.downgrade_settings import DowngradeSettingsJournal
+from cooling_tower.settings_compatibility import (
+    SETTING_COMPATIBILITY_CATALOG,
+    project_compatible_settings,
+)
 
 
 _GENERATION_FIELD_NAMES = {
@@ -115,6 +120,14 @@ def _migrate_settings_2_to_3(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_3_to_4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Declare stable meanings for settings shared across downgrades."""
+
+    migrated = dict(payload)
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -168,6 +181,7 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 expanded[name] = value
     if expanded:
         normalized["expanded_sections"] = expanded
+    normalized["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
     return normalized
 
 
@@ -175,6 +189,7 @@ _USER_SETTINGS_MIGRATIONS = {
     0: _migrate_settings_0_to_1,
     1: _migrate_settings_1_to_2,
     2: _migrate_settings_2_to_3,
+    3: _migrate_settings_3_to_4,
 }
 
 
@@ -195,6 +210,10 @@ class UserSettingsStore:
         )
         self.last_load_warning: str | None = None
         self.last_migration_backup: Path | None = None
+        self._downgrade_journal = DowngradeSettingsJournal(self.user_path)
+        self._downgrade_baseline: dict[str, Any] | None = None
+        self._downgrade_active = False
+        self._pending_merged_payload: dict[str, Any] | None = None
         self._user_document = VersionedJsonStore(
             self.user_path,
             schema_key="settings_schema_version",
@@ -206,6 +225,8 @@ class UserSettingsStore:
 
     @property
     def write_blocked_reason(self) -> str | None:
+        if self._downgrade_active:
+            return None
         return self._user_document.write_blocked_reason
 
     def load_defaults(self) -> GenerationSettings:
@@ -230,22 +251,33 @@ class UserSettingsStore:
         defaults = self.load_defaults()
         self.last_load_warning = None
         self.last_migration_backup = None
+        self._downgrade_baseline = None
+        self._downgrade_active = False
+        self._pending_merged_payload = None
         if not self.user_path.is_file():
             return defaults, {}
+        try:
+            source_bytes = self.user_path.read_bytes()
+            source_payload = json.loads(source_bytes.decode("utf-8"))
+            if not isinstance(source_payload, dict):
+                source_payload = {}
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            source_bytes = b""
+            source_payload = {}
         try:
             result = self._user_document.load()
             payload = result.payload
             self.last_migration_backup = result.backup_path
-            generation = payload.get("generation", payload)
-            merged = defaults.to_dict()
-            merged.update(_generation_values(generation))
-            return GenerationSettings.from_mapping(merged), payload
+            self._apply_pending_downgrade_changes(source_bytes, payload)
+            payload = self._pending_merged_payload or payload
+            return self._settings_from_payload(payload, defaults), payload
         except FutureSchemaVersionError as error:
-            self.last_load_warning = (
-                f"{error} Die Datei bleibt unverändert und wird von dieser "
-                "Programmversion nicht überschrieben."
+            return self._load_downgrade_working_copy(
+                defaults,
+                source_bytes,
+                source_payload,
+                error,
             )
-            return defaults, {}
         except (OSError, VersionedDocumentError) as error:
             self.last_load_warning = (
                 "Die gespeicherten Benutzereinstellungen konnten nicht sicher "
@@ -265,17 +297,22 @@ class UserSettingsStore:
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
-        return self._user_document.save(
-            self._build_payload(
-                generation,
-                output_root=output_root,
-                window_width=window_width,
-                window_height=window_height,
-                preview_quality=preview_quality,
-                preview_camera=preview_camera,
-                expanded_sections=expanded_sections,
-            )
+        payload = self._build_payload(
+            generation,
+            output_root=output_root,
+            window_width=window_width,
+            window_height=window_height,
+            preview_quality=preview_quality,
+            preview_camera=preview_camera,
+            expanded_sections=expanded_sections,
         )
+        if self._downgrade_active and self._downgrade_baseline is not None:
+            self._downgrade_journal.record_changes(
+                self._downgrade_baseline,
+                payload,
+            )
+            return self._downgrade_journal.path.resolve()
+        return self._user_document.save(payload)
 
     def recover(
         self,
@@ -333,7 +370,150 @@ class UserSettingsStore:
                 str(name): bool(value)
                 for name, value in (expanded_sections or {}).items()
             },
+            "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
         }
+
+    def _default_payload(self, defaults: GenerationSettings) -> dict[str, Any]:
+        return {
+            "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+            "generation": defaults.to_dict(),
+            "output_root": str(self.load_default_output_root()),
+            "preview_quality": "balanced",
+            "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
+        }
+
+    @staticmethod
+    def _settings_from_payload(
+        payload: Mapping[str, Any],
+        defaults: GenerationSettings,
+    ) -> GenerationSettings:
+        generation = payload.get("generation", payload)
+        merged = defaults.to_dict()
+        merged.update(_generation_values(generation))
+        return GenerationSettings.from_mapping(merged)
+
+    def _load_downgrade_working_copy(
+        self,
+        defaults: GenerationSettings,
+        source_bytes: bytes,
+        source_payload: Mapping[str, Any],
+        error: FutureSchemaVersionError,
+    ) -> tuple[GenerationSettings, dict[str, Any]]:
+        source_schema = source_payload.get("settings_schema_version")
+        fallback = self._default_payload(defaults)
+        projection = project_compatible_settings(source_payload, fallback)
+        if (
+            not source_bytes
+            or isinstance(source_schema, bool)
+            or not isinstance(source_schema, int)
+        ):
+            self.last_load_warning = (
+                f"{error} Die Datei bleibt unverändert und wird von dieser "
+                "Programmversion nicht überschrieben."
+            )
+            return defaults, {}
+
+        try:
+            self._downgrade_journal.prepare(source_bytes, source_schema)
+            effective = self._downgrade_journal.apply_to(projection.payload)
+        except (OSError, VersionedDocumentError, ValueError) as journal_error:
+            self.last_load_warning = (
+                f"{error} Die Datei bleibt unverändert und wird nicht "
+                "überschrieben. Änderungen konnten nicht sicher getrennt "
+                f"gespeichert werden: {journal_error}"
+            )
+            return (
+                self._settings_from_payload(projection.payload, defaults),
+                projection.payload,
+            )
+
+        self._downgrade_baseline = projection.payload
+        self._downgrade_active = True
+        rejected = set(projection.rejected_ids) | set(effective.rejected_ids)
+        rejection_notice = (
+            f" {len(rejected)} nicht kompatible Einstellung(en) wurden zum "
+            "Schutz dieser Programmversion nicht übernommen."
+            if rejected
+            else ""
+        )
+        self.last_load_warning = (
+            f"{error} Die neuere Einstellungsdatei bleibt unverändert und wird "
+            "nicht überschrieben. Änderungen dieser Programmversion werden "
+            f"sicher getrennt gespeichert.{rejection_notice}"
+        )
+        return (
+            self._settings_from_payload(effective.payload, defaults),
+            effective.payload,
+        )
+
+    def _apply_pending_downgrade_changes(
+        self,
+        source_bytes: bytes,
+        payload: dict[str, Any],
+    ) -> None:
+        try:
+            journal = self._downgrade_journal.load()
+        except (OSError, VersionedDocumentError, ValueError) as error:
+            self.last_load_warning = (
+                "Gespeicherte Änderungen aus einer älteren Programmversion "
+                f"konnten nicht sicher geprüft werden: {error}"
+            )
+            return
+        if journal is None or journal.get("status") != "active":
+            return
+        protected_schema = journal.get("protected_settings_schema_version")
+        protected_schema_is_valid = (
+            isinstance(protected_schema, int)
+            and not isinstance(protected_schema, bool)
+        )
+        if (
+            not source_bytes
+            or not self._downgrade_journal.matches_source(source_bytes)
+            or not protected_schema_is_valid
+            or SETTINGS_SCHEMA_VERSION < protected_schema
+        ):
+            if (
+                source_bytes
+                and protected_schema_is_valid
+                and SETTINGS_SCHEMA_VERSION >= protected_schema
+            ):
+                self.last_load_warning = (
+                    "Gespeicherte Änderungen aus einer älteren Programmversion "
+                    "wurden nicht übernommen, weil sich die zugehörige neuere "
+                    "Einstellungsdatei zwischenzeitlich geändert hat."
+                )
+            return
+
+        merged = self._downgrade_journal.apply_to(payload)
+        try:
+            self._user_document.save(merged.payload)
+        except (OSError, VersionedDocumentError) as error:
+            self.last_load_warning = (
+                "Die geprüften Änderungen aus einer älteren Programmversion "
+                f"konnten nicht gespeichert werden: {error}"
+            )
+            return
+        self._pending_merged_payload = merged.payload
+        try:
+            self._downgrade_journal.mark_applied(
+                target_schema_version=SETTINGS_SCHEMA_VERSION,
+                accepted_ids=merged.accepted_ids,
+                rejected_ids=merged.rejected_ids,
+            )
+        except (OSError, VersionedDocumentError, ValueError) as error:
+            self.last_load_warning = (
+                "Die gültigen Änderungen aus einer älteren Programmversion "
+                "wurden übernommen, ihr Änderungsjournal konnte jedoch nicht "
+                f"abschließend markiert werden: {error}"
+            )
+            return
+        if merged.rejected_ids:
+            self.last_load_warning = (
+                "Änderungen aus einer älteren Programmversion wurden geprüft. "
+                f"{len(merged.rejected_ids)} nicht kompatible Einstellung(en) "
+                "wurden nicht übernommen; die gültigen neueren Werte bleiben "
+                "erhalten."
+            )
 
     @staticmethod
     def _load_generation(

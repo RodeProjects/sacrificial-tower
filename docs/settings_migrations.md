@@ -52,7 +52,9 @@ läuft die jeweilige Schema-Migration mit eigener Sicherung.
   bytegetreue Sicherung neben der Originaldatei angelegt.
 - Die neue Datei wird zunächst vollständig in eine temporäre Datei geschrieben
   und anschließend atomar an die Zielstelle verschoben.
-- Eine unbekannte neuere Schema-Version wird nie automatisch verändert.
+- Eine unbekannte neuere Schema-Version wird nie automatisch verändert. Eine
+  ältere Programmversion darf ausschließlich ausdrücklich kompatible Werte in
+  einer getrennten Arbeitsdatei ändern.
 - Nach einem Lade-, Validierungs- oder Migrationsfehler bleibt Schreiben
   gesperrt. Dadurch kann das Speichern beim Programmende die Originaldatei
   nicht mit Standardwerten überschreiben.
@@ -92,8 +94,48 @@ Benutzerdateien noch unterstützt werden sollen.
   und einen nutzerverständlichen Hinweis vorsehen.
 - **Ungültiger Einzelwert:** Nur diesen Wert verwerfen und den Standardwert
   verwenden; nicht das gesamte Profil verlieren.
-- **Neueres unbekanntes Schema:** Lesen und Schreiben ablehnen, Originaldatei
-  erhalten und den Nutzer informieren.
+- **Neueres unbekanntes Schema:** Originaldatei erhalten und den Nutzer
+  informieren. Nur Werte mit stabiler Kennung und identischem
+  Bedeutungsschlüssel dürfen in eine getrennte Downgrade-Arbeitsdatei
+  übernommen werden.
+
+## Sichere Änderungen während eines Downgrades
+
+Schema 4 ergänzt `setting_compatibility`. Der Katalog ordnet jeder gemeinsam
+verwendbaren Einstellung eine stabile Kennung und einen Bedeutungsschlüssel zu.
+Der Schlüssel enthält insbesondere die Einheit und wird bei einer semantischen
+Änderung geändert. Ein gleicher JSON-Feldname allein beweist keine
+Kompatibilität.
+
+Erkennt eine ältere Programmversion eine neuere Einstellungsdatei, bleibt diese
+bytegenau unangetastet. Die ältere Version:
+
+1. übernimmt nur Werte mit gleicher stabiler Kennung und gleichem
+   Bedeutungsschlüssel;
+2. prüft Typ, endliche Zahlen, Auswahlwerte, eigene Mindest- und Höchstwerte
+   sowie Abhängigkeiten zwischen zusammengehörigen Feldern;
+3. speichert spätere Änderungen atomar in
+   `user_settings.json.downgrade-changes.json`;
+4. bindet das Journal mit einem SHA-256-Hash an genau die geschützte
+   Originaldatei.
+
+Unterstützt eine spätere Programmversion das geschützte Schema wieder, prüft sie
+jeden Journalwert erneut gegen ihre eigenen Regeln. Gültige Werte werden
+übernommen. Ungültige, nicht mehr gleichbedeutende oder außerhalb neuer Grenzen
+liegende Werte werden nicht begrenzt und nicht umgedeutet, sondern verworfen;
+der gültige Wert der neueren Datei bleibt bestehen. Abhängige Geometriewerte
+werden als Gruppe übernommen oder vollständig abgelehnt. Erst nach einer
+erfolgreichen atomaren Speicherung wird das Journal als angewendet markiert.
+
+Stimmt der gespeicherte Datei-Hash nicht mehr, wird das Journal nicht
+automatisch angewendet. Dadurch können Änderungen aus verschiedenen
+Dateiständen nicht unbemerkt miteinander kombiniert werden.
+
+Die getrennte Änderungsübernahme steht für Programmversionen ab Schema 4 zur
+Verfügung. Bereits veröffentlichte ältere Versionen können nicht nachträglich
+mit dieser Logik ausgestattet werden; ihr bisheriges Schreibverbot schützt eine
+unbekannte neuere Originaldatei weiterhin, zeichnet währenddessen aber keine
+Änderungen für eine spätere Rückübernahme auf.
 
 ## Zukünftige Einstellungsprofile
 

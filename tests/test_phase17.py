@@ -24,6 +24,7 @@ from PySide6.QtCore import QCoreApplication, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.preview_dialog import PreviewDialog
@@ -414,7 +415,10 @@ class Phase17Tests(unittest.TestCase):
             preview_camera={"yaw_deg": 12.0},
         )
         payload = json.loads(user.read_text(encoding="utf-8"))
-        self.assertEqual(payload["settings_schema_version"], 3)
+        self.assertEqual(
+            payload["settings_schema_version"],
+            SETTINGS_SCHEMA_VERSION,
+        )
         self.assertNotIn("output_mode", payload)
         self.assertEqual(payload["preview_quality"], "exact")
         self.assertNotIn("slicer_iterations", payload)

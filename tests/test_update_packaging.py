@@ -38,6 +38,20 @@ class UpdatePackagingTests(unittest.TestCase):
             installer,
         )
         self.assertIn('WorkingDir: "{app}"', installer)
+        self.assertIn(
+            'Description: "Sacrificial-Tower jetzt starten?"',
+            installer,
+        )
+        self.assertIn("Flags: nowait postinstall skipifsilent", installer)
+        self.assertIn(
+            'Flags: nowait skipifnotsilent; Check: IsAutomaticUpdate',
+            installer,
+        )
+        self.assertIn("HasCommandLineSwitch('SACRIFICIALTOWERUPDATE')", installer)
+        self.assertNotIn(
+            'Description: "Sacrificial Tower starten"; Flags: nowait',
+            installer,
+        )
         self.assertIn("VersionInfoVersion={#AppVersion}", installer)
         self.assertIn("OutputDir={#InstallerOutputDir}", installer)
         self.assertIn(
@@ -79,6 +93,39 @@ class UpdatePackagingTests(unittest.TestCase):
         )
         self.assertIn(mutex_name, installer)
         self.assertIn(mutex_name, mutex_source)
+
+    def test_installer_and_uninstaller_messages_are_german(self) -> None:
+        installer = (
+            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("[Languages]", installer)
+        self.assertIn(
+            'Name: "german"; MessagesFile: "compiler:Languages\\German.isl"',
+            installer,
+        )
+        self.assertNotIn(
+            "Daten anderer Sacrificial-Tower-Instanzen bleiben unangetastet.",
+            installer,
+        )
+
+    def test_installer_handles_reinstall_and_downgrade_explicitly(self) -> None:
+        installer = (
+            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("ComparePackedVersion", installer)
+        self.assertIn("Möchten Sie die Neuinstallation fortsetzen?", installer)
+        self.assertIn(
+            "derzeit installierte Version zuerst deinstalliert werden.",
+            installer,
+        )
+        self.assertIn("MB_YESNOCANCEL or MB_DEFBUTTON2", installer)
+        self.assertIn("Das Beibehalten wird empfohlen.", installer)
+        self.assertIn("function PrepareToInstall", installer)
+        self.assertIn("ExistingReplacementPending := True", installer)
+        self.assertIn("RunExistingUninstaller", installer)
+        self.assertIn("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", installer)
 
     def test_release_build_uses_free_signed_update_manifest(self) -> None:
         installer = (
@@ -123,6 +170,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("actions/setup-python@v6", workflow)
         self.assertIn("actions/upload-artifact@v5", workflow)
         self.assertIn("test_uninstaller.ps1", workflow)
+        self.assertIn("test_installer_replacement.ps1", workflow)
         self.assertIn(
             "name: Windows-Installer für Sacrificial-Tower-Update bauen",
             workflow,

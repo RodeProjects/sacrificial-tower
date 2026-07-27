@@ -272,6 +272,7 @@ class UpdateService:
                     "/CURRENTUSER",
                     "/CLOSEAPPLICATIONS",
                     "/NORESTARTAPPLICATIONS",
+                    "/SACRIFICIALTOWERUPDATE",
                 ],
                 cwd=installer.parent,
                 stdin=subprocess.DEVNULL,
