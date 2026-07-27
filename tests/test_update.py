@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import os
 import sys
@@ -8,6 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,12 +27,23 @@ from cooling_tower.update import (
     parse_update_manifest,
     version_key,
 )
+from cooling_tower.update_manifest import sign_update_manifest
 
 
 INSTALLER_URL = (
     "https://github.com/RodeProjects/sacrificial-tower-updates/"
     "releases/download/v0.4.2/SacrificialTowerSetup-0.4.2.exe"
 )
+TEST_KEY_ID = "test-key"
+TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+TEST_PRIVATE_KEY_BASE64 = base64.b64encode(bytes(range(32))).decode("ascii")
+TEST_PUBLIC_KEY_BASE64 = base64.b64encode(
+    TEST_PRIVATE_KEY.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+).decode("ascii")
+TEST_PUBLIC_KEYS = {TEST_KEY_ID: TEST_PUBLIC_KEY_BASE64}
 
 
 class FakeResponse:
@@ -62,7 +77,7 @@ class SequenceOpener:
 
 
 def manifest_for(payload: bytes, version: str = "0.4.2") -> bytes:
-    return json.dumps(
+    signed = sign_update_manifest(
         {
             "schema_version": 1,
             "version": version,
@@ -70,8 +85,11 @@ def manifest_for(payload: bytes, version: str = "0.4.2") -> bytes:
             "sha256": hashlib.sha256(payload).hexdigest(),
             "size_bytes": len(payload),
             "release_notes": "Testversion",
-        }
-    ).encode("utf-8")
+        },
+        private_key_base64=TEST_PRIVATE_KEY_BASE64,
+        key_id=TEST_KEY_ID,
+    )
+    return json.dumps(signed).encode("utf-8")
 
 
 class UpdateServiceTests(unittest.TestCase):
@@ -84,19 +102,64 @@ class UpdateServiceTests(unittest.TestCase):
 
     def test_manifest_requires_the_public_update_release_path(self) -> None:
         payload = b"installer"
-        parsed = parse_update_manifest(manifest_for(payload))
+        parsed = parse_update_manifest(
+            manifest_for(payload),
+            public_keys=TEST_PUBLIC_KEYS,
+        )
         self.assertEqual(parsed.version, "0.4.2")
         self.assertEqual(parsed.installer_url, INSTALLER_URL)
 
         invalid = json.loads(manifest_for(payload))
         invalid["installer_url"] = "https://example.com/update.exe"
         with self.assertRaises(UpdateError):
-            parse_update_manifest(json.dumps(invalid))
+            parse_update_manifest(
+                json.dumps(invalid),
+                public_keys=TEST_PUBLIC_KEYS,
+            )
+
+    def test_manifest_signature_rejects_every_tampered_field(self) -> None:
+        payload = b"installer"
+        tampered = json.loads(manifest_for(payload))
+        tampered["release_notes"] = "Manipuliert"
+
+        with self.assertRaisesRegex(UpdateError, "Signatur"):
+            parse_update_manifest(
+                json.dumps(tampered),
+                public_keys=TEST_PUBLIC_KEYS,
+            )
+
+    def test_manifest_requires_a_known_key_and_signature(self) -> None:
+        payload = b"installer"
+        unknown = json.loads(manifest_for(payload))
+        unknown["signing_key_id"] = "unknown"
+        with self.assertRaisesRegex(UpdateError, "vertrauenswürdigen Schlüssel"):
+            parse_update_manifest(
+                json.dumps(unknown),
+                public_keys=TEST_PUBLIC_KEYS,
+            )
+
+        unsigned = json.loads(manifest_for(payload))
+        unsigned.pop("signature")
+        with self.assertRaisesRegex(UpdateError, "Signatur"):
+            parse_update_manifest(
+                json.dumps(unsigned),
+                public_keys=TEST_PUBLIC_KEYS,
+            )
+
+    def test_manifest_rejects_duplicate_json_keys(self) -> None:
+        with self.assertRaisesRegex(UpdateError, "mehrfach"):
+            parse_update_manifest(
+                '{"schema_version":1,"schema_version":1}',
+                public_keys=TEST_PUBLIC_KEYS,
+            )
 
     def test_check_returns_only_a_newer_version(self) -> None:
         payload = b"installer"
         opener = SequenceOpener(FakeResponse(manifest_for(payload)))
-        service = UpdateService(opener=opener)
+        service = UpdateService(
+            opener=opener,
+            manifest_public_keys=TEST_PUBLIC_KEYS,
+        )
         result = service.check_for_update("0.4.1")
         self.assertIsNotNone(result)
         self.assertEqual(result.version, "0.4.2")
@@ -106,7 +169,10 @@ class UpdateServiceTests(unittest.TestCase):
         )
 
         current_opener = SequenceOpener(FakeResponse(manifest_for(payload)))
-        current_service = UpdateService(opener=current_opener)
+        current_service = UpdateService(
+            opener=current_opener,
+            manifest_public_keys=TEST_PUBLIC_KEYS,
+        )
         self.assertIsNone(current_service.check_for_update("0.4.2"))
 
     def test_download_is_kept_only_after_size_and_sha256_match(self) -> None:

@@ -14,15 +14,29 @@ from typing import TextIO, Type
 from PySide6.QtCore import QtMsgType, QTimer, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from cooling_tower.application_mutex import (
+    acquire_application_mutex,
+    release_application_mutex,
+)
 from cooling_tower.gui import MainWindow
-from cooling_tower.runtime_paths import INSTALL_ROOT
+from cooling_tower.distribution import (
+    DistributionChannel,
+    detect_distribution_channel,
+)
+from cooling_tower.runtime_paths import IS_FROZEN, resolve_user_data_root
 from cooling_tower.version import APP_VERSION
 
 
-PROJECT_ROOT = INSTALL_ROOT
-DEFAULT_STARTUP_LOG = PROJECT_ROOT / "output" / "logs" / "application_startup.log"
-DEFAULT_NATIVE_CRASH_LOG = PROJECT_ROOT / "output" / "logs" / "native_crash.log"
-DEFAULT_RUNTIME_LOG = PROJECT_ROOT / "output" / "logs" / "application_runtime.log"
+_DISTRIBUTION_CHANNEL = detect_distribution_channel()
+_APPLICATION_DATA_ROOT = resolve_user_data_root(
+    instance_id=(
+        _DISTRIBUTION_CHANNEL.value if IS_FROZEN else "development"
+    )
+)
+_APPLICATION_LOG_ROOT = _APPLICATION_DATA_ROOT / "logs"
+DEFAULT_STARTUP_LOG = _APPLICATION_LOG_ROOT / "application_startup.log"
+DEFAULT_NATIVE_CRASH_LOG = _APPLICATION_LOG_ROOT / "native_crash.log"
+DEFAULT_RUNTIME_LOG = _APPLICATION_LOG_ROOT / "application_runtime.log"
 
 
 def enable_native_crash_log(
@@ -185,9 +199,21 @@ def run_application(
     log_path: str | Path = DEFAULT_STARTUP_LOG,
 ) -> int:
     native_crash_log = enable_native_crash_log()
+    application_mutex = None
     previous_qt_message_handler = None
     qt_message_logging_installed = False
     try:
+        if (
+            IS_FROZEN
+            and _DISTRIBUTION_CHANNEL is DistributionChannel.STANDALONE
+        ):
+            try:
+                application_mutex = acquire_application_mutex()
+            except OSError:
+                append_runtime_diagnostic(
+                    "application-mutex",
+                    traceback.format_exc(),
+                )
         application = QApplication.instance() or QApplication(sys.argv)
         application.setApplicationName("Kühlturm-Generator")
         application.setApplicationVersion(APP_VERSION)
@@ -217,6 +243,13 @@ def run_application(
                 native_crash_log.close()
             except (OSError, RuntimeError):
                 pass
+        try:
+            release_application_mutex(application_mutex)
+        except OSError:
+            append_runtime_diagnostic(
+                "application-mutex-release",
+                traceback.format_exc(),
+            )
 
 
 if __name__ == "__main__":

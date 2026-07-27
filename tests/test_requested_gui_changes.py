@@ -58,7 +58,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        self.assertEqual(APP_VERSION, "0.4.4")
+        self.assertEqual(APP_VERSION, "0.4.7")
         self.assertEqual(window.version_label.text(), APP_VERSION_LABEL)
         self.assertEqual(window.version_label.objectName(), "versionLabel")
         self.assertNotIn("alpha", window.version_label.text().casefold())

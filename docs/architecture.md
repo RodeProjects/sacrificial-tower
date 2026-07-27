@@ -11,6 +11,14 @@ Beide verwenden die Fachlogik unter `src/cooling_tower`. Die GUI erzeugt
 Ausgaben ausschließlich über den Vorschau-/Exportpfad. Der CLI-Dienst
 `GenerationService` bleibt der direkte, skriptfähige Generierungspfad.
 
+Installations- und Ressourcenpfade sind schreibgeschützte Eingaben. Die GUI
+speichert Konfiguration, Logs und Standardausgaben in einem getrennten,
+beschreibbaren AppData-Instanzordner. Python-Entwicklung, eigenständiger
+Installer und späterer Store-Build verwenden unterschiedliche Instanzen;
+gezielte parallele Tests können eine eigene Instanz-ID setzen. Details und die
+nicht überschreibende Legacy-Übernahme stehen in
+`docs/settings_migrations.md`.
+
 ## Paketverantwortung
 
 - `gcode`: G-Code-Parsing und Zeitberechnung
@@ -21,6 +29,7 @@ Ausgaben ausschließlich über den Vorschau-/Exportpfad. Der CLI-Dienst
 - `preview`: Vorschauaufbau, Export und Berichte
 - `services`: Anwendungsfälle für Analyse, Generierung und Ausgabe
 - `gui`: Qt-Oberfläche und dünne Worker für lang laufende Anwendungsfälle
+- `persistence`: versionierte, gesicherte und atomare Benutzerdaten
 
 Abhängigkeiten sollen von der Oberfläche in Richtung Fachlogik verlaufen.
 Fachmodule dürfen keine Qt-Abhängigkeit erhalten.
@@ -36,8 +45,13 @@ Fachmodule dürfen keine Qt-Abhängigkeit erhalten.
   `cooling_tower.gui.texts`, sofern sie von mehreren Aufbau- oder
   Aktualisierungspfaden verwendet werden.
 - Standardwerte liegen in `config/default_settings.json`; persistierte
-  Benutzereinstellungen werden von `UserSettingsStore` gefiltert und
-  migrationssicher geladen.
+  Benutzereinstellungen, Slicer-Pfade und Profilzuordnungen werden gefiltert
+  und über `VersionedJsonStore` schrittweise, gesichert und atomar migriert. Die
+  verbindlichen Regeln für neue Einstellungs- und Profilschemata stehen in
+  `docs/settings_migrations.md`.
+- `config/distribution.json` ist unveränderliche Build-Metadaten. Der Kanal
+  `standalone` darf den Sacrificial-Tower-Updater verwenden; der Kanal
+  `microsoft-store` schaltet ihn zwingend ab.
 
 ## Thread-Lebenszyklus
 

@@ -38,6 +38,7 @@ from cooling_tower.models import (
     GenerationSettings,
     ProfileFeasibilityAssessment,
 )
+from cooling_tower.persistence import VersionedDocumentWriteBlockedError
 from cooling_tower.services import (
     AnalysisCancelled,
     GCodeAnalysisService,
@@ -157,6 +158,104 @@ class SettingsSchemaTests(unittest.TestCase):
             (PROJECT_ROOT / "output").resolve(),
         )
 
+    def test_migration_is_persisted_with_byte_exact_backup(self) -> None:
+        self.user_path.write_text(
+            json.dumps(
+                {
+                    "minimum_radius_mm": 7.5,
+                    "slicer_iterations": 6,
+                    "output_mode": "obsolete",
+                }
+            ),
+            encoding="utf-8",
+        )
+        original = self.user_path.read_bytes()
+
+        settings, state = self.store.load()
+
+        self.assertEqual(settings.minimum_outer_radius_mm, 7.5)
+        self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
+        self.assertEqual(state["preview_quality"], "exact")
+        self.assertNotIn("output_mode", state)
+        self.assertIsNotNone(self.store.last_migration_backup)
+        self.assertEqual(
+            self.store.last_migration_backup.read_bytes(),
+            original,
+        )
+        persisted = json.loads(self.user_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted, state)
+
+    def test_invalid_individual_value_falls_back_without_losing_others(self) -> None:
+        self.user_path.write_text(
+            json.dumps(
+                {
+                    "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+                    "generation": {
+                        "target_layer_time_s": "invalid",
+                        "safety_factor": 1.25,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        settings, _state = self.store.load()
+
+        self.assertEqual(
+            settings.target_layer_time_s,
+            GenerationSettings().target_layer_time_s,
+        )
+        self.assertEqual(settings.safety_factor, 1.25)
+        self.assertIsNotNone(self.store.last_migration_backup)
+
+    def test_future_schema_blocks_save_and_preserves_original(self) -> None:
+        self.user_path.write_text(
+            json.dumps(
+                {
+                    "settings_schema_version": SETTINGS_SCHEMA_VERSION + 1,
+                    "generation": {"target_layer_time_s": 99.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        original = self.user_path.read_bytes()
+
+        settings, state = self.store.load()
+
+        self.assertEqual(settings, GenerationSettings())
+        self.assertEqual(state, {})
+        self.assertIn("nicht überschrieben", self.store.last_load_warning)
+        with self.assertRaises(VersionedDocumentWriteBlockedError):
+            self.store.save(
+                settings,
+                output_root="output",
+                window_width=900,
+                window_height=700,
+            )
+        self.assertEqual(self.user_path.read_bytes(), original)
+
+    def test_malformed_file_requires_explicit_recovery(self) -> None:
+        original = b'{"settings_schema_version": '
+        self.user_path.write_bytes(original)
+
+        settings, state = self.store.load()
+
+        self.assertEqual(settings, GenerationSettings())
+        self.assertEqual(state, {})
+        self.assertIsNotNone(self.store.last_load_warning)
+        recovered = self.store.recover(
+            settings,
+            output_root="output",
+            window_width=900,
+            window_height=700,
+        )
+        self.assertEqual(recovered, self.user_path.resolve())
+        backups = list(
+            self.root.glob("user.json.schema-recovery.backup*")
+        )
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+
 
 class GuiCase(unittest.TestCase):
     @classmethod
@@ -185,6 +284,32 @@ class GuiCase(unittest.TestCase):
             time.sleep(0.005)
         self.app.processEvents()
         self.assertTrue(predicate(), "Zeitlimit beim Warten auf GUI-Zustand")
+
+    def test_future_settings_are_visible_and_survive_window_close(self) -> None:
+        self.window.close()
+        protected_path = self.root / "future-user.json"
+        protected_path.write_text(
+            json.dumps(
+                {
+                    "settings_schema_version": SETTINGS_SCHEMA_VERSION + 1,
+                    "generation": {"target_layer_time_s": 99.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        original = protected_path.read_bytes()
+        self.window = MainWindow(user_settings_path=protected_path)
+        self.window.show()
+        self.app.processEvents()
+
+        self.assertTrue(self.window.settings_load_notice_panel.isVisible())
+        self.assertIn(
+            "nicht überschrieben",
+            self.window.settings_load_notice_label.text(),
+        )
+        self.window.close()
+        self.app.processEvents()
+        self.assertEqual(protected_path.read_bytes(), original)
 
     def feed_snapshot(
         self,

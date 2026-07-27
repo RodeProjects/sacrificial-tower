@@ -1,58 +1,101 @@
-# Automatischer Update-Kanal
+# Sacrificial-Tower-Update-Kanal
 
-Die installierte Windows-Anwendung prüft im Hintergrund das öffentliche
-Manifest unter:
+Die eigenständig installierte Windows-Anwendung prüft im Hintergrund das
+öffentliche Manifest unter:
 
 `https://raw.githubusercontent.com/RodeProjects/sacrificial-tower-updates/main/latest.json`
 
 Das private Quellcode-Repository und persönliche GitHub-Zugangsdaten sind für
 Endnutzer nicht erforderlich. Der öffentliche Kanal enthält ausschließlich den
-Windows-Installer, dessen SHA-256-Wert und die aktuelle Versionsnummer.
+Windows-Installer, das kryptografisch signierte Manifest und die zugehörigen
+Prüfdaten.
+
+## Kostenlose kryptografische Absicherung
+
+Der Windows-Installer wird vorerst ohne Authenticode-Zertifikat erzeugt. Deshalb
+kann Windows bei einem manuell heruntergeladenen Installer weiterhin vor einem
+unbekannten Herausgeber warnen. Die Sicherheit des automatischen
+Sacrificial-Tower-Updates hängt davon nicht ab:
+
+- Jede Version erhält ein Ed25519-signiertes Manifest.
+- Der private Ed25519-Schlüssel liegt ausschließlich als verschlüsseltes
+  GitHub-Actions-Secret `UPDATE_MANIFEST_SIGNING_KEY_BASE64` im privaten
+  Quellcode-Repository.
+- Die Anwendung enthält nur den öffentlichen Prüfschlüssel und lehnt fehlende,
+  unbekannte oder ungültige Signaturen ab.
+- Signiert werden Versionsnummer, Installer-URL, SHA-256, Dateigröße und
+  Versionshinweise gemeinsam. Keine dieser Angaben kann unbemerkt verändert
+  werden.
+- Der Installer wird erst nach erfolgreicher Signatur-, Größen- und
+  SHA-256-Prüfung gestartet.
+
+Version 0.4.2 ignoriert die zusätzlichen Signaturfelder, prüft aber weiterhin
+Größe und SHA-256. Dadurch kann sie auf die erste signierte Manifest-Version
+wechseln. Ab Version 0.4.5 ist die Manifest-Signatur verpflichtend.
+
+Der optionale Authenticode-Abschnitt in `installer/SacrificialTower.iss` bleibt
+für eine spätere öffentlich vertrauenswürdige Zertifikatsignierung erhalten.
+Eine spätere Signierung ändert weder das Manifestformat noch die bestehende
+Inno-Setup-`AppId`.
+
+### Schlüsselrotation
+
+Der derzeitige Schlüssel heißt `2026-07-primary`. Eine reguläre Rotation muss
+zweistufig erfolgen:
+
+1. Eine noch mit dem alten Schlüssel signierte Programmversion veröffentlicht
+   zusätzlich den neuen öffentlichen Schlüssel.
+2. Erst nachdem diese Übergangsversion verteilt wurde, wird das GitHub-Secret
+   durch den neuen privaten Schlüssel ersetzt und die neue Schlüssel-ID für
+   Builds aktiviert.
+
+Der private Schlüssel darf niemals in Dateien, Logs, Commit-Nachrichten oder
+Artefakten gespeichert werden. `scripts/provision_update_signing_key.py` sendet
+ihn bei einer kontrollierten Rotation direkt über die GitHub CLI an das Secret
+und gibt ausschließlich den öffentlichen Anteil aus.
 
 ## Veröffentlichung einer neuen Version
 
-### Einmalige Einrichtung der Windows-Signatur
-
-Update-Builds werden nur noch mit einer gültigen Authenticode-Signatur
-veröffentlicht. Dadurch erkennen Windows und Virenschutzprogramme den
-Herausgeber auch dann wieder, wenn sich der SHA-256-Wert bei einer neuen
-Version ändert. Im privaten Quellcode-Repository müssen dafür diese
-GitHub-Actions-Secrets hinterlegt sein:
-
-- `WINDOWS_SIGNING_CERTIFICATE_BASE64`: ein von einer öffentlich vertrauten
-  Zertifizierungsstelle ausgestelltes Code-Signing-Zertifikat samt privatem
-  Schlüssel im PFX/PKCS#12-Format, vollständig Base64-kodiert.
-- `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`: das Kennwort der PFX-Datei.
-
-Das Zertifikat wird nur im kurzlebigen Zertifikatsspeicher des GitHub-Runners
-importiert. Der Build signiert die Programm-EXE, den Installer, dessen
-temporäre Setup-Kopie und den Uninstaller mit SHA-256 und einem RFC-3161-
-Zeitstempel. Fehlt ein Secret oder ist eine Signatur ungültig, bricht der
-Workflow ab. Auch `publish_update.ps1` prüft Signatur und Zertifikat nochmals,
-bevor ein Release oder `latest.json` verändert wird. Ein selbstsigniertes
-Zertifikat reicht für verteilte Updates nicht aus.
-
 1. `APP_VERSION` in `src/cooling_tower/version.py` erhöhen.
-2. Änderungen testen, committen und auf `main` pushen.
-3. Das Skript `scripts/publish_update.ps1` ausführen. Es startet den Workflow
-   `Build Windows update`, wartet auf den erfolgreichen Build und veröffentlicht
-   anschließend das Ergebnis.
+2. Änderungen vollständig testen, committen und auf `main` übernehmen.
+3. `scripts/publish_update.ps1` im normalen Windows-Benutzerkontext ausführen.
 
-Das Skript lädt das geprüfte Actions-Artefakt herunter, erstellt im öffentlichen
-Repository ein Release und aktualisiert anschließend `latest.json`. Es verwendet
-nur die lokale, interaktive GitHub-CLI-Anmeldung des Entwicklers. Im Programm,
-Installer oder öffentlichen Manifest werden keine Tokens gespeichert.
+Das Skript startet den Workflow
+`Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den
+erfolgreichen Build und lädt dessen Artefakt herunter. Anschließend prüft es die
+Ed25519-Signatur sowie Installergröße und SHA-256 erneut. Erst danach erstellt
+es im öffentlichen Update-Repository ein Release und veröffentlicht exakt das
+bereits im privaten Build signierte `latest.json`.
+
+Schlägt die Veröffentlichung des Manifests nach dem Erstellen des Releases
+fehl, entfernt das Skript das unvollständige Release wieder. Es verwendet nur
+die lokale, interaktive GitHub-CLI-Anmeldung des Entwicklers. Im Programm,
+Installer oder öffentlichen Manifest werden keine GitHub-Tokens gespeichert.
+
+## Eigenständiger und späterer Store-Build
+
+`config/distribution.json` legt den Vertriebskanal eines Builds fest:
+
+- `standalone`: verwendet den Sacrificial-Tower-Update-Kanal.
+- `microsoft-store`: deaktiviert den eigenen Updater vollständig; Updates
+  werden später ausschließlich durch den Microsoft Store verwaltet.
+
+Die normale Entwicklung und der aktuelle Inno-Setup-Installer bleiben
+`standalone`. Ein zukünftiger MSIX-Build erhält vor dem Paketbau eine
+Store-spezifische Variante der Distributionsdatei.
 
 ## Verhalten im Programm
 
-- Die Prüfung findet nur in der gebauten Windows-Anwendung statt.
+- Die automatische Prüfung findet nur in einem gebauten eigenständigen
+  Windows-Programm statt.
+- Store-Builds können den eigenständigen Updater nicht versehentlich starten.
 - Netzwerkfehler oder ein nicht erreichbarer Kanal stören die normale Nutzung
   nicht.
 - Der Button `Aktualisieren` erscheint nur bei einer numerisch höheren Version.
-- Der Installer wird vollständig heruntergeladen und gegen Größe und SHA-256
-  aus dem Manifest geprüft.
-- Alle veröffentlichten Windows-EXE-Dateien sind Authenticode-signiert; ein
-  unsigniertes Build kann den Update-Kanal nicht erreichen.
+- Das Manifest muss einen eingebetteten vertrauenswürdigen Ed25519-Schlüssel
+  verwenden und eine gültige Signatur besitzen.
+- Der Installer wird vollständig heruntergeladen und gegen Dateigröße und
+  SHA-256 aus dem signierten Manifest geprüft.
 - HTTPS-Zertifikate werden über den nativen Windows-Zertifikatsspeicher
   geprüft.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung

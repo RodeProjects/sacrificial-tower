@@ -17,8 +17,26 @@ if ($null -ne $ghCommand) {
 if (-not (Test-Path -LiteralPath $gh)) {
     throw "GitHub CLI wurde nicht gefunden."
 }
+$venvPython = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
+if (Test-Path -LiteralPath $venvPython) {
+    $python = (Resolve-Path -LiteralPath $venvPython).Path
+} else {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        throw "Python wurde für die Signaturprüfung nicht gefunden."
+    }
+    $python = $pythonCommand.Source
+}
+
+function Assert-NativeSuccess {
+    param([string]$Action)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Action ist fehlgeschlagen (Exitcode $LASTEXITCODE)."
+    }
+}
 
 & $gh auth status
+Assert-NativeSuccess "Die GitHub-Anmeldeprüfung"
 
 $versionSource = Get-Content "src\cooling_tower\version.py" -Raw
 $versionMatch = [regex]::Match(
@@ -31,11 +49,15 @@ if (-not $versionMatch.Success) {
 $version = $versionMatch.Groups["version"].Value
 $tag = "v$version"
 
-if (git status --porcelain) {
+$worktreeStatus = git status --porcelain
+Assert-NativeSuccess "Die Prüfung des Git-Arbeitsbaums"
+if ($worktreeStatus) {
     throw "Der Arbeitsbaum muss vor der Veröffentlichung sauber sein."
 }
 $localCommit = git rev-parse HEAD
+Assert-NativeSuccess "Das Lesen des lokalen Commits"
 $remoteCommit = & $gh api "repos/$SourceRepository/commits/main" --jq .sha
+Assert-NativeSuccess "Das Lesen des veröffentlichten main-Commits"
 if ($localCommit -ne $remoteCommit) {
     throw "Der lokale Commit entspricht nicht dem veröffentlichten main-Branch."
 }
@@ -44,16 +66,19 @@ if ($localCommit -ne $remoteCommit) {
     --repo $SourceRepository `
     --ref main `
     -f "version=$version"
+Assert-NativeSuccess "Das Starten des Build-Workflows"
 
 $run = $null
 for ($attempt = 0; $attempt -lt 20 -and $null -eq $run; $attempt++) {
     Start-Sleep -Seconds 2
-    $runs = & $gh run list `
+    $runsJson = & $gh run list `
         --repo $SourceRepository `
         --workflow build-update.yml `
         --event workflow_dispatch `
         --limit 10 `
-        --json databaseId,headSha,createdAt | ConvertFrom-Json
+        --json databaseId,headSha,createdAt
+    Assert-NativeSuccess "Das Lesen der Build-Workflow-Läufe"
+    $runs = $runsJson | ConvertFrom-Json
     $run = $runs |
         Where-Object { $_.headSha -eq $localCommit } |
         Sort-Object createdAt -Descending |
@@ -64,6 +89,7 @@ if ($null -eq $run) {
 }
 
 & $gh run watch $run.databaseId --repo $SourceRepository --exit-status
+Assert-NativeSuccess "Der Build-Workflow"
 
 $temporaryRoot = Join-Path (
     [System.IO.Path]::GetTempPath()
@@ -80,15 +106,20 @@ if (-not $resolvedTemporaryRoot.StartsWith(
 }
 New-Item -ItemType Directory -Path $resolvedTemporaryRoot | Out-Null
 
+$releaseCreated = $false
+$manifestPublished = $false
 try {
     $artifactName = "SacrificialTower-$version-windows-x64"
     & $gh run download $run.databaseId `
         --repo $SourceRepository `
         --name $artifactName `
         --dir $resolvedTemporaryRoot
+    Assert-NativeSuccess "Das Herunterladen des Build-Artefakts"
 
     $metadataPath = Join-Path $resolvedTemporaryRoot "update-metadata.json"
+    $manifestPath = Join-Path $resolvedTemporaryRoot "latest.json"
     $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     if ($metadata.version -ne $version) {
         throw "Die Version des Build-Artefakts stimmt nicht überein."
     }
@@ -101,39 +132,27 @@ try {
     if ($actualHash -ne $metadata.sha256 -or $installer.Length -ne $metadata.size_bytes) {
         throw "Die Integritätsprüfung des Build-Artefakts ist fehlgeschlagen."
     }
-    $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-        throw (
-            "Der Update-Installer besitzt keine gültige Authenticode-Signatur: " +
-            $signature.StatusMessage
-        )
-    }
-    $signerThumbprint = $signature.SignerCertificate.Thumbprint.ToLowerInvariant()
     if (
-        [string]::IsNullOrWhiteSpace($metadata.signer_thumbprint) -or
-        $signerThumbprint -ne $metadata.signer_thumbprint.ToLowerInvariant()
+        $manifest.version -ne $version -or
+        $manifest.sha256 -ne $actualHash -or
+        $manifest.size_bytes -ne $installer.Length
     ) {
-        throw "Der Authenticode-Unterzeichner des Build-Artefakts stimmt nicht überein."
+        throw "Das signierte Update-Manifest stimmt nicht mit dem Build-Artefakt überein."
     }
+    & $python `
+        (Join-Path $PSScriptRoot "verify_update_manifest.py") `
+        --manifest $manifestPath `
+        --installer $installer.FullName
+    Assert-NativeSuccess "Die kryptografische Prüfung des Update-Manifests"
 
     & $gh release create $tag $installer.FullName `
         --repo $UpdateRepository `
         --title "Sacrificial Tower $version" `
-        --notes "Automatisches Windows-Update auf Version $version."
+        --notes "Sacrificial-Tower-Update auf Version $version."
+    Assert-NativeSuccess "Das Erstellen des Sacrificial-Tower-Releases"
+    $releaseCreated = $true
 
-    $manifest = @{
-        schema_version = 1
-        version = $version
-        installer_url = (
-            "https://github.com/$UpdateRepository/releases/download/" +
-            "$tag/$($installer.Name)"
-        )
-        sha256 = $actualHash
-        size_bytes = $installer.Length
-        signer_thumbprint = $signerThumbprint
-        release_notes = "Sacrificial Tower $version"
-    } | ConvertTo-Json
-    $manifestBytes = [System.Text.Encoding]::UTF8.GetBytes($manifest + "`n")
+    $manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
     $encodedManifest = [Convert]::ToBase64String($manifestBytes)
 
     $existingSha = $null
@@ -141,6 +160,7 @@ try {
         $existingSha = & $gh api `
             "repos/$UpdateRepository/contents/latest.json" `
             --jq .sha
+        Assert-NativeSuccess "Das Lesen des bestehenden Programmupdate-Manifests"
     } catch {
         $existingSha = $null
     }
@@ -148,7 +168,7 @@ try {
         "api",
         "repos/$UpdateRepository/contents/latest.json",
         "--method", "PUT",
-        "-f", "message=Update channel to $version",
+        "-f", "message=Programmupdate-Kanal auf Version $version aktualisieren",
         "-f", "content=$encodedManifest",
         "-f", "branch=main"
     )
@@ -156,8 +176,21 @@ try {
         $apiArguments += @("-f", "sha=$existingSha")
     }
     & $gh @apiArguments | Out-Null
+    Assert-NativeSuccess "Das Aktualisieren des Programmupdate-Manifests"
+    $manifestPublished = $true
     Write-Host "Version $version wurde im öffentlichen Update-Kanal veröffentlicht."
 } finally {
+    if ($releaseCreated -and -not $manifestPublished) {
+        & $gh release delete $tag `
+            --repo $UpdateRepository `
+            --yes
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning (
+                "Das unvollständig veröffentlichte Release $tag konnte nicht " +
+                "automatisch entfernt werden."
+            )
+        }
+    }
     if (
         (Test-Path -LiteralPath $resolvedTemporaryRoot) -and
         $resolvedTemporaryRoot.StartsWith(

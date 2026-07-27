@@ -80,6 +80,11 @@ from cooling_tower.models import (
     ProfileFeasibilityAssessment,
     TowerNeedAssessment,
 )
+from cooling_tower.distribution import (
+    DistributionChannel,
+    detect_distribution_channel,
+)
+from cooling_tower.persistence import migrate_legacy_configuration
 from cooling_tower.preview import (
     OutputMode,
     PreviewExportResult,
@@ -106,7 +111,12 @@ from cooling_tower.slicers import (
 )
 from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
 from cooling_tower.update import UpdateInfo, UpdateService
-from cooling_tower.runtime_paths import INSTALL_ROOT, RESOURCE_ROOT
+from cooling_tower.runtime_paths import (
+    INSTALL_ROOT,
+    IS_FROZEN,
+    RESOURCE_ROOT,
+    resolve_user_data_root,
+)
 from cooling_tower.tower.hollow_profile import (
     MAXIMUM_EXPANSION_ANGLE_DEG,
     validate_hollow_settings,
@@ -118,7 +128,6 @@ from cooling_tower.tower.base_calculator import (
 from cooling_tower.tower.wall_calculator import calculate_wall_path_bounds
 
 
-PROJECT_ROOT = INSTALL_ROOT
 PREVIEW_QUALITY_ITERATIONS = {
     "fast": 1,
     "balanced": 3,
@@ -338,26 +347,66 @@ class MainWindow(QMainWindow):
         export_service: PreviewExportService | None = None,
         update_service: UpdateService | None = None,
         enable_update_check: bool | None = None,
+        user_data_root: str | Path | None = None,
+        distribution_channel: DistributionChannel | str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("mainWindow")
         self.setWindowTitle("Kühlturm-Generator")
         self.setMinimumSize(720, 640)
+        if distribution_channel is None:
+            self.distribution_channel = detect_distribution_channel()
+        else:
+            self.distribution_channel = DistributionChannel(distribution_channel)
+        explicit_user_settings = (
+            str(user_settings_path)
+            if user_settings_path is not None
+            else os.environ.get("COOLING_TOWER_USER_SETTINGS_PATH", "").strip()
+            or None
+        )
+        if user_data_root is not None:
+            self.user_data_root = Path(user_data_root).expanduser().resolve()
+            user_config_root = self.user_data_root / "config"
+        elif explicit_user_settings is not None:
+            user_config_root = Path(explicit_user_settings).expanduser().resolve().parent
+            self.user_data_root = user_config_root.parent
+        else:
+            default_instance = (
+                self.distribution_channel.value
+                if IS_FROZEN
+                else "development"
+            )
+            self.user_data_root = resolve_user_data_root(
+                instance_id=default_instance
+            )
+            user_config_root = self.user_data_root / "config"
+        self.location_migration_results = ()
+        if explicit_user_settings is None and user_data_root is None:
+            self.location_migration_results = migrate_legacy_configuration(
+                INSTALL_ROOT / "config",
+                user_config_root,
+                (
+                    "user_settings.json",
+                    "slicer_settings.json",
+                    "profile_inventory_cache.json",
+                    "profile_mappings.json",
+                ),
+            )
         self.analysis_service = analysis_service or GCodeAnalysisService()
         self._slicer_service_was_injected = slicer_service is not None
         self.slicer_service = slicer_service or SlicerDiscoveryService(
             preference_store=SlicerPreferenceStore(
                 os.environ.get("COOLING_TOWER_SLICER_SETTINGS_PATH")
-                or PROJECT_ROOT / "config" / "slicer_settings.json"
+                or user_config_root / "slicer_settings.json"
             )
         )
         self.profile_service = profile_service or ProfileMatchingService(
             inventory_service=ProfileInventoryService(
-                PROJECT_ROOT / "config" / "profile_inventory_cache.json"
+                user_config_root / "profile_inventory_cache.json"
             ),
             mapping_store=ProfileMappingStore(
-                PROJECT_ROOT / "config" / "profile_mappings.json"
+                user_config_root / "profile_mappings.json"
             ),
             validator=SlicerProfileProbeValidator(),
         )
@@ -365,7 +414,7 @@ class MainWindow(QMainWindow):
         self.export_service = export_service or PreviewExportService()
         update_service_was_injected = update_service is not None
         self.update_service = update_service or UpdateService()
-        self._update_check_enabled = (
+        requested_update_check = (
             enable_update_check
             if enable_update_check is not None
             else update_service_was_injected
@@ -373,6 +422,10 @@ class MainWindow(QMainWindow):
                 bool(getattr(sys, "frozen", False))
                 and os.environ.get("COOLING_TOWER_DISABLE_UPDATE_CHECK") != "1"
             )
+        )
+        self._update_check_enabled = bool(
+            requested_update_check
+            and self.distribution_channel.uses_sacrificial_tower_updates
         )
         self.available_update: UpdateInfo | None = None
         self._update_check_request_id = 0
@@ -456,11 +509,15 @@ class MainWindow(QMainWindow):
         self._additional_options_dialog: QDialog | None = None
 
         self.settings_store = UserSettingsStore(
-            user_settings_path
-            or os.environ.get("COOLING_TOWER_USER_SETTINGS_PATH")
-            or INSTALL_ROOT / "config" / "user_settings.json",
+            explicit_user_settings
+            or user_config_root / "user_settings.json",
             default_settings_path
             or RESOURCE_ROOT / "config" / "default_settings.json",
+            default_output_base=(
+                self.user_data_root
+                if explicit_user_settings is None
+                else None
+            ),
         )
         self.default_settings = self.settings_store.load_defaults()
         self.default_output_root = self.settings_store.load_default_output_root()
@@ -504,6 +561,7 @@ class MainWindow(QMainWindow):
         self._refresh_stl_availability()
         self.validate_form()
         self.workflow.reset()
+        self._show_settings_load_notice()
         QTimer.singleShot(0, self._update_slicer_combo_widths)
         if self._update_check_enabled:
             QTimer.singleShot(750, self.start_update_check)
@@ -1679,6 +1737,22 @@ class MainWindow(QMainWindow):
         self.result_label = QLabel("")
         self.result_label.setObjectName("resultLabel")
         self.result_label.setWordWrap(True)
+        self.settings_load_notice_label = QLabel("")
+        self.settings_load_notice_label.setObjectName(
+            "settingsLoadNoticeLabel"
+        )
+        self.settings_load_notice_label.setWordWrap(True)
+        self.settings_load_notice_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.settings_load_notice_panel = FooterNoticeDropdown(
+            "⚠  Gespeicherte Einstellungen geschützt",
+            severity="warning",
+        )
+        self.settings_load_notice_panel.content_layout.addWidget(
+            self.settings_load_notice_label
+        )
+        self.settings_load_notice_panel.hide()
         self.warning_text = AutoHeightTextEdit(
             minimum_height=24,
             maximum_height=112,
@@ -1878,7 +1952,10 @@ class MainWindow(QMainWindow):
 
         self._footer_notice_panels = {
             "error": [self.error_panel],
-            "warning": [self.notice_panel],
+            "warning": [
+                self.settings_load_notice_panel,
+                self.notice_panel,
+            ],
             "info": [],
         }
         self.footer_notice_host = QWidget()
@@ -3365,6 +3442,20 @@ class MainWindow(QMainWindow):
         style.unpolish(widget)
         style.polish(widget)
 
+    @staticmethod
+    def _set_boolean_style_property(
+        widget: QWidget,
+        property_name: str,
+        enabled: bool,
+    ) -> bool:
+        current = widget.property(property_name)
+        enabled = bool(enabled)
+        if current is not None and bool(current) == enabled:
+            return False
+        widget.setProperty(property_name, enabled)
+        MainWindow._refresh_widget_style(widget)
+        return True
+
     def _sync_collapsible_content(self, section: str, expanded: bool) -> None:
         if not expanded:
             return
@@ -3598,6 +3689,15 @@ class MainWindow(QMainWindow):
         panel.toggled.connect(
             lambda _expanded: self._schedule_footer_height_update()
         )
+        self._refresh_footer_notice_layout()
+        self._schedule_footer_height_update()
+
+    def _show_settings_load_notice(self) -> None:
+        warning = self.settings_store.last_load_warning
+        self.settings_load_notice_label.setText(warning or "")
+        self.settings_load_notice_panel.setVisible(bool(warning))
+        if warning:
+            self.settings_load_notice_panel.reset_collapsed()
         self._refresh_footer_notice_layout()
         self._schedule_footer_height_update()
 
@@ -5121,7 +5221,7 @@ class MainWindow(QMainWindow):
             self.additional_options_dialog,
             "Basis-Ausgabeordner auswählen",
             self.output_root_edit.text()
-            or str(PROJECT_ROOT / "output"),
+            or str(self.default_output_root),
         )
         if selected:
             self.output_root_edit.setText(selected)
@@ -5922,12 +6022,16 @@ class MainWindow(QMainWindow):
         feasibility_errors = (
             self._feasibility_field_errors if feedback_available else {}
         )
+        layout_changed = False
         for name, widget in self._setting_widgets.items():
             messages = _deduplicate_validation_messages((
                 *static_errors.get(name, ()),
                 *feasibility_errors.get(name, ()),
             ))
-            widget.set_error("\n".join(messages) or None)
+            layout_changed = (
+                widget.set_error("\n".join(messages) or None)
+                or layout_changed
+            )
 
         automatic_messages = [
             *static_errors.get("automatic_base_width", ()),
@@ -5938,53 +6042,73 @@ class MainWindow(QMainWindow):
         automatic_error = "\n".join(
             dict.fromkeys(automatic_messages)
         )
-        self.automatic_base_checkbox.setProperty(
-            "invalid", bool(automatic_error)
+        automatic_invalid = bool(automatic_error)
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.automatic_base_checkbox,
+                "invalid",
+                automatic_invalid,
+            )
+            or layout_changed
         )
-        self.automatic_base_checkbox.style().unpolish(
-            self.automatic_base_checkbox
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.automatic_base_error_label,
+                "error",
+                automatic_invalid,
+            )
+            or layout_changed
         )
-        self.automatic_base_checkbox.style().polish(
-            self.automatic_base_checkbox
-        )
-        self.automatic_base_error_label.setText(automatic_error)
-        self.automatic_base_error_label.setProperty(
-            "error", bool(automatic_error)
-        )
-        self.automatic_base_error_label.style().unpolish(
-            self.automatic_base_error_label
-        )
-        self.automatic_base_error_label.style().polish(
-            self.automatic_base_error_label
-        )
-        self.automatic_base_error_label.setVisible(bool(automatic_error))
+        if self.automatic_base_error_label.text() != automatic_error:
+            self.automatic_base_error_label.setText(automatic_error)
+            layout_changed = True
+        if (
+            not self.automatic_base_error_label.isHidden()
+        ) != automatic_invalid:
+            self.automatic_base_error_label.setVisible(automatic_invalid)
+            layout_changed = True
 
         output_messages = static_errors.get("output_root", ())
         output_error = "\n".join(dict.fromkeys(output_messages))
-        self.output_root_edit.setProperty("invalid", bool(output_error))
-        self.output_root_edit.style().unpolish(self.output_root_edit)
-        self.output_root_edit.style().polish(self.output_root_edit)
-        self.output_root_error_label.setText(output_error)
-        self.output_root_error_label.setProperty(
-            "error", bool(output_error)
+        output_invalid = bool(output_error)
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.output_root_edit,
+                "invalid",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.style().unpolish(
-            self.output_root_error_label
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.output_root_error_label,
+                "error",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.style().polish(
-            self.output_root_error_label
+        if self.output_root_error_label.text() != output_error:
+            self.output_root_error_label.setText(output_error)
+            layout_changed = True
+        if (not self.output_root_error_label.isHidden()) != output_invalid:
+            self.output_root_error_label.setVisible(output_invalid)
+            layout_changed = True
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.options_button,
+                "invalid",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.setVisible(bool(output_error))
-        self.options_button.setProperty("invalid", bool(output_error))
-        self._refresh_widget_style(self.options_button)
         # Inline messages participate in the normal layout. Refresh the two
         # fixed-height responsive hosts immediately so newly visible errors
         # enlarge their cards instead of painting over the following field.
-        if hasattr(self, "geometry_settings_group"):
+        if layout_changed and hasattr(self, "geometry_settings_group"):
             self._refresh_geometry_section_layout(
                 self.geometry_settings_group.isChecked()
             )
-        elif hasattr(self, "ready_grid"):
+        elif layout_changed and hasattr(self, "ready_grid"):
             self._refresh_ready_grid_layout()
 
     def _show_preview_dialog(self) -> None:

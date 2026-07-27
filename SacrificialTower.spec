@@ -58,6 +58,10 @@ a = Analysis(
             "config",
         ),
         (
+            str(project_root / "config" / "distribution.json"),
+            "config",
+        ),
+        (
             str(source_root / "cooling_tower" / "gui" / "styles.qss"),
             "cooling_tower/gui",
         ),
