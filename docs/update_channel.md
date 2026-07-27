@@ -85,7 +85,7 @@ aus. Die Regeln liegen nachvollziehbar in
   entfernt.
 - Ist die 10-GiB-Grenze erreicht, werden die ältesten geeigneten Releases ohne
   Rücksicht auf ihr Alter entfernt, bis die Größe wieder unter der Grenze liegt.
-- Jede Version `x.y.0` und die ausdrücklich eingetragene Version `0.4.8` sind
+- Jede Version `x.y.0` und die ausdrücklich eingetragene Version `0.4.9` sind
   dauerhaft geschützt.
 - Das gerade veröffentlichte Release, Entwürfe, unveränderliche Releases und
   nicht eindeutig als `x.y.z` erkennbare Tags werden ebenfalls nie automatisch

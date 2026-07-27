@@ -4,6 +4,6 @@
   "minimum_releases": 100,
   "protect_zero_patch_versions": true,
   "protected_versions": [
-    "0.4.8"
+    "0.4.9"
   ]
 }

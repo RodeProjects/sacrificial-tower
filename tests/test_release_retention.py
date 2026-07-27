@@ -52,7 +52,7 @@ def policy(
         maximum_total_asset_size_bytes=maximum_size,
         minimum_age_days=minimum_age_days,
         protect_zero_patch_versions=True,
-        protected_versions=frozenset({"0.4.8"}),
+        protected_versions=frozenset({"0.4.9"}),
     )
 
 
@@ -69,7 +69,7 @@ class ReleaseRetentionTests(unittest.TestCase):
         self.assertEqual(configured.maximum_total_asset_size_bytes, 10 * 1024**3)
         self.assertEqual(configured.minimum_age_days, 90)
         self.assertTrue(configured.protect_zero_patch_versions)
-        self.assertIn("0.4.8", configured.protected_versions)
+        self.assertIn("0.4.9", configured.protected_versions)
 
     def test_old_releases_beyond_newest_hundred_are_removed(self) -> None:
         releases = [
@@ -78,7 +78,7 @@ class ReleaseRetentionTests(unittest.TestCase):
         ]
         releases.extend(
             (
-                release(104, "v0.4.8", age_days=103),
+                release(104, "v0.4.9", age_days=103),
                 release(105, "v0.3.0", age_days=104),
             )
         )
@@ -96,7 +96,7 @@ class ReleaseRetentionTests(unittest.TestCase):
         )
         self.assertEqual(plan["release_count_after"], 102)
         protected = {item["tag_name"] for item in plan["protected"]}
-        self.assertIn("v0.4.8", protected)
+        self.assertIn("v0.4.9", protected)
         self.assertIn("v0.3.0", protected)
 
     def test_newest_hundred_are_never_deleted_due_to_age(self) -> None:
@@ -135,7 +135,7 @@ class ReleaseRetentionTests(unittest.TestCase):
             release(index + 1, f"v4.1.{index + 1}", age_days=index, size=10)
             for index in range(100)
         ]
-        releases.append(release(101, "v0.4.8", age_days=200, size=10))
+        releases.append(release(101, "v0.4.9", age_days=200, size=10))
         releases.append(release(102, "v4.0.0", age_days=300, size=10))
 
         plan = plan_release_cleanup(
