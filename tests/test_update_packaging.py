@@ -28,9 +28,10 @@ class UpdatePackagingTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("PrivilegesRequired=lowest", installer)
         self.assertIn(
-            "DefaultDirName={localappdata}\\Programs\\SacrificialTower",
+            '#define DefaultInstallDir "{localappdata}\\Programs\\SacrificialTower"',
             installer,
         )
+        self.assertIn("DefaultDirName={#DefaultInstallDir}", installer)
         self.assertIn("RestartApplications=yes", installer)
         self.assertIn(
             'Filename: "{app}\\SacrificialTower.exe"',
@@ -38,6 +39,46 @@ class UpdatePackagingTests(unittest.TestCase):
         )
         self.assertIn('WorkingDir: "{app}"', installer)
         self.assertIn("VersionInfoVersion={#AppVersion}", installer)
+        self.assertIn("OutputDir={#InstallerOutputDir}", installer)
+        self.assertIn(
+            "OutputBaseFilename={#InstallerOutputBaseFilename}",
+            installer,
+        )
+
+    def test_uninstaller_preserves_data_unless_deletion_is_explicit(self) -> None:
+        installer = (
+            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Uninstallable=yes", installer)
+        self.assertIn("UninstallDisplayName=Sacrificial Tower", installer)
+        self.assertIn('Filename: "{uninstallexe}"', installer)
+        self.assertIn(
+            '#define StandaloneUserDataDir '
+            '"{localappdata}\\RodeProjects\\SacrificialTower\\standalone"',
+            installer,
+        )
+        self.assertIn("HasCommandLineSwitch('DELETEUSERDATA')", installer)
+        self.assertIn("HasCommandLineSwitch('VERYSILENT')", installer)
+        self.assertIn("HasCommandLineSwitch('SUPPRESSMSGBOXES')", installer)
+        self.assertIn("MB_YESNO or MB_DEFBUTTON2", installer)
+        self.assertIn("IDNO) = IDYES", installer)
+        self.assertIn("DelTree(UserDataRoot, True, True, True)", installer)
+        self.assertIn("CurUninstallStep = usPostUninstall", installer)
+        self.assertIn("CheckForMutexes('{#ApplicationMutexName}')", installer)
+        self.assertIn('Type: dirifempty; Name: "{app}"', installer)
+        self.assertNotIn('Type: filesandordirs; Name: "{app}"', installer)
+        self.assertNotIn('Name: "{app}\\*"', installer)
+
+        mutex_source = (
+            PROJECT_ROOT / "src" / "cooling_tower" / "application_mutex.py"
+        ).read_text(encoding="utf-8")
+        mutex_name = (
+            "SacrificialTower-Standalone-"
+            "D47169C5-9DE6-46AF-A8C9-72A394CD2949"
+        )
+        self.assertIn(mutex_name, installer)
+        self.assertIn(mutex_name, mutex_source)
 
     def test_release_build_uses_free_signed_update_manifest(self) -> None:
         installer = (
@@ -81,6 +122,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("actions/checkout@v5", workflow)
         self.assertIn("actions/setup-python@v6", workflow)
         self.assertIn("actions/upload-artifact@v5", workflow)
+        self.assertIn("test_uninstaller.ps1", workflow)
         self.assertIn(
             "name: Windows-Installer für Sacrificial-Tower-Update bauen",
             workflow,

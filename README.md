@@ -62,6 +62,9 @@ Instanzen. Aufbau, sichere Legacy-Übernahme und Schema-Migration sind in
 
 Build und Veröffentlichung des Installers sind in
 [`docs/update_channel.md`](docs/update_channel.md) dokumentiert.
+Verhalten, Datenerhalt und die ausdrücklich wählbare vollständige Bereinigung
+des Deinstallers beschreibt
+[`docs/uninstallation.md`](docs/uninstallation.md).
 
 ## Entwicklung und Wartung
 

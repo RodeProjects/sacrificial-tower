@@ -147,22 +147,28 @@ class DistributionAndPathTests(unittest.TestCase):
             enable_update_check=False,
         )
         try:
+            self.assertTrue(window.user_data_root.samefile(self.root))
             self.assertEqual(
                 window.settings_store.user_path,
-                self.root / "config" / "user_settings.json",
+                window.user_data_root / "config" / "user_settings.json",
             )
-            self.assertEqual(window.default_output_root, self.root / "output")
+            self.assertEqual(
+                window.default_output_root,
+                window.user_data_root / "output",
+            )
             self.assertEqual(
                 window.slicer_service.preference_store.path,
-                self.root / "config" / "slicer_settings.json",
+                window.user_data_root / "config" / "slicer_settings.json",
             )
             self.assertEqual(
                 window.profile_service.inventory_service.cache_path,
-                self.root / "config" / "profile_inventory_cache.json",
+                window.user_data_root
+                / "config"
+                / "profile_inventory_cache.json",
             )
             self.assertEqual(
                 window.profile_service.mapping_store.path,
-                self.root / "config" / "profile_mappings.json",
+                window.user_data_root / "config" / "profile_mappings.json",
             )
         finally:
             window.close()

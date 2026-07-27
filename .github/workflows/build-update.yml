@@ -71,6 +71,14 @@ jobs:
             "/DAppVersion=$env:APP_VERSION" `
             'installer\SacrificialTower.iss'
 
+      - name: Test isolated installation and uninstallation
+        shell: pwsh
+        run: |
+          $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
+          .\scripts\test_uninstaller.ps1 `
+            -IsccPath $iscc `
+            -Version $env:APP_VERSION
+
       - name: Create verified update metadata
         shell: pwsh
         run: |
