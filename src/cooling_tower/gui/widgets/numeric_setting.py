@@ -290,10 +290,16 @@ class NumericSettingWidget(QWidget):
         self._update_reset_metadata()
         self._update_modified_state()
 
-    def set_error(self, message: str | None) -> None:
-        self._error_messages = self._message_lines(message or "")
+    def set_error(self, message: str | None) -> bool:
+        """Apply error messages and report whether their state changed."""
+
+        error_messages = self._message_lines(message or "")
+        if error_messages == self._error_messages:
+            return False
+        self._error_messages = error_messages
         self._sync_editor_feedback_properties()
         self._render_messages()
+        return True
 
     def set_helper_text(self, message: str) -> None:
         self._helper_text = message
@@ -313,14 +319,17 @@ class NumericSettingWidget(QWidget):
         self._render_messages()
 
     def _sync_editor_feedback_properties(self) -> None:
-        self.editor.setProperty(
-            "invalid",
-            self._feedback_enabled and bool(self._error_messages),
-        )
-        self.editor.setProperty(
-            "warning",
-            self._feedback_enabled and bool(self._warning_messages),
-        )
+        invalid = self._feedback_enabled and bool(self._error_messages)
+        warning = self._feedback_enabled and bool(self._warning_messages)
+        if (
+            self.editor.property("invalid") is not None
+            and bool(self.editor.property("invalid")) == invalid
+            and self.editor.property("warning") is not None
+            and bool(self.editor.property("warning")) == warning
+        ):
+            return
+        self.editor.setProperty("invalid", invalid)
+        self.editor.setProperty("warning", warning)
         self.editor.style().unpolish(self.editor)
         self.editor.style().polish(self.editor)
 

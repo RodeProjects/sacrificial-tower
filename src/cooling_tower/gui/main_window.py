@@ -3442,6 +3442,20 @@ class MainWindow(QMainWindow):
         style.unpolish(widget)
         style.polish(widget)
 
+    @staticmethod
+    def _set_boolean_style_property(
+        widget: QWidget,
+        property_name: str,
+        enabled: bool,
+    ) -> bool:
+        current = widget.property(property_name)
+        enabled = bool(enabled)
+        if current is not None and bool(current) == enabled:
+            return False
+        widget.setProperty(property_name, enabled)
+        MainWindow._refresh_widget_style(widget)
+        return True
+
     def _sync_collapsible_content(self, section: str, expanded: bool) -> None:
         if not expanded:
             return
@@ -6008,12 +6022,16 @@ class MainWindow(QMainWindow):
         feasibility_errors = (
             self._feasibility_field_errors if feedback_available else {}
         )
+        layout_changed = False
         for name, widget in self._setting_widgets.items():
             messages = _deduplicate_validation_messages((
                 *static_errors.get(name, ()),
                 *feasibility_errors.get(name, ()),
             ))
-            widget.set_error("\n".join(messages) or None)
+            layout_changed = (
+                widget.set_error("\n".join(messages) or None)
+                or layout_changed
+            )
 
         automatic_messages = [
             *static_errors.get("automatic_base_width", ()),
@@ -6024,53 +6042,73 @@ class MainWindow(QMainWindow):
         automatic_error = "\n".join(
             dict.fromkeys(automatic_messages)
         )
-        self.automatic_base_checkbox.setProperty(
-            "invalid", bool(automatic_error)
+        automatic_invalid = bool(automatic_error)
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.automatic_base_checkbox,
+                "invalid",
+                automatic_invalid,
+            )
+            or layout_changed
         )
-        self.automatic_base_checkbox.style().unpolish(
-            self.automatic_base_checkbox
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.automatic_base_error_label,
+                "error",
+                automatic_invalid,
+            )
+            or layout_changed
         )
-        self.automatic_base_checkbox.style().polish(
-            self.automatic_base_checkbox
-        )
-        self.automatic_base_error_label.setText(automatic_error)
-        self.automatic_base_error_label.setProperty(
-            "error", bool(automatic_error)
-        )
-        self.automatic_base_error_label.style().unpolish(
-            self.automatic_base_error_label
-        )
-        self.automatic_base_error_label.style().polish(
-            self.automatic_base_error_label
-        )
-        self.automatic_base_error_label.setVisible(bool(automatic_error))
+        if self.automatic_base_error_label.text() != automatic_error:
+            self.automatic_base_error_label.setText(automatic_error)
+            layout_changed = True
+        if (
+            not self.automatic_base_error_label.isHidden()
+        ) != automatic_invalid:
+            self.automatic_base_error_label.setVisible(automatic_invalid)
+            layout_changed = True
 
         output_messages = static_errors.get("output_root", ())
         output_error = "\n".join(dict.fromkeys(output_messages))
-        self.output_root_edit.setProperty("invalid", bool(output_error))
-        self.output_root_edit.style().unpolish(self.output_root_edit)
-        self.output_root_edit.style().polish(self.output_root_edit)
-        self.output_root_error_label.setText(output_error)
-        self.output_root_error_label.setProperty(
-            "error", bool(output_error)
+        output_invalid = bool(output_error)
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.output_root_edit,
+                "invalid",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.style().unpolish(
-            self.output_root_error_label
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.output_root_error_label,
+                "error",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.style().polish(
-            self.output_root_error_label
+        if self.output_root_error_label.text() != output_error:
+            self.output_root_error_label.setText(output_error)
+            layout_changed = True
+        if (not self.output_root_error_label.isHidden()) != output_invalid:
+            self.output_root_error_label.setVisible(output_invalid)
+            layout_changed = True
+        layout_changed = (
+            self._set_boolean_style_property(
+                self.options_button,
+                "invalid",
+                output_invalid,
+            )
+            or layout_changed
         )
-        self.output_root_error_label.setVisible(bool(output_error))
-        self.options_button.setProperty("invalid", bool(output_error))
-        self._refresh_widget_style(self.options_button)
         # Inline messages participate in the normal layout. Refresh the two
         # fixed-height responsive hosts immediately so newly visible errors
         # enlarge their cards instead of painting over the following field.
-        if hasattr(self, "geometry_settings_group"):
+        if layout_changed and hasattr(self, "geometry_settings_group"):
             self._refresh_geometry_section_layout(
                 self.geometry_settings_group.isChecked()
             )
-        elif hasattr(self, "ready_grid"):
+        elif layout_changed and hasattr(self, "ready_grid"):
             self._refresh_ready_grid_layout()
 
     def _show_preview_dialog(self) -> None:

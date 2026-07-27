@@ -436,6 +436,31 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertNotIn(";", setting.message_label.text())
         window.close()
 
+    def test_unchanged_inline_error_skips_redundant_repolishing(self) -> None:
+        window = self.window()
+        setting = window._setting_widgets["maximum_outer_radius_mm"]
+        setting.set_error("Unveränderte Testmeldung")
+
+        with (
+            patch.object(setting, "_sync_editor_feedback_properties") as sync,
+            patch.object(setting, "_render_messages") as render,
+        ):
+            setting.set_error("Unveränderte Testmeldung")
+
+        sync.assert_not_called()
+        render.assert_not_called()
+        window.close()
+
+    def test_unchanged_form_errors_skip_global_repolishing(self) -> None:
+        window = self.window()
+        window._apply_inline_errors({})
+
+        with patch.object(MainWindow, "_refresh_widget_style") as refresh:
+            window._apply_inline_errors({})
+
+        refresh.assert_not_called()
+        window.close()
+
     def test_automatic_slicer_verification_never_starts_the_gui_executable(self) -> None:
         executable = self.root / "FlashSafe.exe"
         executable.write_bytes(b"synthetic executable")
