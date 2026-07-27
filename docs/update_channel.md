@@ -101,7 +101,7 @@ Ein ungefährlicher Probelauf gegen ein beliebiges Repository ist möglich mit:
 ```powershell
 .\scripts\cleanup_releases.ps1 `
   -Repository RodeProjects/sacrificial-tower-updates `
-  -LatestVersion 0.4.8 `
+  -LatestVersion 0.4.9 `
   -DryRun
 ```
 

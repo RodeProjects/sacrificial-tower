@@ -186,6 +186,15 @@ class ReleaseRetentionIntegrationTests(unittest.TestCase):
         self.assertNotIn("--cleanup-tag", script)
         self.assertIn("[switch]$DryRun", script)
 
+    def test_cleanup_flattens_each_github_api_page(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "cleanup_releases.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("$parsedPage = ConvertFrom-Json -InputObject", script)
+        self.assertIn("foreach ($release in $parsedPage)", script)
+        self.assertIn("$allReleases += $batch", script)
+
 
 if __name__ == "__main__":
     unittest.main()

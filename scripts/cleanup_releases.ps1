@@ -80,7 +80,12 @@ try {
             "repos/$Repository/releases?per_page=100&page=$page"
         )
         Assert-NativeSuccess "Das Lesen der Release-Seite $page"
-        $batch = @($response | ConvertFrom-Json)
+        $parsedPage = ConvertFrom-Json -InputObject ($response -join "`n")
+        $batch = @(
+            foreach ($release in $parsedPage) {
+                $release
+            }
+        )
         $allReleases += $batch
         $page += 1
     } while ($batch.Count -eq 100)
