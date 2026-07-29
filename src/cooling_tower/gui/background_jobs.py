@@ -36,7 +36,13 @@ def start_background_job(
     worker.moveToThread(thread)
     thread.started.connect(run)
     finished.connect(thread.quit)
-    finished.connect(worker.deleteLater)
+    # The worker's completion signal can be emitted before QThread.exec() has
+    # entered its event loop.  Scheduling deletion at that point leaves a
+    # race in which the last Python reference is released by the GUI thread
+    # while the worker still owns native timers.  Qt explicitly guarantees
+    # deferred deletion during QThread.finished cleanup, even though the
+    # worker event loop has already stopped.
+    thread.finished.connect(worker.deleteLater)
     thread.finished.connect(on_thread_finished)
     thread.finished.connect(thread.deleteLater)
     thread.start()

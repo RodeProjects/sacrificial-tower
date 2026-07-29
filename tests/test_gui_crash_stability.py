@@ -17,10 +17,11 @@ if str(SRC_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QThread
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.application import enable_native_crash_log
+from cooling_tower.gui.background_jobs import start_background_job
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.models import SlicerFamily
 from cooling_tower.slicers import (
@@ -109,6 +110,56 @@ class RepeatedSlicerService(StaticSlicerService):
         return self.result
 
 
+class TimerOwningWorker(QObject):
+    """Worker exposing the native-timer cleanup race from the real crash."""
+
+    finished = Signal(int)
+
+    def __init__(self, request_id: int) -> None:
+        super().__init__()
+        self.request_id = request_id
+        self.timers: tuple[QTimer, QTimer] | None = None
+
+    @Slot()
+    def run(self) -> None:
+        first = QTimer(self)
+        second = QTimer(self)
+        first.start(1000)
+        second.start(1000)
+        self.timers = (first, second)
+        self.finished.emit(self.request_id)
+
+
+class ControlledTimerOwningWorker(TimerOwningWorker):
+    """Timer worker whose completion can be released by the GUI test."""
+
+    def __init__(self, request_id: int) -> None:
+        super().__init__(request_id)
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.release_timer: QTimer | None = None
+
+    @Slot()
+    def run(self) -> None:
+        first = QTimer(self)
+        second = QTimer(self)
+        first.start(1000)
+        second.start(1000)
+        self.timers = (first, second)
+        self.release_timer = QTimer(self)
+        self.release_timer.timeout.connect(self._finish_if_released)
+        self.release_timer.start(1)
+        self.started.set()
+
+    @Slot()
+    def _finish_if_released(self) -> None:
+        if not self.release.is_set():
+            return
+        assert self.release_timer is not None
+        self.release_timer.stop()
+        self.finished.emit(self.request_id)
+
+
 class GuiCrashStabilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -182,6 +233,54 @@ class GuiCrashStabilityTests(unittest.TestCase):
         thread.quit()
         self.assertTrue(thread.wait(2000))
         self.wait_until(lambda: 41 not in window._analysis_jobs)
+        window.close()
+
+    def test_timer_owning_workers_are_deleted_in_their_own_thread(self) -> None:
+        window = self.make_window(StableProfileService())
+
+        for request_id in range(1, 101):
+            worker = TimerOwningWorker(request_id)
+            start_background_job(
+                parent=window,
+                request_id=request_id,
+                worker=worker,
+                jobs=window._analysis_jobs,
+                on_thread_finished=window._on_background_thread_finished,
+            )
+            self.wait_until(lambda: request_id not in window._analysis_jobs)
+
+        self.assertFalse(window._analysis_jobs)
+        window.close()
+
+    def test_job_is_retained_until_native_thread_cleanup_finishes(self) -> None:
+        window = self.make_window(StableProfileService())
+        worker = ControlledTimerOwningWorker(42)
+        thread = start_background_job(
+            parent=window,
+            request_id=42,
+            worker=worker,
+            jobs=window._analysis_jobs,
+            on_thread_finished=window._on_background_thread_finished,
+        )
+        self.wait_until(worker.started.is_set)
+
+        cleanup_started = threading.Event()
+        cleanup_finished = threading.Event()
+
+        def slow_native_cleanup() -> None:
+            cleanup_started.set()
+            time.sleep(0.1)
+            cleanup_finished.set()
+
+        thread.finished.connect(
+            slow_native_cleanup,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.release.set()
+        self.wait_until(cleanup_started.is_set)
+
+        self.wait_until(lambda: 42 not in window._analysis_jobs)
+        self.assertTrue(cleanup_finished.is_set())
         window.close()
 
     def test_profile_checks_are_serialized_and_latest_request_runs(self) -> None:
