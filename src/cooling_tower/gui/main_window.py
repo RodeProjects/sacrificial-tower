@@ -6,7 +6,7 @@ from dataclasses import replace
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, QSize, QThread, QTimer, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, QThread, QTimer, Qt, Slot
 from PySide6.QtGui import (
     QCloseEvent,
     QFontMetrics,
@@ -3358,10 +3358,19 @@ class MainWindow(QMainWindow):
         self.profile_origin_label.hide()
         self.profile_diagnostics.hide()
 
+    @Slot()
     def _on_background_thread_finished(self) -> None:
         """Release a worker/thread pair only after native QThread shutdown."""
 
         finished_thread = self.sender()
+        if (
+            isinstance(finished_thread, QThread)
+            and finished_thread is not QThread.currentThread()
+        ):
+            # QThread.finished is emitted immediately before the native thread
+            # exits.  Keep both Python wrappers alive until deferred QObject
+            # deletion and thread-local cleanup have actually completed.
+            finished_thread.wait()
         finished_kind: str | None = None
         job_groups = (
             ("analysis", self._analysis_jobs),
