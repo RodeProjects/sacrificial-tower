@@ -1,0 +1,44 @@
+name: Windows-Prozess-Stresstests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  process-stress:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          - 1729
+          - 271828
+          - 314159
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+      COOLING_TOWER_STRESS_SEED: ${{ matrix.seed }}
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        run: python -m pip install -r requirements.txt
+
+      - name: Isolierte Prozess-Stresstests ausführen
+        run: >-
+          python -m unittest discover
+          -s tests
+          -p test_process_stress.py
+          -v

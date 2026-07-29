@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.models.gcode_metadata import SlicerFamily
 from cooling_tower.slicers.errors import (
     SlicerProcessError,
@@ -498,6 +499,13 @@ class BaseSlicerAdapter:
                 work_output,
                 working_root,
             )
+            record_diagnostic(
+                "slice_job_prepared",
+                adapter=self.adapter_id,
+                product_name=self.product_name,
+                purpose=request.purpose,
+                command=(str(executable), *(str(item) for item in arguments)),
+            )
             outcome = self.runner.run(
                 executable,
                 arguments,
@@ -509,11 +517,26 @@ class BaseSlicerAdapter:
                 sorted(path for path in work_output.rglob("*") if path.is_file())
             )
             failure_reason = self._failure_reason(outcome, produced)
+            record_diagnostic(
+                "slice_output_files_checked",
+                adapter=self.adapter_id,
+                product_name=self.product_name,
+                output_file_count=len(produced),
+                success=failure_reason is None,
+                return_code=outcome.return_code,
+                timed_out=outcome.timed_out,
+                cancelled=outcome.cancelled,
+            )
             if failure_reason is not None:
                 diagnostic = self._write_failure_diagnostic(
                     request,
                     outcome,
                     failure_reason,
+                )
+                record_diagnostic(
+                    "slice_job_failed",
+                    failure_reason=failure_reason,
+                    diagnostic_path=diagnostic,
                 )
                 return SliceResult(
                     success=False,
@@ -567,6 +590,10 @@ class BaseSlicerAdapter:
             )
         finally:
             shutil.rmtree(working_root, ignore_errors=True)
+            record_diagnostic(
+                "temporary_data_cleaned",
+                temporary_kind="slicer_working_directory",
+            )
 
     def build_slice_command(
         self,

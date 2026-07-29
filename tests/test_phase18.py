@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.workflow_controller import WorkflowController
@@ -1414,26 +1415,37 @@ class Phase18UiTests(unittest.TestCase):
         window.slicer_prediction_button.setVisible(True)
         window.slicer_prediction_button.setEnabled(True)
         window.preview_state = PreviewState.BUILDING
-        window._preview_jobs[99] = (SimpleNamespace(), SimpleNamespace())
-        window._refresh_phase17_actions()
-        window._update_responsive_action_labels()
-        self.assertFalse(window.preview_button.isEnabled())
-        self.assertFalse(window.preview_dialog.update_button.isEnabled())
-        self.assertFalse(window.slicer_prediction_button.isEnabled())
-        self.assertEqual(
-            window.slicer_prediction_button.text(),
-            "Schätzung wird durchgeführt...",
-        )
-        self.assertIn(
-            "Während die Vorschau erstellt wird",
-            window.slicer_prediction_button.toolTip(),
-        )
-        self.assertEqual(window.preview_button.text(), "Vorschau wird erstellt...")
-        self.assertEqual(
-            window.preview_dialog.update_button.text(),
-            "Vorschau wird erstellt...",
-        )
-        window._preview_jobs.clear()
+        actual_has_active = window.background_job_manager.has_active
+
+        def has_active(kind=None):
+            return kind is JobKind.PREVIEW or actual_has_active(kind)
+
+        with patch.object(
+            window.background_job_manager,
+            "has_active",
+            side_effect=has_active,
+        ):
+            window._refresh_phase17_actions()
+            window._update_responsive_action_labels()
+            self.assertFalse(window.preview_button.isEnabled())
+            self.assertFalse(window.preview_dialog.update_button.isEnabled())
+            self.assertFalse(window.slicer_prediction_button.isEnabled())
+            self.assertEqual(
+                window.slicer_prediction_button.text(),
+                "Schätzung wird durchgeführt...",
+            )
+            self.assertIn(
+                "Während die Vorschau erstellt wird",
+                window.slicer_prediction_button.toolTip(),
+            )
+            self.assertEqual(
+                window.preview_button.text(),
+                "Vorschau wird erstellt...",
+            )
+            self.assertEqual(
+                window.preview_dialog.update_button.text(),
+                "Vorschau wird erstellt...",
+            )
         window.close()
 
     def test_calculation_settings_follow_only_the_geometry_dropdown(self) -> None:
@@ -1576,7 +1588,9 @@ class Phase18UiTests(unittest.TestCase):
             window.start_slicer_prediction()
         for _ in range(100):
             self.app.processEvents()
-            if not window._slicer_prediction_jobs:
+            if not window.background_job_manager.has_active(
+                JobKind.SLICER_PREDICTION
+            ):
                 break
             QTest.qWait(10)
         self.assertEqual(service.iterations, [5])

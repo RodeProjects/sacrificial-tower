@@ -17,12 +17,13 @@ if str(SRC_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.application import enable_native_crash_log
-from cooling_tower.gui.background_jobs import start_background_job
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.models import SlicerFamily
 from cooling_tower.slicers import (
     SlicerDiscoveryResult,
@@ -110,7 +111,7 @@ class RepeatedSlicerService(StaticSlicerService):
         return self.result
 
 
-class TimerOwningWorker(QObject):
+class TimerOwningWorker(CancelableWorker):
     """Worker exposing the native-timer cleanup race from the real crash."""
 
     finished = Signal(int)
@@ -219,20 +220,29 @@ class GuiCrashStabilityTests(unittest.TestCase):
 
     def test_worker_reference_is_retained_until_qthread_finished(self) -> None:
         window = self.make_window(StableProfileService())
-        thread = QThread(window)
-        worker = QObject()
-        worker.moveToThread(thread)
-        window._analysis_jobs[41] = (thread, worker)
-        thread.finished.connect(window._on_background_thread_finished)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
-        self.wait_until(thread.isRunning)
+        worker = ControlledTimerOwningWorker(41)
+        job_id = window.background_job_manager.start_job(
+            kind=JobKind.ANALYSIS,
+            request_id=41,
+            worker=worker,
+        )
+        self.wait_until(worker.started.is_set)
+        job = window.background_job_manager.job(job_id)
+        self.assertIsNotNone(job)
+        thread = job.thread
+        self.assertIsInstance(thread, QThread)
+        self.assertTrue(thread.isRunning())
+        thread_finished = threading.Event()
+        thread.finished.connect(
+            thread_finished.set,
+            Qt.ConnectionType.DirectConnection,
+        )
 
-        self.assertIn(41, window._analysis_jobs)
-
-        thread.quit()
-        self.assertTrue(thread.wait(2000))
-        self.wait_until(lambda: 41 not in window._analysis_jobs)
+        worker.release.set()
+        self.wait_until(
+            lambda: window.background_job_manager.job(job_id) is None
+        )
+        self.assertTrue(thread_finished.is_set())
         window.close()
 
     def test_timer_owning_workers_are_deleted_in_their_own_thread(self) -> None:
@@ -240,28 +250,36 @@ class GuiCrashStabilityTests(unittest.TestCase):
 
         for request_id in range(1, 101):
             worker = TimerOwningWorker(request_id)
-            start_background_job(
-                parent=window,
+            window.background_job_manager.start_job(
+                kind=JobKind.ANALYSIS,
                 request_id=request_id,
                 worker=worker,
-                jobs=window._analysis_jobs,
-                on_thread_finished=window._on_background_thread_finished,
             )
-            self.wait_until(lambda: request_id not in window._analysis_jobs)
+            self.wait_until(
+                lambda: window.background_job_manager.job_for_request(
+                    JobKind.ANALYSIS,
+                    request_id,
+                )
+                is None
+            )
 
-        self.assertFalse(window._analysis_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.ANALYSIS)
+        )
         window.close()
 
     def test_job_is_retained_until_native_thread_cleanup_finishes(self) -> None:
         window = self.make_window(StableProfileService())
         worker = ControlledTimerOwningWorker(42)
-        thread = start_background_job(
-            parent=window,
+        job_id = window.background_job_manager.start_job(
+            kind=JobKind.ANALYSIS,
             request_id=42,
             worker=worker,
-            jobs=window._analysis_jobs,
-            on_thread_finished=window._on_background_thread_finished,
         )
+        job = window.background_job_manager.job(job_id)
+        self.assertIsNotNone(job)
+        thread = job.thread
+        self.assertIsInstance(thread, QThread)
         self.wait_until(worker.started.is_set)
 
         cleanup_started = threading.Event()
@@ -279,7 +297,9 @@ class GuiCrashStabilityTests(unittest.TestCase):
         worker.release.set()
         self.wait_until(cleanup_started.is_set)
 
-        self.wait_until(lambda: 42 not in window._analysis_jobs)
+        self.wait_until(
+            lambda: window.background_job_manager.job(job_id) is None
+        )
         self.assertTrue(cleanup_finished.is_set())
         window.close()
 
@@ -291,11 +311,20 @@ class GuiCrashStabilityTests(unittest.TestCase):
         self.assertTrue(service.started.wait(1.0))
         window.start_profile_matching(stale_check_only=True)
 
-        self.assertEqual(len(window._profile_jobs), 1)
+        self.assertEqual(
+            len(
+                window.background_job_manager.active_jobs(
+                    JobKind.PROFILE_MATCH
+                )
+            ),
+            1,
+        )
         self.assertIsNotNone(window._pending_profile_match)
         self.wait_until(
             lambda: service.calls == 2
-            and not window._profile_jobs
+            and not window.background_job_manager.has_active(
+                JobKind.PROFILE_MATCH
+            )
             and window._pending_profile_match is None,
         )
         self.assertEqual(service.maximum_active, 1)
@@ -309,12 +338,16 @@ class GuiCrashStabilityTests(unittest.TestCase):
             window._check_profile_inventory_changes()
             self.wait_until(
                 lambda: service.calls >= expected_calls
-                and not window._profile_jobs
+                and not window.background_job_manager.has_active(
+                    JobKind.PROFILE_MATCH
+                )
             )
 
         self.assertEqual(service.calls, 100)
         self.assertEqual(service.maximum_active, 1)
-        self.assertFalse(window._profile_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+        )
         window.close()
 
     def test_repeated_slicer_detection_waits_for_native_thread_shutdown(self) -> None:
@@ -327,13 +360,17 @@ class GuiCrashStabilityTests(unittest.TestCase):
             window.start_slicer_discovery(force=True)
             self.wait_until(
                 lambda: service.calls >= expected_calls
-                and not window._slicer_jobs
+                and not window.background_job_manager.has_active(
+                    JobKind.SLICER_DISCOVERY
+                )
                 and window.slicer_refresh_button.isEnabled(),
             )
 
         self.assertEqual(service.calls, 30)
         self.assertIsNone(window._pending_slicer_discovery)
-        self.assertFalse(window._slicer_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.SLICER_DISCOVERY)
+        )
         window.close()
 
     def test_slicer_detection_and_profile_matching_never_share_adapter_work(self) -> None:
@@ -356,8 +393,12 @@ class GuiCrashStabilityTests(unittest.TestCase):
         window.analysis_snapshot = None
         self.wait_until(
             lambda: slicer_service.calls == 1
-            and not window._profile_jobs
-            and not window._slicer_jobs
+            and not window.background_job_manager.has_active(
+                JobKind.PROFILE_MATCH
+            )
+            and not window.background_job_manager.has_active(
+                JobKind.SLICER_DISCOVERY
+            )
             and window._pending_slicer_discovery is None
             and window.slicer_refresh_button.isEnabled(),
         )

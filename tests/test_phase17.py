@@ -25,6 +25,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.preview_dialog import PreviewDialog
@@ -522,10 +523,15 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.export_button.isEnabled())
         window.start_export()
         deadline = time.monotonic() + 10.0
-        while window._export_jobs and time.monotonic() < deadline:
+        while (
+            window.background_job_manager.has_active(JobKind.EXPORT)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
             time.sleep(0.01)
-        self.assertFalse(window._export_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.EXPORT)
+        )
         self.assertIsNotNone(window.last_export_result)
         self.assertTrue(window.last_export_result.output_path.is_file())
         report = json.loads(
@@ -546,7 +552,10 @@ class Phase17Tests(unittest.TestCase):
         window.preview_quality_buttons["fast"].click()
         window.start_preview()
         deadline = time.monotonic() + 10.0
-        while window._preview_jobs and time.monotonic() < deadline:
+        while (
+            window.background_job_manager.has_active(JobKind.PREVIEW)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
             time.sleep(0.01)
         self.assertIsNotNone(window.current_preview)
@@ -558,7 +567,10 @@ class Phase17Tests(unittest.TestCase):
             window.start_export()
         question.assert_not_called()
         deadline = time.monotonic() + 10.0
-        while window._export_jobs and time.monotonic() < deadline:
+        while (
+            window.background_job_manager.has_active(JobKind.EXPORT)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
             time.sleep(0.01)
 
@@ -585,7 +597,9 @@ class Phase17Tests(unittest.TestCase):
         ) as question:
             window.start_export()
         question.assert_called_once()
-        self.assertFalse(window._export_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.EXPORT)
+        )
 
         with patch.object(
             window,
@@ -594,7 +608,10 @@ class Phase17Tests(unittest.TestCase):
         ):
             window.start_export()
         deadline = time.monotonic() + 10.0
-        while window._export_jobs and time.monotonic() < deadline:
+        while (
+            window.background_job_manager.has_active(JobKind.EXPORT)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
             time.sleep(0.01)
         self.assertIsNotNone(window.last_export_result)

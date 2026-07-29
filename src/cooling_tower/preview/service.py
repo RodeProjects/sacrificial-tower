@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Event
 from typing import Callable
 
+from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.calibration import CalibrationService
 from cooling_tower.calibration.gcode_integration import (
     GCodeIntegrationError,
@@ -320,6 +321,10 @@ class PreviewService:
         finally:
             if owner is not None:
                 owner.cleanup()
+                record_diagnostic(
+                    "temporary_data_cleaned",
+                    temporary_kind="preview_directory",
+                )
 
     @staticmethod
     def _minimum_verified_time(

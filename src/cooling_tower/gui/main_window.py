@@ -6,7 +6,7 @@ from dataclasses import replace
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, QSize, QThread, QTimer, Qt, Slot
+from PySide6.QtCore import QPoint, QRect, QSize, QTimer, Qt, Slot
 from PySide6.QtGui import (
     QCloseEvent,
     QFontMetrics,
@@ -40,8 +40,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cooling_tower.diagnostics import (
+    DiagnosticJournal,
+    current_diagnostic_journal,
+)
 from cooling_tower.gui.analysis_worker import AnalysisWorker
-from cooling_tower.gui.background_jobs import start_background_job
+from cooling_tower.gui.background_jobs import (
+    BackgroundJob,
+    BackgroundJobManager,
+    JobKind,
+)
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.export_worker import ExportWorker
@@ -350,6 +358,7 @@ class MainWindow(QMainWindow):
         enable_update_check: bool | None = None,
         user_data_root: str | Path | None = None,
         distribution_channel: DistributionChannel | str | None = None,
+        diagnostic_journal: DiagnosticJournal | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -415,6 +424,15 @@ class MainWindow(QMainWindow):
         self.export_service = export_service or PreviewExportService()
         update_service_was_injected = update_service is not None
         self.update_service = update_service or UpdateService()
+        self.background_job_manager = BackgroundJobManager(
+            self,
+            diagnostic_journal=(
+                diagnostic_journal or current_diagnostic_journal()
+            ),
+        )
+        self.background_job_manager.job_released.connect(
+            self._on_background_job_released
+        )
         requested_update_check = (
             enable_update_check
             if enable_update_check is not None
@@ -430,33 +448,18 @@ class MainWindow(QMainWindow):
         )
         self.available_update: UpdateInfo | None = None
         self._update_check_request_id = 0
-        self._update_check_jobs: dict[
-            int, tuple[QThread, UpdateCheckWorker]
-        ] = {}
         self._update_download_request_id = 0
-        self._update_download_jobs: dict[
-            int, tuple[QThread, UpdateDownloadWorker]
-        ] = {}
         self._slicer_request_id = 0
-        self._slicer_jobs: dict[
-            int, tuple[QThread, SlicerDiscoveryWorker]
-        ] = {}
         self._pending_slicer_discovery: tuple[bool, Path | None] | None = None
         self.slicer_discovery_result: SlicerDiscoveryResult | None = None
         self._slicer_header_installation: SlicerInstallation | None = None
         self._populating_slicer_combo = False
         self._profile_request_id = 0
-        self._profile_jobs: dict[
-            int, tuple[QThread, ProfileMatchingWorker]
-        ] = {}
         self._pending_profile_match: dict[str, object] | None = None
         self.profile_match_result: ProfileMatchResult | None = None
         self._populating_profile_combos = False
         self.profile_preview_outdated = False
         self._analysis_request_id = 0
-        self._analysis_jobs: dict[
-            int, tuple[QThread, AnalysisWorker]
-        ] = {}
         self._analysis_failed = False
         self._closing = False
         self.analysis_snapshot: GCodeAnalysisSnapshot | None = None
@@ -464,21 +467,13 @@ class MainWindow(QMainWindow):
         self.profile_feasibility: ProfileFeasibilityAssessment | None = None
         self.current_gcode_path: Path | None = None
         self._feasibility_request_id = 0
-        self._feasibility_jobs: dict[
-            int, tuple[QThread, FeasibilityWorker]
-        ] = {}
         self._preview_request_id = 0
-        self._preview_jobs: dict[int, tuple[QThread, PreviewWorker]] = {}
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
-        self._slicer_prediction_jobs: dict[
-            int, tuple[QThread, PreviewWorker]
-        ] = {}
         self._slicer_prediction_estimate_s: float | None = None
         self._slicer_prediction_status = ""
         self._export_request_id = 0
-        self._export_jobs: dict[int, tuple[QThread, ExportWorker]] = {}
         self.last_export_result: PreviewExportResult | None = None
         # This session-scoped path intentionally survives a changed or removed
         # G-Code.  The footer action must always target the most recent
@@ -2192,7 +2187,7 @@ class MainWindow(QMainWindow):
         if (
             self._closing
             or not self._update_check_enabled
-            or self._update_check_jobs
+            or self.background_job_manager.has_active(JobKind.UPDATE_CHECK)
         ):
             return
         self._update_check_request_id += 1
@@ -2204,12 +2199,10 @@ class MainWindow(QMainWindow):
         )
         worker.succeeded.connect(self._on_update_check_succeeded)
         worker.failed.connect(self._on_update_check_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.UPDATE_CHECK,
             request_id=request_id,
             worker=worker,
-            jobs=self._update_check_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def _on_update_check_succeeded(
@@ -2246,7 +2239,7 @@ class MainWindow(QMainWindow):
         if (
             self._closing
             or self.available_update is None
-            or self._update_download_jobs
+            or self.background_job_manager.has_active(JobKind.UPDATE_DOWNLOAD)
         ):
             return
         self._update_download_request_id += 1
@@ -2261,12 +2254,10 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_update_download_progress)
         worker.succeeded.connect(self._on_update_download_succeeded)
         worker.failed.connect(self._on_update_download_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.UPDATE_DOWNLOAD,
             request_id=request_id,
             worker=worker,
-            jobs=self._update_download_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def _on_update_download_progress(self, request_id: int, percent: int) -> None:
@@ -2563,9 +2554,10 @@ class MainWindow(QMainWindow):
         if not preserve_slicer_prediction:
             self._clear_slicer_prediction()
         self._preview_request_id += 1
-        for thread, worker in tuple(self._preview_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.PREVIEW,
+            reason="preview_invalidated",
+        )
         if hasattr(self, "progress_bar"):
             self.progress_bar.setProperty("task", "default")
             self._refresh_widget_style(self.progress_bar)
@@ -2610,7 +2602,8 @@ class MainWindow(QMainWindow):
         if self._preview_dialog is not None:
             self._preview_dialog.update_button.setEnabled(enabled)
         self.preview_quality_panel.setEnabled(
-            not self._preview_jobs and not self._export_jobs
+            not self.background_job_manager.has_active(JobKind.PREVIEW)
+            and not self.background_job_manager.has_active(JobKind.EXPORT)
         )
         self._set_export_button_state(enabled, block_reason)
         if hasattr(self, "slicer_prediction_button"):
@@ -2621,11 +2614,11 @@ class MainWindow(QMainWindow):
         self._refresh_folder_action_states()
 
     def _export_block_reason(self) -> str | None:
-        if self._export_jobs:
+        if self.background_job_manager.has_active(JobKind.EXPORT):
             return "Ein Export wird bereits ausgeführt."
-        if self._slicer_prediction_jobs:
+        if self.background_job_manager.has_active(JobKind.SLICER_PREDICTION):
             return "Die einmalige Slicer-Schätzung wird gerade erstellt."
-        if self._preview_jobs:
+        if self.background_job_manager.has_active(JobKind.PREVIEW):
             return "Die Vorschau wird gerade erstellt."
         if self.current_gcode_path is None:
             return "Bitte zuerst einen G-Code auswählen."
@@ -2684,7 +2677,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._closing:
             return
-        if self._slicer_jobs or self._profile_jobs:
+        if self.background_job_manager.has_active(
+            JobKind.SLICER_DISCOVERY
+        ) or self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
             # Discovery and profile resolution share the selected adapter and
             # its process runner. Keep only the newest discovery request and
             # start it after both native worker threads have actually stopped.
@@ -2696,7 +2691,11 @@ class MainWindow(QMainWindow):
             self._profile_watch_timer.stop()
             self.slicer_refresh_button.setEnabled(False)
             self.slicer_manual_button.setEnabled(False)
-            if self._profile_jobs and not self._slicer_jobs:
+            if self.background_job_manager.has_active(
+                JobKind.PROFILE_MATCH
+            ) and not self.background_job_manager.has_active(
+                JobKind.SLICER_DISCOVERY
+            ):
                 self._set_slicer_progress(
                     0,
                     "Laufende Profilprüfung wird abgeschlossen …",
@@ -2737,12 +2736,10 @@ class MainWindow(QMainWindow):
         )
         worker.succeeded.connect(self._on_slicer_discovery_succeeded)
         worker.failed.connect(self._on_slicer_discovery_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.SLICER_DISCOVERY,
             request_id=request_id,
             worker=worker,
-            jobs=self._slicer_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def select_manual_slicer(self) -> None:
@@ -3016,7 +3013,7 @@ class MainWindow(QMainWindow):
         installation = self.selected_slicer_installation
         if snapshot is None or installation is None:
             return
-        if self._profile_jobs:
+        if self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
             # Profile resolution, its disk cache and probe validator are one
             # shared unit.  Concurrent matches used to race on those objects.
             self._profile_request_id += 1
@@ -3072,12 +3069,10 @@ class MainWindow(QMainWindow):
         worker.succeeded.connect(self._on_profile_matching_succeeded)
         worker.unchanged.connect(self._on_profile_inventory_unchanged)
         worker.failed.connect(self._on_profile_matching_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.PROFILE_MATCH,
             request_id=request_id,
             worker=worker,
-            jobs=self._profile_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def _on_profile_matching_succeeded(
@@ -3329,7 +3324,7 @@ class MainWindow(QMainWindow):
         if (
             self._closing
             or self.profile_match_result is None
-            or self._profile_jobs
+            or self.background_job_manager.has_active(JobKind.PROFILE_MATCH)
         ):
             return
         # The worker is retained until QThread.finished and profile jobs are
@@ -3358,47 +3353,23 @@ class MainWindow(QMainWindow):
         self.profile_origin_label.hide()
         self.profile_diagnostics.hide()
 
-    @Slot()
-    def _on_background_thread_finished(self) -> None:
-        """Release a worker/thread pair only after native QThread shutdown."""
+    @Slot(object)
+    def _on_background_job_released(self, job: BackgroundJob) -> None:
+        """React only after the manager has observed the native thread end."""
 
-        finished_thread = self.sender()
-        if (
-            isinstance(finished_thread, QThread)
-            and finished_thread is not QThread.currentThread()
-        ):
-            # QThread.finished is emitted immediately before the native thread
-            # exits.  Keep both Python wrappers alive until deferred QObject
-            # deletion and thread-local cleanup have actually completed.
-            finished_thread.wait()
-        finished_kind: str | None = None
-        job_groups = (
-            ("analysis", self._analysis_jobs),
-            ("feasibility", self._feasibility_jobs),
-            ("slicer", self._slicer_jobs),
-            ("profile", self._profile_jobs),
-            ("preview", self._preview_jobs),
-            ("prediction", self._slicer_prediction_jobs),
-            ("export", self._export_jobs),
-            ("update-check", self._update_check_jobs),
-            ("update-download", self._update_download_jobs),
-        )
-        for kind, jobs in job_groups:
-            for request_id, (thread, _worker) in tuple(jobs.items()):
-                if thread is finished_thread:
-                    jobs.pop(request_id, None)
-                    finished_kind = kind
-                    break
-            if finished_kind is not None:
-                break
+        finished_kind = job.kind
 
         if self._closing:
             return
         pending_adapter_work_started = False
         if (
             finished_kind in {"slicer", "profile"}
-            and not self._slicer_jobs
-            and not self._profile_jobs
+            and not self.background_job_manager.has_active(
+                JobKind.SLICER_DISCOVERY
+            )
+            and not self.background_job_manager.has_active(
+                JobKind.PROFILE_MATCH
+            )
             and self._pending_slicer_discovery is not None
         ):
             pending = self._pending_slicer_discovery
@@ -3412,7 +3383,9 @@ class MainWindow(QMainWindow):
                     manual_path=manual_path,
                 ),
             )
-        elif finished_kind == "profile" and not self._profile_jobs:
+        elif finished_kind == "profile" and not (
+            self.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+        ):
             pending = self._pending_profile_match
             self._pending_profile_match = None
             if pending is not None:
@@ -3443,8 +3416,12 @@ class MainWindow(QMainWindow):
 
         enabled = bool(
             not self._closing
-            and not self._slicer_jobs
-            and not self._profile_jobs
+            and not self.background_job_manager.has_active(
+                JobKind.SLICER_DISCOVERY
+            )
+            and not self.background_job_manager.has_active(
+                JobKind.PROFILE_MATCH
+            )
             and self._pending_slicer_discovery is None
         )
         self.slicer_refresh_button.setEnabled(enabled)
@@ -3974,9 +3951,10 @@ class MainWindow(QMainWindow):
 
     def _clear_slicer_prediction(self) -> None:
         self._slicer_prediction_request_id += 1
-        for thread, worker in tuple(self._slicer_prediction_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.SLICER_PREDICTION,
+            reason="prediction_invalidated",
+        )
         self._slicer_prediction_estimate_s = None
         self._slicer_prediction_status = ""
 
@@ -3998,17 +3976,22 @@ class MainWindow(QMainWindow):
             and self.profile_feasibility is not None
             and self.profile_feasibility.feasible
             and self.preview_state is not PreviewState.BUILDING
-            and not self._slicer_prediction_jobs
-            and not self._preview_jobs
-            and not self._export_jobs
+            and not self.background_job_manager.has_active(
+                JobKind.SLICER_PREDICTION
+            )
+            and not self.background_job_manager.has_active(JobKind.PREVIEW)
+            and not self.background_job_manager.has_active(JobKind.EXPORT)
         )
 
     def _refresh_prediction_advice(self, estimate_kind: str) -> None:
         analytical = estimate_kind == "Analytische Schätzung"
         offered = analytical and self._slicer_prediction_is_offered()
-        running = bool(self._slicer_prediction_jobs)
+        running = self.background_job_manager.has_active(
+            JobKind.SLICER_PREDICTION
+        )
         preview_running = bool(
-            self.preview_state is PreviewState.BUILDING or self._preview_jobs
+            self.preview_state is PreviewState.BUILDING
+            or self.background_job_manager.has_active(JobKind.PREVIEW)
         )
         self.prediction_advice_frame.setProperty("active", analytical)
         self.prediction_advice_label.setVisible(analytical)
@@ -4030,7 +4013,10 @@ class MainWindow(QMainWindow):
             else "Slicer-Schätzung\ndurchführen"
         )
         if offered and not running and not self._slicer_prediction_can_start():
-            if self.preview_state is PreviewState.BUILDING or self._preview_jobs:
+            if (
+                self.preview_state is PreviewState.BUILDING
+                or self.background_job_manager.has_active(JobKind.PREVIEW)
+            ):
                 tooltip = (
                     "Während die Vorschau erstellt wird, kann keine separate "
                     "Slicer-Schätzung gestartet werden."
@@ -4108,12 +4094,11 @@ class MainWindow(QMainWindow):
         worker.failed.connect(self._on_slicer_prediction_failed)
         self._refresh_prediction()
         self._refresh_phase17_actions()
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.SLICER_PREDICTION,
             request_id=request_id,
             worker=worker,
-            jobs=self._slicer_prediction_jobs,
-            on_thread_finished=self._on_background_thread_finished,
+            parent_operation_id=f"prediction-{request_id}",
         )
 
     def _on_slicer_prediction_progress(
@@ -4354,7 +4339,7 @@ class MainWindow(QMainWindow):
         self.output_root_edit.selectAll()
 
     def remove_gcode(self) -> None:
-        if self._export_jobs:
+        if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
                 "Der G-Code kann erst nach Abschluss des laufenden Exports entfernt werden."
             )
@@ -4365,14 +4350,19 @@ class MainWindow(QMainWindow):
         self._feasibility_request_id += 1
         self._preview_request_id += 1
         self._clear_slicer_prediction()
-        for thread, _worker in tuple(self._analysis_jobs.values()):
-            thread.requestInterruption()
-        for thread, _worker in tuple(self._profile_jobs.values()):
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.ANALYSIS,
+            reason="gcode_removed",
+        )
+        self.background_job_manager.cancel_jobs(
+            JobKind.PROFILE_MATCH,
+            reason="gcode_removed",
+        )
         self._cancel_feasibility_jobs()
-        for thread, worker in tuple(self._preview_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.PREVIEW,
+            reason="gcode_removed",
+        )
         if self.current_preview is not None:
             self.current_preview.dispose()
         self.current_preview = None
@@ -4426,7 +4416,7 @@ class MainWindow(QMainWindow):
     def reload_gcode(self) -> None:
         """Read and analyse the selected G-code again from disk."""
 
-        if self._export_jobs:
+        if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
                 "Der G-Code kann erst nach Abschluss des laufenden Exports "
                 "neu eingelesen werden."
@@ -4495,8 +4485,10 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def _start_gcode_analysis(self, path: Path) -> None:
-        for thread, _worker in self._analysis_jobs.values():
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.ANALYSIS,
+            reason="analysis_replaced",
+        )
 
         self._analysis_request_id += 1
         request_id = self._analysis_request_id
@@ -4524,12 +4516,10 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_analysis_progress)
         worker.succeeded.connect(self._on_analysis_succeeded)
         worker.failed.connect(self._on_analysis_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.ANALYSIS,
             request_id=request_id,
             worker=worker,
-            jobs=self._analysis_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def _on_analysis_progress(
@@ -4758,12 +4748,10 @@ class MainWindow(QMainWindow):
         )
         worker.succeeded.connect(self._on_feasibility_succeeded)
         worker.failed.connect(self._on_feasibility_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.FEASIBILITY,
             request_id=request_id,
             worker=worker,
-            jobs=self._feasibility_jobs,
-            on_thread_finished=self._on_background_thread_finished,
         )
 
     def _on_feasibility_succeeded(
@@ -4849,8 +4837,10 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def _cancel_feasibility_jobs(self) -> None:
-        for thread, _worker in tuple(self._feasibility_jobs.values()):
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.FEASIBILITY,
+            reason="feasibility_replaced",
+        )
 
     def _discard_feasibility_issues_for_setting(
         self,
@@ -6255,9 +6245,10 @@ class MainWindow(QMainWindow):
             self.preview_dialog.set_failed(german_user_message(error))
             return
 
-        for thread, worker in tuple(self._preview_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
+        self.background_job_manager.cancel_jobs(
+            JobKind.PREVIEW,
+            reason="preview_replaced",
+        )
         self._preview_request_id += 1
         request_id = self._preview_request_id
         self.preview_state = PreviewState.BUILDING
@@ -6288,12 +6279,11 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_preview_progress)
         worker.succeeded.connect(self._on_preview_succeeded)
         worker.failed.connect(self._on_preview_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.PREVIEW,
             request_id=request_id,
             worker=worker,
-            jobs=self._preview_jobs,
-            on_thread_finished=self._on_background_thread_finished,
+            parent_operation_id=f"preview-{request_id}",
         )
 
     def _on_preview_progress(
@@ -6453,12 +6443,11 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_export_progress)
         worker.succeeded.connect(self._on_export_succeeded)
         worker.failed.connect(self._on_export_failed)
-        start_background_job(
-            parent=self,
+        self.background_job_manager.start_job(
+            kind=JobKind.EXPORT,
             request_id=request_id,
             worker=worker,
-            jobs=self._export_jobs,
-            on_thread_finished=self._on_background_thread_finished,
+            parent_operation_id=f"export-{request_id}",
         )
 
     def _create_stale_preview_message_box(self) -> QMessageBox:
@@ -6831,49 +6820,16 @@ class MainWindow(QMainWindow):
         self._pending_profile_match = None
         self._feasibility_timer.stop()
         self._profile_watch_timer.stop()
-        self._cancel_feasibility_jobs()
-        for thread, _worker in tuple(self._analysis_jobs.values()):
-            thread.requestInterruption()
-        for thread, worker in tuple(self._preview_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
-        for thread, worker in tuple(self._slicer_prediction_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
-        for thread, worker in tuple(self._export_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
-        for thread, worker in tuple(self._update_download_jobs.values()):
-            worker.cancel()
-            thread.requestInterruption()
-
-        background_threads = (
-            *(thread for thread, _worker in self._analysis_jobs.values()),
-            *(thread for thread, _worker in self._feasibility_jobs.values()),
-            *(thread for thread, _worker in self._slicer_jobs.values()),
-            *(thread for thread, _worker in self._profile_jobs.values()),
-            *(thread for thread, _worker in self._preview_jobs.values()),
-            *(thread for thread, _worker in self._slicer_prediction_jobs.values()),
-            *(thread for thread, _worker in self._export_jobs.values()),
-            *(thread for thread, _worker in self._update_check_jobs.values()),
-            *(thread for thread, _worker in self._update_download_jobs.values()),
-        )
-        for thread in background_threads:
-            thread.requestInterruption()
-            thread.quit()
-        stopped_cleanly = True
-        for thread in background_threads:
-            if not thread.wait(5000):
-                stopped_cleanly = False
-
-        if not stopped_cleanly:
+        shutdown_result = self.background_job_manager.shutdown(5000)
+        if not shutdown_result.clean:
             self._closing = False
             event.ignore()
             QMessageBox.warning(
                 self,
                 "Beenden noch nicht möglich",
-                "Mindestens eine Hintergrundanalyse konnte noch nicht "
-                "kontrolliert beendet werden. Bitte versuchen Sie es erneut.",
+                "Mindestens eine Hintergrundaufgabe konnte noch nicht "
+                "kontrolliert beendet werden. Ihre Thread-Referenzen bleiben "
+                "sicher erhalten. Bitte versuchen Sie es erneut.",
             )
             return
 

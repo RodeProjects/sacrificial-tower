@@ -17,6 +17,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.models import SlicerFamily, SlicerIdentity
 from cooling_tower.slicers import (
@@ -703,11 +704,16 @@ class Phase14GuiTests(unittest.TestCase):
 
     def wait_for_discovery(self, window: MainWindow) -> None:
         deadline = time.monotonic() + 3.0
-        while window._slicer_jobs and time.monotonic() < deadline:
+        while (
+            window.background_job_manager.has_active(JobKind.SLICER_DISCOVERY)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
             time.sleep(0.01)
         self.app.processEvents()
-        self.assertFalse(window._slicer_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.SLICER_DISCOVERY)
+        )
 
     def test_gui_lists_all_installations_and_preselects_recommendation(self) -> None:
         first = self.installation("first", "First")

@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Event
 from typing import Callable
 
+from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.calibration.convergence import evaluate_convergence
 from cooling_tower.calibration.gcode_integration import (
@@ -239,6 +240,11 @@ class CalibrationService:
                     f"Kühlturm wird kalibriert – Durchlauf "
                     f"{number}/{config.maximum_iterations}",
                 )
+                record_diagnostic(
+                    "calibration_round_started",
+                    calibration_round=number,
+                    calibration_round_count=config.maximum_iterations,
+                )
                 hollow = build_hollow_tower_profile(
                     radius_profile,
                     settings,
@@ -264,6 +270,12 @@ class CalibrationService:
                 )
                 export = write_binary_stl(mesh, candidate_stl)
                 if not export.validation.is_valid:
+                    record_diagnostic(
+                        "calibration_round_finished",
+                        calibration_round=number,
+                        success=False,
+                        reason="invalid_geometry",
+                    )
                     failures.append(CalibrationFailure(
                         CalibrationFailureCode.GEOMETRY_INVALID,
                         "Das erzeugte Kandidaten-Mesh ist nicht geschlossen und "
@@ -292,6 +304,12 @@ class CalibrationService:
                     )
                 )
                 if not slice_result.success:
+                    record_diagnostic(
+                        "calibration_round_finished",
+                        calibration_round=number,
+                        success=False,
+                        reason="slicer_failure",
+                    )
                     details = (slice_result.stderr or slice_result.stdout).strip()
                     if len(details) > 1000:
                         details = details[-1000:]
@@ -324,6 +342,12 @@ class CalibrationService:
                             retraction_speed_mm_s=config.retraction_speed_mm_s,
                         )
                     except GCodeIntegrationError as error:
+                        record_diagnostic(
+                            "calibration_round_finished",
+                            calibration_round=number,
+                            success=False,
+                            reason="gcode_integration_failure",
+                        )
                         failures.append(CalibrationFailure(
                             CalibrationFailureCode.UNSUPPORTED_GCODE, str(error)
                         ))
@@ -354,6 +378,15 @@ class CalibrationService:
                     final_combined_gcode_path=combined_path,
                 )
                 iterations.append(iteration)
+                record_diagnostic(
+                    "calibration_round_finished",
+                    calibration_round=number,
+                    success=True,
+                    deficient_layer_count=convergence.deficient_layer_count,
+                    maximum_remaining_deficit_s=(
+                        convergence.maximum_remaining_deficit_s
+                    ),
+                )
                 metadata_conflict = (
                     config.mode is CalibrationMode.GCODE
                     and evaluation.maximum_metadata_difference_s is not None

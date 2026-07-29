@@ -18,7 +18,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, QThread, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from cooling_tower.application import show_startup_error
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui import MainWindow
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.models import (
@@ -867,9 +868,18 @@ class StartupLayoutAndLifecycleTests(GuiCase):
         )
         alternate.drop_zone.set_file(self.source)
         deadline = time.monotonic() + 2
-        while not alternate._analysis_jobs and time.monotonic() < deadline:
+        while (
+            not alternate.background_job_manager.has_active(JobKind.ANALYSIS)
+            and time.monotonic() < deadline
+        ):
             self.app.processEvents()
-        threads = [thread for thread, _worker in alternate._analysis_jobs.values()]
+        threads = [
+            job.thread
+            for job in alternate.background_job_manager.active_jobs(
+                JobKind.ANALYSIS
+            )
+            if isinstance(job.thread, QThread)
+        ]
         self.assertTrue(threads and threads[0].isRunning())
         alternate.close()
         self.app.processEvents()

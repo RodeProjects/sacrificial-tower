@@ -11,12 +11,17 @@ from pathlib import Path
 from types import TracebackType
 from typing import TextIO, Type
 
-from PySide6.QtCore import QtMsgType, QTimer, qInstallMessageHandler
+from PySide6.QtCore import QTimer, QUrl, QtMsgType, qInstallMessageHandler
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.application_mutex import (
     acquire_application_mutex,
     release_application_mutex,
+)
+from cooling_tower.diagnostics import (
+    DiagnosticJournal,
+    set_current_diagnostic_journal,
 )
 from cooling_tower.gui import MainWindow
 from cooling_tower.distribution import (
@@ -37,6 +42,18 @@ _APPLICATION_LOG_ROOT = _APPLICATION_DATA_ROOT / "logs"
 DEFAULT_STARTUP_LOG = _APPLICATION_LOG_ROOT / "application_startup.log"
 DEFAULT_NATIVE_CRASH_LOG = _APPLICATION_LOG_ROOT / "native_crash.log"
 DEFAULT_RUNTIME_LOG = _APPLICATION_LOG_ROOT / "application_runtime.log"
+DEFAULT_JOB_DIAGNOSTIC_LOG = _APPLICATION_LOG_ROOT / "background_jobs.jsonl"
+DEFAULT_DIAGNOSTIC_SESSION_STATE = (
+    _APPLICATION_LOG_ROOT / "diagnostic_session.json"
+)
+
+_CRITICAL_QT_MESSAGES = (
+    "qobject::killtimer",
+    "timers cannot be stopped from another thread",
+    "qthread: destroyed while thread is still running",
+    "qthreadstorage",
+    "qobject::setparent",
+)
 
 
 def enable_native_crash_log(
@@ -95,8 +112,11 @@ def append_runtime_diagnostic(
 
 def install_qt_message_logging(
     log_path: str | Path = DEFAULT_RUNTIME_LOG,
+    *,
+    diagnostic_journal: DiagnosticJournal | None = None,
+    active_jobs_provider: Callable[[], object] | None = None,
 ):
-    """Record Qt warnings and fatal messages before a native abort."""
+    """Record Qt messages without throwing and preserve an existing handler."""
 
     labels = {
         QtMsgType.QtDebugMsg: "qt-debug",
@@ -106,17 +126,103 @@ def install_qt_message_logging(
         QtMsgType.QtFatalMsg: "qt-fatal",
     }
 
-    def handle_qt_message(mode, context, message) -> None:
-        location = ""
-        if context is not None and context.file:
-            location = f"{context.file}:{context.line}: "
-        append_runtime_diagnostic(
-            labels.get(mode, "qt-message"),
-            f"{location}{message}",
-            log_path,
-        )
+    if diagnostic_journal is not None:
+        diagnostic_journal.set_active_jobs_provider(active_jobs_provider)
+    previous_holder: dict[str, object] = {}
 
-    return qInstallMessageHandler(handle_qt_message)
+    def handle_qt_message(mode, context, message) -> None:
+        try:
+            location = ""
+            if context is not None and context.file:
+                location = f"{context.file}:{context.line}"
+            normalized = str(message).casefold()
+            critical = any(
+                marker in normalized for marker in _CRITICAL_QT_MESSAGES
+            )
+            if diagnostic_journal is not None:
+                diagnostic_journal.record_qt_message(
+                    message_type=labels.get(mode, "qt-message"),
+                    message=str(message),
+                    location=location,
+                    critical=critical,
+                )
+            else:
+                append_runtime_diagnostic(
+                    labels.get(mode, "qt-message"),
+                    f"{location + ': ' if location else ''}{message}",
+                    log_path,
+                )
+        except Exception:
+            pass
+        previous = previous_holder.get("handler")
+        if callable(previous):
+            try:
+                previous(mode, context, message)
+            except Exception:
+                pass
+
+    previous = qInstallMessageHandler(handle_qt_message)
+    previous_holder["handler"] = previous
+    return previous
+
+
+def offer_previous_crash_report(
+    parent,
+    journal: DiagnosticJournal,
+) -> None:
+    """Offer local-only recovery actions for an unclosed previous session."""
+
+    if journal.previous_unexpected_session is None:
+        return
+    box = QMessageBox(parent)
+    box.setWindowTitle("Vorheriger Programmabbruch erkannt")
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setText(
+        "Die vorherige Sitzung wurde offenbar nicht sauber beendet. "
+        "Der technische Bericht bleibt lokal und wird nicht automatisch "
+        "übertragen."
+    )
+    show_button = box.addButton(
+        "Technischen Bericht anzeigen",
+        QMessageBox.ButtonRole.ActionRole,
+    )
+    copy_button = box.addButton(
+        "In Zwischenablage kopieren",
+        QMessageBox.ButtonRole.ActionRole,
+    )
+    folder_button = box.addButton(
+        "Protokollordner öffnen",
+        QMessageBox.ButtonRole.ActionRole,
+    )
+    discard_button = box.addButton(
+        "Bericht verwerfen",
+        QMessageBox.ButtonRole.DestructiveRole,
+    )
+    later_button = box.addButton(
+        "Später",
+        QMessageBox.ButtonRole.RejectRole,
+    )
+    box.setDefaultButton(later_button)
+    box.exec()
+    clicked = box.clickedButton()
+    report = journal.build_previous_crash_report()
+    if clicked is show_button:
+        details = QMessageBox(parent)
+        details.setWindowTitle("Technischer Diagnosebericht")
+        details.setIcon(QMessageBox.Icon.Information)
+        details.setText(
+            "Diagnose der unerwartet beendeten vorherigen Sitzung"
+        )
+        details.setDetailedText(report)
+        details.exec()
+    elif clicked is copy_button:
+        QApplication.clipboard().setText(report)
+    elif clicked is folder_button:
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(journal.log_path.parent))
+        )
+    elif clicked is discard_button:
+        journal.discard_previous_crash_report()
 
 
 def show_startup_error(
@@ -202,6 +308,13 @@ def run_application(
     application_mutex = None
     previous_qt_message_handler = None
     qt_message_logging_installed = False
+    application_returned = False
+    diagnostic_journal = DiagnosticJournal(
+        DEFAULT_JOB_DIAGNOSTIC_LOG,
+        state_path=DEFAULT_DIAGNOSTIC_SESSION_STATE,
+    )
+    diagnostic_journal.start_session()
+    set_current_diagnostic_journal(diagnostic_journal)
     try:
         if (
             IS_FROZEN
@@ -219,11 +332,25 @@ def run_application(
         application.setApplicationVersion(APP_VERSION)
         application.setQuitOnLastWindowClosed(True)
         install_exception_handler(log_path)
-        previous_qt_message_handler = install_qt_message_logging()
+        previous_qt_message_handler = install_qt_message_logging(
+            diagnostic_journal=diagnostic_journal,
+        )
         qt_message_logging_installed = True
         try:
             window = window_factory()
+            manager = getattr(window, "background_job_manager", None)
+            provider = getattr(manager, "diagnostic_snapshot", None)
+            if callable(provider):
+                diagnostic_journal.set_active_jobs_provider(provider)
             window.show()
+            if diagnostic_journal.previous_unexpected_session is not None:
+                QTimer.singleShot(
+                    0,
+                    lambda: offer_previous_crash_report(
+                        window,
+                        diagnostic_journal,
+                    ),
+                )
             automatic_close_ms = os.environ.get(
                 "COOLING_TOWER_TEST_AUTOCLOSE_MS"
             )
@@ -231,11 +358,17 @@ def run_application(
                 QTimer.singleShot(int(automatic_close_ms), window.close)
         except Exception:
             show_startup_error(traceback.format_exc(), log_path=log_path)
+            application_returned = True
             return 1
-        return application.exec()
+        result = application.exec()
+        application_returned = True
+        return result
     finally:
         if qt_message_logging_installed:
             qInstallMessageHandler(previous_qt_message_handler)
+        if application_returned:
+            diagnostic_journal.close_session()
+        set_current_diagnostic_journal(None)
         if native_crash_log is not None:
             try:
                 faulthandler.disable()

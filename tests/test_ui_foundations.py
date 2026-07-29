@@ -21,6 +21,7 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLabel
 
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.workflow_controller import (
     WorkflowController,
@@ -270,7 +271,9 @@ class UiFoundationTests(unittest.TestCase):
             window.stability_group,
         ):
             self.assertFalse(widget.isVisible())
-        self.assertFalse(window._slicer_jobs)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.SLICER_DISCOVERY)
+        )
         window.close()
 
     def test_slicer_progress_has_percentage_symbol_and_german_step(self) -> None:

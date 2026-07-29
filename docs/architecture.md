@@ -55,16 +55,75 @@ Fachmodule dürfen keine Qt-Abhängigkeit erhalten.
 
 ## Thread-Lebenszyklus
 
-Jeder GUI-Worker besitzt `run()` und ein `finished`-Signal. Der gemeinsame
-Starter hält Thread und Worker bis zum nativen `QThread.finished` in der
-zuständigen Job-Registry. Erst dann entfernt
-`MainWindow._on_background_thread_finished` beide Referenzen und startet
-gegebenenfalls aufgeschobene Arbeit.
+Für sämtliche Hintergrundaufgaben gelten diese überprüfbaren Invarianten:
 
-Beim Schließen werden laufende Aufgaben zuerst zur Unterbrechung aufgefordert,
-danach werden ihre Event-Loops beendet und mit begrenztem Timeout abgewartet.
-Neue Workerarten müssen in diese zentrale Registry- und Shutdown-Behandlung
-aufgenommen werden.
+1. Jeder Worker und sein `QThread` haben genau einen Besitzer, den
+   `BackgroundJobManager` im GUI-Thread.
+2. Starke Worker- und Thread-Referenzen werden erst nach dem vollständigen
+   nativen Threadende entfernt.
+3. `QObject`, `QTimer` und `QProcess` werden ausschließlich in ihrem
+   zugehörigen Thread erzeugt und zerstört.
+4. Abbruchanforderungen über `cancel()` und das gemeinsame
+   `threading.Event` sind mehrfach gefahrlos aufrufbar.
+5. Kein laufender Thread wird mit `terminate()` gewaltsam zerstört.
+6. Nur der GUI-Thread verändert Widgets.
+
+Jeder GUI-Worker besitzt `run()`, genau ein eindeutiges `finished`-Signal und
+den gemeinsamen Cancel-Vertrag. Der `BackgroundJobManager` ist der einzige
+produktive Erzeuger von `QThread`-Instanzen. Er führt jeden Auftrag durch die
+feste Zustandsmaschine
+`CREATED → STARTING → RUNNING → CANCEL_REQUESTED → WORKER_FINISHED →
+THREAD_FINISHED → RELEASED`. Direkte Normalabschlüsse überspringen
+`CANCEL_REQUESTED`, nicht aber die beiden beobachtbaren Abschlusszustände.
+Unzulässige Übergänge werden im Entwicklungsbetrieb sofort diagnostiziert.
+
+Das Hauptfenster hält keine Job-Dictionaries, Kompatibilitätsansichten oder
+eigenen Worker-/Thread-Paare. Laufende Arbeiten werden ausschließlich über
+`BackgroundJobManager.has_active()`, `active_jobs()` und `job_for_request()`
+abgefragt. Dadurch bleibt der Manager auch für reine Statusabfragen die einzige
+Wahrheitsquelle für Hintergrundarbeit.
+
+Der Worker meldet zuerst seinen fachlichen Abschluss. Das beendet die
+Thread-Ereignisschleife; `QThread.finished` plant die Löschung des Workers in
+dessen Thread ein. Der Manager wartet anschließend auf das tatsächliche native
+Threadende, entfernt erst dann beide starken Referenzen und meldet `RELEASED`.
+
+Beim Schließen fordert der Manager alle Jobs idempotent zum Abbruch auf, setzt
+zusätzlich `QThread.requestInterruption()` und wartet mit einem gemeinsamen,
+begrenzten Timeout. Ein noch laufender Job bleibt bei Zeitüberschreitung
+registriert; die Oberfläche verweigert den unsicheren Programmabschluss und
+versucht niemals, den Thread gewaltsam freizugeben.
+
+## Diagnose und Stresstests
+
+`DiagnosticJournal` schreibt pro Sitzung eine rotierende, append-only
+JSONL-Datei. Jeder technische und fachliche Job-Eintrag enthält Sitzungs- und
+Korrelations-ID, Programmversion, Ereignisnummer, UTC- und monotone Zeit,
+Zustandsübergang, Worker- und Thread-Identität, Abbruch-/Fehlergrund und Dauer.
+Pfade, lange Inhalte sowie Schlüssel- und Profilinhalte werden redigiert.
+
+Der zentrale Qt-Message-Handler erfasst insbesondere Timer-, ThreadStorage-,
+`setParent`- und vorzeitig zerstörte `QThread`-Warnungen zusammen mit einem
+threadsicheren Snapshot der aktiven Jobs. Er öffnet keine GUI, wirft keine
+Ausnahme in Qt zurück und reicht Nachrichten an einen zuvor installierten
+Handler weiter.
+
+Ein atomarer Sitzungsmarker unterscheidet saubere Abschlüsse von einem
+unerwarteten Abbruch. Beim nächsten Start kann der Benutzer den ausschließlich
+lokalen technischen Bericht anzeigen, kopieren, seinen Protokollordner öffnen
+oder den Hinweis verwerfen. Es gibt keinen automatischen Upload.
+
+Native Stressfälle laufen über `cooling_tower.gui.job_stress` jeweils in einem
+eigenen Python-Prozess mit festem Zufalls-Seed. Der Elternprozess prüft
+Exitcode, Abschlussmarker, Timeout, kritische Qt-Warnungen, leere Job-Registry
+und verwaiste Fake-Slicer-Unterprozesse. Damit beendet ein möglicher nativer
+Qt-Abbruch nicht die übrige Testsuite und bleibt mit dem ausgegebenen Seed
+reproduzierbar.
+
+Der Architekturtest wertet den Python-Syntaxbaum aus und erkennt auch
+aliasierte beziehungsweise qualifizierte `QThread`-Konstruktoren sowie direkte
+`deleteLater`- und `terminate`-Umgehungen. Zusätzlich verbietet er die
+Wiedereinführung der entfernten Legacy-Job-API im produktiven Quellcode.
 
 ## Regeln für Änderungen
 

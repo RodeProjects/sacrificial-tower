@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import traceback
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import Signal, Slot
 
+from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.models import (
     GCodeAnalysisSnapshot,
     GenerationSettings,
@@ -15,7 +16,7 @@ from cooling_tower.services import (
 )
 
 
-class FeasibilityWorker(QObject):
+class FeasibilityWorker(CancelableWorker):
     """Cancelable worker for one debounced, output-free profile check."""
 
     succeeded = Signal(int, object)
@@ -37,24 +38,25 @@ class FeasibilityWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        thread = QThread.currentThread()
-        try:
-            result = assess_profile_feasibility(
-                self.snapshot,
-                self.settings,
-                self.assessment,
-                cancellation_callback=thread.isInterruptionRequested,
-            )
-        except FeasibilityCancelled:
-            pass
-        except Exception as error:
-            self.failed.emit(
-                self.request_id,
-                str(error),
-                traceback.format_exc(),
-            )
-        else:
-            if not thread.isInterruptionRequested():
-                self.succeeded.emit(self.request_id, result)
-        finally:
-            self.finished.emit(self.request_id)
+        with self.diagnostic_scope():
+            try:
+                result = assess_profile_feasibility(
+                    self.snapshot,
+                    self.settings,
+                    self.assessment,
+                    cancellation_callback=self.cancellation_requested,
+                )
+            except FeasibilityCancelled:
+                pass
+            except Exception as error:
+                if not self.cancellation_requested():
+                    self.failed.emit(
+                        self.request_id,
+                        str(error),
+                        traceback.format_exc(),
+                    )
+            else:
+                if not self.cancellation_requested():
+                    self.succeeded.emit(self.request_id, result)
+            finally:
+                self.finished.emit(self.request_id)
