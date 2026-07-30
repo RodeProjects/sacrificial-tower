@@ -28,7 +28,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from cooling_tower.application import show_startup_error
+from cooling_tower.application import (
+    MAIN_WINDOW_REVEAL_DELAY_MS,
+    _show_main_window,
+    show_startup_error,
+)
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui import MainWindow
 from cooling_tower.gui.background_jobs import JobKind
@@ -93,6 +97,73 @@ class StartupWindowVisibilityTests(unittest.TestCase):
 
         self.assertEqual(recorder.shown, [])
 
+    def test_saved_main_window_geometry_is_complete_before_show(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            settings_path = Path(temporary) / "user.json"
+            available = self.app.primaryScreen().availableGeometry()
+            target_x = available.left() + 20
+            target_y = available.top() + 20
+
+            first = MainWindow(
+                user_settings_path=settings_path,
+                enable_update_check=False,
+            )
+            first.resize(720, 640)
+            first.move(target_x, target_y)
+            first.show()
+            self.app.processEvents()
+            first.close()
+            self.app.processEvents()
+
+            saved = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["window"]["x"], target_x)
+            self.assertEqual(saved["window"]["y"], target_y)
+
+            restored = MainWindow(
+                user_settings_path=settings_path,
+                enable_update_check=False,
+            )
+            self.assertEqual(restored.width(), 720)
+            self.assertEqual(restored.height(), 640)
+            self.assertEqual(restored.x(), target_x)
+            self.assertEqual(restored.y(), target_y)
+            restored.show()
+            self.app.processEvents()
+            self.assertEqual(restored.x(), target_x)
+            self.assertEqual(restored.y(), target_y)
+            restored.close()
+
+    def test_windows_startup_frame_remains_transparent_until_reveal(self) -> None:
+        class WindowStub:
+            def __init__(self) -> None:
+                self.visible = False
+                self.opacity_values: list[float] = []
+
+            def setWindowOpacity(self, value: float) -> None:  # noqa: N802
+                self.opacity_values.append(value)
+
+            def show(self) -> None:
+                self.visible = True
+
+            def isVisible(self) -> bool:  # noqa: N802
+                return self.visible
+
+        window = WindowStub()
+        with (
+            patch("cooling_tower.application.sys.platform", "win32"),
+            patch("cooling_tower.application.QTimer.singleShot") as schedule,
+        ):
+            _show_main_window(window)
+
+        self.assertTrue(window.visible)
+        self.assertEqual(window.opacity_values, [0.0])
+        self.assertEqual(
+            schedule.call_args.args[0],
+            MAIN_WINDOW_REVEAL_DELAY_MS,
+        )
+        schedule.call_args.args[1]()
+        self.assertEqual(window.opacity_values, [0.0, 1.0])
+
 
 class SettingsSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -144,6 +215,8 @@ class SettingsSchemaTests(unittest.TestCase):
             output_root=str(self.root / "output"),
             window_width=900,
             window_height=700,
+            window_x=-320,
+            window_y=45,
         )
         payload = json.loads(self.user_path.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -151,6 +224,33 @@ class SettingsSchemaTests(unittest.TestCase):
             SETTINGS_SCHEMA_VERSION,
         )
         self.assertIn("generation", payload)
+        self.assertEqual(
+            payload["window"],
+            {"width": 900, "height": 700, "x": -320, "y": 45},
+        )
+
+    def test_schema_4_migrates_directly_before_window_positions_are_saved(
+        self,
+    ) -> None:
+        self.user_path.write_text(
+            json.dumps(
+                {
+                    "settings_schema_version": 4,
+                    "generation": {"target_layer_time_s": 73.0},
+                    "window": {"width": 840, "height": 680},
+                }
+            ),
+            encoding="utf-8",
+        )
+        original = self.user_path.read_bytes()
+
+        settings, state = self.store.load()
+
+        self.assertEqual(settings.target_layer_time_s, 73.0)
+        self.assertEqual(state["settings_schema_version"], 5)
+        self.assertEqual(state["window"], {"width": 840, "height": 680})
+        self.assertIsNotNone(self.store.last_migration_backup)
+        self.assertEqual(self.store.last_migration_backup.read_bytes(), original)
 
     def test_relative_default_output_is_resolved_from_project(self) -> None:
         self.assertEqual(

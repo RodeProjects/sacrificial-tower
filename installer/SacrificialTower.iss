@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.0.0"
+  #error AppVersion muss aus src/cooling_tower/version.py übergeben werden.
 #endif
 
 #ifndef AppIdValue

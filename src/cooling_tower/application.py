@@ -16,6 +16,8 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.application_mutex import (
+    ApplicationAlreadyRunningError,
+    activate_running_application_window,
     acquire_application_mutex,
     release_application_mutex,
 )
@@ -24,12 +26,9 @@ from cooling_tower.diagnostics import (
     set_current_diagnostic_journal,
 )
 from cooling_tower.gui import MainWindow
-from cooling_tower.distribution import (
-    DistributionChannel,
-    detect_distribution_channel,
-)
+from cooling_tower.distribution import detect_distribution_channel
 from cooling_tower.runtime_paths import IS_FROZEN, resolve_user_data_root
-from cooling_tower.version import APP_VERSION
+from cooling_tower.version import APP_NAME, APP_VERSION
 
 
 _DISTRIBUTION_CHANNEL = detect_distribution_channel()
@@ -54,6 +53,26 @@ _CRITICAL_QT_MESSAGES = (
     "qthreadstorage",
     "qobject::setparent",
 )
+MAIN_WINDOW_REVEAL_DELAY_MS = 40
+
+
+def _reveal_main_window(window) -> None:  # type: ignore[no-untyped-def]
+    if window.isVisible():
+        window.setWindowOpacity(1.0)
+
+
+def _show_main_window(window) -> None:  # type: ignore[no-untyped-def]
+    """Hide Windows' provisional first frame until placement is complete."""
+
+    if sys.platform != "win32":
+        window.show()
+        return
+    window.setWindowOpacity(0.0)
+    window.show()
+    QTimer.singleShot(
+        MAIN_WINDOW_REVEAL_DELAY_MS,
+        lambda: _reveal_main_window(window),
+    )
 
 
 def enable_native_crash_log(
@@ -234,7 +253,7 @@ def show_startup_error(
     location = str(written) if written is not None else "nicht verfügbar"
     QMessageBox.critical(
         None,
-        "Kühlturm-Generator – Startfehler",
+        f"{APP_NAME} – Startfehler",
         "Die Anwendung konnte nicht vollständig gestartet werden.\n\n"
         "Fehlerdetails wurden gespeichert unter:\n"
         f"{location}",
@@ -304,8 +323,26 @@ def run_application(
     window_factory=MainWindow,
     log_path: str | Path = DEFAULT_STARTUP_LOG,
 ) -> int:
-    native_crash_log = enable_native_crash_log()
     application_mutex = None
+    try:
+        application_mutex = acquire_application_mutex()
+    except ApplicationAlreadyRunningError:
+        try:
+            activate_running_application_window(APP_NAME)
+        except OSError:
+            append_runtime_diagnostic(
+                "application-activation",
+                traceback.format_exc(),
+            )
+        return 0
+    except OSError:
+        append_runtime_diagnostic(
+            "application-mutex",
+            traceback.format_exc(),
+        )
+        return 1
+
+    native_crash_log = enable_native_crash_log()
     previous_qt_message_handler = None
     qt_message_logging_installed = False
     application_returned = False
@@ -316,19 +353,8 @@ def run_application(
     diagnostic_journal.start_session()
     set_current_diagnostic_journal(diagnostic_journal)
     try:
-        if (
-            IS_FROZEN
-            and _DISTRIBUTION_CHANNEL is DistributionChannel.STANDALONE
-        ):
-            try:
-                application_mutex = acquire_application_mutex()
-            except OSError:
-                append_runtime_diagnostic(
-                    "application-mutex",
-                    traceback.format_exc(),
-                )
         application = QApplication.instance() or QApplication(sys.argv)
-        application.setApplicationName("Kühlturm-Generator")
+        application.setApplicationName(APP_NAME)
         application.setApplicationVersion(APP_VERSION)
         application.setQuitOnLastWindowClosed(True)
         install_exception_handler(log_path)
@@ -342,10 +368,14 @@ def run_application(
             provider = getattr(manager, "diagnostic_snapshot", None)
             if callable(provider):
                 diagnostic_journal.set_active_jobs_provider(provider)
-            window.show()
+            _show_main_window(window)
             if diagnostic_journal.previous_unexpected_session is not None:
                 QTimer.singleShot(
-                    0,
+                    (
+                        MAIN_WINDOW_REVEAL_DELAY_MS + 1
+                        if sys.platform == "win32"
+                        else 0
+                    ),
                     lambda: offer_previous_crash_report(
                         window,
                         diagnostic_journal,

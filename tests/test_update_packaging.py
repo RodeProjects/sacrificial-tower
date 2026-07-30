@@ -8,6 +8,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class UpdatePackagingTests(unittest.TestCase):
+    def test_app_version_is_the_single_release_version_source(self) -> None:
+        installer = (
+            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
+        ).read_text(encoding="utf-8")
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
+        ).read_text(encoding="utf-8")
+        spec = (PROJECT_ROOT / "SacrificialTower.spec").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn('#define AppVersion "0.0.0"', installer)
+        self.assertIn("#error AppVersion muss", installer)
+        self.assertIn(
+            "from cooling_tower.version import APP_VERSION", workflow
+        )
+        self.assertIn('"/DAppVersion=$env:APP_VERSION"', workflow)
+        self.assertIn('version_namespace["APP_VERSION"]', spec)
+
     def test_pyinstaller_bundle_contains_required_runtime_data(self) -> None:
         spec = (PROJECT_ROOT / "SacrificialTower.spec").read_text(
             encoding="utf-8"

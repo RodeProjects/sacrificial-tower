@@ -32,7 +32,8 @@ _LEGACY_ALIASES = {
 }
 _GENERATION_DEFAULTS = GenerationSettings().to_dict()
 _PREVIEW_QUALITIES = {"fast", "balanced", "exact"}
-_WINDOW_KEYS = {"width", "height"}
+_WINDOW_SIZE_KEYS = {"width", "height"}
+_WINDOW_POSITION_KEYS = {"x", "y"}
 _CAMERA_KEYS = {"yaw_deg", "pitch_deg", "zoom", "pan_x", "pan_y"}
 _EXPANDED_SECTION_KEYS = {"timing", "prediction", "geometry"}
 _OBSOLETE_UI_KEYS = {"output_mode", "preview_signature"}
@@ -128,6 +129,12 @@ def _migrate_settings_3_to_4(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_4_to_5(payload: dict[str, Any]) -> dict[str, Any]:
+    """Allow an optional main-window position alongside its saved size."""
+
+    return dict(payload)
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -141,12 +148,20 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     raw_window = nested.get("window")
     window: dict[str, int] = {}
     if isinstance(raw_window, Mapping):
-        for name in _WINDOW_KEYS:
+        for name in _WINDOW_SIZE_KEYS:
             value = raw_window.get(name)
             if (
                 isinstance(value, int)
                 and not isinstance(value, bool)
                 and 100 <= value <= 100_000
+            ):
+                window[name] = value
+        for name in _WINDOW_POSITION_KEYS:
+            value = raw_window.get(name)
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and -100_000 <= value <= 100_000
             ):
                 window[name] = value
     if window:
@@ -190,6 +205,7 @@ _USER_SETTINGS_MIGRATIONS = {
     1: _migrate_settings_1_to_2,
     2: _migrate_settings_2_to_3,
     3: _migrate_settings_3_to_4,
+    4: _migrate_settings_4_to_5,
 }
 
 
@@ -293,6 +309,8 @@ class UserSettingsStore:
         output_root: str,
         window_width: int,
         window_height: int,
+        window_x: int | None = None,
+        window_y: int | None = None,
         preview_quality: str = "balanced",
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
@@ -302,6 +320,8 @@ class UserSettingsStore:
             output_root=output_root,
             window_width=window_width,
             window_height=window_height,
+            window_x=window_x,
+            window_y=window_y,
             preview_quality=preview_quality,
             preview_camera=preview_camera,
             expanded_sections=expanded_sections,
@@ -321,6 +341,8 @@ class UserSettingsStore:
         output_root: str,
         window_width: int,
         window_height: int,
+        window_x: int | None = None,
+        window_y: int | None = None,
         preview_quality: str = "balanced",
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
@@ -333,6 +355,8 @@ class UserSettingsStore:
                 output_root=output_root,
                 window_width=window_width,
                 window_height=window_height,
+                window_x=window_x,
+                window_y=window_y,
                 preview_quality=preview_quality,
                 preview_camera=preview_camera,
                 expanded_sections=expanded_sections,
@@ -348,18 +372,23 @@ class UserSettingsStore:
         output_root: str,
         window_width: int,
         window_height: int,
+        window_x: int | None,
+        window_y: int | None,
         preview_quality: str,
         preview_camera: Mapping[str, Any] | None,
         expanded_sections: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
+        window = {
+            "width": window_width,
+            "height": window_height,
+        }
+        if window_x is not None and window_y is not None:
+            window.update({"x": window_x, "y": window_y})
         return {
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
             "generation": generation.to_dict(),
             "output_root": output_root,
-            "window": {
-                "width": window_width,
-                "height": window_height,
-            },
+            "window": window,
             "preview_quality": (
                 preview_quality
                 if preview_quality in {"fast", "balanced", "exact"}

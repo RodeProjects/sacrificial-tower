@@ -484,9 +484,13 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(geometry.state(), SectionState.ERROR)
         window._refresh_collapsible_error_badges({})
 
-        window.options_button.click()
+        window.change_output_action.trigger()
         self.app.processEvents()
         self.assertTrue(window.additional_options_dialog.isVisible())
+        self.assertEqual(
+            window.additional_options_dialog.windowTitle(),
+            "Ausgabeordner ändern",
+        )
         self.assertEqual(window.options_button.text(), "")
         self.assertFalse(window.options_button.icon().isNull())
         self.assertEqual(window.options_button.iconSize().width(), 18)
@@ -502,12 +506,11 @@ class Phase18UiTests(unittest.TestCase):
         window.move(40, 0)
         window.show()
         self.app.processEvents()
-        window.options_button.click()
+        window.change_output_action.trigger()
         QTest.qWait(30)
         self.app.processEvents()
         dialog = window.additional_options_dialog
-        expected_width = int(round((window.width() * 0.8) / 20.0) * 20)
-        self.assertEqual(dialog.width(), expected_width)
+        self.assertEqual(dialog.width(), 600)
         self.assertEqual(dialog.height(), dialog.layout().sizeHint().height())
         self.assertLess(dialog.height(), window.height() // 2)
         self.assertLessEqual(
@@ -799,7 +802,10 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.geometry_group.title(), "Abmessungen")
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
-        self.assertEqual(window.subtitle_label.text(), "Kühlturm aus einem G-Code erzeugen")
+        self.assertEqual(
+            window.subtitle_label.text(),
+            "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
+        )
         self.assertEqual(window.prediction_frame.title(), "Prognose")
         self.assertTrue(window.slicer_columns.is_two_column())
         self.assertTrue(window.slicer_columns_divider.isVisible())

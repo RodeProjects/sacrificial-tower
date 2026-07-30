@@ -16,11 +16,16 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton
 
 from cooling_tower.gui.main_window import (
+    ABOUT_DIALOG_MINIMUM_WIDTH_PX,
+    ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX,
+    ABOUT_DIALOG_PREFERRED_WIDTH_PX,
+    CURRENT_LICENSE_STATUS,
+    LICENSE_STATUS_DEFINITIONS,
     MAIN_FOOTER_MAX_HEIGHT_PX,
     MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
     MainWindow,
@@ -39,6 +44,7 @@ from cooling_tower.slicers.models import (
     SlicerDiscoverySource,
 )
 from cooling_tower.slicers.process import ProcessOutcome
+from cooling_tower.version import APP_NAME, APP_SUBTITLE
 
 
 class RecordingProbeRunner:
@@ -293,12 +299,291 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         self.assertIsNone(window._preview_dialog)
         self.assertIsNone(window._additional_options_dialog)
+        self.assertIsNone(window._about_dialog)
         self.assertFalse(
             any(isinstance(widget, QDialog) for widget in self.app.topLevelWidgets())
         )
 
         self.assertIsNotNone(window.preview_dialog)
         self.assertIsNotNone(window.additional_options_dialog)
+        self.assertIsNotNone(window.about_dialog)
+        window.close()
+
+    def test_header_menu_and_subtitle_expose_the_requested_actions(self) -> None:
+        window = self.window()
+        window.resize(760, 700)
+        window.move(20, 20)
+        window.show()
+        self.app.processEvents()
+
+        self.assertEqual(
+            window.subtitle_label.text(),
+            "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
+        )
+        self.assertEqual(window.windowTitle(), APP_NAME)
+        self.assertEqual(window.title_label.text(), APP_NAME)
+        self.assertEqual(window.subtitle_label.text(), APP_SUBTITLE)
+        self.assertEqual(window.options_button.accessibleName(), "Menü öffnen")
+        self.assertEqual(
+            [action.text() for action in window.options_menu.actions()],
+            ["Ausgabeordner ändern", "Über Kühlturm-Generator"],
+        )
+        self.assertTrue(
+            all(
+                not action.icon().isNull()
+                for action in window.options_menu.actions()
+            )
+        )
+        window.options_menu.ensurePolished()
+        menu_size = window.options_menu.sizeHint()
+        popup_position = window._options_menu_popup_position(menu_size)
+        window_top_left = window.mapToGlobal(QPoint(0, 0))
+        button_top_left = window.options_button.mapToGlobal(QPoint(0, 0))
+        self.assertGreaterEqual(popup_position.x(), window_top_left.x())
+        self.assertLessEqual(
+            popup_position.x() + menu_size.width(),
+            window_top_left.x() + window.width(),
+        )
+        self.assertEqual(
+            popup_position.y(),
+            button_top_left.y() + window.options_button.height(),
+        )
+        window.close()
+
+    def test_output_folder_dialog_width_and_reset_follow_install_defaults(self) -> None:
+        window = self.window()
+        window.resize(720, 800)
+        window.show()
+        self.app.processEvents()
+
+        window.change_output_action.trigger()
+        self.app.processEvents()
+        self.assertEqual(window.additional_options_dialog.width(), 600)
+        self.assertLess(
+            window.additional_options_dialog.width(), window.width()
+        )
+        self.assertFalse(window.output_browse_button.icon().isNull())
+        self.assertFalse(window.output_root_reset_button.icon().isNull())
+        self.assertLessEqual(
+            window.additional_options_dialog.width(), window.width()
+        )
+        self.assertEqual(
+            window.preview_hint_label.text(),
+            "Beim Export wird der Kühlturm immer mit den aktuellen "
+            "Einstellungen erzeugt.",
+        )
+        self.assertNotIn(
+            "Die Vorschau ist optional",
+            window.preview_hint_label.text(),
+        )
+
+        window.additional_options_dialog.close()
+        window.resize(550, 800)
+        self.app.processEvents()
+        window.show_additional_options()
+        self.app.processEvents()
+        self.assertEqual(window.additional_options_dialog.width(), 600)
+
+        window.output_root_edit.setText(str(self.root / "custom-output"))
+        window._reset_output_root()
+        self.assertEqual(
+            Path(window.output_root_edit.text()),
+            window.settings_store.load_default_output_root(),
+        )
+        window.close()
+
+    def test_program_information_contains_requested_icons_and_scrolling(self) -> None:
+        window = self.window()
+        window.resize(900, 900)
+        window.show()
+        self.app.processEvents()
+        window.about_action.trigger()
+        self.app.processEvents()
+
+        dialog = window.about_dialog
+        self.assertTrue(dialog.isVisible())
+        self.assertEqual(dialog.windowTitle(), "Über Kühlturm-Generator")
+        self.assertEqual(window.about_product_title.text(), APP_NAME)
+        self.assertEqual(
+            window.about_product_description.text(),
+            APP_SUBTITLE,
+        )
+        self.assertEqual(
+            dialog.minimumWidth(), ABOUT_DIALOG_MINIMUM_WIDTH_PX
+        )
+        self.assertEqual(dialog.width(), ABOUT_DIALOG_PREFERRED_WIDTH_PX)
+        self.assertLessEqual(
+            dialog.height(), ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX
+        )
+        self.assertLess(dialog.width(), window.width())
+        self.assertLess(dialog.height(), window.height())
+        self.assertFalse(window.about_program_icon.pixmap().isNull())
+        self.assertEqual(
+            window.about_scroll.horizontalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        self.assertEqual(
+            window.about_scroll.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        labels = "\n".join(
+            label.text() for label in dialog.findChildren(QLabel)
+        )
+        for expected in (
+            "Kühlturm-Generator",
+            "Florian Rode",
+            "Entwicklungsversion",
+            "florian.rode@outlook.com",
+        ):
+            self.assertIn(expected, labels)
+        self.assertNotIn("© 2026 Florian Rode", labels)
+        self.assertEqual(
+            window.about_developer_row.itemAt(1).widget().text(),
+            "Entwickelt von:",
+        )
+        self.assertIs(
+            window.about_developer_row.itemAt(2).widget(),
+            window.about_developer_name,
+        )
+        self.assertEqual(
+            window.about_license_status_row.itemAt(1).widget().text(),
+            "Lizenzstatus:",
+        )
+        self.assertIs(
+            window.about_license_status_row.itemAt(2).widget(),
+            window.about_license_status_label,
+        )
+        self.assertEqual(window.about_copyright_symbol.text(), "©")
+        self.assertEqual(
+            window.about_copyright_symbol.font().pointSizeF(),
+            window.about_copyright_text.font().pointSizeF(),
+        )
+        self.assertEqual(
+            window.about_copyright_text.text(),
+            "2026 Florian Rode · Alle Rechte vorbehalten.",
+        )
+        self.assertTrue(window.about_copyright_symbol.pixmap().isNull())
+        stylesheet = window.styleSheet()
+        for status, definition in LICENSE_STATUS_DEFINITIONS.items():
+            window._set_about_license_status(status)
+            self.assertEqual(
+                window.about_license_status_label.text(),
+                definition["label"],
+            )
+            self.assertEqual(
+                window.about_license_status_label.property("licenseStatus"),
+                status,
+            )
+            self.assertEqual(
+                window.about_license_status_description.text(),
+                definition["description"],
+            )
+            for color in (
+                definition["foreground"],
+                definition["background"],
+                definition["border"],
+            ):
+                self.assertIn(color, stylesheet)
+        window._set_about_license_status(CURRENT_LICENSE_STATUS)
+        self.assertIn("#123c63", window.about_support_link.text())
+        self.assertEqual(
+            [button.text() for button in window.about_legal_buttons],
+            [
+                "Lizenzbedingungen",
+                "Datenschutzerklärung",
+                "Drittanbieter-Lizenzen",
+            ],
+        )
+        self.assertTrue(
+            all(
+                not button.icon().isNull()
+                for button in window.about_legal_buttons
+            )
+        )
+        button_widths = [
+            window.about_legal_grid._columns_for_width(width)
+            for width in range(1, 2000)
+        ]
+        one_column_width = button_widths.index(2) + 1
+        three_column_width = button_widths.index(3) + 1
+        for width, expected_columns in (
+            (three_column_width, 3),
+            (one_column_width, 2),
+            (one_column_width - 1, 1),
+        ):
+            window.about_legal_grid._relayout(width)
+            self.assertEqual(
+                window.about_legal_grid.column_count,
+                expected_columns,
+            )
+        window.resize(720, 640)
+        QTest.qWait(20)
+        self.app.processEvents()
+        self.assertEqual(dialog.width(), 640)
+        self.assertLessEqual(dialog.height(), 560)
+        self.assertLess(dialog.width(), window.width())
+        self.assertLess(dialog.height(), window.height())
+        dialog.resize(300, dialog.height())
+        self.app.processEvents()
+        self.assertEqual(dialog.width(), ABOUT_DIALOG_MINIMUM_WIDTH_PX)
+        window.close()
+
+    def test_gcode_guide_has_matching_space_above_and_below(self) -> None:
+        window = self.window()
+        window.resize(900, 900)
+        window.show()
+        self.app.processEvents()
+
+        guide_top = window.gcode_import_guide.mapTo(
+            window.source_group.content_widget,
+            QPoint(0, 0),
+        ).y()
+        guide_bottom = guide_top + window.gcode_import_guide.height()
+        drop_zone_top = window.drop_zone.mapTo(
+            window.source_group.content_widget,
+            QPoint(0, 0),
+        ).y()
+        upper_gap = (
+            guide_top
+            - window.source_group.content_widget.contentsRect().top()
+        )
+        lower_gap = drop_zone_top - guide_bottom
+
+        self.assertLessEqual(abs(upper_gap - lower_gap), 1)
+        window.close()
+
+    def test_program_legal_placeholder_expands_down_before_scrolling(self) -> None:
+        window = self.window()
+        window.resize(900, 900)
+        window.show()
+        window.show_about_dialog()
+        self.app.processEvents()
+
+        dialog = window.about_dialog
+        available = dialog.screen().availableGeometry()
+        dialog.move(available.left() + 20, available.top() + 80)
+        dialog.resize(dialog.width(), 400)
+        self.app.processEvents()
+        initial_frame_top = dialog.frameGeometry().top()
+        initial_height = dialog.height()
+
+        window.about_legal_buttons[0].click()
+        QTest.qWait(20)
+        self.app.processEvents()
+
+        self.assertFalse(window.about_placeholder_label.isHidden())
+        self.assertGreater(dialog.height(), initial_height)
+        self.assertEqual(dialog.frameGeometry().top(), initial_frame_top)
+        self.assertLessEqual(
+            dialog.frameGeometry().bottom(), available.bottom()
+        )
+        natural_height = (
+            window._about_natural_content_height(dialog.width()) + 2
+        )
+        if natural_height > dialog.height():
+            self.assertGreater(
+                window.about_scroll.verticalScrollBar().maximum(), 0
+            )
         window.close()
 
     def test_startup_exposes_only_the_main_window(self) -> None:

@@ -9,8 +9,10 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QRect, QSize, QTimer, Qt, Slot
 from PySide6.QtGui import (
     QCloseEvent,
+    QCursor,
     QFontMetrics,
     QIcon,
+    QPixmap,
     QResizeEvent,
     QStandardItemModel,
 )
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -118,7 +121,12 @@ from cooling_tower.slicers import (
     SlicerPreferenceStore,
     SlicerProfileProbeValidator,
 )
-from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
+from cooling_tower.version import (
+    APP_NAME,
+    APP_SUBTITLE,
+    APP_VERSION,
+    APP_VERSION_LABEL,
+)
 from cooling_tower.update import UpdateInfo, UpdateService
 from cooling_tower.runtime_paths import (
     INSTALL_ROOT,
@@ -149,6 +157,48 @@ MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 120.0
 PREVIEW_ACTION_COMPACT_WIDTH_PX = 176
 EXPORT_ACTION_HORIZONTAL_PADDING_PX = 25
+ABOUT_DIALOG_MINIMUM_WIDTH_PX = 450
+ABOUT_DIALOG_PREFERRED_WIDTH_PX = 720
+ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX = 720
+OPTIONAL_DIALOG_PARENT_MARGIN_PX = 80
+OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
+CURRENT_LICENSE_STATUS = "development"
+LICENSE_STATUS_DEFINITIONS = {
+    "development": {
+        "label": "Entwicklungsversion",
+        "description": (
+            "Diese Version befindet sich noch in Entwicklung und ist nicht "
+            "für den regulären Vertrieb bestimmt."
+        ),
+        "foreground": "#6b4b00",
+        "background": "#fff3ce",
+        "border": "#e3c365",
+    },
+    "evaluation": {
+        "label": "Testversion",
+        "description": (
+            "Diese Version ist für einen begrenzten Test- und "
+            "Evaluierungszeitraum vorgesehen."
+        ),
+        "foreground": "#174ea6",
+        "background": "#eaf2ff",
+        "border": "#9bbcf2",
+    },
+    "licensed": {
+        "label": "Lizenzierte Version",
+        "description": "Für diese Version liegt eine gültige Lizenz vor.",
+        "foreground": "#17633a",
+        "background": "#e7f6ed",
+        "border": "#8fc9a5",
+    },
+    "unlicensed": {
+        "label": "Nicht lizenzierte Version",
+        "description": "Für diese Version liegt keine gültige Lizenz vor.",
+        "foreground": "#9b1c1c",
+        "background": "#fdecec",
+        "border": "#e4a1a1",
+    },
+}
 SETTING_UNITS = {
     "target_layer_time_s": "s",
     "safety_factor": "",
@@ -166,6 +216,7 @@ SETTING_UNITS = {
     "mesh_segments": "Segm.",
     "local_reference_window": "Layer",
 }
+GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 
 
 def open_path(path: str | Path) -> None:
@@ -341,6 +392,78 @@ class _FooterIssueLabel(QLabel):
         self.setAccessibleDescription(self._plain_text)
 
 
+class _ResponsiveLegalButtonGrid(QWidget):
+    """Flow three legal-document actions across as many columns as fit."""
+
+    def __init__(
+        self,
+        buttons: list[QPushButton],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.buttons = buttons
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(8)
+        self.grid.setVerticalSpacing(8)
+        self.column_count = 0
+        for button in self.buttons:
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+        # Start with the preferred one-row arrangement so the parent dialog's
+        # natural width can account for all three actions. A real resize then
+        # reduces the column count when the available viewport is narrower.
+        self._relayout(10_000)
+
+    def _columns_for_width(self, width: int) -> int:
+        widths = [
+            QFontMetrics(button.font()).horizontalAdvance(button.text())
+            + button.iconSize().width()
+            + 30
+            for button in self.buttons
+        ]
+        spacing = max(0, self.grid.horizontalSpacing())
+        if width >= sum(widths) + spacing * (len(widths) - 1):
+            return 3
+        if width >= sum(sorted(widths, reverse=True)[:2]) + spacing:
+            return 2
+        return 1
+
+    def _relayout(self, width: int) -> None:
+        columns = self._columns_for_width(width)
+        if columns == self.column_count:
+            return
+        for button in self.buttons:
+            self.grid.removeWidget(button)
+        for index, button in enumerate(self.buttons):
+            row, column = divmod(index, columns)
+            is_last_unpaired = (
+                columns == 2
+                and index == len(self.buttons) - 1
+                and len(self.buttons) % columns
+            )
+            self.grid.addWidget(
+                button,
+                row,
+                column,
+                1,
+                columns if is_last_unpaired else 1,
+            )
+        for column in range(3):
+            self.grid.setColumnStretch(column, 0)
+        for column in range(columns):
+            self.grid.setColumnStretch(column, 1)
+        self.column_count = columns
+        self.grid.invalidate()
+        self.updateGeometry()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        self._relayout(event.size().width())
+        super().resizeEvent(event)
+
+
 class MainWindow(QMainWindow):
     """Scrollable desktop front end for the shared generation service."""
 
@@ -363,7 +486,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("mainWindow")
-        self.setWindowTitle("Kühlturm-Generator")
+        self.setWindowTitle(APP_NAME)
         self.setMinimumSize(720, 640)
         if distribution_channel is None:
             self.distribution_channel = detect_distribution_channel()
@@ -503,6 +626,7 @@ class MainWindow(QMainWindow):
         self._preview_dialog: PreviewDialog | None = None
         self._pending_preview_camera_state: object = None
         self._additional_options_dialog: QDialog | None = None
+        self._about_dialog: QDialog | None = None
 
         self.settings_store = UserSettingsStore(
             explicit_user_settings
@@ -551,6 +675,7 @@ class MainWindow(QMainWindow):
             int(window.get("width", 900)),
             int(window.get("height", 900)),
         )
+        self._restore_initial_window_position(window)
         self.update_wall_path_preview()
         self._update_section_summaries()
         self._loading_phase17_state = False
@@ -561,6 +686,70 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._update_slicer_combo_widths)
         if self._update_check_enabled:
             QTimer.singleShot(750, self.start_update_check)
+
+    def _restore_initial_window_position(
+        self,
+        window_state: object,
+    ) -> None:
+        """Place the complete main window before its first visible frame."""
+
+        screens = QApplication.screens()
+        if not screens:
+            return
+
+        saved_x: int | None = None
+        saved_y: int | None = None
+        if isinstance(window_state, dict):
+            raw_x = window_state.get("x")
+            raw_y = window_state.get("y")
+            if (
+                isinstance(raw_x, int)
+                and not isinstance(raw_x, bool)
+                and isinstance(raw_y, int)
+                and not isinstance(raw_y, bool)
+            ):
+                saved_x = raw_x
+                saved_y = raw_y
+
+        target = QRect(QPoint(0, 0), self.size())
+        screen = None
+        if saved_x is not None and saved_y is not None:
+            target.moveTopLeft(QPoint(saved_x, saved_y))
+            largest_visible_area = 0
+            for candidate in screens:
+                intersection = target.intersected(candidate.availableGeometry())
+                visible_area = max(0, intersection.width()) * max(
+                    0,
+                    intersection.height(),
+                )
+                if visible_area > largest_visible_area:
+                    screen = candidate
+                    largest_visible_area = visible_area
+
+        if screen is None:
+            screen = (
+                QApplication.screenAt(QCursor.pos())
+                or QApplication.primaryScreen()
+                or screens[0]
+            )
+            target.moveCenter(screen.availableGeometry().center())
+
+        available = screen.availableGeometry()
+        maximum_x = max(
+            available.left(),
+            available.right() - target.width() + 1,
+        )
+        maximum_y = max(
+            available.top(),
+            available.bottom() - target.height() + 1,
+        )
+        target.moveLeft(
+            min(max(target.left(), available.left()), maximum_x)
+        )
+        target.moveTop(
+            min(max(target.top(), available.top()), maximum_y)
+        )
+        self.move(target.topLeft())
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -575,7 +764,8 @@ class MainWindow(QMainWindow):
         header_layout.setSpacing(4)
 
         title_row = QHBoxLayout()
-        title = QLabel("Kühlturm-Generator")
+        title = QLabel(APP_NAME)
+        self.title_label = title
         title.setObjectName("titleLabel")
         self.reset_button = QPushButton("Standardwerte wiederherstellen")
         self.reset_button.setObjectName("headerResetButton")
@@ -601,25 +791,32 @@ class MainWindow(QMainWindow):
         self.options_button.setObjectName("optionsButton")
         self.options_button.setText("")
         self.options_button.setIcon(
-            QIcon(
-                str(
-                    Path(__file__).with_name("assets")
-                    / "settings_gear.svg"
-                )
-            )
+            QIcon(str(GUI_ASSET_ROOT / "menu.svg"))
         )
         self.options_button.setIconSize(QSize(18, 18))
         self.options_button.setFixedSize(
             METRICS.info_button_diameter_px,
             METRICS.info_button_diameter_px,
         )
-        self.options_button.setToolTip("Weitere Optionen öffnen")
-        self.options_button.setAccessibleName("Weitere Optionen öffnen")
-        self.options_button.clicked.connect(self.show_additional_options)
-        title_row.addWidget(self.options_button)
-        subtitle = QLabel(
-            "Kühlturm aus einem G-Code erzeugen"
+        self.options_button.setToolTip("Menü öffnen")
+        self.options_button.setAccessibleName("Menü öffnen")
+        self.options_menu = QMenu(self.options_button)
+        self.options_menu.setObjectName("mainOptionsMenu")
+        self.change_output_action = self.options_menu.addAction(
+            QIcon(str(GUI_ASSET_ROOT / "folder.svg")),
+            "Ausgabeordner ändern",
         )
+        self.change_output_action.triggered.connect(
+            self.show_additional_options
+        )
+        self.about_action = self.options_menu.addAction(
+            QIcon(str(GUI_ASSET_ROOT / "info_circle.svg")),
+            f"Über {APP_NAME}",
+        )
+        self.about_action.triggered.connect(self.show_about_dialog)
+        self.options_button.clicked.connect(self.show_options_menu)
+        title_row.addWidget(self.options_button)
+        subtitle = QLabel(APP_SUBTITLE)
         self.subtitle_label = subtitle
         subtitle.setObjectName("subtitleLabel")
         self.version_label = QLabel(APP_VERSION_LABEL)
@@ -687,7 +884,16 @@ class MainWindow(QMainWindow):
         self.gcode_import_guide_row = QWidget()
         self.gcode_import_guide_row.setObjectName("gcodeImportGuideRow")
         gcode_guide_layout = QHBoxLayout(self.gcode_import_guide_row)
-        gcode_guide_layout.setContentsMargins(0, 0, 0, 0)
+        gcode_guide_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            max(
+                0,
+                METRICS.card_body_vertical_padding_px
+                - source_layout.spacing(),
+            ),
+        )
         gcode_guide_layout.setSpacing(8)
         self.gcode_import_guide_icon = QLabel("ℹ")
         self.gcode_import_guide_icon.setObjectName("gcodeImportGuideIcon")
@@ -697,7 +903,7 @@ class MainWindow(QMainWindow):
             "Noch kein fertiger G-Code?\n"
             "Objekt im Slicer mit den gewünschten Einstellungen slicen → "
             "G-Code exportieren → G-Code anschließend hier im "
-            "Kühlturm-Generator importieren."
+            f"{APP_NAME} importieren."
         )
         self.gcode_import_guide.setObjectName("gcodeImportGuide")
         self.gcode_import_guide.setWordWrap(True)
@@ -1339,7 +1545,7 @@ class MainWindow(QMainWindow):
         options_layout = QVBoxLayout(self.additional_options_content)
         options_layout.setContentsMargins(18, 18, 18, 18)
         options_layout.setSpacing(10)
-        options_title = QLabel("Weitere Optionen")
+        options_title = QLabel("Ausgabeordner ändern")
         options_title.setObjectName("dialogTitle")
         options_layout.addWidget(options_title)
         options_description = QLabel(
@@ -1363,9 +1569,17 @@ class MainWindow(QMainWindow):
         self.output_root_edit.setObjectName("outputRoot")
         self.output_root_edit.setMinimumHeight(32)
         self.output_browse_button = QPushButton("Auswählen …")
+        self.output_browse_button.setIcon(
+            QIcon(str(GUI_ASSET_ROOT / "folder.svg"))
+        )
+        self.output_browse_button.setIconSize(QSize(18, 18))
         self.output_browse_button.clicked.connect(self.select_output_root)
-        self.output_root_reset_button = QPushButton("↺")
+        self.output_root_reset_button = QPushButton("")
         self.output_root_reset_button.setObjectName("settingResetButton")
+        self.output_root_reset_button.setIcon(
+            QIcon(str(GUI_ASSET_ROOT / "reset.svg"))
+        )
+        self.output_root_reset_button.setIconSize(QSize(18, 18))
         self.output_root_reset_button.setFixedSize(
             METRICS.reset_button_size_px,
             METRICS.reset_button_size_px,
@@ -1552,8 +1766,8 @@ class MainWindow(QMainWindow):
         prediction_layout.addWidget(self.tower_need_label)
         prediction_layout.addWidget(self.layer_time_check_hint)
         self.preview_hint_label = QLabel(
-            "Die Vorschau ist optional. Beim Export wird der Kühlturm immer "
-            "mit den aktuellen Einstellungen erzeugt."
+            "Beim Export wird der Kühlturm immer mit den aktuellen "
+            "Einstellungen erzeugt."
         )
         self.preview_hint_label.setObjectName("previewHintLabel")
         self.preview_hint_label.setWordWrap(True)
@@ -2365,14 +2579,14 @@ class MainWindow(QMainWindow):
 
     @property
     def additional_options_dialog(self) -> QDialog:
-        """Create the options dialog lazily to avoid a startup window flash."""
+        """Create the output-folder dialog lazily."""
 
         if self._additional_options_dialog is None:
             dialog = QDialog(self)
             dialog.setObjectName("additionalOptionsDialog")
-            dialog.setWindowTitle("Weitere Optionen")
+            dialog.setWindowTitle("Ausgabeordner ändern")
             dialog.setModal(False)
-            dialog.setMinimumWidth(520)
+            dialog.setMinimumWidth(OUTPUT_DIALOG_MINIMUM_WIDTH_PX)
             dialog.setSizeGripEnabled(False)
             dialog_layout = QVBoxLayout(dialog)
             dialog_layout.setContentsMargins(0, 0, 0, 0)
@@ -2382,6 +2596,289 @@ class MainWindow(QMainWindow):
             self.additional_options_content.show()
             self._additional_options_dialog = dialog
         return self._additional_options_dialog
+
+    @property
+    def about_dialog(self) -> QDialog:
+        """Create the compact, scrollable program information dialog lazily."""
+
+        if self._about_dialog is None:
+            dialog = QDialog(self)
+            dialog.setObjectName("aboutDialog")
+            dialog.setWindowTitle(f"Über {APP_NAME}")
+            dialog.setModal(False)
+            dialog.setMinimumWidth(ABOUT_DIALOG_MINIMUM_WIDTH_PX)
+            dialog.setSizeGripEnabled(True)
+
+            dialog_layout = QVBoxLayout(dialog)
+            dialog_layout.setContentsMargins(0, 0, 0, 0)
+            dialog_layout.setSpacing(0)
+
+            scroll = QScrollArea(dialog)
+            scroll.setObjectName("aboutScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+            scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+
+            content = QWidget()
+            content.setObjectName("aboutContent")
+            content.setMinimumWidth(320)
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(24, 22, 24, 20)
+            content_layout.setSpacing(14)
+            self.about_content_layout = content_layout
+
+            hero = QFrame()
+            hero.setObjectName("aboutHero")
+            hero_layout = QHBoxLayout(hero)
+            hero_layout.setContentsMargins(18, 16, 18, 16)
+            hero_layout.setSpacing(20)
+
+            program_icon = QLabel()
+            program_icon.setObjectName("aboutProgramIcon")
+            program_icon.setAccessibleName(f"Programmsymbol {APP_NAME}")
+            program_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_pixmap = QPixmap(
+                str(GUI_ASSET_ROOT / "icon_tower_render.png")
+            )
+            program_icon.setPixmap(
+                icon_pixmap.scaled(
+                    104,
+                    140,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            program_icon.setFixedSize(108, 144)
+            hero_layout.addWidget(program_icon)
+
+            hero_text = QVBoxLayout()
+            hero_text.setSpacing(6)
+            product_title = QLabel(APP_NAME)
+            product_title.setObjectName("aboutProductTitle")
+            self.about_product_title = product_title
+            product_description = QLabel(APP_SUBTITLE)
+            product_description.setObjectName("aboutProductDescription")
+            product_description.setWordWrap(True)
+            self.about_product_description = product_description
+            version = QLabel(APP_VERSION_LABEL)
+            version.setObjectName("aboutVersion")
+            hero_text.addStretch(1)
+            hero_text.addWidget(product_title)
+            hero_text.addWidget(product_description)
+            hero_text.addWidget(version)
+            hero_text.addStretch(1)
+            hero_layout.addLayout(hero_text, 1)
+            content_layout.addWidget(hero)
+
+            developer_section = QFrame()
+            developer_section.setObjectName("aboutSection")
+            developer_layout = QVBoxLayout(developer_section)
+            developer_layout.setContentsMargins(18, 16, 18, 16)
+            developer_layout.setSpacing(10)
+            developer_name = QLabel("Florian Rode")
+            developer_name.setObjectName("aboutEmphasis")
+            self.about_developer_name = developer_name
+            self.about_developer_row = self._about_icon_text_row(
+                "user.svg",
+                "Entwickelt von:",
+                heading=True,
+                value_widget=developer_name,
+            )
+            developer_layout.addLayout(self.about_developer_row)
+            self.about_copyright_row = self._about_symbol_text_row(
+                "©",
+                "2026 Florian Rode · Alle Rechte vorbehalten.",
+            )
+            developer_layout.addLayout(self.about_copyright_row)
+            proprietary_notice = QLabel(
+                "Proprietäre Software. Die Nutzung, Vervielfältigung, "
+                "Weitergabe oder Veränderung ist nur im Rahmen der "
+                "geltenden Lizenzbedingungen gestattet."
+            )
+            proprietary_notice.setWordWrap(True)
+            proprietary_notice.setObjectName("aboutBodyText")
+            developer_layout.addWidget(proprietary_notice)
+            content_layout.addWidget(developer_section)
+
+            license_section = QFrame()
+            license_section.setObjectName("aboutSection")
+            license_layout = QVBoxLayout(license_section)
+            license_layout.setContentsMargins(18, 16, 18, 16)
+            license_layout.setSpacing(9)
+            development_status = QLabel()
+            development_status.setObjectName("aboutStatusBadge")
+            development_status.setSizePolicy(
+                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Fixed,
+            )
+            self.about_license_status_label = development_status
+            self.about_license_status_row = self._about_icon_text_row(
+                "shield.svg",
+                "Lizenzstatus:",
+                heading=True,
+                value_widget=development_status,
+            )
+            license_layout.addLayout(self.about_license_status_row)
+            development_notice = QLabel()
+            development_notice.setWordWrap(True)
+            development_notice.setObjectName("aboutBodyText")
+            self.about_license_status_description = development_notice
+            self._set_about_license_status(CURRENT_LICENSE_STATUS)
+            license_layout.addWidget(development_notice)
+            content_layout.addWidget(license_section)
+
+            legal_specs = (
+                ("document.svg", "Lizenzbedingungen"),
+                ("privacy.svg", "Datenschutzerklärung"),
+                ("packages.svg", "Drittanbieter-Lizenzen"),
+            )
+            self.about_legal_buttons: list[QPushButton] = []
+            for icon_name, caption in legal_specs:
+                button = QPushButton(caption)
+                button.setObjectName("aboutLegalButton")
+                button.setIcon(QIcon(str(GUI_ASSET_ROOT / icon_name)))
+                button.setIconSize(QSize(18, 18))
+                button.setToolTip(f"{caption} – Inhalt folgt später")
+                button.clicked.connect(
+                    lambda _checked=False, name=caption: (
+                        self._show_legal_placeholder(name)
+                    )
+                )
+                self.about_legal_buttons.append(button)
+            self.about_legal_grid = _ResponsiveLegalButtonGrid(
+                self.about_legal_buttons
+            )
+            self.about_legal_grid.setObjectName("aboutLegalGrid")
+            content_layout.addWidget(self.about_legal_grid)
+
+            self.about_placeholder_label = QLabel()
+            self.about_placeholder_label.setObjectName("aboutPlaceholder")
+            self.about_placeholder_label.setWordWrap(True)
+            self.about_placeholder_label.hide()
+            content_layout.addWidget(self.about_placeholder_label)
+
+            support_frame = QFrame()
+            support_frame.setObjectName("aboutSupport")
+            support_layout = QHBoxLayout(support_frame)
+            support_layout.setContentsMargins(14, 10, 14, 10)
+            support_layout.setSpacing(9)
+            support_icon = QLabel()
+            support_icon.setPixmap(
+                QIcon(str(GUI_ASSET_ROOT / "mail.svg")).pixmap(20, 20)
+            )
+            support_icon.setAccessibleName("E-Mail")
+            support_layout.addWidget(support_icon)
+            support_link = QLabel(
+                'Support: <a href="mailto:florian.rode@outlook.com">'
+                '<span style="color:#123c63;">'
+                "florian.rode@outlook.com</span></a>"
+            )
+            support_link.setObjectName("aboutSupportLink")
+            support_link.setOpenExternalLinks(True)
+            support_layout.addWidget(support_link, 1)
+            content_layout.addWidget(support_frame)
+
+            close_row = QHBoxLayout()
+            close_row.addStretch(1)
+            close_button = QPushButton("Schließen")
+            close_button.setObjectName("aboutCloseButton")
+            close_button.setIcon(
+                QIcon(str(GUI_ASSET_ROOT / "close.svg"))
+            )
+            close_button.setIconSize(QSize(18, 18))
+            close_button.clicked.connect(dialog.close)
+            close_row.addWidget(close_button)
+            content_layout.addLayout(close_row)
+
+            scroll.setWidget(content)
+            dialog_layout.addWidget(scroll)
+            self.about_scroll = scroll
+            self.about_content = content
+            self.about_program_icon = program_icon
+            self.about_support_link = support_link
+            self.about_close_button = close_button
+            self._about_dialog = dialog
+        return self._about_dialog
+
+    def _about_icon_text_row(
+        self,
+        icon_name: str,
+        text: str,
+        *,
+        heading: bool = False,
+        value_widget: QWidget | None = None,
+    ) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        icon = QLabel()
+        icon.setPixmap(QIcon(str(GUI_ASSET_ROOT / icon_name)).pixmap(20, 20))
+        icon.setFixedSize(22, 22)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label = QLabel(text)
+        label.setObjectName("aboutSectionTitle" if heading else "aboutMetaText")
+        label.setWordWrap(value_widget is None)
+        icon_alignment = (
+            Qt.AlignmentFlag.AlignVCenter
+            if value_widget is not None
+            else Qt.AlignmentFlag.AlignTop
+        )
+        row.addWidget(icon, 0, icon_alignment)
+        row.addWidget(label, 0 if value_widget is not None else 1)
+        if value_widget is not None:
+            row.addWidget(value_widget)
+            row.addStretch(1)
+        return row
+
+    def _about_symbol_text_row(
+        self,
+        symbol: str,
+        text: str,
+    ) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        symbol_label = QLabel(symbol)
+        symbol_label.setObjectName("aboutCopyrightSymbol")
+        symbol_label.setAccessibleName("Copyright")
+        symbol_label.setFixedWidth(22)
+        symbol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_label = QLabel(text)
+        text_label.setObjectName("aboutMetaText")
+        text_label.setWordWrap(True)
+        row.addWidget(symbol_label, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(text_label, 1)
+        self.about_copyright_symbol = symbol_label
+        self.about_copyright_text = text_label
+        return row
+
+    def _set_about_license_status(self, status: str) -> None:
+        try:
+            definition = LICENSE_STATUS_DEFINITIONS[status]
+        except KeyError as error:
+            raise ValueError(f"Unbekannter Lizenzstatus: {status}") from error
+        self.about_license_status_label.setText(definition["label"])
+        self.about_license_status_label.setProperty("licenseStatus", status)
+        self.about_license_status_description.setText(
+            definition["description"]
+        )
+        self.about_license_status_label.style().unpolish(
+            self.about_license_status_label
+        )
+        self.about_license_status_label.style().polish(
+            self.about_license_status_label
+        )
+
+    def _show_legal_placeholder(self, document_name: str) -> None:
+        self.about_placeholder_label.setText(
+            f"„{document_name}“ wird in einer späteren Version ergänzt."
+        )
+        self.about_placeholder_label.show()
+        self.about_content_layout.invalidate()
+        QTimer.singleShot(0, self._expand_about_downward_for_content)
 
     def _close_additional_options(self) -> None:
         if self._additional_options_dialog is not None:
@@ -2586,8 +3083,8 @@ class MainWindow(QMainWindow):
         else:
             self.preview_hint_label.setProperty("state", "current")
             self.preview_hint_label.setText(
-                "Die Vorschau ist optional. Beim Export wird der Kühlturm mit "
-                "den aktuellen Einstellungen erzeugt."
+                "Beim Export wird der Kühlturm immer mit den aktuellen "
+                "Einstellungen erzeugt."
             )
         self._refresh_widget_style(self.preview_hint_label)
         self._refresh_prediction()
@@ -4400,8 +4897,8 @@ class MainWindow(QMainWindow):
         self.open_run_button.setEnabled(False)
         self.preview_hint_label.setProperty("state", "current")
         self.preview_hint_label.setText(
-            "Die Vorschau ist optional. Beim Export wird der Kühlturm mit "
-            "den aktuellen Einstellungen erzeugt."
+            "Beim Export wird der Kühlturm immer mit den aktuellen "
+            "Einstellungen erzeugt."
         )
         self._refresh_widget_style(self.preview_hint_label)
         self._set_main_status(
@@ -5230,36 +5727,191 @@ class MainWindow(QMainWindow):
         if selected:
             self.output_root_edit.setText(selected)
 
+    def show_options_menu(self) -> None:
+        """Open the header menu below the button and inside the main window."""
+
+        self.options_menu.ensurePolished()
+        self.options_menu.adjustSize()
+        popup_position = self._options_menu_popup_position(
+            self.options_menu.sizeHint()
+        )
+        self.options_menu.popup(popup_position)
+
+    def _options_menu_popup_position(self, menu_size: QSize) -> QPoint:
+        button_top_left = self.options_button.mapToGlobal(QPoint(0, 0))
+        window_top_left = self.mapToGlobal(QPoint(0, 0))
+        window_right = window_top_left.x() + self.width()
+        window_bottom = window_top_left.y() + self.height()
+
+        desired_x = (
+            button_top_left.x()
+            + self.options_button.width()
+            - menu_size.width()
+        )
+        maximum_x = max(window_top_left.x(), window_right - menu_size.width())
+        x = max(window_top_left.x(), min(desired_x, maximum_x))
+
+        below_y = button_top_left.y() + self.options_button.height()
+        if below_y + menu_size.height() <= window_bottom:
+            y = below_y
+        else:
+            above_y = button_top_left.y() - menu_size.height()
+            if above_y >= window_top_left.y():
+                y = above_y
+            else:
+                y = max(
+                    window_top_left.y(),
+                    min(below_y, window_bottom - menu_size.height()),
+                )
+        return QPoint(x, y)
+
     def show_additional_options(self) -> None:
-        """Open compact program options centred over the main window."""
+        """Open the compact output-folder dialog over the main window."""
 
         dialog = self.additional_options_dialog
         dialog.setWindowState(Qt.WindowState.WindowNoState)
-        layout = dialog.layout()
-        if layout is not None:
-            layout.invalidate()
-            layout.activate()
-            natural_height = layout.sizeHint().height()
-        else:
-            natural_height = dialog.sizeHint().height()
-
-        screen = self.screen()
-        available = screen.availableGeometry() if screen is not None else None
-        rounded_width = int(round((self.width() * 0.8) / 20.0) * 20)
-        target_width = max(520, rounded_width)
-        if available is not None:
-            target_width = min(target_width, available.width() - 40)
-            natural_height = min(natural_height, available.height() - 40)
-        dialog.setFixedHeight(max(1, natural_height))
-        dialog.resize(target_width, dialog.height())
         dialog.show()
-        self._place_additional_options_dialog()
-        QTimer.singleShot(0, self._place_additional_options_dialog)
+        self._resize_additional_options_to_content()
+        QTimer.singleShot(0, self._resize_additional_options_to_content)
         dialog.raise_()
         dialog.activateWindow()
 
+    def _resize_additional_options_to_content(self) -> None:
+        dialog = self.additional_options_dialog
+        if not dialog.isVisible():
+            return
+        content_layout = self.additional_options_content.layout()
+        if content_layout is not None:
+            content_layout.invalidate()
+            content_layout.activate()
+        natural_height = self.additional_options_content.sizeHint().height()
+        natural_width = self.additional_options_content.minimumSizeHint().width()
+        target_width = max(OUTPUT_DIALOG_MINIMUM_WIDTH_PX, natural_width)
+        screen = self.screen()
+        if screen is not None:
+            natural_height = min(
+                natural_height,
+                screen.availableGeometry().height() - 40,
+            )
+        dialog.setFixedSize(target_width, max(1, natural_height))
+        self._place_dialog_centered(dialog)
+
+    def show_about_dialog(self) -> None:
+        """Show program information at its natural size with safe scrolling."""
+
+        dialog = self.about_dialog
+        dialog.setWindowState(Qt.WindowState.WindowNoState)
+        dialog.show()
+        self._resize_about_to_content()
+        QTimer.singleShot(0, self._resize_about_to_content)
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _resize_about_to_content(self) -> None:
+        dialog = self.about_dialog
+        if not dialog.isVisible():
+            return
+        screen = self.screen()
+        available = screen.availableGeometry() if screen is not None else None
+        if available is not None:
+            width_limit = min(
+                available.width() - 40,
+                max(
+                    ABOUT_DIALOG_MINIMUM_WIDTH_PX,
+                    self.width() - OPTIONAL_DIALOG_PARENT_MARGIN_PX,
+                ),
+            )
+            target_width = max(
+                ABOUT_DIALOG_MINIMUM_WIDTH_PX,
+                min(
+                    ABOUT_DIALOG_PREFERRED_WIDTH_PX,
+                    width_limit,
+                ),
+            )
+        else:
+            target_width = ABOUT_DIALOG_PREFERRED_WIDTH_PX
+
+        natural_height = self._about_natural_content_height(target_width)
+        if available is not None:
+            height_limit = min(
+                available.height() - 40,
+                max(280, self.height() - OPTIONAL_DIALOG_PARENT_MARGIN_PX),
+            )
+            target_height = min(
+                natural_height + 2,
+                ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX,
+                height_limit,
+            )
+        else:
+            target_height = min(
+                natural_height + 2,
+                ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX,
+            )
+        dialog.resize(target_width, max(280, target_height))
+        self._place_dialog_centered(dialog)
+
+    def _about_natural_content_height(self, target_width: int) -> int:
+        content_margins = self.about_content_layout.contentsMargins()
+        inner_width = max(
+            1,
+            target_width
+            - content_margins.left()
+            - content_margins.right(),
+        )
+        self.about_legal_grid._relayout(inner_width)
+        self.about_content.resize(target_width, self.about_content.height())
+        self.about_content_layout.invalidate()
+        self.about_content_layout.activate()
+        natural_height = (
+            self.about_content_layout.heightForWidth(target_width)
+            if self.about_content_layout.hasHeightForWidth()
+            else self.about_content_layout.sizeHint().height()
+        )
+        return max(
+            natural_height,
+            self.about_content_layout.minimumSize().height(),
+        )
+
+    def _expand_about_downward_for_content(self) -> None:
+        dialog = self._about_dialog
+        if dialog is None or not dialog.isVisible():
+            return
+        natural_height = self._about_natural_content_height(dialog.width()) + 2
+        if natural_height <= dialog.height():
+            return
+
+        screen = dialog.screen() or self.screen()
+        target_height = natural_height
+        frame_geometry = dialog.frameGeometry()
+        frame_top_left = frame_geometry.topLeft()
+        if screen is not None:
+            available = screen.availableGeometry()
+            frame_overhead = max(
+                0,
+                frame_geometry.height() - dialog.height(),
+            )
+            maximum_client_height = max(
+                dialog.height(),
+                available.bottom()
+                - frame_geometry.top()
+                + 1
+                - frame_overhead,
+            )
+            target_height = min(target_height, maximum_client_height)
+
+        if target_height > dialog.height():
+            dialog.resize(dialog.width(), target_height)
+            # Preserve the current upper edge: newly revealed content grows
+            # only downwards until the Windows work area is exhausted.
+            dialog.move(frame_top_left)
+
     def _place_additional_options_dialog(self) -> None:
         dialog = self.additional_options_dialog
+        if not dialog.isVisible():
+            return
+        self._place_dialog_centered(dialog)
+
+    def _place_dialog_centered(self, dialog: QDialog) -> None:
         if not dialog.isVisible():
             return
         target_frame = dialog.frameGeometry()
@@ -5277,6 +5929,15 @@ class MainWindow(QMainWindow):
             )
             target_frame.moveTopLeft(QPoint(x, y))
         dialog.move(target_frame.topLeft())
+
+    def _resize_visible_optional_dialogs(self) -> None:
+        if self._about_dialog is not None and self._about_dialog.isVisible():
+            self._resize_about_to_content()
+        if (
+            self._additional_options_dialog is not None
+            and self._additional_options_dialog.isVisible()
+        ):
+            self._resize_additional_options_to_content()
 
     def collect_settings(self) -> GenerationSettings:
         return GenerationSettings(
@@ -6652,6 +7313,17 @@ class MainWindow(QMainWindow):
             and self.reconstructed_config_text.isVisible()
         ):
             QTimer.singleShot(0, self._fit_reconstructed_config_height)
+        if (
+            (
+                self._about_dialog is not None
+                and self._about_dialog.isVisible()
+            )
+            or (
+                self._additional_options_dialog is not None
+                and self._additional_options_dialog.isVisible()
+            )
+        ):
+            QTimer.singleShot(0, self._resize_visible_optional_dialogs)
 
     def _update_slicer_combo_widths(self) -> None:
         if not hasattr(self, "_slicer_width_combos"):
@@ -6794,11 +7466,15 @@ class MainWindow(QMainWindow):
 
     def _save_user_settings(self) -> None:
         try:
+            window_geometry = self.normalGeometry()
+            window_position = self.pos()
             self.settings_store.save(
                 self.collect_settings(),
                 output_root=self.output_root_edit.text(),
-                window_width=self.width(),
-                window_height=self.height(),
+                window_width=window_geometry.width(),
+                window_height=window_geometry.height(),
+                window_x=window_position.x(),
+                window_y=window_position.y(),
                 preview_quality=self.preview_quality,
                 preview_camera=(
                     self._preview_dialog.canvas.camera_state()
@@ -6841,5 +7517,7 @@ class MainWindow(QMainWindow):
             self._preview_dialog.close()
         if self._additional_options_dialog is not None:
             self._additional_options_dialog.close()
+        if self._about_dialog is not None:
+            self._about_dialog.close()
         self._hint_controller.dispose()
         super().closeEvent(event)
