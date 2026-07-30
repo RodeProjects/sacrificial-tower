@@ -489,7 +489,17 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.additional_options_dialog.isVisible())
         self.assertEqual(
             window.additional_options_dialog.windowTitle(),
-            "Ausgabeordner ändern",
+            "Exportordner ändern",
+        )
+        dialog_labels = {
+            label.text()
+            for label in window.additional_options_dialog.findChildren(QLabel)
+        }
+        self.assertIn("Exportordner ändern", dialog_labels)
+        self.assertIn("Aktueller Exportordner:", dialog_labels)
+        self.assertNotIn(
+            "Hier legen Sie programmweite Ausgabeoptionen fest.",
+            dialog_labels,
         )
         self.assertEqual(window.options_button.text(), "")
         self.assertFalse(window.options_button.icon().isNull())
@@ -663,9 +673,11 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         window.preview_dialog.setWindowState(Qt.WindowState.WindowMaximized)
         window._show_preview_dialog()
+        self.assertEqual(window.preview_dialog.windowOpacity(), 0.0)
         QTest.qWait(220)
         self.app.processEvents()
         self.assertTrue(window.preview_dialog.isVisible())
+        self.assertEqual(window.preview_dialog.windowOpacity(), 1.0)
         self.assertFalse(window.preview_dialog.isMaximized())
         self.assertFalse(window.preview_dialog.isFullScreen())
         self.assertEqual(

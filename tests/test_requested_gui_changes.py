@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -52,6 +53,33 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
+
+    @staticmethod
+    def write_export_folder(
+        output_root: Path,
+        name: str,
+        created_at: str,
+    ) -> Path:
+        folder = output_root / name
+        folder.mkdir(parents=True)
+        output_path = folder / "tower.stl"
+        output_path.write_text("solid tower\nendsolid tower\n", encoding="utf-8")
+        (folder / "export_summary.txt").write_text(
+            "Export erfolgreich\n",
+            encoding="utf-8",
+        )
+        (folder / "export_report.json").write_text(
+            json.dumps(
+                {
+                    "report_type": "cooling_tower_export_diagnostics",
+                    "created_at": created_at,
+                    "summary": {"export_succeeded": True},
+                    "output": {"path": str(output_path)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return folder
 
     def test_header_shows_current_version_below_action_icons(self) -> None:
         window = self.window()
@@ -1028,8 +1056,16 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertTrue(output_root.is_dir())
 
         window._export_request_id = 11
-        first_folder = self.root / "export-1"
-        second_folder = self.root / "export-2"
+        first_folder = self.write_export_folder(
+            output_root,
+            "export-1",
+            "2026-07-30T10:00:01+02:00",
+        )
+        second_folder = self.write_export_folder(
+            output_root,
+            "export-2",
+            "2026-07-30T10:00:02+02:00",
+        )
         for folder in (first_folder, second_folder):
             result = SimpleNamespace(
                 output_mode=OutputMode.STL,
@@ -1047,9 +1083,56 @@ class RequestedGuiChangesTests(unittest.TestCase):
             open_directory_mock.assert_called_once_with(
                 second_folder.resolve()
             )
-        self.assertEqual(window.open_output_button.text(), "Outputordner öffnen")
-        self.assertEqual(window.open_stl_button.text(), "Exportordner öffnen")
+        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
+        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
         self.assertTrue(window.open_stl_button.isEnabled())
+        window.close()
+
+    def test_latest_export_button_explains_disabled_state_and_rechecks(self) -> None:
+        window = self.window()
+        output_root = self.root / "exports"
+        window.output_root_edit.setText(str(output_root))
+
+        self.assertFalse(window.open_stl_button.isEnabled())
+        self.assertEqual(
+            window.open_stl_button.toolTip(),
+            "Kein Exportordner gefunden.",
+        )
+        self.assertTrue(
+            window.open_stl_button.testAttribute(
+                Qt.WidgetAttribute.WA_AlwaysShowToolTips
+            )
+        )
+
+        latest = self.write_export_folder(
+            output_root,
+            "20260730_100000_referenz",
+            "2026-07-30T10:00:00+02:00",
+        )
+        window._refresh_folder_action_states(rescan=True)
+        self.assertTrue(window.open_stl_button.isEnabled())
+        self.assertEqual(
+            window.open_stl_button.toolTip(),
+            "Den Ordner des zuletzt erstellten Exports öffnen",
+        )
+
+        with patch(
+            "cooling_tower.gui.main_window.open_directory"
+        ) as open_directory_mock:
+            window.open_stl_directory()
+            open_directory_mock.assert_called_once_with(latest.resolve())
+
+        (latest / "export_report.json").unlink()
+        with patch(
+            "cooling_tower.gui.main_window.open_directory"
+        ) as open_directory_mock:
+            window.open_stl_directory()
+            open_directory_mock.assert_not_called()
+        self.assertFalse(window.open_stl_button.isEnabled())
+        self.assertEqual(
+            window.open_stl_button.toolTip(),
+            "Kein gültiger Exportordner gefunden.",
+        )
         window.close()
 
     def test_slicer_dropdown_keeps_every_verified_installation(self) -> None:

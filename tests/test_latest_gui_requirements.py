@@ -25,6 +25,7 @@ from cooling_tower.gui.main_window import (
     ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX,
     ABOUT_DIALOG_PREFERRED_WIDTH_PX,
     CURRENT_LICENSE_STATUS,
+    INTERNAL_DIALOG_REVEAL_DELAY_MS,
     LICENSE_STATUS_DEFINITIONS,
     MAIN_FOOTER_MAX_HEIGHT_PX,
     MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
@@ -296,12 +297,23 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.close()
 
     def test_optional_dialogs_are_not_created_during_startup(self) -> None:
+        dialogs_before = {
+            id(widget)
+            for widget in self.app.topLevelWidgets()
+            if isinstance(widget, QDialog)
+        }
         window = self.window()
         self.assertIsNone(window._preview_dialog)
         self.assertIsNone(window._additional_options_dialog)
         self.assertIsNone(window._about_dialog)
-        self.assertFalse(
-            any(isinstance(widget, QDialog) for widget in self.app.topLevelWidgets())
+        dialogs_after = {
+            id(widget)
+            for widget in self.app.topLevelWidgets()
+            if isinstance(widget, QDialog)
+        }
+        self.assertEqual(
+            dialogs_after,
+            dialogs_before,
         )
 
         self.assertIsNotNone(window.preview_dialog)
@@ -323,10 +335,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(window.windowTitle(), APP_NAME)
         self.assertEqual(window.title_label.text(), APP_NAME)
         self.assertEqual(window.subtitle_label.text(), APP_SUBTITLE)
+        self.assertEqual(window.options_button.toolTip(), "")
         self.assertEqual(window.options_button.accessibleName(), "Menü öffnen")
+        self.assertEqual(window.version_label.toolTip(), "")
+        self.assertNotEqual(window.version_label.accessibleName(), "")
         self.assertEqual(
             [action.text() for action in window.options_menu.actions()],
-            ["Ausgabeordner ändern", "Über Kühlturm-Generator"],
+            ["Exportordner ändern", "Über Kühlturm-Generator"],
         )
         self.assertTrue(
             all(
@@ -528,6 +543,45 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(dialog.width(), ABOUT_DIALOG_MINIMUM_WIDTH_PX)
         window.close()
 
+    def test_internal_dialogs_stay_transparent_until_final_placement(self) -> None:
+        window = self.window()
+        window.resize(900, 900)
+        window.show()
+        self.app.processEvents()
+
+        for opener, dialog_getter in (
+            (window.show_about_dialog, lambda: window.about_dialog),
+            (
+                window.show_additional_options,
+                lambda: window.additional_options_dialog,
+            ),
+        ):
+            opener()
+            dialog = dialog_getter()
+            self.app.processEvents()
+            self.assertTrue(dialog.isVisible())
+            self.assertEqual(dialog.windowOpacity(), 0.0)
+
+            QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
+            self.app.processEvents()
+            self.assertEqual(dialog.windowOpacity(), 1.0)
+            dialog.close()
+            self.app.processEvents()
+
+        # New dialogs are protected automatically even if their implementer
+        # accidentally omits the preferred main-window parent.
+        future_dialog = QDialog()
+        future_dialog.setWindowTitle("Zukünftiger Dialog")
+        future_dialog.show()
+        self.app.processEvents()
+        self.assertEqual(future_dialog.windowOpacity(), 0.0)
+        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
+        self.app.processEvents()
+        self.assertEqual(future_dialog.windowOpacity(), 1.0)
+        future_dialog.close()
+        future_dialog.setParent(window)
+        window.close()
+
     def test_gcode_guide_has_matching_space_above_and_below(self) -> None:
         window = self.window()
         window.resize(900, 900)
@@ -557,6 +611,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.resize(900, 900)
         window.show()
         window.show_about_dialog()
+        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
         self.app.processEvents()
 
         dialog = window.about_dialog

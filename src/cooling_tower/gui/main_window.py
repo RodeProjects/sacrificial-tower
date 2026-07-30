@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from html import escape
 from pathlib import Path
+from weakref import ref
 
-from PySide6.QtCore import QPoint, QRect, QSize, QTimer, Qt, Slot
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, QTimer, Qt, Slot
 from PySide6.QtGui import (
     QCloseEvent,
     QCursor,
@@ -55,6 +57,7 @@ from cooling_tower.gui.background_jobs import (
 )
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
+from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.preview_dialog import PreviewDialog
 from cooling_tower.gui.preview_worker import PreviewWorker
@@ -162,6 +165,7 @@ ABOUT_DIALOG_PREFERRED_WIDTH_PX = 720
 ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX = 720
 OPTIONAL_DIALOG_PARENT_MARGIN_PX = 80
 OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
+INTERNAL_DIALOG_REVEAL_DELAY_MS = 40
 CURRENT_LICENSE_STATUS = "development"
 LICENSE_STATUS_DEFINITIONS = {
     "development": {
@@ -464,6 +468,77 @@ class _ResponsiveLegalButtonGrid(QWidget):
         super().resizeEvent(event)
 
 
+class _InternalDialogRevealFilter(QObject):
+    """Conceal every owned dialog until its first native frame is stable."""
+
+    def __init__(self, owner: QMainWindow) -> None:
+        super().__init__(owner)
+        self._owner_ref = ref(owner)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            event.type() == QEvent.Type.Show
+            and isinstance(watched, QDialog)
+            and watched.isWindow()
+            and self._is_managed_dialog(watched)
+        ):
+            self.prepare(watched)
+            self.schedule_reveal(watched)
+        return super().eventFilter(watched, event)
+
+    def _is_managed_dialog(self, dialog: QDialog) -> bool:
+        owner = self._owner_ref()
+        if owner is None:
+            return False
+        parent = dialog.parentWidget()
+        while parent is not None:
+            if parent is owner:
+                return True
+            parent = parent.parentWidget()
+        return owner.isVisible() and dialog.parentWidget() is None
+
+    @staticmethod
+    def prepare(dialog: QDialog) -> None:
+        dialog.setWindowOpacity(0.0)
+
+    def schedule_reveal(
+        self,
+        dialog: QDialog,
+        before_reveal: Callable[[], None] | None = None,
+    ) -> None:
+        dialog._initial_reveal_callback = before_reveal  # type: ignore[attr-defined]
+        timer = getattr(dialog, "_initial_reveal_timer", None)
+        if timer is None:
+            timer = QTimer(dialog)
+            timer.setSingleShot(True)
+            timer.setInterval(INTERNAL_DIALOG_REVEAL_DELAY_MS)
+            filter_ref = ref(self)
+            dialog_ref = ref(dialog)
+
+            def reveal_referenced_dialog() -> None:
+                reveal_filter = filter_ref()
+                referenced_dialog = dialog_ref()
+                if reveal_filter is not None and referenced_dialog is not None:
+                    reveal_filter._reveal(referenced_dialog)
+
+            timer.timeout.connect(reveal_referenced_dialog)
+            dialog._initial_reveal_timer = timer  # type: ignore[attr-defined]
+        timer.start()
+
+    @staticmethod
+    def _reveal(dialog: QDialog) -> None:
+        callback = getattr(dialog, "_initial_reveal_callback", None)
+        dialog._initial_reveal_callback = None  # type: ignore[attr-defined]
+        try:
+            if dialog.isVisible() and callable(callback):
+                callback()
+        finally:
+            dialog.setWindowOpacity(1.0)
+        if dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+
+
 class MainWindow(QMainWindow):
     """Scrollable desktop front end for the shared generation service."""
 
@@ -598,10 +673,9 @@ class MainWindow(QMainWindow):
         self._slicer_prediction_status = ""
         self._export_request_id = 0
         self.last_export_result: PreviewExportResult | None = None
-        # This session-scoped path intentionally survives a changed or removed
-        # G-Code.  The footer action must always target the most recent
-        # successful tower export since the application was started.
         self._latest_export_directory: Path | None = None
+        self._latest_export_root_text: str | None = None
+        self._latest_export_unavailable_reason = "Kein Exportordner gefunden."
         self._phase17_static_valid = False
         self._loading_phase17_state = True
         self._setting_widgets: dict[str, NumericSettingWidget] = {}
@@ -664,6 +738,10 @@ class MainWindow(QMainWindow):
         self._preview_layout_adjusted = False
         self._preview_target_geometry: QRect | None = None
         self._hint_controller = WindowHintController(self)
+        self._internal_dialog_reveal_filter = _InternalDialogRevealFilter(self)
+        application = QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self._internal_dialog_reveal_filter)
         self._apply_style()
         self.apply_settings(initial_settings)
         self.output_root_edit.setText(
@@ -798,13 +876,12 @@ class MainWindow(QMainWindow):
             METRICS.info_button_diameter_px,
             METRICS.info_button_diameter_px,
         )
-        self.options_button.setToolTip("Menü öffnen")
         self.options_button.setAccessibleName("Menü öffnen")
         self.options_menu = QMenu(self.options_button)
         self.options_menu.setObjectName("mainOptionsMenu")
         self.change_output_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "folder.svg")),
-            "Ausgabeordner ändern",
+            "Exportordner ändern",
         )
         self.change_output_action.triggered.connect(
             self.show_additional_options
@@ -823,9 +900,6 @@ class MainWindow(QMainWindow):
         self.version_label.setObjectName("versionLabel")
         self.version_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.version_label.setToolTip(
-            f"Aktuelle Programmversion: {APP_VERSION}"
         )
         self.version_label.setAccessibleName(
             f"Programmversion {APP_VERSION}"
@@ -1545,15 +1619,9 @@ class MainWindow(QMainWindow):
         options_layout = QVBoxLayout(self.additional_options_content)
         options_layout.setContentsMargins(18, 18, 18, 18)
         options_layout.setSpacing(10)
-        options_title = QLabel("Ausgabeordner ändern")
+        options_title = QLabel("Exportordner ändern")
         options_title.setObjectName("dialogTitle")
         options_layout.addWidget(options_title)
-        options_description = QLabel(
-            "Hier legen Sie programmweite Ausgabeoptionen fest."
-        )
-        options_description.setObjectName("helpText")
-        options_description.setWordWrap(True)
-        options_layout.addWidget(options_description)
 
         output_path_layout = QGridLayout()
         self.output_root_info_button = InfoToolButton(
@@ -1561,7 +1629,7 @@ class MainWindow(QMainWindow):
             "und Fehlerprotokolle. Vorhandene Ausgabedateien werden nicht "
             "überschrieben.",
             self.additional_options_content,
-            accessible_name="Informationen zum Basis-Ausgabeordner",
+            accessible_name="Informationen zum aktuellen Exportordner",
             object_name="settingInfoButton",
             diameter_px=24,
         )
@@ -1585,10 +1653,10 @@ class MainWindow(QMainWindow):
             METRICS.reset_button_size_px,
         )
         self.output_root_reset_button.setToolTip(
-            "Ausgabeordner auf Standardwert zurücksetzen"
+            "Exportordner auf Standardwert zurücksetzen"
         )
         self.output_root_reset_button.setAccessibleName(
-            "Ausgabeordner auf Standardwert zurücksetzen"
+            "Exportordner auf Standardwert zurücksetzen"
         )
         self.output_root_error_label = QLabel()
         self.output_root_error_label.setObjectName("settingMessage")
@@ -1607,7 +1675,7 @@ class MainWindow(QMainWindow):
             self.output_root_error_label, 1, 0, 1, 4
         )
         output_path_layout.setColumnStretch(1, 1)
-        options_layout.addWidget(QLabel("Basis-Ausgabeordner"))
+        options_layout.addWidget(QLabel("Aktueller Exportordner:"))
         options_layout.addLayout(output_path_layout)
         self.prediction_frame = SectionCard(
             "Prognose",
@@ -2002,15 +2070,19 @@ class MainWindow(QMainWindow):
         )
         action_notice_layout.addWidget(self.action_availability_icon)
         action_notice_layout.addWidget(self.export_availability_label, 1)
-        self.open_output_button = QPushButton("Outputordner öffnen")
+        self.open_output_button = QPushButton("Alle Exporte öffnen")
         self.open_output_button.setObjectName("openBaseOutputFolderButton")
         self.open_output_button.setToolTip(
-            "Den in den Optionen festgelegten Output-Basisordner öffnen"
+            "Den Exportordner mit allen Exporten öffnen"
         )
-        self.open_stl_button = QPushButton("Exportordner öffnen")
+        self.open_stl_button = QPushButton("Letzten Export öffnen")
         self.open_stl_button.setObjectName("openOutputFolderButton")
-        self.open_stl_button.setToolTip(
-            "Den Ordner des zuletzt exportierten Kühlturms öffnen"
+        self.open_stl_button.setAccessibleName(
+            "Ordner des letzten Exports öffnen"
+        )
+        self.open_stl_button.setAttribute(
+            Qt.WidgetAttribute.WA_AlwaysShowToolTips,
+            True,
         )
         self.open_run_button = QPushButton("Letzten Kurzbericht öffnen")
         self.open_output_button.setEnabled(False)
@@ -2584,7 +2656,7 @@ class MainWindow(QMainWindow):
         if self._additional_options_dialog is None:
             dialog = QDialog(self)
             dialog.setObjectName("additionalOptionsDialog")
-            dialog.setWindowTitle("Ausgabeordner ändern")
+            dialog.setWindowTitle("Exportordner ändern")
             dialog.setModal(False)
             dialog.setMinimumWidth(OUTPUT_DIALOG_MINIMUM_WIDTH_PX)
             dialog.setSizeGripEnabled(False)
@@ -4829,7 +4901,7 @@ class MainWindow(QMainWindow):
             self._last_changed_setting_name = "output_root"
         self._update_section_summaries()
         self.validate_form()
-        self._refresh_folder_action_states()
+        self._refresh_folder_action_states(rescan=True)
 
     def _reset_output_root(self) -> None:
         self.output_root_edit.setText(str(self.default_output_root))
@@ -5458,7 +5530,7 @@ class MainWindow(QMainWindow):
         """Return the black heading used for one field-related issue group."""
 
         if setting_name == "output_root":
-            return f"Ausgabeordner: {self.output_root_edit.text().strip()}"
+            return f"Exportordner: {self.output_root_edit.text().strip()}"
         return self._setting_value_description(setting_name)
 
     def _concise_field_message(self, setting_name: str, message: str) -> str:
@@ -5486,7 +5558,7 @@ class MainWindow(QMainWindow):
                     "Maximale Wandstärkenänderung",
                 ),
                 "local_reference_window": ("Lokales Zeitfenster",),
-                "output_root": ("Ausgabeordner",),
+                "output_root": ("Exportordner",),
             }.get(setting_name, ())
         )
         for prefix in sorted(set(prefixes), key=len, reverse=True):
@@ -5720,7 +5792,7 @@ class MainWindow(QMainWindow):
     def select_output_root(self) -> None:
         selected = QFileDialog.getExistingDirectory(
             self.additional_options_dialog,
-            "Basis-Ausgabeordner auswählen",
+            "Exportordner auswählen",
             self.output_root_edit.text()
             or str(self.default_output_root),
         )
@@ -5770,11 +5842,10 @@ class MainWindow(QMainWindow):
 
         dialog = self.additional_options_dialog
         dialog.setWindowState(Qt.WindowState.WindowNoState)
-        dialog.show()
-        self._resize_additional_options_to_content()
-        QTimer.singleShot(0, self._resize_additional_options_to_content)
-        dialog.raise_()
-        dialog.activateWindow()
+        self._show_internal_dialog_without_flash(
+            dialog,
+            self._resize_additional_options_to_content,
+        )
 
     def _resize_additional_options_to_content(self) -> None:
         dialog = self.additional_options_dialog
@@ -5801,11 +5872,31 @@ class MainWindow(QMainWindow):
 
         dialog = self.about_dialog
         dialog.setWindowState(Qt.WindowState.WindowNoState)
+        self._show_internal_dialog_without_flash(
+            dialog,
+            self._resize_about_to_content,
+        )
+
+    def _show_internal_dialog_without_flash(
+        self,
+        dialog: QDialog,
+        finalize_geometry: Callable[[], None],
+    ) -> None:
+        """Reveal a child dialog only after native sizing and placement settle."""
+
+        if dialog.isVisible():
+            finalize_geometry()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+
+        self._internal_dialog_reveal_filter.prepare(dialog)
         dialog.show()
-        self._resize_about_to_content()
-        QTimer.singleShot(0, self._resize_about_to_content)
-        dialog.raise_()
-        dialog.activateWindow()
+        finalize_geometry()
+        self._internal_dialog_reveal_filter.schedule_reveal(
+            dialog,
+            finalize_geometry,
+        )
 
     def _resize_about_to_content(self) -> None:
         dialog = self.about_dialog
@@ -6479,10 +6570,10 @@ class MainWindow(QMainWindow):
         if not self.output_root_edit.text().strip():
             add_error(
                 ("output_root",),
-                "Bitte einen Ausgabeordner angeben.",
+                "Bitte einen Exportordner angeben.",
                 (
-                    "Einen beschreibbaren Ausgabeordner auswählen.",
-                    "Den Standard-Ausgabeordner wiederherstellen.",
+                    "Einen beschreibbaren Exportordner auswählen.",
+                    "Den Standard-Exportordner wiederherstellen.",
                 ),
             )
 
@@ -6780,14 +6871,15 @@ class MainWindow(QMainWindow):
         if not self.preview_dialog.isVisible():
             self.preview_dialog.setWindowState(Qt.WindowState.WindowNoState)
             self._place_preview_beside_main_window()
-            self.preview_dialog.show()
-            self._enforce_preview_window_geometry()
-            QTimer.singleShot(0, self._enforce_preview_window_geometry)
+            self._show_internal_dialog_without_flash(
+                self.preview_dialog,
+                self._enforce_preview_window_geometry,
+            )
             QTimer.singleShot(80, self._enforce_preview_window_geometry)
         else:
             self._enforce_preview_window_geometry()
-        self.preview_dialog.raise_()
-        self.preview_dialog.activateWindow()
+            self.preview_dialog.raise_()
+            self.preview_dialog.activateWindow()
 
     def _place_preview_beside_main_window(self) -> None:
         screen = self.screen()
@@ -7166,6 +7258,8 @@ class MainWindow(QMainWindow):
             return
         self.last_export_result = result
         self._latest_export_directory = result.output_path.parent.resolve()
+        self._latest_export_root_text = self.output_root_edit.text().strip()
+        self._latest_export_unavailable_reason = ""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.progress_bar.hide()
@@ -7184,7 +7278,7 @@ class MainWindow(QMainWindow):
                 f"Datei: {result.output_path.name}\n"
                 f"Erzeugungsart: {kind}\n"
                 "Kurzbericht und technischer Bericht wurden im "
-                "Ausgabeordner gespeichert."
+                "Exportordner gespeichert."
             )
             self.result_label.setToolTip(str(result.output_path))
         else:
@@ -7264,6 +7358,7 @@ class MainWindow(QMainWindow):
             return None
 
     def open_stl_directory(self) -> None:
+        self._refresh_folder_action_states(rescan=True)
         if self._latest_export_directory is not None:
             open_directory(self._latest_export_directory)
 
@@ -7279,7 +7374,7 @@ class MainWindow(QMainWindow):
             open_directory(directory.resolve())
         except OSError as error:
             self.result_label.setText(
-                "Der Outputordner konnte nicht geöffnet werden: "
+                "Der Exportordner konnte nicht geöffnet werden: "
                 f"{german_user_message(error)}"
             )
             self._schedule_footer_height_update()
@@ -7350,10 +7445,10 @@ class MainWindow(QMainWindow):
             return
         compact = self.width() < 900
         self.open_output_button.setText(
-            "Outputordner" if compact else "Outputordner öffnen"
+            "Alle Exporte" if compact else "Alle Exporte öffnen"
         )
         self.open_stl_button.setText(
-            "Exportordner" if compact else "Exportordner öffnen"
+            "Letzter Export" if compact else "Letzten Export öffnen"
         )
         self.reset_button.setText("Standardwerte wiederherstellen")
         preview_is_repeat = self.preview_state in {
@@ -7396,14 +7491,35 @@ class MainWindow(QMainWindow):
             + border_width
         )
 
-    def _refresh_folder_action_states(self) -> None:
+    def _refresh_folder_action_states(self, *, rescan: bool = False) -> None:
         if not hasattr(self, "open_output_button"):
             return
-        self.open_output_button.setEnabled(
-            bool(self.output_root_edit.text().strip())
-        )
-        self.open_stl_button.setEnabled(
+        output_root_text = self.output_root_edit.text().strip()
+        self.open_output_button.setEnabled(bool(output_root_text))
+        known_directory_missing = bool(
             self._latest_export_directory is not None
+            and not self._latest_export_directory.is_dir()
+        )
+        if (
+            rescan
+            or output_root_text != self._latest_export_root_text
+            or known_directory_missing
+        ):
+            resolution = resolve_latest_export_directory(
+                output_root_text,
+                preferred_directory=self._latest_export_directory,
+            )
+            self._latest_export_directory = resolution.directory
+            self._latest_export_unavailable_reason = (
+                resolution.unavailable_reason or ""
+            )
+            self._latest_export_root_text = output_root_text
+        latest_export_available = self._latest_export_directory is not None
+        self.open_stl_button.setEnabled(latest_export_available)
+        self.open_stl_button.setToolTip(
+            "Den Ordner des zuletzt erstellten Exports öffnen"
+            if latest_export_available
+            else self._latest_export_unavailable_reason
         )
 
     def _has_non_default_settings(self) -> bool:
@@ -7520,4 +7636,7 @@ class MainWindow(QMainWindow):
         if self._about_dialog is not None:
             self._about_dialog.close()
         self._hint_controller.dispose()
+        application = QApplication.instance()
+        if application is not None:
+            application.removeEventFilter(self._internal_dialog_reveal_filter)
         super().closeEvent(event)

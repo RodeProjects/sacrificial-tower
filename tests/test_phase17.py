@@ -911,10 +911,10 @@ class Phase17Tests(unittest.TestCase):
         window.show()
         window.resize(1000, 700)
         self.app.processEvents()
-        self.assertEqual(window.open_stl_button.text(), "Exportordner öffnen")
+        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
         window.resize(720, 640)
         self.app.processEvents()
-        self.assertEqual(window.open_stl_button.text(), "Exportordner")
+        self.assertEqual(window.open_stl_button.text(), "Letzter Export")
         window.close()
 
     def test_35_preview_progress_step_is_below_progress_bar(self) -> None:
