@@ -9,7 +9,8 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Sequence
+from enum import Enum
+from typing import Callable, Mapping, Protocol, Sequence, runtime_checkable
 
 from cooling_tower.diagnostic_context import record_diagnostic
 
@@ -23,6 +24,120 @@ class ProcessOutcome:
     duration_s: float
     timed_out: bool = False
     cancelled: bool = False
+    process_id: int | None = None
+    crashed: bool = False
+    backend: str = "legacy"
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    output_diagnostic_path: Path | None = None
+
+
+ProcessStateCallback = Callable[[str, Mapping[str, object]], None]
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessRequest:
+    """Transport-neutral description of one isolated slicer invocation."""
+
+    executable: str | Path
+    arguments: tuple[str | Path, ...]
+    working_directory: str | Path
+    timeout_s: float
+    cancellation_event: Event | None = None
+    environment: Mapping[str, str] | None = None
+    diagnostics_directory: str | Path | None = None
+    output_memory_limit_bytes: int = 1024 * 1024
+    adapter_id: str | None = None
+    product_name: str | None = None
+    purpose: str | None = None
+    calibration_round: int | None = None
+    state_callback: ProcessStateCallback | None = None
+
+    def __post_init__(self) -> None:
+        if self.timeout_s <= 0:
+            raise ValueError("Process timeout must be greater than zero.")
+        if self.output_memory_limit_bytes <= 0:
+            raise ValueError("Process output memory limit must be greater than zero.")
+
+
+@runtime_checkable
+class SlicerProcessRunner(Protocol):
+    backend_name: str
+
+    def run(
+        self,
+        executable: str | Path,
+        arguments: Sequence[str | Path],
+        *,
+        working_directory: str | Path,
+        timeout_s: float,
+        cancellation_event: Event | None = None,
+        diagnostics_directory: str | Path | None = None,
+        adapter_id: str | None = None,
+        product_name: str | None = None,
+        purpose: str | None = None,
+        calibration_round: int | None = None,
+        environment: Mapping[str, str] | None = None,
+        state_callback: ProcessStateCallback | None = None,
+    ) -> ProcessOutcome: ...
+
+
+class ProcessBackend(str, Enum):
+    LEGACY = "legacy"
+    QPROCESS = "qprocess"
+
+
+def configured_process_backend(adapter_id: str | None = None) -> ProcessBackend:
+    """Resolve the internal backend switch, including per-adapter rollout."""
+
+    normalized_adapter = (adapter_id or "").strip().casefold()
+    forced_legacy = {
+        value.strip().casefold()
+        for value in os.environ.get(
+            "COOLING_TOWER_LEGACY_SLICER_ADAPTERS",
+            "",
+        ).split(",")
+        if value.strip()
+    }
+    if normalized_adapter and (
+        "*" in forced_legacy or normalized_adapter in forced_legacy
+    ):
+        return ProcessBackend.LEGACY
+    selected_adapters = {
+        value.strip().casefold()
+        for value in os.environ.get(
+            "COOLING_TOWER_QPROCESS_ADAPTERS",
+            "",
+        ).split(",")
+        if value.strip()
+    }
+    if selected_adapters:
+        return (
+            ProcessBackend.QPROCESS
+            if "*" in selected_adapters or normalized_adapter in selected_adapters
+            else ProcessBackend.LEGACY
+        )
+    configured = os.environ.get(
+        "COOLING_TOWER_SLICER_PROCESS_BACKEND",
+        ProcessBackend.QPROCESS.value,
+    ).strip().casefold()
+    try:
+        return ProcessBackend(configured)
+    except ValueError as error:
+        raise ValueError(
+            "COOLING_TOWER_SLICER_PROCESS_BACKEND must be 'qprocess' or 'legacy'."
+        ) from error
+
+
+def create_slicer_process_runner(
+    adapter_id: str | None = None,
+) -> SlicerProcessRunner:
+    backend = configured_process_backend(adapter_id)
+    if backend is ProcessBackend.LEGACY:
+        return SecureSlicerProcessRunner()
+    from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
+
+    return QProcessSlicerProcessRunner()
 
 
 def isolated_slicer_environment(root: str | Path) -> dict[str, str]:
@@ -67,6 +182,8 @@ def isolated_slicer_environment(root: str | Path) -> dict[str, str]:
 class SecureSlicerProcessRunner:
     """Run a slicer without a shell and with timeout/cancellation support."""
 
+    backend_name = "legacy"
+
     def run(
         self,
         executable: str | Path,
@@ -75,6 +192,13 @@ class SecureSlicerProcessRunner:
         working_directory: str | Path,
         timeout_s: float,
         cancellation_event: Event | None = None,
+        diagnostics_directory: str | Path | None = None,
+        adapter_id: str | None = None,
+        product_name: str | None = None,
+        purpose: str | None = None,
+        calibration_round: int | None = None,
+        environment: Mapping[str, str] | None = None,
+        state_callback: ProcessStateCallback | None = None,
     ) -> ProcessOutcome:
         executable_path = Path(executable).expanduser().resolve()
         if not executable_path.is_file():
@@ -93,7 +217,40 @@ class SecureSlicerProcessRunner:
         with tempfile.TemporaryDirectory(
             prefix="cooling_tower_slicer_environment_"
         ) as isolated_root:
-            record_diagnostic(
+            process_environment = isolated_slicer_environment(isolated_root)
+            if environment is not None:
+                process_environment.update(
+                    {str(key): str(value) for key, value in environment.items()}
+                )
+                isolated = isolated_slicer_environment(isolated_root)
+                for key in (
+                    "APPDATA",
+                    "LOCALAPPDATA",
+                    "HOME",
+                    "USERPROFILE",
+                    "TEMP",
+                    "TMP",
+                    "XDG_CONFIG_HOME",
+                    "XDG_CACHE_HOME",
+                    "XDG_DATA_HOME",
+                    "COOLING_TOWER_SLICER_ISOLATED",
+                ):
+                    process_environment[key] = isolated[key]
+
+            def report(event: str, **details: object) -> None:
+                common: dict[str, object] = {
+                    "backend": self.backend_name,
+                    "adapter": adapter_id,
+                    "product_name": product_name,
+                    "purpose": purpose,
+                    "calibration_round": calibration_round,
+                }
+                common.update(details)
+                record_diagnostic(event, **common)
+                if state_callback is not None:
+                    state_callback(event, common)
+
+            report(
                 "slicer_process_state",
                 process_state="starting",
                 command=command,
@@ -101,7 +258,7 @@ class SecureSlicerProcessRunner:
             process = subprocess.Popen(
                 command,
                 cwd=str(working_path),
-                env=isolated_slicer_environment(isolated_root),
+                env=process_environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -111,7 +268,7 @@ class SecureSlicerProcessRunner:
                 shell=False,
                 creationflags=creation_flags,
             )
-            record_diagnostic(
+            report(
                 "slicer_process_started",
                 process_state="running",
                 process_id=process.pid,
@@ -147,8 +304,10 @@ class SecureSlicerProcessRunner:
             duration_s=max(0.0, time.monotonic() - started),
             timed_out=timed_out,
             cancelled=cancelled,
+            process_id=process.pid,
+            backend=self.backend_name,
         )
-        record_diagnostic(
+        report(
             "slicer_process_finished",
             process_state="not_running",
             process_id=process.pid,
@@ -158,6 +317,22 @@ class SecureSlicerProcessRunner:
             duration_s=outcome.duration_s,
         )
         return outcome
+
+    def run_request(self, request: ProcessRequest) -> ProcessOutcome:
+        return self.run(
+            request.executable,
+            request.arguments,
+            working_directory=request.working_directory,
+            timeout_s=request.timeout_s,
+            cancellation_event=request.cancellation_event,
+            diagnostics_directory=request.diagnostics_directory,
+            adapter_id=request.adapter_id,
+            product_name=request.product_name,
+            purpose=request.purpose,
+            calibration_round=request.calibration_round,
+            environment=request.environment,
+            state_callback=request.state_callback,
+        )
 
     @staticmethod
     def _stop_process(process: subprocess.Popen[str]) -> None:

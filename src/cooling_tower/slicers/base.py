@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -29,10 +30,31 @@ from cooling_tower.slicers.models import (
     SlicerInstallation,
     SlicerSupportLevel,
 )
-from cooling_tower.slicers.process import ProcessOutcome, SecureSlicerProcessRunner
+from cooling_tower.slicers.process import (
+    ProcessOutcome,
+    SlicerProcessRunner,
+    create_slicer_process_runner,
+)
 
 
 _VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,4})(?!\d)")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSlice:
+    """Prepared, transport-neutral slice job whose paths remain owned here."""
+
+    request: SliceRequest
+    working_root: Path
+    input_directory: Path
+    output_directory: Path
+    copied_model: Path
+    executable: Path
+    arguments: tuple[str, ...]
+
+    @property
+    def command(self) -> tuple[str, ...]:
+        return (str(self.executable), *self.arguments)
 
 
 def read_windows_version_information(path: Path) -> dict[str, str]:
@@ -164,8 +186,8 @@ class BaseSlicerAdapter:
     probe_timeout_s = 5.0
     capabilities: frozenset[SlicerCapability] = frozenset()
 
-    def __init__(self, runner: SecureSlicerProcessRunner | None = None) -> None:
-        self.runner = runner or SecureSlicerProcessRunner()
+    def __init__(self, runner: SlicerProcessRunner | None = None) -> None:
+        self.runner = runner or create_slicer_process_runner(self.adapter_id)
 
     def known_candidates(self) -> tuple[SlicerCandidate, ...]:
         return ()
@@ -474,6 +496,16 @@ class BaseSlicerAdapter:
         return dict(values) if isinstance(values, Mapping) else {}
 
     def slice_model(self, request: SliceRequest) -> SliceResult:
+        prepared = self.prepare_slice(request)
+        try:
+            outcome = self.execute_prepared_slice(prepared)
+            return self.finalize_slice(prepared, outcome)
+        finally:
+            self.cleanup_prepared_slice(prepared)
+
+    def prepare_slice(self, request: SliceRequest) -> PreparedSlice:
+        """Copy inputs and build a command without starting an external process."""
+
         if not request.model_path.is_file():
             raise FileNotFoundError(f"STL model not found: {request.model_path}")
         if request.profile.installation.adapter_id != self.adapter_id:
@@ -490,110 +522,175 @@ class BaseSlicerAdapter:
         work_input.mkdir()
         work_output.mkdir()
         copied_model = work_input / request.model_path.name
-        shutil.copy2(request.model_path, copied_model)
-        outcome: ProcessOutcome | None = None
         try:
+            shutil.copy2(request.model_path, copied_model)
             executable, arguments = self.build_slice_command(
                 request,
                 copied_model,
                 work_output,
                 working_root,
             )
+            prepared = PreparedSlice(
+                request=request,
+                working_root=working_root.resolve(),
+                input_directory=work_input.resolve(),
+                output_directory=work_output.resolve(),
+                copied_model=copied_model.resolve(),
+                executable=Path(executable).expanduser().resolve(),
+                arguments=tuple(str(item) for item in arguments),
+            )
             record_diagnostic(
                 "slice_job_prepared",
                 adapter=self.adapter_id,
                 product_name=self.product_name,
                 purpose=request.purpose,
-                command=(str(executable), *(str(item) for item in arguments)),
+                calibration_round=request.calibration_round,
+                command=prepared.command,
             )
-            outcome = self.runner.run(
-                executable,
-                arguments,
-                working_directory=working_root,
-                timeout_s=request.timeout_s,
-                cancellation_event=request.cancellation_event,
-            )
-            produced = tuple(
-                sorted(path for path in work_output.rglob("*") if path.is_file())
-            )
-            failure_reason = self._failure_reason(outcome, produced)
-            record_diagnostic(
-                "slice_output_files_checked",
-                adapter=self.adapter_id,
-                product_name=self.product_name,
-                output_file_count=len(produced),
-                success=failure_reason is None,
-                return_code=outcome.return_code,
-                timed_out=outcome.timed_out,
-                cancelled=outcome.cancelled,
-            )
-            if failure_reason is not None:
-                diagnostic = self._write_failure_diagnostic(
-                    request,
-                    outcome,
-                    failure_reason,
-                )
-                record_diagnostic(
-                    "slice_job_failed",
-                    failure_reason=failure_reason,
-                    diagnostic_path=diagnostic,
-                )
-                return SliceResult(
-                    success=False,
-                    return_code=outcome.return_code,
-                    command=outcome.command,
-                    output_files=(),
-                    gcode_path=None,
-                    metadata_paths=(),
-                    stdout=outcome.stdout,
-                    stderr=outcome.stderr,
-                    duration_s=outcome.duration_s,
-                    diagnostic_path=diagnostic,
-                    failure_reason=failure_reason,
-                    timed_out=outcome.timed_out,
-                    cancelled=outcome.cancelled,
-                )
+            return prepared
+        except Exception:
+            shutil.rmtree(working_root, ignore_errors=True)
+            raise
 
-            request.output_directory.mkdir(parents=True, exist_ok=True)
-            copied_outputs: list[Path] = []
-            for source in produced:
-                relative = source.relative_to(work_output)
-                destination = request.output_directory / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, destination)
-                copied_outputs.append(destination.resolve())
-            gcode_path = next(
-                (
-                    path
-                    for path in copied_outputs
-                    if path.suffix.casefold() in {".gcode", ".gco"}
-                ),
-                None,
+    def execute_prepared_slice(
+        self,
+        prepared: PreparedSlice,
+        *,
+        runner: SlicerProcessRunner | None = None,
+    ) -> ProcessOutcome:
+        """Run only the transport portion of a prepared slice job."""
+
+        request = prepared.request
+        kwargs: dict[str, object] = {
+            "working_directory": prepared.working_root,
+            "timeout_s": request.timeout_s,
+            "cancellation_event": request.cancellation_event,
+        }
+        selected_runner = runner or self.runner
+        if getattr(selected_runner, "backend_name", None) in {"legacy", "qprocess"}:
+            kwargs.update(
+                {
+                    "diagnostics_directory": (
+                        request.diagnostics_root
+                        if request.retain_failure_diagnostics
+                        else None
+                    ),
+                    "adapter_id": self.adapter_id,
+                    "product_name": self.product_name,
+                    "purpose": request.purpose,
+                    "calibration_round": request.calibration_round,
+                }
             )
-            metadata_paths = tuple(
-                path
-                for path in copied_outputs
-                if path.name.casefold().endswith(
-                    (".gcode.metadata", ".gco.metadata", ".metadata")
-                )
+        return selected_runner.run(
+            prepared.executable,
+            prepared.arguments,
+            **kwargs,
+        )
+
+    def finalize_slice(
+        self,
+        prepared: PreparedSlice,
+        outcome: ProcessOutcome,
+    ) -> SliceResult:
+        """Validate and persist outputs after the process has fully stopped."""
+
+        request = prepared.request
+        produced = tuple(
+            sorted(path for path in prepared.output_directory.rglob("*") if path.is_file())
+        )
+        failure_reason = self._failure_reason(outcome, produced)
+        record_diagnostic(
+            "slice_output_files_checked",
+            adapter=self.adapter_id,
+            product_name=self.product_name,
+            output_file_count=len(produced),
+            success=failure_reason is None,
+            return_code=outcome.return_code,
+            timed_out=outcome.timed_out,
+            cancelled=outcome.cancelled,
+            crashed=outcome.crashed,
+            backend=outcome.backend,
+        )
+        if failure_reason is not None:
+            diagnostic = self._write_failure_diagnostic(
+                request,
+                outcome,
+                failure_reason,
+            )
+            record_diagnostic(
+                "slice_job_failed",
+                failure_reason=failure_reason,
+                diagnostic_path=diagnostic,
+                process_output_diagnostic_path=outcome.output_diagnostic_path,
             )
             return SliceResult(
-                success=True,
+                success=False,
                 return_code=outcome.return_code,
                 command=outcome.command,
-                output_files=tuple(copied_outputs),
-                gcode_path=gcode_path,
-                metadata_paths=metadata_paths,
+                output_files=(),
+                gcode_path=None,
+                metadata_paths=(),
                 stdout=outcome.stdout,
                 stderr=outcome.stderr,
                 duration_s=outcome.duration_s,
+                diagnostic_path=diagnostic,
+                failure_reason=failure_reason,
+                timed_out=outcome.timed_out,
+                cancelled=outcome.cancelled,
+                crashed=outcome.crashed,
+                process_backend=outcome.backend,
+                stdout_truncated=outcome.stdout_truncated,
+                stderr_truncated=outcome.stderr_truncated,
+                process_output_diagnostic_path=outcome.output_diagnostic_path,
             )
-        finally:
-            shutil.rmtree(working_root, ignore_errors=True)
-            record_diagnostic(
-                "temporary_data_cleaned",
-                temporary_kind="slicer_working_directory",
+
+        request.output_directory.mkdir(parents=True, exist_ok=True)
+        copied_outputs: list[Path] = []
+        for source in produced:
+            relative = source.relative_to(prepared.output_directory)
+            destination = request.output_directory / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            copied_outputs.append(destination.resolve())
+        gcode_path = next(
+            (
+                path
+                for path in copied_outputs
+                if path.suffix.casefold() in {".gcode", ".gco"}
+            ),
+            None,
+        )
+        metadata_paths = tuple(
+            path
+            for path in copied_outputs
+            if path.name.casefold().endswith(
+                (".gcode.metadata", ".gco.metadata", ".metadata")
             )
+        )
+        return SliceResult(
+            success=True,
+            return_code=outcome.return_code,
+            command=outcome.command,
+            output_files=tuple(copied_outputs),
+            gcode_path=gcode_path,
+            metadata_paths=metadata_paths,
+            stdout=outcome.stdout,
+            stderr=outcome.stderr,
+            duration_s=outcome.duration_s,
+            crashed=outcome.crashed,
+            process_backend=outcome.backend,
+            stdout_truncated=outcome.stdout_truncated,
+            stderr_truncated=outcome.stderr_truncated,
+            process_output_diagnostic_path=outcome.output_diagnostic_path,
+        )
+
+    @staticmethod
+    def cleanup_prepared_slice(prepared: PreparedSlice) -> None:
+        shutil.rmtree(prepared.working_root, ignore_errors=True)
+        record_diagnostic(
+            "temporary_data_cleaned",
+            temporary_kind="slicer_working_directory",
+        )
 
     def build_slice_command(
         self,
@@ -615,6 +712,8 @@ class BaseSlicerAdapter:
             return "Der Slicervorgang wurde abgebrochen."
         if outcome.timed_out:
             return "Der Slicervorgang hat das Zeitlimit überschritten."
+        if outcome.crashed:
+            return "Der Slicer-Prozess ist abgestürzt."
         if outcome.return_code != 0:
             return f"Der Slicer wurde mit Fehlercode {outcome.return_code} beendet."
         if not any(path.suffix.casefold() in {".gcode", ".gco"} for path in produced):
@@ -640,10 +739,19 @@ class BaseSlicerAdapter:
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
             "cancelled": outcome.cancelled,
+            "crashed": outcome.crashed,
+            "process_backend": outcome.backend,
             "duration_s": outcome.duration_s,
             "command": list(outcome.command),
             "stdout": outcome.stdout,
             "stderr": outcome.stderr,
+            "stdout_truncated": outcome.stdout_truncated,
+            "stderr_truncated": outcome.stderr_truncated,
+            "process_output_diagnostic_path": (
+                str(outcome.output_diagnostic_path)
+                if outcome.output_diagnostic_path is not None
+                else None
+            ),
         }
         path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -658,6 +766,18 @@ class BaseSlicerAdapter:
 
         snapshot = GCodeAnalysisService().analyze(result.gcode_path, force=True)
         return tuple(layer.total_time_s for layer in snapshot.layers)
+
+    def validate_process_backends(
+        self,
+        request: SliceRequest,
+        *,
+        report_path: str | Path | None = None,
+    ):
+        """Compare legacy and QProcess semantics for this specific adapter."""
+
+        from cooling_tower.slicers.validation import validate_adapter_backends
+
+        return validate_adapter_backends(self, request, report_path=report_path)
 
 
 def environment_roots() -> tuple[Path, ...]:

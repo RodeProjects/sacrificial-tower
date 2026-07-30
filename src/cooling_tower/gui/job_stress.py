@@ -21,7 +21,7 @@ from cooling_tower.application import (
 from cooling_tower.diagnostics import DiagnosticJournal
 from cooling_tower.gui.background_jobs import BackgroundJobManager, JobKind
 from cooling_tower.gui.worker_contract import CancelableWorker
-from cooling_tower.slicers.process import SecureSlicerProcessRunner
+from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
 
 
 SCENARIOS = (
@@ -36,6 +36,8 @@ SCENARIOS = (
     "large_slicer_stdout",
     "slicer_child_process",
     "cancel_output_race",
+    "parallel_qprocess_slicers",
+    "close_during_qprocess_slicer",
     "shutdown_timeout",
 )
 
@@ -131,12 +133,19 @@ class FakeSlicerWorker(CancelableWorker):
                 arguments = [self.script, self.mode]
                 if self.pid_file is not None:
                     arguments.append(self.pid_file)
-                outcome = SecureSlicerProcessRunner().run(
+                outcome = QProcessSlicerProcessRunner(
+                    output_memory_limit_bytes=256 * 1024,
+                    termination_grace_ms=100,
+                ).run(
                     self.executable,
                     arguments,
                     working_directory=self.working_directory,
                     timeout_s=self.timeout_s,
                     cancellation_event=self.cancellation_event,
+                    diagnostics_directory=self.working_directory / "process_output",
+                    adapter_id="fake_stress_slicer",
+                    product_name="Fake stress slicer",
+                    purpose="stress",
                 )
                 self.succeeded.emit(self.request_id, outcome)
             except Exception as error:
@@ -360,6 +369,48 @@ def run_scenario(
                 application.processEvents()
             manager.cancel_jobs(JobKind.PREVIEW, reason="final_replacement")
             _wait_until(application, lambda: not manager.has_active())
+        elif scenario == "parallel_qprocess_slicers":
+            script = _write_fake_slicer(artifact_directory)
+            for request_id in range(1, 7):
+                manager.start_job(
+                    kind=JobKind.PREVIEW,
+                    request_id=request_id,
+                    worker=FakeSlicerWorker(
+                        request_id,
+                        Path(sys.executable),
+                        script,
+                        "success",
+                        artifact_directory / f"parallel-{request_id}",
+                        5.0,
+                    ),
+                    parent_operation_id=f"parallel-slicer-{request_id}",
+                )
+            _wait_until(application, lambda: not manager.has_active(), 10.0)
+        elif scenario == "close_during_qprocess_slicer":
+            script = _write_fake_slicer(artifact_directory)
+            job_id = manager.start_job(
+                kind=JobKind.PREVIEW,
+                request_id=1,
+                worker=FakeSlicerWorker(
+                    1,
+                    Path(sys.executable),
+                    script,
+                    "hang",
+                    artifact_directory / "close-during-slicer",
+                    30.0,
+                ),
+                parent_operation_id="close-during-qprocess-slicer",
+            )
+            _wait_until(
+                application,
+                lambda: (
+                    manager.job(job_id) is not None
+                    and manager.job(job_id).process_id is not None
+                ),
+            )
+            result = manager.shutdown(2000)
+            if not result.clean:
+                raise AssertionError("QProcess slicer did not stop during shutdown.")
         elif scenario in {
             "hanging_fake_slicer",
             "large_slicer_stdout",

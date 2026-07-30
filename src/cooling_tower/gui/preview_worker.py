@@ -6,6 +6,7 @@ from PySide6.QtCore import Signal, Slot
 
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.preview import PreviewCancelled, PreviewRequest, PreviewService
+from cooling_tower.preview.controller import PreviewBuildController
 
 
 class PreviewWorker(CancelableWorker):
@@ -29,8 +30,9 @@ class PreviewWorker(CancelableWorker):
     def run(self) -> None:
         with self.diagnostic_scope():
             self.diagnose("preview_request_accepted")
+            controller = PreviewBuildController(self.service, self)
             try:
-                result = self.service.prepare(
+                result = controller.execute(
                     self.request,
                     cancellation_event=self.cancellation_event,
                     progress_callback=self._report_progress,

@@ -284,6 +284,10 @@ class CalibrationService:
                     break
                 signature = self._profile_signature(hollow)
                 repeated_signatures[signature] = repeated_signatures.get(signature, 0) + 1
+                notify(
+                    round((number - 0.5) / config.maximum_iterations * 90),
+                    f"Slicer-Auftrag {number}/{config.maximum_iterations} wird ausgeführt …",
+                )
                 slice_result = adapter.slice_model(
                     SliceRequest(
                         model_path=candidate_stl,
@@ -301,7 +305,12 @@ class CalibrationService:
                             if placement else None
                         ),
                         purpose="calibration",
+                        calibration_round=number,
                     )
+                )
+                notify(
+                    round(number / config.maximum_iterations * 90),
+                    f"Slicer-Ergebnis {number}/{config.maximum_iterations} wird ausgewertet …",
                 )
                 if not slice_result.success:
                     record_diagnostic(

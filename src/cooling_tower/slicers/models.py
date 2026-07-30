@@ -182,6 +182,7 @@ class SliceRequest:
     expected_layer_heights_mm: tuple[float, ...] = ()
     placement_xy_mm: tuple[float, float] | None = None
     purpose: str = "normal"
+    calibration_round: int | None = None
     cancellation_event: Event | None = field(
         default=None,
         compare=False,
@@ -220,6 +221,11 @@ class SliceResult:
     failure_reason: str | None = None
     timed_out: bool = False
     cancelled: bool = False
+    crashed: bool = False
+    process_backend: str = "legacy"
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    process_output_diagnostic_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)

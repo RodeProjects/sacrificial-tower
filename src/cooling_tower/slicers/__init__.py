@@ -26,9 +26,25 @@ from cooling_tower.slicers.models import (
     SlicerSupportLevel,
 )
 from cooling_tower.slicers.process import (
+    ProcessBackend,
     ProcessOutcome,
+    ProcessRequest,
     SecureSlicerProcessRunner,
+    SlicerProcessRunner,
+    configured_process_backend,
+    create_slicer_process_runner,
     isolated_slicer_environment,
+)
+from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
+from cooling_tower.slicers.compatibility import (
+    SLICER_COMPATIBILITY_MATRIX,
+    SlicerCompatibility,
+    compatibility_for,
+)
+from cooling_tower.slicers.validation import (
+    BackendValidationReport,
+    SliceSemantics,
+    validate_adapter_backends,
 )
 from cooling_tower.slicers.profile_safety import (
     ProfileSourceFingerprint,
@@ -104,6 +120,9 @@ __all__ = [
     "PrusaSlicerAdapter",
     "Simplify3DAdapter",
     "ProcessOutcome",
+    "ProcessBackend",
+    "ProcessRequest",
+    "BackendValidationReport",
     "CRITICAL_PROFILE_KEYS",
     "ConfirmedProfileMapping",
     "GCodeProfileEvidence",
@@ -131,6 +150,15 @@ __all__ = [
     "ProfileKind",
     "ProfileRecord",
     "SecureSlicerProcessRunner",
+    "SlicerProcessRunner",
+    "QProcessSlicerProcessRunner",
+    "SLICER_COMPATIBILITY_MATRIX",
+    "SlicerCompatibility",
+    "SliceSemantics",
+    "compatibility_for",
+    "configured_process_backend",
+    "create_slicer_process_runner",
+    "validate_adapter_backends",
     "isolated_slicer_environment",
     "SliceRequest",
     "SliceResult",

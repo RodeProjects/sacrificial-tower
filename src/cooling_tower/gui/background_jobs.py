@@ -610,6 +610,11 @@ class BackgroundJobManager(QObject):
                 source_event=event,
             )
             return
+        if event == "slicer_process_started":
+            process_id = details.get("process_id")
+            job.process_id = int(process_id) if process_id is not None else None
+            with self._lock:
+                self._refresh_snapshot_locked()
         self._record_job_event(job, event, **details)
 
     def _record_job_event(

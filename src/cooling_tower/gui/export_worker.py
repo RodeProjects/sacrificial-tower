@@ -13,6 +13,7 @@ from cooling_tower.preview import (
     PreviewResult,
     PreviewService,
 )
+from cooling_tower.preview.controller import PreviewBuildController
 
 
 class ExportWorker(CancelableWorker):
@@ -45,7 +46,8 @@ class ExportWorker(CancelableWorker):
             try:
                 preview = self.preview
                 if preview is None:
-                    generated_preview = self.preview_service.prepare(
+                    controller = PreviewBuildController(self.preview_service, self)
+                    generated_preview = controller.execute(
                         self.request,
                         cancellation_event=self.cancellation_event,
                         progress_callback=lambda percent, status: self.progress.emit(

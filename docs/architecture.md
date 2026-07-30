@@ -32,7 +32,10 @@ nicht überschreibende Legacy-Übernahme stehen in
 - `persistence`: versionierte, gesicherte und atomare Benutzerdaten
 
 Abhängigkeiten sollen von der Oberfläche in Richtung Fachlogik verlaufen.
-Fachmodule dürfen keine Qt-Abhängigkeit erhalten.
+Fachmodule dürfen keine Qt-Abhängigkeit erhalten. Die einzige bewusst
+gekapselte Ausnahme ist das austauschbare Slicer-Transportbackend
+`slicers.qprocess_backend`; Adapter, Prozessauftrag und fachliche Auswertung
+bleiben Qt-unabhängig.
 
 ## Gemeinsame Infrastruktur
 
@@ -93,6 +96,31 @@ zusätzlich `QThread.requestInterruption()` und wartet mit einem gemeinsamen,
 begrenzten Timeout. Ein noch laufender Job bleibt bei Zeitüberschreitung
 registriert; die Oberfläche verweigert den unsicheren Programmabschluss und
 versucht niemals, den Thread gewaltsam freizugeben.
+
+## Externe Slicer-Prozesse
+
+`prepare_slice()`, Prozess-Runner und `finalize_slice()` bilden drei getrennte
+Phasen. Das QProcess-Backend erzeugt Controller, QProcess und alle zugehörigen
+Timer erst im ausführenden Worker-Thread. `cancel()` setzt aus dem GUI-Thread
+ausschließlich das threadsichere Abbruch-Event; ein Timer im Prozess-Controller
+übersetzt es in ein queued Signal. Nur dessen Slot darf `terminate()` oder
+`kill()` am QProcess ausführen.
+
+Ein lokaler Qt-Eventloop verarbeitet Prozess- und Ausgabesignale ohne
+`waitForFinished()`, Shell-Aufruf oder Python-Lesethread. Der Runner kehrt erst
+zurück, nachdem das finale Prozesssignal eingetroffen ist, beide Ausgabekanäle
+vollständig ausgelesen, Diagnose- und Job-Object-Handles geschlossen, die
+isolierte Umgebung entfernt und die QObjects im Eigentümer-Thread zerstört
+wurden. Erst danach darf der übergeordnete Worker sein `finished`-Signal senden.
+
+Unter Windows wird die konkrete Slicer-PID einem Job Object mit
+`KILL_ON_JOB_CLOSE` zugeordnet. Kann Windows die Zuordnung nicht herstellen,
+bleibt die konkrete PID-Baumaufnahme als diagnostizierter Fallback erhalten;
+eine Namenssuche ist verboten. Standardausgabe und Standardfehler haben je
+eine Speicherobergrenze. Bei Überschreitung bleibt der jeweilige Tail im
+Ergebnis und die vollständigen Bytes werden in einer Diagnosedatei archiviert.
+Backend-Schalter, Adaptermatrix und Doppelvalidierung sind in
+`docs/slicer_qprocess_compatibility.md` beschrieben.
 
 ## Diagnose und Stresstests
 

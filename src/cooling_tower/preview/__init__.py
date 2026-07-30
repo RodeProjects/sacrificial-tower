@@ -15,6 +15,7 @@ from cooling_tower.preview.models import (
     PreviewState,
 )
 from cooling_tower.preview.service import PreviewBuildError, PreviewService
+from cooling_tower.preview.controller import PreviewBuildController, PreviewBuildState
 from cooling_tower.preview.toolpath import PreviewCancelled, extract_deposition_toolpaths
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "OutputMode",
     "Point3D",
     "PreviewBuildError",
+    "PreviewBuildController",
+    "PreviewBuildState",
     "PreviewCancelled",
     "PreviewExportResult",
     "PreviewExportService",

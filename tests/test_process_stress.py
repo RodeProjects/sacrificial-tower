@@ -88,6 +88,7 @@ class IsolatedProcessStressTests(unittest.TestCase):
                         native_crash_log,
                     )
                     critical_messages = []
+                    lifecycle_warnings = []
                     for path in artifact_directory.glob("diagnostics.jsonl*"):
                         for line in path.read_text(
                             encoding="utf-8",
@@ -102,7 +103,24 @@ class IsolatedProcessStressTests(unittest.TestCase):
                                 and entry.get("priority") == "critical"
                             ):
                                 critical_messages.append(entry)
+                            message = str(entry.get("message", ""))
+                            if (
+                                entry.get("event") == "qt_message"
+                                and entry.get("priority") in {"warning", "critical"}
+                                and any(
+                                    marker in message
+                                    for marker in (
+                                        "QObject::",
+                                        "QProcess:",
+                                        "QSocketNotifier:",
+                                        "QThread:",
+                                        "Timers cannot",
+                                    )
+                                )
+                            ):
+                                lifecycle_warnings.append(entry)
                     self.assertEqual(critical_messages, [])
+                    self.assertEqual(lifecycle_warnings, [])
                     if scenario == "shutdown_timeout":
                         self.assertTrue(result.get("timeout_observed"), result)
 
