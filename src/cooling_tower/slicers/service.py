@@ -4,6 +4,11 @@ import re
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from cooling_tower.diagnostic_context import record_diagnostic
+from cooling_tower.diagnostic_events import (
+    DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+    exception_error_code,
+)
 from cooling_tower.models.gcode_metadata import SlicerIdentity
 from cooling_tower.slicers.adapter import SlicerAdapter
 from cooling_tower.slicers.adapters import default_adapters
@@ -84,6 +89,15 @@ class SlicerDiscoveryService:
         stale_saved_paths: set[Path] = set()
         for candidate in deduplicate_candidates(candidates):
             if not candidate.executable_path.expanduser().is_file():
+                record_diagnostic(
+                    "slicer_candidate_rejected",
+                    diagnostic_event_schema_version=(
+                        DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                    ),
+                    outcome="rejected",
+                    result_code="slicer_executable_missing",
+                    discovery_source=candidate.discovery_source.value,
+                )
                 if candidate.discovery_source is SlicerDiscoverySource.SAVED_PATH:
                     stale_saved_paths.add(candidate.executable_path)
                     diagnostics.append(
@@ -93,6 +107,15 @@ class SlicerDiscoveryService:
                 continue
             adapters = self._adapters_for_candidate(candidate)
             if not adapters:
+                record_diagnostic(
+                    "slicer_candidate_rejected",
+                    diagnostic_event_schema_version=(
+                        DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                    ),
+                    outcome="rejected",
+                    result_code="slicer_adapter_not_found",
+                    discovery_source=candidate.discovery_source.value,
+                )
                 diagnostics.append(
                     f"Kein Adapter passt zu {candidate.executable_path.name}."
                 )
@@ -102,9 +125,38 @@ class SlicerDiscoveryService:
                 try:
                     installation = adapter.verify_installation(candidate)
                 except (OSError, SlicerError, ValueError) as error:
+                    record_diagnostic(
+                        "slicer_candidate_rejected",
+                        diagnostic_event_schema_version=(
+                            DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                        ),
+                        outcome="rejected",
+                        result_code=exception_error_code(
+                            "slicer_verification",
+                            error,
+                        ),
+                        adapter_id=adapter.adapter_id,
+                        discovery_source=candidate.discovery_source.value,
+                        error_type=type(error).__name__,
+                    )
                     errors.append(f"{adapter.adapter_id}: {error}")
                     continue
                 installations.append(installation)
+                record_diagnostic(
+                    "slicer_candidate_verified",
+                    diagnostic_event_schema_version=(
+                        DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                    ),
+                    outcome="success",
+                    result_code="slicer_candidate_verified",
+                    adapter_id=installation.adapter_id,
+                    product_name=installation.product_name,
+                    version=installation.version,
+                    verified=installation.verified,
+                    can_slice=installation.can_slice,
+                    support_level=installation.support_level.value,
+                    discovery_source=installation.discovery_source.value,
+                )
                 break
             else:
                 diagnostics.append(
@@ -127,6 +179,20 @@ class SlicerDiscoveryService:
             try:
                 installation = adapter.verify_installation(candidate)
             except (OSError, SlicerError, ValueError) as error:
+                record_diagnostic(
+                    "slicer_candidate_rejected",
+                    diagnostic_event_schema_version=(
+                        DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                    ),
+                    outcome="rejected",
+                    result_code=exception_error_code(
+                        "manual_slicer_verification",
+                        error,
+                    ),
+                    adapter_id=adapter.adapter_id,
+                    discovery_source=candidate.discovery_source.value,
+                    error_type=type(error).__name__,
+                )
                 errors.append(str(error))
                 continue
             current = list(self._installations or ())
@@ -134,6 +200,21 @@ class SlicerDiscoveryService:
             self._installations = self._deduplicate_installations(current)
             if self.preference_store is not None:
                 self.preference_store.confirm_path(path)
+            record_diagnostic(
+                "slicer_candidate_verified",
+                diagnostic_event_schema_version=(
+                    DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                ),
+                outcome="success",
+                result_code="manual_slicer_candidate_verified",
+                adapter_id=installation.adapter_id,
+                product_name=installation.product_name,
+                version=installation.version,
+                verified=installation.verified,
+                can_slice=installation.can_slice,
+                support_level=installation.support_level.value,
+                discovery_source=installation.discovery_source.value,
+            )
             return self._build_result(
                 self._installations,
                 source_slicer,

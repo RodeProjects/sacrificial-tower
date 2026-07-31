@@ -306,6 +306,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertIsNone(window._preview_dialog)
         self.assertIsNone(window._additional_options_dialog)
         self.assertIsNone(window._about_dialog)
+        self.assertIsNone(window._support_report_dialog)
         dialogs_after = {
             id(widget)
             for widget in self.app.topLevelWidgets()
@@ -319,6 +320,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertIsNotNone(window.preview_dialog)
         self.assertIsNotNone(window.additional_options_dialog)
         self.assertIsNotNone(window.about_dialog)
+        self.assertIsNotNone(window.support_report_dialog)
         window.close()
 
     def test_header_menu_and_subtitle_expose_the_requested_actions(self) -> None:
@@ -341,7 +343,11 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertNotEqual(window.version_label.accessibleName(), "")
         self.assertEqual(
             [action.text() for action in window.options_menu.actions()],
-            ["Exportordner ändern", "Über Kühlturm-Generator"],
+            [
+                "Exportordner ändern",
+                "Support & Diagnose …",
+                "Über Kühlturm-Generator",
+            ],
         )
         self.assertTrue(
             all(

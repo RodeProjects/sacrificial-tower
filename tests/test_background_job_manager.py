@@ -318,6 +318,7 @@ class BackgroundJobManagerTests(unittest.TestCase):
         content = (self.root / "jobs.jsonl").read_text(encoding="utf-8")
         self.assertIn("job_worker_failed", content)
         self.assertIn("expected worker failure", content)
+        self.assertIn('"error_code": "analysis_worker_failed"', content)
 
     def test_cancel_before_and_after_start_is_idempotent(self) -> None:
         first_id, _first = self.start_worker(1, duration_s=0.2)
@@ -409,6 +410,20 @@ class DiagnosticJournalTests(unittest.TestCase):
             )
             previous = second.start_session()
             self.assertIsNotNone(previous)
+            entries = [
+                json.loads(line)
+                for line in (root / "jobs.jsonl").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+            current_start = next(
+                entry
+                for entry in reversed(entries)
+                if entry["event"] == "session_started"
+            )
+            self.assertTrue(
+                current_start["previous_session_ended_unexpectedly"]
+            )
             report = second.build_previous_crash_report()
             self.assertIn("intentional_failure", report)
             self.assertNotIn("must-not-appear", report)

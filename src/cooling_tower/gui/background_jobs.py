@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import threading
 import time
@@ -56,6 +57,11 @@ _ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.THREAD_FINISHED: frozenset({JobState.RELEASED}),
     JobState.RELEASED: frozenset(),
 }
+
+_TRACEBACK_ERROR_TYPE = re.compile(
+    r"^\s*([A-Za-z_][\w.]*(?:Error|Exception|Warning|Fault))\s*:",
+    re.MULTILINE,
+)
 
 
 def _utc_now() -> str:
@@ -499,11 +505,14 @@ class BackgroundJobManager(QObject):
         job.error_message = message
         job.error_details = details
         job.completion_info = "failed"
+        error_types = _TRACEBACK_ERROR_TYPE.findall(details)
         self._record_job_event(
             job,
             "job_worker_failed",
             error_message=message,
             error_details=details,
+            error_code=f"{job.kind.replace('-', '_')}_worker_failed",
+            error_type=(error_types[-1] if error_types else "unknown"),
         )
         self.job_failed.emit(job)
 

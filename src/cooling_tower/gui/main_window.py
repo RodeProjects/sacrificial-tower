@@ -64,6 +64,7 @@ from cooling_tower.gui.preview_worker import PreviewWorker
 from cooling_tower.gui.profile_worker import ProfileMatchingWorker
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
+from cooling_tower.gui.support_report_dialog import SupportReportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
     SETTING_INFO_TEXTS,
@@ -137,6 +138,7 @@ from cooling_tower.runtime_paths import (
     RESOURCE_ROOT,
     resolve_user_data_root,
 )
+from cooling_tower.support_report import SupportReportService
 from cooling_tower.tower.hollow_profile import (
     MAXIMUM_EXPANSION_ANGLE_DEG,
     validate_hollow_settings,
@@ -165,6 +167,8 @@ ABOUT_DIALOG_PREFERRED_WIDTH_PX = 720
 ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX = 720
 OPTIONAL_DIALOG_PARENT_MARGIN_PX = 80
 OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
+SUPPORT_DIALOG_PREFERRED_WIDTH_PX = 700
+SUPPORT_DIALOG_PREFERRED_HEIGHT_PX = 670
 INTERNAL_DIALOG_REVEAL_DELAY_MS = 40
 CURRENT_LICENSE_STATUS = "development"
 LICENSE_STATUS_DEFINITIONS = {
@@ -635,6 +639,10 @@ class MainWindow(QMainWindow):
         self.background_job_manager.job_released.connect(
             self._on_background_job_released
         )
+        self.support_report_service = SupportReportService(
+            self.user_data_root,
+            diagnostic_journal=self.background_job_manager.diagnostic_journal,
+        )
         requested_update_check = (
             enable_update_check
             if enable_update_check is not None
@@ -705,6 +713,7 @@ class MainWindow(QMainWindow):
         self._pending_preview_camera_state: object = None
         self._additional_options_dialog: QDialog | None = None
         self._about_dialog: QDialog | None = None
+        self._support_report_dialog: SupportReportDialog | None = None
 
         self.settings_store = UserSettingsStore(
             explicit_user_settings
@@ -897,6 +906,13 @@ class MainWindow(QMainWindow):
         )
         self.change_output_action.triggered.connect(
             self.show_additional_options
+        )
+        self.support_report_action = self.options_menu.addAction(
+            QIcon(str(GUI_ASSET_ROOT / "document.svg")),
+            "Support & Diagnose …",
+        )
+        self.support_report_action.triggered.connect(
+            self.show_support_report_dialog
         )
         self.about_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "info_circle.svg")),
@@ -2923,6 +2939,20 @@ class MainWindow(QMainWindow):
             self.about_close_button = close_button
             self._about_dialog = dialog
         return self._about_dialog
+
+    @property
+    def support_report_dialog(self) -> SupportReportDialog:
+        """Create the local support-report dialog only when requested."""
+
+        if self._support_report_dialog is None:
+            self._support_report_dialog = SupportReportDialog(
+                self.support_report_service,
+                application_context_provider=self._support_diagnostic_context,
+                open_directory=open_directory,
+                asset_root=GUI_ASSET_ROOT,
+                parent=self,
+            )
+        return self._support_report_dialog
 
     def _about_icon_text_row(
         self,
@@ -6029,6 +6059,30 @@ class MainWindow(QMainWindow):
             self._resize_about_to_content,
         )
 
+    def show_support_report_dialog(self) -> None:
+        """Show the local report composer without transmitting any data."""
+
+        dialog = self.support_report_dialog
+        dialog.setWindowState(Qt.WindowState.WindowNoState)
+        self._show_internal_dialog_without_flash(
+            dialog,
+            self._resize_support_report_dialog,
+        )
+
+    def _resize_support_report_dialog(self) -> None:
+        dialog = self.support_report_dialog
+        if not dialog.isVisible():
+            return
+        target_width = SUPPORT_DIALOG_PREFERRED_WIDTH_PX
+        target_height = SUPPORT_DIALOG_PREFERRED_HEIGHT_PX
+        screen = dialog.screen() or self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            target_width = min(target_width, max(620, available.width() - 40))
+            target_height = min(target_height, max(590, available.height() - 40))
+        dialog.resize(target_width, target_height)
+        self._place_dialog_centered(dialog)
+
     def _show_internal_dialog_without_flash(
         self,
         dialog: QDialog,
@@ -6181,6 +6235,132 @@ class MainWindow(QMainWindow):
             and self._additional_options_dialog.isVisible()
         ):
             self._resize_additional_options_to_content()
+        if (
+            self._support_report_dialog is not None
+            and self._support_report_dialog.isVisible()
+        ):
+            self._resize_support_report_dialog()
+
+    def _support_diagnostic_context(self) -> dict[str, object]:
+        """Return a bounded, non-file-content snapshot for local support."""
+
+        source: dict[str, object] = {
+            "loaded": self.current_gcode_path is not None,
+        }
+        if self.current_gcode_path is not None:
+            source["suffix"] = self.current_gcode_path.suffix.casefold()
+            try:
+                source["size_bytes"] = self.current_gcode_path.stat().st_size
+            except OSError:
+                source["size_bytes"] = None
+
+        discovery = self.slicer_discovery_result
+        slicer_context: dict[str, object] = {
+            "status_text": self.slicer_status_label.text(),
+            "search_completed": discovery is not None,
+        }
+        if discovery is not None:
+            slicer_context.update(
+                {
+                    "gui_state": discovery.gui_state.value,
+                    "message": discovery.message,
+                    "installation_count": len(discovery.installations),
+                    "verified_installation_count": sum(
+                        1 for item in discovery.installations if item.verified
+                    ),
+                    "diagnostics": list(discovery.diagnostics),
+                    "installations": [
+                        {
+                            "adapter_id": item.adapter_id,
+                            "product_name": item.product_name,
+                            "version": item.version,
+                            "verified": item.verified,
+                            "can_slice": item.can_slice,
+                            "support_level": item.support_level.value,
+                        }
+                        for item in discovery.installations
+                    ],
+                }
+            )
+        selected_slicer = self.selected_slicer_installation
+        if selected_slicer is not None:
+            slicer_context["selected"] = {
+                "adapter_id": selected_slicer.adapter_id,
+                "product_name": selected_slicer.product_name,
+                "version": selected_slicer.version,
+                "can_slice": selected_slicer.can_slice,
+            }
+
+        profile_context: dict[str, object] = {
+            "status_text": self.profile_status_label.text(),
+            "available": self.profile_match_result is not None,
+        }
+        if self.profile_match_result is not None:
+            match = self.profile_match_result
+            selected = match.selected
+            profile_context.update(
+                {
+                    "state": match.state.value,
+                    "message": match.message,
+                    "candidate_count": len(match.candidates),
+                    "selection_available": selected is not None,
+                    "requires_confirmation": match.requires_confirmation,
+                    "user_confirmed": match.user_confirmed,
+                    "can_use_stl_mode": match.can_use_stl_mode,
+                    "can_use_gcode_mode": match.can_use_gcode_mode,
+                    "gcode_restrictions": list(match.gcode_restrictions),
+                    "profiles_filtered": match.profiles_filtered,
+                    "unfiltered_option_counts": list(
+                        match.unfiltered_option_counts
+                    ),
+                    "visible_option_counts": list(
+                        match.visible_option_counts
+                    ),
+                    "execution_slicer": {
+                        "adapter_id": match.execution_slicer.adapter_id,
+                        "product_name": match.execution_slicer.product_name,
+                        "version": match.execution_slicer.version,
+                        "can_slice": match.execution_slicer.can_slice,
+                    },
+                }
+            )
+
+        active_jobs = [
+            {
+                "job_kind": item.get("job_kind"),
+                "state": item.get("state"),
+                "worker_class": item.get("worker_class"),
+                "cancel_requested": item.get("cancel_requested"),
+                "duration_s": item.get("duration_s"),
+            }
+            for item in self.background_job_manager.diagnostic_snapshot()
+        ]
+
+        return {
+            "workflow_stage": self.workflow.stage.value,
+            "source_gcode": source,
+            "analysis": {
+                "available": self.analysis_snapshot is not None,
+                "layer_count": (
+                    self.analysis_snapshot.layer_count
+                    if self.analysis_snapshot is not None
+                    else None
+                ),
+                "failed": self._analysis_failed,
+            },
+            "slicer": slicer_context,
+            "profile": profile_context,
+            "preview": {
+                "state": self.preview_state.value,
+                "available": self.current_preview is not None,
+            },
+            "export": {
+                "last_export_available": self.last_export_result is not None,
+            },
+            "settings": self.collect_settings().to_dict(),
+            "active_background_jobs": active_jobs,
+            "visible_error": self._workflow_error_message,
+        }
 
     def collect_settings(self) -> GenerationSettings:
         return GenerationSettings(
@@ -7800,6 +7980,8 @@ class MainWindow(QMainWindow):
             self._additional_options_dialog.close()
         if self._about_dialog is not None:
             self._about_dialog.close()
+        if self._support_report_dialog is not None:
+            self._support_report_dialog.close()
         self._hint_controller.dispose()
         application = QApplication.instance()
         if application is not None:

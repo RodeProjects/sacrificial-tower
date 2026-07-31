@@ -695,6 +695,46 @@ QWidget#aboutContent {
     background: #f5f8fb;
 }
 
+QDialog#supportReportDialog {
+    background: #f5f8fb;
+}
+
+QLabel#supportReportTitle {
+    color: #123c63;
+    font-size: 15pt;
+    font-weight: 700;
+}
+
+QLabel#supportReportIntroduction,
+QLabel#supportReportPrivacyText {
+    color: #405b73;
+}
+
+QTextEdit#supportReportDescription {
+    min-height: 105px;
+}
+
+QFrame#supportReportPrivacy {
+    background: #edf6fc;
+    border: 1px solid #b6d4e9;
+    border-radius: 8px;
+}
+
+QLabel#supportReportResult {
+    color: #526274;
+    background: transparent;
+    border: none;
+    padding: 3px 1px;
+}
+
+QLabel#supportReportResult[state="success"] {
+    color: #17633a;
+}
+
+QLabel#supportReportResult[state="error"] {
+    color: #9b1c1c;
+}
+
 QFrame#aboutHero {
     background: #eaf4fb;
     border: 1px solid #b6d4e9;
@@ -957,7 +997,8 @@ QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {
 }
 
 QDoubleSpinBox[invalid="true"], QSpinBox[invalid="true"],
-QLineEdit[invalid="true"], QComboBox[invalid="true"] {
+QLineEdit[invalid="true"], QTextEdit[invalid="true"],
+QComboBox[invalid="true"] {
     border: 2px solid #c43d3d;
     background: #fff4f3;
 }
@@ -990,7 +1031,8 @@ QLineEdit[warning="true"]:focus, QComboBox[warning="true"]:focus {
 }
 
 QDoubleSpinBox[invalid="true"]:focus, QSpinBox[invalid="true"]:focus,
-QLineEdit[invalid="true"]:focus, QComboBox[invalid="true"]:focus,
+QLineEdit[invalid="true"]:focus, QTextEdit[invalid="true"]:focus,
+QComboBox[invalid="true"]:focus,
 QDoubleSpinBox[warning="true"][invalid="true"]:focus,
 QSpinBox[warning="true"][invalid="true"]:focus,
 QLineEdit[warning="true"][invalid="true"]:focus,

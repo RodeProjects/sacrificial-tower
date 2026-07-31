@@ -21,8 +21,13 @@ from cooling_tower.application_mutex import (
     acquire_application_mutex,
     release_application_mutex,
 )
+from cooling_tower.diagnostic_events import (
+    DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+    exception_error_code,
+)
 from cooling_tower.diagnostics import (
     DiagnosticJournal,
+    current_diagnostic_journal,
     set_current_diagnostic_journal,
 )
 from cooling_tower.gui import MainWindow
@@ -127,6 +132,20 @@ def append_runtime_diagnostic(
         return path.resolve()
     except OSError:
         return None
+
+
+def _record_unhandled_exception(scope: str, exception: BaseException) -> None:
+    journal = current_diagnostic_journal()
+    if journal is None:
+        return
+    journal.record(
+        "unhandled_python_exception",
+        diagnostic_event_schema_version=DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+        outcome="failed",
+        error_scope=scope,
+        error_code=exception_error_code(scope, exception),
+        error_type=type(exception).__name__,
+    )
 
 
 def install_qt_message_logging(
@@ -270,6 +289,7 @@ def install_exception_handler(
         exception: BaseException,
         exception_traceback: TracebackType | None,
     ) -> None:
+        _record_unhandled_exception("main_thread_exception", exception)
         details = "".join(
             traceback.format_exception(
                 exception_type,
@@ -285,6 +305,10 @@ def install_exception_handler(
         show_startup_error(details, log_path=log_path)
 
     def handle_thread_exception(arguments) -> None:
+        _record_unhandled_exception(
+            "python_thread_exception",
+            arguments.exc_value,
+        )
         details = "".join(
             traceback.format_exception(
                 arguments.exc_type,
@@ -299,6 +323,10 @@ def install_exception_handler(
         )
 
     def handle_unraisable(arguments) -> None:
+        _record_unhandled_exception(
+            "unraisable_exception",
+            arguments.exc_value,
+        )
         details = "".join(
             traceback.format_exception(
                 type(arguments.exc_value),
@@ -386,7 +414,20 @@ def run_application(
             )
             if automatic_close_ms:
                 QTimer.singleShot(int(automatic_close_ms), window.close)
-        except Exception:
+        except Exception as error:
+            diagnostic_journal.record(
+                "application_startup_failed",
+                diagnostic_event_schema_version=(
+                    DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                ),
+                outcome="failed",
+                error_scope="application_startup",
+                error_code=exception_error_code(
+                    "application_startup",
+                    error,
+                ),
+                error_type=type(error).__name__,
+            )
             show_startup_error(traceback.format_exc(), log_path=log_path)
             application_returned = True
             return 1

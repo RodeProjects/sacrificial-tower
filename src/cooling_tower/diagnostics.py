@@ -117,6 +117,9 @@ class DiagnosticJournal:
             self._write_state(clean_shutdown=False)
             self.record(
                 "session_started",
+                previous_session_ended_unexpectedly=(
+                    self.previous_unexpected_session is not None
+                ),
                 previous_unexpected_session=(
                     self.previous_unexpected_session.get("session_id")
                     if self.previous_unexpected_session
