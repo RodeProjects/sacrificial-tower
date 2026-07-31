@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -202,6 +203,8 @@ def _parse_config_atom(value: str) -> ConfigValueItem:
         number = int(number_text)
     else:
         number = float(number_text)
+        if not math.isfinite(number):
+            raise ValueError("Numeric configuration value must be finite.")
     return ConfigValueItem(number, unit=unit)
 
 

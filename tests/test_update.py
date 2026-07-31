@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
@@ -20,6 +21,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cooling_tower.update import (
+    UpdateCancelled,
     UpdateError,
     UpdateInfo,
     UpdateService,
@@ -215,7 +217,53 @@ class UpdateServiceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(UpdateError, "SHA-256"):
                 service.download_installer(info)
-            self.assertEqual(list(Path(temporary).rglob("*.exe")), [])
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+    def test_cancelled_download_removes_its_temporary_directory(self) -> None:
+        payload = b"installer"
+        info = UpdateInfo(
+            version="0.4.2",
+            installer_url=INSTALLER_URL,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+        )
+        cancellation = Event()
+        cancellation.set()
+        with tempfile.TemporaryDirectory() as temporary:
+            service = UpdateService(
+                opener=SequenceOpener(FakeResponse(payload)),
+                temporary_root=temporary,
+            )
+            with self.assertRaises(UpdateCancelled):
+                service.download_installer(
+                    info,
+                    cancellation_event=cancellation,
+                )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+    def test_failing_progress_callback_removes_completed_download(self) -> None:
+        payload = b"installer"
+        info = UpdateInfo(
+            version="0.4.2",
+            installer_url=INSTALLER_URL,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+        )
+
+        def fail_progress(_value: int) -> None:
+            raise RuntimeError("callback failed")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = UpdateService(
+                opener=SequenceOpener(FakeResponse(payload)),
+                temporary_root=temporary,
+            )
+            with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                service.download_installer(
+                    info,
+                    progress_callback=fail_progress,
+                )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
 
     def test_launch_uses_the_silent_inno_update_switches(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

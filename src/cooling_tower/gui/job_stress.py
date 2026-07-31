@@ -298,7 +298,10 @@ def run_scenario(
                 0.02,
             )
             job = manager.job(job_id)
-            assert job is not None and isinstance(job.thread, QThread)
+            if job is None or not isinstance(job.thread, QThread):
+                raise RuntimeError(
+                    "The stress-test job did not create the expected QThread."
+                )
             cleanup_finished = threading.Event()
 
             def delayed_cleanup() -> None:

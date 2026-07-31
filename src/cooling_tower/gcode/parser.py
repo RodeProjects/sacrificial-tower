@@ -180,7 +180,10 @@ def parse_parameters(
                 break
 
             name = match.group("name").upper()
-            parameters[name] = float(match.group("value"))
+            value = float(match.group("value"))
+            if not math.isfinite(value):
+                break
+            parameters[name] = value
             current_position = match.end()
 
         remaining_text = parameter_text[current_position:].strip()
@@ -201,6 +204,8 @@ def parse_parameters(
 
         letter = match.group("letter").upper()
         value = float(match.group("value"))
+        if not math.isfinite(value):
+            break
 
         parameters[letter] = value
         current_position = match.end()
@@ -425,6 +430,8 @@ def normalize_command(command: str) -> str:
     try:
         numeric_value = float(command_number)
     except ValueError:
+        return command
+    if not math.isfinite(numeric_value):
         return command
 
     if numeric_value.is_integer():

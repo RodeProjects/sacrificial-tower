@@ -172,6 +172,10 @@ class PreviewResult:
     slicer_optimized: bool = False
     calibration: Any = None
     minimum_verified_layer_time_s: float | None = None
+    target_layer_time_s: float | None = None
+    calibration_time_tolerance_s: float = 0.15
+    calibration_profile_tolerance_mm: float = 0.03
+    calibration_metadata_tolerance_s: float = 0.75
     warnings: tuple[str, ...] = ()
     _temporary_owner: tempfile.TemporaryDirectory[str] | None = field(
         default=None,

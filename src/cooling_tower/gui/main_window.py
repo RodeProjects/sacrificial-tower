@@ -601,7 +601,11 @@ class MainWindow(QMainWindow):
                     "profile_mappings.json",
                 ),
             )
-        self.analysis_service = analysis_service or GCodeAnalysisService()
+        self.analysis_service = analysis_service or GCodeAnalysisService(
+            persistent_cache_path=(
+                user_config_root / "gcode_analysis_cache.json"
+            )
+        )
         self._slicer_service_was_injected = slicer_service is not None
         self.slicer_service = slicer_service or SlicerDiscoveryService(
             preference_store=SlicerPreferenceStore(
@@ -723,15 +727,6 @@ class MainWindow(QMainWindow):
         self._feasibility_timer.timeout.connect(
             self._start_feasibility_validation
         )
-        self._profile_watch_timer = QTimer(self)
-        # Runtime profile invalidation is intentionally infrequent.  The scan
-        # itself stays off the GUI thread because real slicer installations can
-        # contain many thousands of profile files.
-        self._profile_watch_timer.setInterval(30000)
-        self._profile_watch_timer.timeout.connect(
-            self._check_profile_inventory_changes
-        )
-
         self._build_ui()
         self._main_geometry_before_preview: QRect | None = None
         self._main_was_maximized_before_preview = False
@@ -856,6 +851,22 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Fixed,
         )
         self.reset_button.clicked.connect(self.request_reset_defaults)
+        self.validation_bypass_checkbox = QCheckBox(
+            "Eingabeprüfung umgehen (Dev)"
+        )
+        self.validation_bypass_checkbox.setObjectName(
+            "validationBypassCheckBox"
+        )
+        self.validation_bypass_checkbox.setToolTip(
+            "Nur zu Entwicklungszwecken: Unterdrückt Eingabefehler und "
+            "erlaubt den Export auch mit ungültigen Einstellungen."
+        )
+        self.validation_bypass_checkbox.setAccessibleName(
+            "Eingabeprüfung zu Entwicklungszwecken umgehen"
+        )
+        self.validation_bypass_checkbox.toggled.connect(
+            self._on_validation_bypass_toggled
+        )
         self.stl_info_button = InfoToolButton(
             "STL-Dateien bleiben allgemein anpassbar. Die endgültige "
             "Layerzeit sollte nach dem gemeinsamen Slicen von Objekt und "
@@ -863,6 +874,7 @@ class MainWindow(QMainWindow):
         )
         title_row.addWidget(title)
         title_row.addStretch(1)
+        title_row.addWidget(self.validation_bypass_checkbox)
         title_row.addWidget(self.reset_button)
         title_row.addWidget(self.stl_info_button)
         self.options_button = QToolButton()
@@ -1140,8 +1152,14 @@ class MainWindow(QMainWindow):
         )
         self.slicer_detail_label.setObjectName("slicerDetailLabel")
         self.slicer_detail_label.setWordWrap(True)
+        self.profile_filter_label = QLabel(
+            "Profilfilter\nNoch keine Profile inventarisiert."
+        )
+        self.profile_filter_label.setObjectName("profileFilterLabel")
+        self.profile_filter_label.setWordWrap(True)
         slicer_information_layout.addWidget(self.slicer_status_label)
         slicer_information_layout.addWidget(self.slicer_detail_label)
+        slicer_information_layout.addWidget(self.profile_filter_label)
         slicer_information_layout.addStretch(1)
 
         slicer_selectors = QWidget()
@@ -1210,8 +1228,8 @@ class MainWindow(QMainWindow):
         self.filament_profile_label = QLabel("Filamentprofil")
         for label, combo in (
             (self.machine_profile_label, self.machine_profile_combo),
-            (self.process_profile_label, self.process_profile_combo),
             (self.filament_profile_label, self.filament_profile_combo),
+            (self.process_profile_label, self.process_profile_combo),
         ):
             label.setObjectName("slicerFieldTitle")
             label.setAlignment(
@@ -1219,6 +1237,17 @@ class MainWindow(QMainWindow):
             )
             slicer_selectors_layout.addWidget(label)
             slicer_selectors_layout.addWidget(combo)
+        self.show_all_profiles_checkbox = QCheckBox("Alle Profile anzeigen")
+        self.show_all_profiles_checkbox.setObjectName(
+            "showAllProfilesCheckBox"
+        )
+        self.show_all_profiles_checkbox.setToolTip(
+            "Zeigt alle Maschinenprofile des gewählten Slicers. User-Presets "
+            "bleiben generell sichtbar; System-Presets für Filament und "
+            "Prozess bleiben auf das gewählte Maschinenprofil begrenzt."
+        )
+        self.show_all_profiles_checkbox.setEnabled(False)
+        slicer_selectors_layout.addWidget(self.show_all_profiles_checkbox)
 
         self.slicer_columns_divider = QFrame()
         self.slicer_columns_divider.setObjectName("slicerVerticalDivider")
@@ -2119,14 +2148,16 @@ class MainWindow(QMainWindow):
             (
                 "balanced",
                 "Mittel",
-                "3 Slicer-Durchläufe – guter Kompromiss aus "
-                "Geschwindigkeit und Genauigkeit.",
+                "Mindestens 2, höchstens 3 Slicer-Durchläufe – beendet die "
+                "Prüfung als guten Kompromiss vorzeitig, sobald die Ergebnisse "
+                "praktisch stabil sind.",
             ),
             (
                 "exact",
                 "Exakt",
-                "5 Slicer-Durchläufe – höchste Genauigkeit, "
-                "längste Wartezeit.",
+                "Mindestens 2, höchstens 5 Slicer-Durchläufe – höchste "
+                "Genauigkeit durch weitere Prüfungen bei merklichen "
+                "Unterschieden bis zur Stabilität.",
             ),
         )
         for index, (quality, label, description) in enumerate(quality_options):
@@ -2350,6 +2381,9 @@ class MainWindow(QMainWindow):
         self.filament_profile_combo.currentIndexChanged.connect(
             lambda _index: self._on_profile_selection_changed("filament")
         )
+        self.show_all_profiles_checkbox.toggled.connect(
+            self._on_show_all_profiles_toggled
+        )
         self.profile_confirm_button.clicked.connect(
             self.confirm_profile_selection
         )
@@ -2362,6 +2396,7 @@ class MainWindow(QMainWindow):
         for widget in (
             self.open_output_button,
             self.open_stl_button,
+            self.validation_bypass_checkbox,
             self.reset_button,
             self.preview_action_control,
             self.preview_button,
@@ -2404,6 +2439,15 @@ class MainWindow(QMainWindow):
     def _setting_feedback_is_available(self) -> bool:
         workflow = getattr(self, "workflow", None)
         return workflow is not None and workflow.stage == WorkflowStage.READY
+
+    def _input_validation_is_bypassed(self) -> bool:
+        checkbox = getattr(self, "validation_bypass_checkbox", None)
+        return checkbox is not None and checkbox.isChecked()
+
+    def _on_validation_bypass_toggled(self, _checked: bool) -> None:
+        """Refresh validation feedback and export access for the dev override."""
+
+        self.validate_form()
 
     @staticmethod
     def _double_spin(
@@ -2606,6 +2650,9 @@ class MainWindow(QMainWindow):
             ).replace(
                 "__COMBO_DOWN_ICON__",
                 (assets / "spin_down.svg").as_posix(),
+            ).replace(
+                "__CHECKBOX_CHECK_ICON__",
+                (assets / "checkbox_check.svg").as_posix(),
             )
             self.setStyleSheet(style)
         except OSError:
@@ -3166,15 +3213,18 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "preview_button"):
             return
         block_reason = self._export_block_reason()
-        enabled = block_reason is None
-        self.preview_button.setEnabled(enabled)
+        export_enabled = block_reason is None
+        preview_enabled = (
+            self._export_block_reason(allow_validation_bypass=False) is None
+        )
+        self.preview_button.setEnabled(preview_enabled)
         if self._preview_dialog is not None:
-            self._preview_dialog.update_button.setEnabled(enabled)
+            self._preview_dialog.update_button.setEnabled(preview_enabled)
         self.preview_quality_panel.setEnabled(
             not self.background_job_manager.has_active(JobKind.PREVIEW)
             and not self.background_job_manager.has_active(JobKind.EXPORT)
         )
-        self._set_export_button_state(enabled, block_reason)
+        self._set_export_button_state(export_enabled, block_reason)
         if hasattr(self, "slicer_prediction_button"):
             self._refresh_prediction_advice(
                 self.prediction_method_label.text()
@@ -3182,7 +3232,14 @@ class MainWindow(QMainWindow):
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
 
-    def _export_block_reason(self) -> str | None:
+    def _export_block_reason(
+        self,
+        *,
+        allow_validation_bypass: bool = True,
+    ) -> str | None:
+        validation_bypassed = (
+            allow_validation_bypass and self._input_validation_is_bypassed()
+        )
         if self.background_job_manager.has_active(JobKind.EXPORT):
             return "Ein Export wird bereits ausgeführt."
         if self.background_job_manager.has_active(JobKind.SLICER_PREDICTION):
@@ -3195,15 +3252,17 @@ class MainWindow(QMainWindow):
             return "Die G-Code-Analyse ist fehlgeschlagen."
         if self.analysis_snapshot is None:
             return "Der G-Code wird noch analysiert."
-        if not self._phase17_static_valid:
+        if not self._phase17_static_valid and not validation_bypassed:
             return "Bitte ungültige oder unvollständige Eingaben korrigieren."
         if self.tower_assessment is None:
-            return "Der Kühlturmbedarf wird noch geprüft."
-        if not self.tower_assessment.tower_required:
+            if not validation_bypassed:
+                return "Der Kühlturmbedarf wird noch geprüft."
+        elif not self.tower_assessment.tower_required:
             return "Für die aktuellen Werte ist kein Kühlturm erforderlich."
         if self.profile_feasibility is None:
-            return "Die Turmgeometrie wird noch geprüft."
-        if not self.profile_feasibility.feasible:
+            if not validation_bypassed:
+                return "Die Turmgeometrie wird noch geprüft."
+        elif not self.profile_feasibility.feasible and not validation_bypassed:
             return "Die Turmgeometrie ist mit den aktuellen Werten nicht möglich."
         return None
 
@@ -3246,6 +3305,18 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._closing:
             return
+        if (
+            not force
+            and manual_path is None
+            and self.slicer_discovery_result is not None
+        ):
+            # Installation discovery is a session-level operation. Loading a
+            # new G-code updates its profile assignment, but must not repeat
+            # the visible Slicer detection workflow or briefly disable its
+            # controls. The explicit refresh action remains the rescan path.
+            if self.analysis_snapshot is not None:
+                self.start_profile_matching()
+            return
         if self.background_job_manager.has_active(
             JobKind.SLICER_DISCOVERY
         ) or self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
@@ -3257,7 +3328,6 @@ class MainWindow(QMainWindow):
             self._slicer_request_id += 1
             self._pending_slicer_discovery = (force, manual_path)
             self._pending_profile_match = None
-            self._profile_watch_timer.stop()
             self.slicer_refresh_button.setEnabled(False)
             self.slicer_manual_button.setEnabled(False)
             if self.background_job_manager.has_active(
@@ -3533,16 +3603,16 @@ class MainWindow(QMainWindow):
         lines = (
             ("Slicer", current.display_name),
             ("Maschinenprofil", selected_text(self.machine_profile_combo)),
-            ("Prozessprofil", selected_text(self.process_profile_combo)),
             ("Filamentprofil", selected_text(self.filament_profile_combo)),
+            ("Prozessprofil", selected_text(self.process_profile_combo)),
         )
         self.slicer_group.set_compact_summary_rows(lines)
         QTimer.singleShot(0, self._refresh_slicer_section_layout)
 
     def _clear_profile_assignment(self, message: str, state: str) -> None:
-        self._profile_watch_timer.stop()
         self._pending_profile_match = None
         self.profile_match_result = None
+        self._reset_profile_filter_controls()
         self._populating_profile_combos = True
         try:
             for combo in (
@@ -3569,18 +3639,47 @@ class MainWindow(QMainWindow):
             self.profile_diagnostics.hide()
         self._refresh_stl_availability()
 
+    def _reset_profile_filter_controls(self) -> None:
+        self.show_all_profiles_checkbox.setEnabled(False)
+        previous_block_state = self.show_all_profiles_checkbox.blockSignals(True)
+        self.show_all_profiles_checkbox.setChecked(False)
+        self.show_all_profiles_checkbox.blockSignals(previous_block_state)
+        self.profile_filter_label.setText(
+            "Profilfilter\nProfile werden nach dem verwendeten Drucker "
+            "gefiltert."
+        )
+
     def start_profile_matching(
         self,
         *,
         selected_profile_ids: dict[str, str] | None = None,
         force_inventory: bool = False,
         stale_check_only: bool = False,
+        include_all_profiles: bool | None = None,
     ) -> None:
         if self._closing:
             return
         snapshot = self.analysis_snapshot
         installation = self.selected_slicer_installation
         if snapshot is None or installation is None:
+            return
+        show_all_profiles = (
+            self.show_all_profiles_checkbox.isChecked()
+            if include_all_profiles is None
+            else bool(include_all_profiles)
+        )
+        if self.background_job_manager.has_active(JobKind.SLICER_DISCOVERY):
+            # The discovery success signal can arrive just before its native
+            # worker thread has fully ended. Queue profile access until the
+            # manager confirms release so both jobs never touch one adapter at
+            # the same time.
+            self._profile_request_id += 1
+            self._pending_profile_match = {
+                "selected_profile_ids": dict(selected_profile_ids or {}),
+                "force_inventory": force_inventory,
+                "stale_check_only": stale_check_only,
+                "include_all_profiles": show_all_profiles,
+            }
             return
         if self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
             # Profile resolution, its disk cache and probe validator are one
@@ -3590,6 +3689,7 @@ class MainWindow(QMainWindow):
                 "selected_profile_ids": dict(selected_profile_ids or {}),
                 "force_inventory": force_inventory,
                 "stale_check_only": stale_check_only,
+                "include_all_profiles": show_all_profiles,
             }
             if not stale_check_only:
                 self.profile_status_label.setText(
@@ -3611,7 +3711,6 @@ class MainWindow(QMainWindow):
         self._profile_request_id += 1
         request_id = self._profile_request_id
         if not stale_check_only:
-            self._profile_watch_timer.stop()
             self.profile_status_label.setText(
                 "Profile werden inventarisiert, aufgelöst und geprüft …"
             )
@@ -3627,6 +3726,7 @@ class MainWindow(QMainWindow):
             adapter,
             selected_profile_ids=selected_profile_ids,
             force_inventory=force_inventory,
+            include_all_profiles=show_all_profiles,
             stale_check_result=(
                 self.profile_match_result if stale_check_only else None
             ),
@@ -3659,6 +3759,12 @@ class MainWindow(QMainWindow):
             return
         self.profile_match_result = result
         self._populate_profile_combos(result)
+        self.show_all_profiles_checkbox.setEnabled(True)
+        self.profile_filter_label.setText(
+            result.profile_filter_summary
+            or "Profilfilter\nFür diese Profilprüfung liegen keine "
+            "Filterangaben vor."
+        )
         state_names = {
             ProfileMatchState.RECONSTRUCTED: "availableRecommended",
             ProfileMatchState.MATCHED: "available",
@@ -3714,7 +3820,6 @@ class MainWindow(QMainWindow):
             self.profile_diagnostics.hide()
         self._invalidate_preview("Die wirksame Profilzuordnung wurde geändert.")
         self._refresh_stl_availability()
-        self._profile_watch_timer.start()
 
     def _populate_profile_combos(self, result: ProfileMatchResult) -> None:
         selected = result.selected
@@ -3853,6 +3958,19 @@ class MainWindow(QMainWindow):
             for role, value in selections.items()
             if isinstance(value, str)
         }
+        if _changed_role == "machine":
+            machine = selected_profile_ids.get("machine")
+            if machine is None:
+                return
+            self.profile_preview_outdated = True
+            self._invalidate_preview(
+                "Das Maschinenprofil wurde geändert; Filament- und "
+                "Prozessprofile werden neu gefiltert."
+            )
+            self.start_profile_matching(
+                selected_profile_ids={"machine": machine},
+            )
+            return
         if len(selected_profile_ids) != 3:
             return
         self.profile_preview_outdated = True
@@ -3860,6 +3978,35 @@ class MainWindow(QMainWindow):
         self.start_profile_matching(
             selected_profile_ids=selected_profile_ids,
         )
+
+    def _on_show_all_profiles_toggled(self, checked: bool) -> None:
+        if (
+            self.analysis_snapshot is None
+            or self.selected_slicer_installation is None
+        ):
+            return
+        self.profile_filter_label.setText(
+            "Profilfilter\nAlle Maschinenprofile werden geladen …"
+            if checked
+            else "Profilfilter\nDruckerkompatible Profile werden ermittelt …"
+        )
+        selected_profile_ids = None
+        if (
+            getattr(self.profile_match_result, "profile_filter_source", None)
+            == "manual"
+        ):
+            machine = self.machine_profile_combo.currentData()
+            if isinstance(machine, str):
+                # Expanding or collapsing the machine catalogue must not undo
+                # a machine the user selected manually just before the toggle.
+                selected_profile_ids = {"machine": machine}
+        if selected_profile_ids is None:
+            self.start_profile_matching(include_all_profiles=checked)
+        else:
+            self.start_profile_matching(
+                selected_profile_ids=selected_profile_ids,
+                include_all_profiles=checked,
+            )
 
     def confirm_profile_selection(self) -> None:
         result = self.profile_match_result
@@ -3952,8 +4099,9 @@ class MainWindow(QMainWindow):
                     manual_path=manual_path,
                 ),
             )
-        elif finished_kind == "profile" and not (
-            self.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+        elif finished_kind in {"slicer", "profile"} and not (
+            self.background_job_manager.has_active(JobKind.SLICER_DISCOVERY)
+            or self.background_job_manager.has_active(JobKind.PROFILE_MATCH)
         ):
             pending = self._pending_profile_match
             self._pending_profile_match = None
@@ -3965,6 +4113,9 @@ class MainWindow(QMainWindow):
                         selected_profile_ids=pending["selected_profile_ids"],
                         force_inventory=bool(pending["force_inventory"]),
                         stale_check_only=bool(pending["stale_check_only"]),
+                        include_all_profiles=bool(
+                            pending["include_all_profiles"]
+                        ),
                     ),
                 )
         elif finished_kind in {"preview", "prediction", "export"}:
@@ -4944,6 +5095,7 @@ class MainWindow(QMainWindow):
         self.tower_assessment = None
         self.profile_feasibility = None
         self.profile_match_result = None
+        self._reset_profile_filter_controls()
         self.profile_preview_outdated = False
         self._analysis_failed = False
         self._clear_feasibility_issues()
@@ -6593,16 +6745,21 @@ class MainWindow(QMainWindow):
         # remains attached to the same field until it is actually resolved.
         self._static_field_errors = raw_field_errors
         self._static_error_causes = _deduplicate_validation_messages(static_causes)
+        validation_bypassed = self._input_validation_is_bypassed()
         feedback_available = self._setting_feedback_is_available()
         visible_field_errors = field_errors if feedback_available else {}
+        if validation_bypassed:
+            visible_field_errors = {}
         self._apply_inline_errors(visible_field_errors)
         self._refresh_collapsible_error_badges(visible_field_errors)
 
-        grouped_messages = {
-            name: list(messages) for name, messages in field_errors.items()
-        }
-        for name, messages in self._feasibility_field_errors.items():
-            grouped_messages.setdefault(name, []).extend(messages)
+        grouped_messages: dict[str, list[str]] = {}
+        if not validation_bypassed:
+            grouped_messages = {
+                name: list(messages) for name, messages in field_errors.items()
+            }
+            for name, messages in self._feasibility_field_errors.items():
+                grouped_messages.setdefault(name, []).extend(messages)
 
         assigned_static = {
             message
@@ -6619,21 +6776,21 @@ class MainWindow(QMainWindow):
             if self._workflow_error_message
             else ()
         )
+        input_messages = () if validation_bypassed else (
+            *general_errors,
+            *(
+                message
+                for message in static_causes
+                if message not in assigned_static
+            ),
+            *(
+                message
+                for message in self._feasibility_issue_summaries
+                if message not in assigned_feasibility
+            ),
+        )
         standalone_messages = _deduplicate_validation_messages(
-            (
-                *workflow_messages,
-                *general_errors,
-                *(
-                    message
-                    for message in static_causes
-                    if message not in assigned_static
-                ),
-                *(
-                    message
-                    for message in self._feasibility_issue_summaries
-                    if message not in assigned_feasibility
-                ),
-            )
+            (*workflow_messages, *input_messages)
         )
         footer_groups = [
             (
@@ -6643,7 +6800,10 @@ class MainWindow(QMainWindow):
             for name, messages in grouped_messages.items()
             if messages
         ]
-        if feedback_available or self._workflow_error_message:
+        if (
+            (feedback_available and not validation_bypassed)
+            or self._workflow_error_message
+        ):
             self.validation_label.set_grouped_notice(
                 standalone_messages,
                 footer_groups,
@@ -6711,7 +6871,10 @@ class MainWindow(QMainWindow):
         self,
         static_errors: dict[str, list[str]],
     ) -> None:
-        feedback_available = self._setting_feedback_is_available()
+        feedback_available = (
+            self._setting_feedback_is_available()
+            and not self._input_validation_is_bypassed()
+        )
         feasibility_errors = (
             self._feasibility_field_errors if feedback_available else {}
         )
@@ -6774,7 +6937,10 @@ class MainWindow(QMainWindow):
         self,
         static_errors: dict[str, list[str]],
     ) -> None:
-        feedback_available = self._setting_feedback_is_available()
+        feedback_available = (
+            self._setting_feedback_is_available()
+            and not self._input_validation_is_bypassed()
+        )
         feasibility_errors = (
             self._feasibility_field_errors if feedback_available else {}
         )
@@ -7611,7 +7777,6 @@ class MainWindow(QMainWindow):
         self._pending_slicer_discovery = None
         self._pending_profile_match = None
         self._feasibility_timer.stop()
-        self._profile_watch_timer.stop()
         shutdown_result = self.background_job_manager.shutdown(5000)
         if not shutdown_result.clean:
             self._closing = False

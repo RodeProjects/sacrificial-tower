@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from hmac import compare_digest
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterable, Mapping
 
+from cooling_tower.persistence.versioned_json import atomic_write_json
 from cooling_tower.slicers.adapter import SlicerAdapter
 from cooling_tower.slicers.models import (
     ProfileKind,
@@ -22,11 +25,49 @@ from cooling_tower.slicers.profile_models import (
 
 
 _PROFILE_SUFFIXES = {".json", ".ini", ".cfg"}
+DEFAULT_MAXIMUM_PROFILE_INVENTORY_CACHE_BYTES = 64 * 1024 * 1024
+
+_CACHE_LOCKS_GUARD = RLock()
+_CACHE_LOCKS: dict[Path, RLock] = {}
+
+
+def _lock_for_cache_path(path: Path) -> RLock:
+    with _CACHE_LOCKS_GUARD:
+        lock = _CACHE_LOCKS.get(path)
+        if lock is None:
+            lock = RLock()
+            _CACHE_LOCKS[path] = lock
+        return lock
 
 
 def profile_record_key(record: ProfileRecord) -> tuple[str, str]:
     section = str(record.metadata.get("section", ""))
     return str(record.path).casefold(), section.casefold()
+
+
+def _records_owned_by_installation(
+    records: Iterable[ProfileRecord],
+    installation: SlicerInstallation,
+) -> tuple[ProfileRecord, ...]:
+    """Reject records crossing the selected slicer's adapter or root boundary."""
+
+    roots: list[Path] = []
+    for root in installation.profile_roots:
+        try:
+            roots.append(Path(root).resolve())
+        except OSError:
+            continue
+    accepted: list[ProfileRecord] = []
+    for record in records:
+        if record.adapter_id != installation.adapter_id:
+            continue
+        try:
+            path = Path(record.path).resolve()
+        except OSError:
+            continue
+        if any(path == root or root in path.parents for root in roots):
+            accepted.append(record)
+    return tuple(accepted)
 
 
 def role_for_profile(
@@ -51,9 +92,31 @@ def role_for_profile(
 class ProfileInventoryService:
     """Cache a profile inventory and invalidate it on any file-state change."""
 
-    def __init__(self, cache_path: str | Path | None = None) -> None:
-        self.cache_path = Path(cache_path) if cache_path is not None else None
+    def __init__(
+        self,
+        cache_path: str | Path | None = None,
+        *,
+        maximum_cache_bytes: int = DEFAULT_MAXIMUM_PROFILE_INVENTORY_CACHE_BYTES,
+    ) -> None:
+        self.cache_path = (
+            Path(cache_path).expanduser().resolve()
+            if cache_path is not None
+            else None
+        )
+        if (
+            isinstance(maximum_cache_bytes, bool)
+            or not isinstance(maximum_cache_bytes, int)
+            or maximum_cache_bytes <= 0
+        ):
+            raise ValueError("maximum_cache_bytes must be a positive integer.")
+        self.maximum_cache_bytes = maximum_cache_bytes
         self._memory: dict[str, ProfileInventory] = {}
+        self._lock = RLock()
+        self._cache_lock = (
+            _lock_for_cache_path(self.cache_path)
+            if self.cache_path is not None
+            else RLock()
+        )
 
     def load(
         self,
@@ -61,6 +124,16 @@ class ProfileInventoryService:
         installation: SlicerInstallation,
         *,
         force: bool = False,
+    ) -> ProfileInventory:
+        with self._lock:
+            return self._load_locked(adapter, installation, force=force)
+
+    def _load_locked(
+        self,
+        adapter: SlicerAdapter,
+        installation: SlicerInstallation,
+        *,
+        force: bool,
     ) -> ProfileInventory:
         key = installation.identity_key
         current_states = self.snapshot_file_states(installation.profile_roots)
@@ -73,12 +146,18 @@ class ProfileInventoryService:
                 self._memory[key] = persisted
                 return persisted
 
-        records = tuple(adapter.discover_profiles(installation))
+        records = _records_owned_by_installation(
+            adapter.discover_profiles(installation),
+            installation,
+        )
         # Re-read after discovery so a concurrent change never creates a mixed
         # inventory/fingerprint pair.
         final_states = self.snapshot_file_states(installation.profile_roots)
         if current_states != final_states:
-            records = tuple(adapter.discover_profiles(installation))
+            records = _records_owned_by_installation(
+                adapter.discover_profiles(installation),
+                installation,
+            )
             final_states = self.snapshot_file_states(installation.profile_roots)
         fingerprint = self._fingerprint(installation, records, final_states)
         inventory = ProfileInventory(
@@ -100,10 +179,12 @@ class ProfileInventoryService:
         self,
         installation: SlicerInstallation,
     ) -> ProfileInventory | None:
-        return self._memory.get(installation.identity_key)
+        with self._lock:
+            return self._memory.get(installation.identity_key)
 
     def invalidate(self, installation: SlicerInstallation) -> None:
-        self._memory.pop(installation.identity_key, None)
+        with self._lock:
+            self._memory.pop(installation.identity_key, None)
 
     @staticmethod
     def snapshot_file_states(
@@ -176,81 +257,144 @@ class ProfileInventoryService:
         installation: SlicerInstallation,
         current_states: tuple[ProfileFileState, ...],
     ) -> ProfileInventory | None:
-        if self.cache_path is None or not self.cache_path.is_file():
+        cache_path = self.cache_path
+        if cache_path is None:
             return None
         try:
-            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if int(payload.get("schema_version", 0)) != PROFILE_INVENTORY_SCHEMA_VERSION:
-                return None
-            entry = payload.get("installations", {}).get(installation.identity_key)
-            if not isinstance(entry, Mapping):
-                return None
-            if entry.get("version") != installation.version:
-                return None
-            raw_states = entry.get("file_states", ())
-            states = tuple(
-                ProfileFileState(
-                    path=Path(item["path"]),
-                    size_bytes=int(item["size_bytes"]),
-                    modified_ns=int(item["modified_ns"]),
+            with self._cache_lock:
+                if not cache_path.is_file():
+                    return None
+                with cache_path.open("rb") as handle:
+                    raw = handle.read(self.maximum_cache_bytes + 1)
+                if len(raw) > self.maximum_cache_bytes:
+                    return None
+                payload = json.loads(raw.decode("utf-8"))
+                if not isinstance(payload, Mapping):
+                    return None
+                if (
+                    payload.get("schema_version")
+                    != PROFILE_INVENTORY_SCHEMA_VERSION
+                ):
+                    return None
+                installations = payload.get("installations")
+                if not isinstance(installations, Mapping):
+                    return None
+                entry = installations.get(installation.identity_key)
+                if not isinstance(entry, Mapping):
+                    return None
+                if entry.get("version") != installation.version:
+                    return None
+                raw_states = entry.get("file_states")
+                if not isinstance(raw_states, list) or not all(
+                    _valid_file_state_payload(item) for item in raw_states
+                ):
+                    return None
+                states = tuple(
+                    ProfileFileState(
+                        path=Path(item["path"]),
+                        size_bytes=item["size_bytes"],
+                        modified_ns=item["modified_ns"],
+                    )
+                    for item in raw_states
                 )
-                for item in raw_states
-                if isinstance(item, Mapping)
-            )
-            if states != current_states:
-                return None
-            records = tuple(
-                _record_from_dict(item, installation.adapter_id)
-                for item in entry.get("records", ())
-                if isinstance(item, Mapping)
-            )
-            if not records and current_states:
-                return None
-            return ProfileInventory(
-                installation=installation,
-                records=records,
-                file_states=states,
-                fingerprint_sha256=str(entry.get("fingerprint_sha256", "")),
-                created_utc=str(entry.get("created_utc", "")),
-            )
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                if states != current_states:
+                    return None
+                raw_records = entry.get("records")
+                if not isinstance(raw_records, list) or not all(
+                    _valid_record_payload(item) for item in raw_records
+                ):
+                    return None
+                records = tuple(
+                    _record_from_dict(item, installation.adapter_id)
+                    for item in raw_records
+                )
+                if records != _records_owned_by_installation(
+                    records,
+                    installation,
+                ):
+                    return None
+                if not records and current_states:
+                    return None
+                stored_fingerprint = entry.get("fingerprint_sha256")
+                if not isinstance(stored_fingerprint, str):
+                    return None
+                calculated_fingerprint = self._fingerprint(
+                    installation,
+                    records,
+                    states,
+                )
+                if not compare_digest(
+                    stored_fingerprint.casefold(),
+                    calculated_fingerprint,
+                ):
+                    return None
+                created_utc = entry.get("created_utc")
+                if not isinstance(created_utc, str):
+                    return None
+                return ProfileInventory(
+                    installation=installation,
+                    records=records,
+                    file_states=states,
+                    fingerprint_sha256=calculated_fingerprint,
+                    created_utc=created_utc,
+                )
+        except (
+            OSError,
+            UnicodeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            json.JSONDecodeError,
+        ):
             return None
 
     def _save_persisted(self, inventory: ProfileInventory) -> None:
-        if self.cache_path is None:
+        cache_path = self.cache_path
+        if cache_path is None:
             return
-        payload: dict[str, Any] = {
-            "schema_version": PROFILE_INVENTORY_SCHEMA_VERSION,
-            "installations": {},
-        }
-        if self.cache_path.is_file():
+        with self._cache_lock:
+            payload: dict[str, Any] = {
+                "schema_version": PROFILE_INVENTORY_SCHEMA_VERSION,
+                "installations": {},
+            }
+            if cache_path.is_file():
+                try:
+                    with cache_path.open("rb") as handle:
+                        raw = handle.read(self.maximum_cache_bytes + 1)
+                    if len(raw) <= self.maximum_cache_bytes:
+                        existing = json.loads(raw.decode("utf-8"))
+                        existing_installations = (
+                            existing.get("installations")
+                            if isinstance(existing, Mapping)
+                            and existing.get("schema_version")
+                            == PROFILE_INVENTORY_SCHEMA_VERSION
+                            else None
+                        )
+                        if isinstance(existing_installations, Mapping):
+                            payload["installations"] = dict(existing_installations)
+                except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+                    pass
+            installations = payload["installations"]
+            installations[inventory.installation.identity_key] = {
+                "version": inventory.installation.version,
+                "created_utc": inventory.created_utc,
+                "fingerprint_sha256": inventory.fingerprint_sha256,
+                "file_states": [state.to_dict() for state in inventory.file_states],
+                "records": [_record_to_dict(record) for record in inventory.records],
+            }
             try:
-                existing = json.loads(self.cache_path.read_text(encoding="utf-8"))
-                if (
-                    isinstance(existing, dict)
-                    and existing.get("schema_version") == PROFILE_INVENTORY_SCHEMA_VERSION
-                ):
-                    payload = existing
-            except (OSError, json.JSONDecodeError):
-                pass
-        installations = payload.setdefault("installations", {})
-        installations[inventory.installation.identity_key] = {
-            "version": inventory.installation.version,
-            "created_utc": inventory.created_utc,
-            "fingerprint_sha256": inventory.fingerprint_sha256,
-            "file_states": [state.to_dict() for state in inventory.file_states],
-            "records": [_record_to_dict(record) for record in inventory.records],
-        }
-        try:
-            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-            temporary.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            temporary.replace(self.cache_path)
-        except OSError:
-            return
+                serialized = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    indent=2,
+                    sort_keys=True,
+                ).encode("utf-8")
+                if len(serialized) + 1 > self.maximum_cache_bytes:
+                    return
+                atomic_write_json(cache_path, payload)
+            except (OSError, TypeError, ValueError):
+                return
 
 
 class ProfileInheritanceResolver:
@@ -427,6 +571,46 @@ def _record_to_dict(record: ProfileRecord) -> dict[str, Any]:
         "inherits": list(record.inherits),
         "metadata": _json_safe(record.metadata),
     }
+
+
+def _valid_file_state_payload(payload: object) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    path = payload.get("path")
+    size_bytes = payload.get("size_bytes")
+    modified_ns = payload.get("modified_ns")
+    return (
+        isinstance(path, str)
+        and bool(path.strip())
+        and isinstance(size_bytes, int)
+        and not isinstance(size_bytes, bool)
+        and size_bytes >= 0
+        and isinstance(modified_ns, int)
+        and not isinstance(modified_ns, bool)
+        and modified_ns >= 0
+    )
+
+
+def _valid_record_payload(payload: object) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    required_strings = ("profile_id", "name", "kind", "path", "source")
+    if any(
+        not isinstance(payload.get(key), str) or not payload[key].strip()
+        for key in required_strings
+    ):
+        return False
+    try:
+        ProfileKind(payload["kind"])
+    except ValueError:
+        return False
+    inherits = payload.get("inherits")
+    metadata = payload.get("metadata")
+    return (
+        isinstance(inherits, list)
+        and all(isinstance(item, str) for item in inherits)
+        and isinstance(metadata, Mapping)
+    )
 
 
 def _record_from_dict(

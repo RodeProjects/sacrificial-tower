@@ -212,6 +212,14 @@ def calibration_diagnostics(
             "total_remaining_deficit_s",
             None,
         ),
+        "best_maximum_slicer_result_change_s": getattr(
+            best_iteration,
+            "maximum_slicer_result_change_s",
+            None,
+        ),
+        "best_slicer_result_stable": bool(
+            getattr(best_iteration, "slicer_result_stable", False)
+        ),
         "failures": failure_dicts,
         "warnings": list(getattr(calibration, "warnings", ())) if attempted else [],
         "minimum_verified_layer_time_s": preview.minimum_verified_layer_time_s,
@@ -451,7 +459,17 @@ def build_user_report(
         if completed < configured:
             lines.append(
                 "Weitere Durchläufe waren nicht erforderlich, weil die "
-                "eingestellte Zielzeit bereits erreicht wurde."
+                "eingestellte Zielzeit erreicht wurde und zwei "
+                "aufeinanderfolgende Slicer-Ergebnisse innerhalb der "
+                "Stabilitätstoleranz lagen."
+            )
+        result_change = diagnostics[
+            "best_maximum_slicer_result_change_s"
+        ]
+        if result_change is not None:
+            lines.append(
+                "Größte Layerzeit-Abweichung zum vorherigen Durchlauf: "
+                f"{result_change:.3f} s."
             )
         lines.append(
             "Bitte kontrollieren Sie die tatsächliche Layerzeit dennoch im "

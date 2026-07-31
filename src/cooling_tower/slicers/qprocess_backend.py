@@ -99,10 +99,14 @@ class _BoundedProcessOutput:
                 self._write_archive_chunk(channel, previous)
 
     def _write_archive_chunk(self, channel: str, data: bytes) -> None:
-        assert self._archive is not None
+        archive = self._archive
+        if archive is None:
+            raise RuntimeError(
+                "Slicer process diagnostics archive is not open."
+            )
         header = f"\n--- {channel} chunk: {len(data)} bytes ---\n".encode("ascii")
-        self._archive.write(header)
-        self._archive.write(data)
+        archive.write(header)
+        archive.write(data)
 
 
 if os.name == "nt":
@@ -521,7 +525,18 @@ class _QProcessController(QObject):
         record_diagnostic(event, **common)
         callback = self._request.state_callback
         if callback is not None:
-            callback(event, common)
+            try:
+                callback(event, common)
+            except Exception as error:
+                # State callbacks are observers.  Letting one escape from a
+                # Qt process slot can suppress completion and strand the
+                # external process/event loop.
+                record_diagnostic(
+                    "slicer_process_state_callback_failed",
+                    backend="qprocess",
+                    source_event=event,
+                    error_type=type(error).__name__,
+                )
 
     def _state_name(self) -> str:
         return {

@@ -56,3 +56,22 @@
   und Wiederherstellungsfälle. Downgrade-Tests müssen außerdem inkompatible
   Typen, geänderte Einheiten und in der Zielversion verschärfte Minimal- und
   Maximalwerte abdecken.
+
+## Unveränderlichkeit von Slicer-Dateien
+
+- Bei sämtlichen Entwicklungen und Programmabläufen dürfen Dateien und
+  Verzeichnisse eines Slicers ausschließlich lesend verwendet werden. Das gilt
+  insbesondere für Installationsdateien, Profile, Presets, Konfigurationen,
+  Datenbanken, Caches und vom Slicer verwaltete G-Code- oder Projektdateien.
+- Slicer-Dateien und Slicer-Verzeichnisse dürfen niemals angelegt, verändert,
+  überschrieben, umbenannt, verschoben oder gelöscht werden. Dies gilt auch
+  dann, wenn eine Slicer-API oder Kommandozeilenfunktion solche Änderungen
+  technisch ermöglichen würde.
+- Benötigt die Anwendung veränderte oder zusammengesetzte Daten, muss sie diese
+  ausschließlich in eigenen programminternen Speicherbereichen oder eigenen
+  temporären Dateien außerhalb aller Slicer-Verzeichnisse erzeugen. Das
+  Original bleibt unverändert; auch temporäre Ausgaben dürfen nicht in
+  slicerverwaltete Pfade geschrieben werden.
+- Neue und geänderte Slicer-Integrationen müssen nach Möglichkeit durch Tests
+  absichern, dass alle slicereigenen Quelldateien vor und nach dem Vorgang
+  unverändert vorhanden und inhaltlich identisch sind.

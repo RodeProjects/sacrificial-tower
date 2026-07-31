@@ -33,6 +33,7 @@ class ProfileMatchingWorker(CancelableWorker):
         *,
         selected_profile_ids: Mapping[str, str] | None = None,
         force_inventory: bool = False,
+        include_all_profiles: bool = False,
         stale_check_result: ProfileMatchResult | None = None,
     ) -> None:
         super().__init__()
@@ -43,6 +44,7 @@ class ProfileMatchingWorker(CancelableWorker):
         self.adapter = adapter
         self.selected_profile_ids = dict(selected_profile_ids or {})
         self.force_inventory = force_inventory
+        self.include_all_profiles = include_all_profiles
         self.stale_check_result = stale_check_result
 
     @Slot()
@@ -66,6 +68,7 @@ class ProfileMatchingWorker(CancelableWorker):
                     force_inventory=(
                         self.force_inventory or self.stale_check_result is not None
                     ),
+                    include_all_profiles=self.include_all_profiles,
                 )
                 if not self.cancellation_requested():
                     self.succeeded.emit(self.request_id, result)

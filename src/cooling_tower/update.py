@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
@@ -217,6 +218,7 @@ class UpdateService:
         request = self._request(info.installer_url, "application/octet-stream")
         digest = hashlib.sha256()
         downloaded = 0
+        completed = False
         try:
             with self._opener(request, timeout=self.timeout_s) as response:
                 header_size = response.headers.get("Content-Length")
@@ -243,13 +245,19 @@ class UpdateService:
             os.replace(partial, target)
             if progress_callback is not None:
                 progress_callback(100)
+            completed = True
             return target.resolve()
         except UpdateError:
-            partial.unlink(missing_ok=True)
             raise
         except (HTTPError, URLError, OSError, TimeoutError, ValueError) as error:
-            partial.unlink(missing_ok=True)
             raise UpdateError("Der Update-Installer konnte nicht geladen werden.") from error
+        finally:
+            if not completed:
+                # The directory contains no reusable state.  Removing it as a
+                # unit also covers a completed rename followed by a failing
+                # progress callback and avoids accumulating abandoned update
+                # directories after cancellations or validation errors.
+                shutil.rmtree(temporary_directory, ignore_errors=True)
 
     @staticmethod
     def launch_installer(installer_path: str | Path) -> None:

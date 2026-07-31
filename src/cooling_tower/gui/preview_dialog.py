@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -102,6 +104,15 @@ class PreviewDialog(QDialog):
         self.details_label.setObjectName("previewDetailsLabel")
         self.details_label.setWordWrap(True)
         layout.addWidget(self.details_label)
+        self.quality_label = QLabel()
+        self.quality_label.setObjectName("previewQualityLabel")
+        self.quality_label.setWordWrap(True)
+        self.quality_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.quality_label.hide()
+        self._last_quality_text = ""
+        layout.addWidget(self.quality_label)
         self.progress = QProgressBar()
         self.progress.setObjectName("previewProgressBar")
         self.progress.setRange(0, 100)
@@ -154,6 +165,10 @@ class PreviewDialog(QDialog):
         self.progress.show()
         self.progress_status_label.setText(german_user_message(status))
         self.progress_status_widget.show()
+        self._set_quality_text(
+            "Qualitätsprüfung wird für die neue Vorschau aktualisiert …",
+            "building",
+        )
         self.update_button.setText("Vorschau wird erstellt...")
         self.update_button.setEnabled(False)
         self.export_button.setEnabled(False)
@@ -182,6 +197,9 @@ class PreviewDialog(QDialog):
             f"Ausgabe: {result.output_mode.value.upper()} · {calibration} · "
             f"Turmhöhe: {result.scene.tower_height_mm:.2f} mm"
         )
+        quality_text, quality_state = self._quality_summary(result)
+        self._last_quality_text = quality_text
+        self._set_quality_text(quality_text, quality_state)
         self.progress.hide()
         self.progress_status_widget.hide()
         self.update_button.setText("Vorschau aktualisieren")
@@ -201,6 +219,12 @@ class PreviewDialog(QDialog):
             )
             self.state_label.setProperty("state", "stale")
             self.update_button.setText("Vorschau aktualisieren")
+            if self._last_quality_text:
+                self._set_quality_text(
+                    "Diese Qualitätsauswertung gehört zur nicht mehr aktuellen "
+                    f"Vorschau.\n{self._last_quality_text}",
+                    "stale",
+                )
         self._refresh_state_style()
         self.progress.hide()
         self.progress_status_widget.hide()
@@ -214,6 +238,12 @@ class PreviewDialog(QDialog):
         )
         self.state_label.setProperty("state", "error")
         self._refresh_state_style()
+        self._last_quality_text = ""
+        self._set_quality_text(
+            "Für die fehlgeschlagene neue Vorschau liegt keine aktuelle "
+            "Qualitätsauswertung vor.",
+            "error",
+        )
         self.progress.hide()
         self.progress_status_widget.hide()
         self.update_button.setText(
@@ -236,3 +266,174 @@ class PreviewDialog(QDialog):
         style = self.state_label.style()
         style.unpolish(self.state_label)
         style.polish(self.state_label)
+
+    def _set_quality_text(self, text: str, state: str) -> None:
+        self.quality_label.setText(text)
+        self.quality_label.setProperty("state", state)
+        style = self.quality_label.style()
+        style.unpolish(self.quality_label)
+        style.polish(self.quality_label)
+        self.quality_label.show()
+
+    @staticmethod
+    def _quality_summary(result: PreviewResult) -> tuple[str, str]:
+        calibration = getattr(result, "calibration", None)
+        if calibration is None:
+            return (
+                "Qualitätsprüfung\n"
+                "— Keine slicerbasierte Kalibrierung durchgeführt; eine "
+                "Genauigkeitsstufe wurde nicht bestätigt.",
+                "neutral",
+            )
+
+        configured = max(
+            0,
+            int(getattr(calibration, "configured_iteration_count", 0) or 0),
+        )
+        iterations = tuple(getattr(calibration, "iterations", ()) or ())
+        completed = len(iterations)
+        if configured >= 5:
+            quality_name = "Exakt"
+        elif configured >= 3:
+            quality_name = "Mittel"
+        elif configured == 1:
+            quality_name = "Schnell"
+        else:
+            quality_name = "Slicerprüfung"
+
+        calibrated = bool(getattr(result, "calibrated", False))
+        slicer_optimized = bool(getattr(result, "slicer_optimized", False))
+        if calibrated and configured == 1:
+            headline = (
+                "✓ Schnell abgeschlossen – ein einzelner Durchlauf bestätigt "
+                "keine Wiederholungsstabilität"
+            )
+            state = "success"
+        elif calibrated:
+            headline = f"✓ {quality_name} bestätigt"
+            state = "success"
+        elif slicer_optimized:
+            headline = (
+                f"⚠ {quality_name} nicht bestätigt – bester gemessener "
+                "Zwischenstand wird angezeigt"
+            )
+            state = "warning"
+        else:
+            headline = f"✕ {quality_name} nicht bestätigt"
+            state = "error"
+
+        lines = [
+            "Qualitätsprüfung",
+            headline,
+            f"Durchläufe: {completed} von maximal {configured}",
+        ]
+        time_tolerance = float(
+            getattr(result, "calibration_time_tolerance_s", 0.15)
+        )
+        profile_tolerance = float(
+            getattr(result, "calibration_profile_tolerance_mm", 0.03)
+        )
+        metadata_tolerance = float(
+            getattr(result, "calibration_metadata_tolerance_s", 0.75)
+        )
+        target_time = getattr(result, "target_layer_time_s", None)
+        minimum_time = getattr(result, "minimum_verified_layer_time_s", None)
+        if PreviewDialog._is_finite(target_time) and PreviewDialog._is_finite(
+            minimum_time
+        ):
+            difference = float(minimum_time) - float(target_time)
+            relation = (
+                "innerhalb der Toleranz"
+                if difference >= -time_tolerance
+                else f"um {-difference - time_tolerance:.3f} s außerhalb der Toleranz"
+            )
+            lines.append(
+                "Kleinste geprüfte Layerzeit des besten Messkandidaten: "
+                f"{float(minimum_time):.3f} s bei {float(target_time):.3f} s "
+                f"Ziel ({difference:+.3f} s; {relation})"
+            )
+
+        if iterations:
+            last = iterations[-1]
+            lines.append("Messwerte des letzten Durchlaufs:")
+            deficit = getattr(last, "maximum_remaining_deficit_s", None)
+            deficient_count = max(
+                0,
+                int(getattr(last, "deficient_layer_count", 0) or 0),
+            )
+            lines.append(
+                PreviewDialog._maximum_value_assessment(
+                    "Zielzeit-Unterschreitung",
+                    deficit,
+                    time_tolerance,
+                    "s",
+                    suffix=f"; {deficient_count} Layer außerhalb der Toleranz",
+                )
+            )
+            lines.append(
+                PreviewDialog._maximum_value_assessment(
+                    "Änderung zum vorherigen Slicer-Durchlauf",
+                    getattr(last, "maximum_slicer_result_change_s", None),
+                    time_tolerance,
+                    "s",
+                )
+            )
+            lines.append(
+                PreviewDialog._maximum_value_assessment(
+                    "Änderung des Geometrieprofils",
+                    getattr(last, "maximum_profile_change_mm", None),
+                    profile_tolerance,
+                    "mm",
+                )
+            )
+            evaluation = getattr(last, "evaluation", None)
+            metadata_difference = getattr(
+                evaluation,
+                "maximum_metadata_difference_s",
+                None,
+            )
+            if metadata_difference is not None:
+                lines.append(
+                    PreviewDialog._maximum_value_assessment(
+                        "Slicer-Metadatenabweichung",
+                        metadata_difference,
+                        metadata_tolerance,
+                        "s",
+                    )
+                )
+
+        failures = tuple(getattr(calibration, "failures", ()) or ())
+        for failure in failures:
+            message = str(getattr(failure, "message", "")).strip()
+            if message:
+                lines.append(f"Grund: {message}")
+        return "\n".join(lines), state
+
+    @staticmethod
+    def _maximum_value_assessment(
+        label: str,
+        value: object,
+        tolerance: float,
+        unit: str,
+        *,
+        suffix: str = "",
+    ) -> str:
+        if not PreviewDialog._is_finite(value):
+            return f"— {label}: nicht vergleichbar{suffix}"
+        numeric = float(value)
+        if numeric <= tolerance:
+            return (
+                f"✓ {label}: {numeric:.3f} {unit} ≤ "
+                f"{tolerance:.3f} {unit}{suffix}"
+            )
+        return (
+            f"✕ {label}: {numeric:.3f} {unit} > {tolerance:.3f} {unit} "
+            f"(um {numeric - tolerance:.3f} {unit} überschritten){suffix}"
+        )
+
+    @staticmethod
+    def _is_finite(value: object) -> bool:
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False

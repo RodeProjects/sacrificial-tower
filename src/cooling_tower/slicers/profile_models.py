@@ -279,6 +279,12 @@ class ProfileMatchResult:
     source_profile_fingerprint: str | None
     source_critical_fingerprint: str | None
     gcode_restrictions: tuple[str, ...] = ()
+    profiles_filtered: bool = False
+    profile_filter_source: str | None = None
+    profile_filter_summary: str = ""
+    unfiltered_option_counts: tuple[int, int, int] = (0, 0, 0)
+    visible_option_counts: tuple[int, int, int] = (0, 0, 0)
+    active_preset_fingerprint: str | None = None
 
     def to_report_dict(self) -> dict[str, Any]:
         return {
@@ -301,6 +307,16 @@ class ProfileMatchResult:
             "can_use_stl_mode": self.can_use_stl_mode,
             "can_use_gcode_mode": self.can_use_gcode_mode,
             "gcode_restrictions": list(self.gcode_restrictions),
+            "profile_filter": {
+                "filtered": self.profiles_filtered,
+                "source": self.profile_filter_source,
+                "summary": self.profile_filter_summary,
+                "unfiltered_option_counts": list(
+                    self.unfiltered_option_counts
+                ),
+                "visible_option_counts": list(self.visible_option_counts),
+                "active_preset_fingerprint": self.active_preset_fingerprint,
+            },
             "inventory_fingerprint": self.inventory_fingerprint,
             "source_profile_fingerprint": self.source_profile_fingerprint,
             "source_critical_fingerprint": self.source_critical_fingerprint,

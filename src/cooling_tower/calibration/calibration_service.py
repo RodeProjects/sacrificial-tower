@@ -186,6 +186,10 @@ class CalibrationService:
         best_iteration_number: int | None = None
         best_score: tuple[int, float, float, float] | None = None
         baseline_score: tuple[int, float, float, float] | None = None
+        previous_added_times_s: dict[int, float] | None = None
+        minimum_iteration_count = (
+            1 if config.maximum_iterations == 1 else 2
+        )
         terminal_state = CalibrationState.LIMIT_REACHED
         warnings: list[str] = []
         if config.mode is CalibrationMode.STL:
@@ -336,9 +340,13 @@ class CalibrationService:
                 )
                 combined_path = None
                 if config.mode is CalibrationMode.GCODE:
-                    assert placement is not None
                     combined_path = iteration_root / "combined.gcode"
                     try:
+                        if placement is None:
+                            raise GCodeIntegrationError(
+                                "Die berechnete Druckbettplatzierung fehlt; der "
+                                "G-Code kann nicht sicher integriert werden."
+                            )
                         self.integrator.integrate(
                             source,
                             evaluation.gcode_path,
@@ -371,6 +379,28 @@ class CalibrationService:
                     maximum_profile_change_mm=maximum_profile_change,
                     config=config,
                 )
+                current_added_times_s = {
+                    int(index): float(value)
+                    for index, value in evaluation.added_time_by_layer.items()
+                }
+                maximum_slicer_result_change_s = (
+                    self._maximum_slicer_result_change(
+                        previous_added_times_s,
+                        current_added_times_s,
+                        source_layers,
+                    )
+                )
+                minimum_iterations_reached = number >= minimum_iteration_count
+                if minimum_iteration_count == 1:
+                    # "Schnell" deliberately accepts its single measurement.
+                    slicer_result_stable = minimum_iterations_reached
+                else:
+                    slicer_result_stable = bool(
+                        minimum_iterations_reached
+                        and maximum_slicer_result_change_s is not None
+                        and maximum_slicer_result_change_s
+                        <= config.time_tolerance_s
+                    )
                 iteration = CalibrationIteration(
                     number=number,
                     candidate_signature=signature,
@@ -384,9 +414,14 @@ class CalibrationService:
                     maximum_profile_change_mm=maximum_profile_change,
                     elapsed_s=time.monotonic() - started,
                     evaluation=evaluation,
+                    maximum_slicer_result_change_s=(
+                        maximum_slicer_result_change_s
+                    ),
+                    slicer_result_stable=slicer_result_stable,
                     final_combined_gcode_path=combined_path,
                 )
                 iterations.append(iteration)
+                previous_added_times_s = current_added_times_s
                 record_diagnostic(
                     "calibration_round_finished",
                     calibration_round=number,
@@ -395,6 +430,11 @@ class CalibrationService:
                     maximum_remaining_deficit_s=(
                         convergence.maximum_remaining_deficit_s
                     ),
+                    maximum_slicer_result_change_s=(
+                        maximum_slicer_result_change_s
+                    ),
+                    slicer_result_stable=slicer_result_stable,
+                    minimum_iterations_reached=minimum_iterations_reached,
                 )
                 metadata_conflict = (
                     config.mode is CalibrationMode.GCODE
@@ -413,7 +453,12 @@ class CalibrationService:
                     best_stl = candidate_stl
                     best_gcode = combined_path
                     best_iteration_number = number
-                if convergence.converged and not metadata_conflict and not hollow.feasibility_issues:
+                if (
+                    convergence.converged
+                    and slicer_result_stable
+                    and not metadata_conflict
+                    and not hollow.feasibility_issues
+                ):
                     result = self._export_candidate(
                         state=CalibrationState.CONVERGED,
                         config=config,
@@ -443,7 +488,11 @@ class CalibrationService:
                         "als zulässig voneinander ab.",
                     ))
                     break
-                if repeated_signatures[signature] > config.repeated_result_limit:
+                if (
+                    convergence.deficient_layer_count > 0
+                    and repeated_signatures[signature]
+                    > config.repeated_result_limit
+                ):
                     failures.append(CalibrationFailure(
                         CalibrationFailureCode.STALLED,
                         "Wiederholt identische Kandidaten können die verbleibende "
@@ -466,10 +515,34 @@ class CalibrationService:
                     config=replace(config, material_reduction_factor=0.0),
                 )
             if not failures:
-                failures.append(CalibrationFailure(
-                    CalibrationFailureCode.ITERATION_LIMIT,
-                    "Die maximale Anzahl der Kalibrierungsdurchläufe wurde erreicht.",
-                ))
+                last_iteration = iterations[-1] if iterations else None
+                if (
+                    last_iteration is not None
+                    and last_iteration.deficient_layer_count == 0
+                    and not last_iteration.slicer_result_stable
+                ):
+                    result_change = (
+                        last_iteration.maximum_slicer_result_change_s
+                    )
+                    rendered_change = (
+                        f"{result_change:.3f} s"
+                        if result_change is not None
+                        and math.isfinite(result_change)
+                        else "nicht belastbar"
+                    )
+                    failures.append(CalibrationFailure(
+                        CalibrationFailureCode.STALLED,
+                        "Die Zielzeit wurde erreicht, aber die aufeinanderfolgenden "
+                        "Slicer-Ergebnisse blieben bis zum Durchlauflimit "
+                        "instabil (größte Layerzeit-Abweichung zuletzt: "
+                        f"{rendered_change}; zulässig: "
+                        f"{config.time_tolerance_s:.3f} s).",
+                    ))
+                else:
+                    failures.append(CalibrationFailure(
+                        CalibrationFailureCode.ITERATION_LIMIT,
+                        "Die maximale Anzahl der Kalibrierungsdurchläufe wurde erreicht.",
+                    ))
             improved = bool(
                 best_score is not None
                 and baseline_score is not None
@@ -521,6 +594,34 @@ class CalibrationService:
             best_iteration_number=best_iteration_number,
             improved_over_analytical=False,
         )
+
+    @staticmethod
+    def _maximum_slicer_result_change(
+        previous_added_times_s: dict[int, float] | None,
+        current_added_times_s: dict[int, float],
+        source_layers: tuple[object, ...],
+    ) -> float | None:
+        """Compare consecutive slicer timings for every relevant source layer."""
+
+        if previous_added_times_s is None:
+            return None
+        expected_indices = tuple(
+            int(getattr(layer, "index")) for layer in source_layers
+        )
+        if any(
+            index not in previous_added_times_s
+            or index not in current_added_times_s
+            for index in expected_indices
+        ):
+            return math.inf
+        changes = []
+        for index in expected_indices:
+            previous = previous_added_times_s[index]
+            current = current_added_times_s[index]
+            if not math.isfinite(previous) or not math.isfinite(current):
+                return math.inf
+            changes.append(abs(current - previous))
+        return max(changes, default=0.0)
 
     @staticmethod
     def _candidate_score(
@@ -579,7 +680,10 @@ class CalibrationService:
             if config.mode is CalibrationMode.GCODE
             else stl_destination
         )
-        assert exported is not None
+        if exported is None:
+            raise GCodeIntegrationError(
+                "Für den Kalibrierungskandidaten fehlt die erwartete Exportdatei."
+            )
         result = CalibrationResult(
             state=state,
             mode=config.mode,

@@ -16,6 +16,14 @@ from cooling_tower.persistence.location_migration import (
     copy_legacy_file_if_absent,
     migrate_legacy_configuration,
 )
+from cooling_tower.persistence.analysis_cache import (
+    DEFAULT_MAXIMUM_ANALYSIS_CACHE_BYTES,
+    PERSISTENT_ANALYSIS_CACHE_SCHEMA_VERSION,
+    InvalidPersistentAnalysisCacheError,
+    PersistentAnalysisCacheError,
+    PersistentGCodeAnalysisCache,
+    UnsupportedPersistentAnalysisCacheError,
+)
 
 __all__ = [
     "ConcurrentDocumentChangeError",
@@ -30,4 +38,10 @@ __all__ = [
     "LocationMigrationResult",
     "copy_legacy_file_if_absent",
     "migrate_legacy_configuration",
+    "DEFAULT_MAXIMUM_ANALYSIS_CACHE_BYTES",
+    "PERSISTENT_ANALYSIS_CACHE_SCHEMA_VERSION",
+    "InvalidPersistentAnalysisCacheError",
+    "PersistentAnalysisCacheError",
+    "PersistentGCodeAnalysisCache",
+    "UnsupportedPersistentAnalysisCacheError",
 ]

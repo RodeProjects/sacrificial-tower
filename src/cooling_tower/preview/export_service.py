@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from datetime import datetime
+from hmac import compare_digest
 from pathlib import Path
 
 from cooling_tower.file_integrity import sha256_file
@@ -57,44 +58,61 @@ class PreviewExportService:
         stamp = created_at.strftime("%Y%m%d_%H%M%S")
         source_name = sanitize_filename_component(source.stem)
         base_name = f"{stamp}_{source_name}"
-        destination = root / base_name
         suffix = 2
-        while destination.exists():
-            destination = root / f"{base_name}_{suffix}"
-            suffix += 1
-        destination.mkdir()
-        extension = ".gcode" if preview.output_mode is OutputMode.GCODE else ".stl"
-        output_name = (
-            f"{source_name}_mit_kuehlturm{extension}"
-            if preview.output_mode is OutputMode.GCODE
-            else f"{source_name}_kuehlturm{extension}"
-        )
-        output_path = destination / output_name
-        shutil.copy2(artifact, output_path)
-        output_hash = sha256_file(output_path)
-        report_path = destination / "export_report.json"
-        user_report_path = destination / "export_summary.txt"
-        report = build_technical_report(
-            preview,
-            request,
-            output_path=output_path,
-            output_sha256=output_hash,
-            created_at=created_at,
-        )
-        report_path.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        user_report_path.write_text(
-            build_user_report(
+        destination = root / base_name
+        while True:
+            try:
+                destination.mkdir()
+                break
+            except FileExistsError:
+                destination = root / f"{base_name}_{suffix}"
+                suffix += 1
+
+        try:
+            extension = (
+                ".gcode" if preview.output_mode is OutputMode.GCODE else ".stl"
+            )
+            output_name = (
+                f"{source_name}_mit_kuehlturm{extension}"
+                if preview.output_mode is OutputMode.GCODE
+                else f"{source_name}_kuehlturm{extension}"
+            )
+            output_path = destination / output_name
+            shutil.copy2(artifact, output_path)
+            output_hash = sha256_file(output_path)
+            if not compare_digest(output_hash, preview.artifact_sha256):
+                raise StalePreviewError(
+                    "Das Vorschau-Artefakt wurde während des Exports verändert."
+                )
+            report_path = destination / "export_report.json"
+            user_report_path = destination / "export_summary.txt"
+            report = build_technical_report(
                 preview,
                 request,
                 output_path=output_path,
-                technical_report_path=report_path.resolve(),
+                output_sha256=output_hash,
                 created_at=created_at,
-            ),
-            encoding="utf-8",
-        )
+            )
+            report_path.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            user_report_path.write_text(
+                build_user_report(
+                    preview,
+                    request,
+                    output_path=output_path,
+                    technical_report_path=report_path.resolve(),
+                    created_at=created_at,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            # The directory was created exclusively by this operation.  A
+            # partially copied artifact or report must never look like a
+            # completed export to the user or later history scans.
+            shutil.rmtree(destination, ignore_errors=True)
+            raise
         return PreviewExportResult(
             output_mode=preview.output_mode,
             run_directory=destination.resolve(),

@@ -223,8 +223,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.slicer_group.summary_details(),
             (
                 "Maschinenprofil: Kobra 3 V2",
-                "Prozessprofil: 0,20 mm Standard",
                 "Filamentprofil: PLA Schwarz",
+                "Prozessprofil: 0,20 mm Standard",
             ),
         )
         self.assertTrue(
@@ -309,6 +309,19 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def test_profile_dropdowns_show_all_grouped_presets_with_scrollbars(self) -> None:
         window = self.window()
+        self.assertIs(
+            window.profile_filter_label.parentWidget(),
+            window.slicer_information_column,
+        )
+        selector_layout = window.slicer_selectors_layout
+        self.assertLess(
+            selector_layout.indexOf(window.machine_profile_label),
+            selector_layout.indexOf(window.filament_profile_label),
+        )
+        self.assertLess(
+            selector_layout.indexOf(window.filament_profile_label),
+            selector_layout.indexOf(window.process_profile_label),
+        )
         records = tuple(
             SimpleNamespace(
                 name=f"Profil {index:02d}",
@@ -362,9 +375,15 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.machine_profile_combo.setCurrentIndex(2)
         self.assertEqual(len(requests), 1)
         selected_ids = requests[0]["selected_profile_ids"]
-        self.assertEqual(set(selected_ids), {"machine", "process", "filament"})
+        self.assertEqual(set(selected_ids), {"machine"})
         self.assertTrue(
             all(Path(value).is_absolute() for value in selected_ids.values())
+        )
+        window.filament_profile_combo.setCurrentIndex(2)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            set(requests[1]["selected_profile_ids"]),
+            {"machine", "process", "filament"},
         )
         window.close()
 

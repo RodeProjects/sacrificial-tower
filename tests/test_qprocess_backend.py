@@ -191,6 +191,22 @@ class QProcessBackendTests(unittest.TestCase):
         self.assertTrue(threads)
         self.assertTrue(all(thread is threads[0] for thread in threads))
 
+    def test_failing_state_observer_cannot_interrupt_process_supervision(self) -> None:
+        def fail_observer(_event, _details) -> None:
+            raise RuntimeError("observer failed")
+
+        for runner in (
+            SecureSlicerProcessRunner(),
+            QProcessSlicerProcessRunner(),
+        ):
+            with self.subTest(backend=runner.backend_name):
+                outcome = self.run_backend(
+                    runner,
+                    "success",
+                    state_callback=fail_observer,
+                )
+                self.assertEqual(outcome.return_code, 0, outcome.stderr)
+
     def test_adapter_validation_runs_both_backends_in_separate_workspaces(self) -> None:
         model = self.root / "cube.stl"
         model.write_bytes(b"solid fake\nendsolid fake\n")

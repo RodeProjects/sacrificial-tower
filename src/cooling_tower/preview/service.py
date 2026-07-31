@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import os
 import tempfile
+from hmac import compare_digest
 from pathlib import Path
 from threading import Event
 from typing import Callable
@@ -28,6 +30,11 @@ from cooling_tower.preview.models import (
     PreviewRequest,
     PreviewResult,
     PreviewScene,
+)
+from cooling_tower.preview.source_cache import (
+    PreviewSourceCacheKey,
+    PreviewSourceData,
+    PreviewSourceDataCache,
 )
 from cooling_tower.preview.toolpath import (
     PreviewCancelled,
@@ -126,8 +133,143 @@ def _tower_wireframe(profile: object, placement: TowerPlacement) -> tuple[LineSe
 
 
 class PreviewService:
-    def __init__(self, calibration_service: CalibrationService | None = None) -> None:
+    def __init__(
+        self,
+        calibration_service: CalibrationService | None = None,
+        source_data_cache: PreviewSourceDataCache | None = None,
+    ) -> None:
         self.calibration_service = calibration_service or CalibrationService()
+        self.source_data_cache = (
+            source_data_cache
+            if source_data_cache is not None
+            else PreviewSourceDataCache()
+        )
+
+    def _source_identity(self, source: Path) -> tuple[os.stat_result, str]:
+        """Read one stable file identity or fail without retaining stale data."""
+
+        try:
+            before = source.stat()
+            content_sha256 = sha256_file(source)
+            after = source.stat()
+        except OSError as error:
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Quell-G-Code konnte während der Vorschauerstellung nicht "
+                "mehr vollständig gelesen werden und muss neu geladen werden."
+            ) from error
+        if (
+            after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+        ):
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Quell-G-Code wurde während der Vorschauerstellung "
+                "verändert und muss neu geladen werden."
+            )
+        return after, content_sha256
+
+    def _source_data(
+        self,
+        request: PreviewRequest,
+        *,
+        cancellation_event: Event | None,
+        notify: ProgressCallback,
+    ) -> PreviewSourceData:
+        source = request.source_path
+        snapshot = request.snapshot
+        if not source.is_file() or not bool(snapshot.matches_file(source)):
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Quell-G-Code wurde seit der Analyse verändert und muss "
+                "neu geladen werden."
+            )
+        before, source_sha256 = self._source_identity(source)
+        if not bool(snapshot.matches_file(source)):
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Quell-G-Code wurde während der Vorschauerstellung "
+                "verändert und muss neu geladen werden."
+            )
+        expected_sha256 = getattr(snapshot, "content_sha256", None)
+        if expected_sha256 is not None and not compare_digest(
+            source_sha256,
+            str(expected_sha256).casefold(),
+        ):
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Inhalt des Quell-G-Codes stimmt nicht mehr mit der "
+                "Analyse überein und muss neu geladen werden."
+            )
+        key = PreviewSourceCacheKey(
+            source_path=source,
+            file_size_bytes=before.st_size,
+            file_modified_ns=before.st_mtime_ns,
+            content_sha256=source_sha256,
+            analysis_schema_version=int(
+                getattr(snapshot, "analysis_schema_version", 1)
+            ),
+            parser_version=int(getattr(snapshot, "parser_version", 1)),
+            expected_layer_count=int(getattr(snapshot, "layer_count")),
+            maximum_segments=request.maximum_object_segments,
+        )
+        cached = self.source_data_cache.get(key)
+        if cached is not None:
+            record_diagnostic(
+                "preview_source_cache_hit",
+                displayed_segment_count=len(cached.object_segments),
+                source_segment_count=cached.source_segment_count,
+            )
+            notify(20, "Zwischengespeicherte Objekt-Werkzeugpfade werden verwendet")
+            return cached
+
+        record_diagnostic("preview_source_cache_miss")
+        notify(5, "Objekt-Werkzeugpfade werden aufbereitet …")
+        object_segments, source_segment_count = extract_deposition_toolpaths(
+            source,
+            expected_layer_count=key.expected_layer_count,
+            maximum_segments=key.maximum_segments,
+            cancellation_event=cancellation_event,
+            progress_callback=lambda _percent, status: notify(10, status),
+        )
+        if not object_segments:
+            raise PreviewBuildError(
+                "Im G-Code wurden keine darstellbaren Extrusionspfade gefunden."
+            )
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise PreviewCancelled()
+        notify(15, "Druckbettbelegung wird bestimmt …")
+        occupied_bounds = determine_occupied_bounds(source)
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise PreviewCancelled()
+
+        after, after_sha256 = self._source_identity(source)
+        if (
+            after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or not compare_digest(after_sha256, source_sha256)
+            or not bool(snapshot.matches_file(source))
+        ):
+            self.source_data_cache.invalidate_path(source)
+            raise PreviewBuildError(
+                "Der Quell-G-Code wurde während der Vorschauerstellung "
+                "verändert und muss neu geladen werden."
+            )
+        value = PreviewSourceData(
+            key=key,
+            object_segments=object_segments,
+            source_segment_count=source_segment_count,
+            occupied_bounds=occupied_bounds,
+        )
+        self.source_data_cache.put(value)
+        record_diagnostic(
+            "preview_source_cache_stored",
+            displayed_segment_count=len(value.object_segments),
+            source_segment_count=value.source_segment_count,
+            cache_entry_count=len(self.source_data_cache),
+        )
+        notify(20, "Objekt-Werkzeugpfade sind vorbereitet")
+        return value
 
     def prepare(
         self,
@@ -139,28 +281,16 @@ class PreviewService:
         notify = progress_callback or (lambda _percent, _status: None)
         signature = request.signature()
         source = request.source_path
-        if not source.is_file() or not bool(request.snapshot.matches_file()):
-            raise PreviewBuildError(
-                "Der Quell-G-Code wurde seit der Analyse verändert und muss neu geladen werden."
-            )
         owner = tempfile.TemporaryDirectory(prefix="cooling_tower_preview_")
         root = Path(owner.name)
         try:
-            notify(5, "Objekt-Werkzeugpfade werden aufbereitet …")
-            object_segments, source_segment_count = extract_deposition_toolpaths(
-                source,
-                expected_layer_count=int(getattr(request.snapshot, "layer_count")),
-                maximum_segments=request.maximum_object_segments,
+            source_data = self._source_data(
+                request,
                 cancellation_event=cancellation_event,
-                progress_callback=lambda _percent, status: notify(10, status),
+                notify=notify,
             )
-            if not object_segments:
-                raise PreviewBuildError(
-                    "Im G-Code wurden keine darstellbaren Extrusionspfade gefunden."
-                )
-            if cancellation_event is not None and cancellation_event.is_set():
-                raise PreviewCancelled()
-            notify(20, "Objekt-Werkzeugpfade sind vorbereitet")
+            object_segments = source_data.object_segments
+            source_segment_count = source_data.source_segment_count
 
             profile = None
             calibration = None
@@ -269,7 +399,7 @@ class PreviewService:
             if artifact is None or not artifact.is_file():
                 raise PreviewBuildError("Die Vorschau besitzt keine exportierbare Ausgabedatei.")
 
-            occupied = determine_occupied_bounds(source)
+            occupied = source_data.occupied_bounds
             bed = None
             if request.effective_profile is not None:
                 bed = parse_bed_bounds(request.effective_profile.effective_values)
@@ -288,6 +418,21 @@ class PreviewService:
                 for point in getattr(profile, "points")
             )
             minimum_time = self._minimum_verified_time(request, calibration)
+            final_state, final_sha256 = self._source_identity(source)
+            if (
+                final_state.st_size != source_data.key.file_size_bytes
+                or final_state.st_mtime_ns != source_data.key.file_modified_ns
+                or not compare_digest(
+                    final_sha256,
+                    source_data.key.content_sha256,
+                )
+                or not bool(request.snapshot.matches_file(source))
+            ):
+                self.source_data_cache.invalidate_path(source)
+                raise PreviewBuildError(
+                    "Der Quell-G-Code wurde während der Vorschauerstellung "
+                    "verändert und muss neu geladen werden."
+                )
             result = PreviewResult(
                 request_signature=signature,
                 output_mode=request.output_mode,
@@ -305,13 +450,23 @@ class PreviewService:
                     notes=tuple(warnings),
                 ),
                 artifact_path=artifact.resolve(),
-                source_sha256=sha256_file(source),
+                source_sha256=final_sha256,
                 artifact_sha256=sha256_file(artifact),
                 calibrated=calibrated,
                 generation_kind=generation_kind,
                 slicer_optimized=slicer_optimized,
                 calibration=calibration,
                 minimum_verified_layer_time_s=minimum_time,
+                target_layer_time_s=request.settings.target_layer_time_s,
+                calibration_time_tolerance_s=(
+                    request.calibration_config.time_tolerance_s
+                ),
+                calibration_profile_tolerance_mm=(
+                    request.calibration_config.profile_change_tolerance_mm
+                ),
+                calibration_metadata_tolerance_s=(
+                    request.calibration_config.slicer_metadata_tolerance_s
+                ),
                 warnings=tuple(warnings),
                 _temporary_owner=owner,
             )

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -77,6 +78,7 @@ class FailingProbeValidator:
 class ProbeRunner:
     def __init__(self) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.loaded_profiles: list[dict[str, object]] = []
 
     def run(
         self,
@@ -89,6 +91,20 @@ class ProbeRunner:
     ) -> ProcessOutcome:
         command = (str(executable), *(str(item) for item in arguments))
         self.commands.append(command)
+        argument_list = list(arguments)
+        settings_value = argument_list[
+            argument_list.index("--load-settings") + 1
+        ]
+        filament_value = argument_list[
+            argument_list.index("--load-filaments") + 1
+        ]
+        for path in (
+            *(Path(value) for value in str(settings_value).split(";")),
+            *(Path(value) for value in str(filament_value).split(";")),
+        ):
+            self.loaded_profiles.append(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
         output_index = list(arguments).index("--outputdir")
         output = Path(arguments[output_index + 1])
         output.mkdir(parents=True, exist_ok=True)
@@ -123,7 +139,10 @@ class Phase15ProfileTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.executable = self.root / "AnycubicSlicerNext.exe"
+        self.executable = (
+            self.root / "installation" / "AnycubicSlicerNext.exe"
+        )
+        self.executable.parent.mkdir(parents=True)
         self.executable.write_bytes(b"MZ phase15")
         self.profile_root = self.root / "profiles"
         self.adapter = AnycubicSlicerNextAdapter()
@@ -164,6 +183,24 @@ class Phase15ProfileTests(unittest.TestCase):
         )
         return path
 
+    def _write_user_profile(
+        self,
+        category: str,
+        name: str,
+        payload: dict,
+    ) -> Path:
+        directory = self.profile_root / "user" / "default" / category
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{name}.json"
+        data = dict(payload)
+        data.setdefault("name", name)
+        data.setdefault("type", category)
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return path
+
     def _write_standard_profiles(self) -> None:
         self._write_profile(
             "machine",
@@ -182,6 +219,7 @@ class Phase15ProfileTests(unittest.TestCase):
             {
                 "inherits": "common_machine",
                 "printer_model": "Example M5",
+                "printer_notes": "Example M5 production printer",
             },
         )
         self._write_profile(
@@ -312,7 +350,8 @@ class Phase15ProfileTests(unittest.TestCase):
         )
 
     def test_02_exact_profile_ids_select_installed_bundle(self) -> None:
-        result = self.service().match(
+        service = self.service()
+        result = service.match(
             self._gcode(omit=("fan_min_speed", "fan_max_speed")),
             self.installation,
             self.adapter,
@@ -615,6 +654,27 @@ class Phase15ProfileTests(unittest.TestCase):
             str(result.selected.machine.path),
         )
         self.assertIn("STL-Optimierung", window.profile_status_label.text())
+        self.assertTrue(window.show_all_profiles_checkbox.isEnabled())
+        self.assertIn("G-Code", window.profile_filter_label.text())
+        requests: list[dict[str, object]] = []
+        window.start_profile_matching = lambda **kwargs: requests.append(kwargs)
+        window.show_all_profiles_checkbox.setChecked(True)
+        self.assertEqual(requests, [{"include_all_profiles": True}])
+        self.assertIn("Alle Maschinenprofile", window.profile_filter_label.text())
+        window.profile_match_result = replace(
+            result,
+            profile_filter_source="manual",
+        )
+        window.show_all_profiles_checkbox.setChecked(False)
+        self.assertEqual(
+            requests[-1],
+            {
+                "selected_profile_ids": {
+                    "machine": str(result.selected.machine.path),
+                },
+                "include_all_profiles": False,
+            },
+        )
         window.close()
         app.processEvents()
 
@@ -671,6 +731,7 @@ class Phase15ProfileTests(unittest.TestCase):
             snapshot,
             self.installation,
             self.adapter,
+            include_all_profiles=True,
         )
 
         self.assertGreater(len(result.machine_options), 10)
@@ -723,6 +784,556 @@ class Phase15ProfileTests(unittest.TestCase):
         self.assertEqual(
             manually_selected.selected.filament.path,
             selected_records["filament"].path,
+        )
+
+    def test_profile_options_are_filtered_for_gcode_printer_and_nozzle(self) -> None:
+        other_machine = self._write_profile(
+            "machine",
+            "Other M5 0.6 nozzle",
+            {
+                "inherits": "manufacturer_base",
+                "printer_settings_id": "Other M5 0.6 nozzle",
+                "printer_variant": "0.6",
+                "nozzle_diameter": ["0.6"],
+            },
+        )
+        self._write_profile(
+            "process",
+            "Other Quality",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Other Quality",
+                "compatible_printers": ["Other M5 0.6 nozzle"],
+            },
+        )
+        self._write_profile(
+            "process",
+            "Wrong nozzle condition",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Wrong nozzle condition",
+                "compatible_printers_condition": "nozzle_diameter[0]==0.6",
+            },
+        )
+        self._write_profile(
+            "process",
+            "Matching notes condition",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Matching notes condition",
+                "compatible_printers_condition": (
+                    "printer_notes=~/.*Example M5.*/ and "
+                    "nozzle_diameter[0]==0.4"
+                ),
+            },
+        )
+        self._write_profile(
+            "process",
+            "Wrong notes condition",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Wrong notes condition",
+                "compatible_printers_condition": (
+                    "printer_notes=~/.*Different Printer.*/"
+                ),
+            },
+        )
+        self._write_profile(
+            "process",
+            "Matching model condition",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Matching model condition",
+                "compatible_printers_condition": (
+                    'printer_model=="Example M5"'
+                ),
+            },
+        )
+        self._write_profile(
+            "process",
+            "Wrong model condition",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Wrong model condition",
+                "compatible_printers_condition": (
+                    'printer_model=="Other M5"'
+                ),
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Other PLA",
+            {
+                "filament_settings_id": "Other PLA",
+                "compatible_printers": ["Other M5 0.6 nozzle"],
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Matching fallback PLA @Example M5 0.4 nozzle",
+            {
+                "filament_settings_id": (
+                    "Matching fallback PLA @Example M5 0.4 nozzle"
+                ),
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Foreign fallback PLA @Other M5 0.6 nozzle",
+            {
+                "filament_settings_id": (
+                    "Foreign fallback PLA @Other M5 0.6 nozzle"
+                ),
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Generic fallback PLA",
+            {
+                "filament_settings_id": "Generic fallback PLA",
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Orphan fallback PLA @Unavailable M9 0.4 nozzle",
+            {
+                "filament_settings_id": (
+                    "Orphan fallback PLA @Unavailable M9 0.4 nozzle"
+                ),
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Abstract fallback PLA @acbase",
+            {
+                "filament_settings_id": "Abstract fallback PLA @acbase",
+            },
+        )
+        self._write_user_profile(
+            "process",
+            "User process for another printer",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "User process for another printer",
+                "compatible_printers": ["Other M5 0.6 nozzle"],
+            },
+        )
+        self._write_user_profile(
+            "filament",
+            "User filament for another printer",
+            {
+                "filament_settings_id": "User filament for another printer",
+                "compatible_printers": ["Other M5 0.6 nozzle"],
+            },
+        )
+
+        service = self.service()
+        snapshot = self._gcode(omit=("fan_min_speed", "fan_max_speed"))
+        result = service.match(snapshot, self.installation, self.adapter)
+
+        self.assertTrue(result.profiles_filtered)
+        self.assertEqual(result.profile_filter_source, "gcode")
+        self.assertIn("Example M5 0.4 nozzle", {
+            item.profile_id for item in result.machine_options
+        })
+        self.assertNotIn("Other M5 0.6 nozzle", {
+            item.profile_id for item in result.machine_options
+        })
+        self.assertNotIn("Other Quality", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertNotIn("Wrong nozzle condition", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertIn("Matching notes condition", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertNotIn("Wrong notes condition", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertIn("Matching model condition", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertNotIn("Wrong model condition", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertNotIn("Other PLA", {
+            item.profile_id for item in result.filament_options
+        })
+        self.assertIn(
+            "Matching fallback PLA @Example M5 0.4 nozzle",
+            {item.profile_id for item in result.filament_options},
+        )
+        self.assertNotIn(
+            "Foreign fallback PLA @Other M5 0.6 nozzle",
+            {item.profile_id for item in result.filament_options},
+        )
+        self.assertIn("Generic fallback PLA", {
+            item.profile_id for item in result.filament_options
+        })
+        self.assertNotIn(
+            "Orphan fallback PLA @Unavailable M9 0.4 nozzle",
+            {item.profile_id for item in result.filament_options},
+        )
+        self.assertIn("Abstract fallback PLA @acbase", {
+            item.profile_id for item in result.filament_options
+        })
+        self.assertIn("User process for another printer", {
+            item.profile_id for item in result.process_options
+        })
+        self.assertIn("User filament for another printer", {
+            item.profile_id for item in result.filament_options
+        })
+        self.assertIn("Sichtbar:", result.profile_filter_summary)
+
+        unfiltered = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+            include_all_profiles=True,
+        )
+        self.assertTrue(unfiltered.profiles_filtered)
+        self.assertIn("Other M5 0.6 nozzle", {
+            item.profile_id for item in unfiltered.machine_options
+        })
+        self.assertNotIn("Other Quality", {
+            item.profile_id for item in unfiltered.process_options
+        })
+        self.assertNotIn("Other PLA", {
+            item.profile_id for item in unfiltered.filament_options
+        })
+        self.assertNotIn(
+            "Foreign fallback PLA @Other M5 0.6 nozzle",
+            {item.profile_id for item in unfiltered.filament_options},
+        )
+        self.assertNotIn(
+            "Orphan fallback PLA @Unavailable M9 0.4 nozzle",
+            {item.profile_id for item in unfiltered.filament_options},
+        )
+        self.assertIn("User process for another printer", {
+            item.profile_id for item in unfiltered.process_options
+        })
+        self.assertIn("User filament for another printer", {
+            item.profile_id for item in unfiltered.filament_options
+        })
+
+        manual_other_machine = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+            selected_profile_ids={"machine": str(other_machine)},
+            include_all_profiles=True,
+        )
+        self.assertIn("Other Quality", {
+            item.profile_id for item in manual_other_machine.process_options
+        })
+        self.assertIn("Other PLA", {
+            item.profile_id for item in manual_other_machine.filament_options
+        })
+        self.assertIn(
+            "Foreign fallback PLA @Other M5 0.6 nozzle",
+            {
+                item.profile_id
+                for item in manual_other_machine.filament_options
+            },
+        )
+        self.assertNotIn(
+            "Matching fallback PLA @Example M5 0.4 nozzle",
+            {
+                item.profile_id
+                for item in manual_other_machine.filament_options
+            },
+        )
+        self.assertIn("Generic fallback PLA", {
+            item.profile_id
+            for item in manual_other_machine.filament_options
+        })
+        self.assertNotIn("Quality 0.2", {
+            item.profile_id for item in manual_other_machine.process_options
+        })
+        self.assertNotIn("Example PLA", {
+            item.profile_id for item in manual_other_machine.filament_options
+        })
+        self.assertIn("User process for another printer", {
+            item.profile_id for item in manual_other_machine.process_options
+        })
+        self.assertIn("User filament for another printer", {
+            item.profile_id for item in manual_other_machine.filament_options
+        })
+
+    def test_saved_slicer_printer_is_used_only_without_gcode_identity(self) -> None:
+        active_config = self.profile_root / "AnycubicSlicerNext.conf"
+        active_config.write_text(
+            "[presets]\n"
+            "printer = Example M5 0.4 nozzle\n"
+            "print = Quality 0.2\n"
+            "filament = Example PLA\n",
+            encoding="utf-8",
+        )
+        snapshot = self._gcode(
+            omit=(
+                "printer_settings_id",
+                "printer_model",
+                "print_settings_id",
+                "filament_settings_id",
+            )
+        )
+
+        service = self.service()
+        result = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+        )
+
+        self.assertEqual(result.profile_filter_source, "slicer")
+        self.assertTrue(result.profiles_filtered)
+        self.assertEqual(
+            [item.profile_id for item in result.machine_options],
+            ["Example M5 0.4 nozzle"],
+        )
+        active_config.write_text(
+            "[presets]\nprinter = Missing printer\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(service.inventory_is_stale(result))
+        gcode_authoritative = service.match(
+            self._gcode(),
+            self.installation,
+            self.adapter,
+        )
+        self.assertEqual(gcode_authoritative.profile_filter_source, "gcode")
+        self.assertEqual(
+            [item.profile_id for item in gcode_authoritative.machine_options],
+            ["Example M5 0.4 nozzle"],
+        )
+
+    def test_selected_machine_controls_visible_system_presets(self) -> None:
+        second_machine = self._write_profile(
+            "machine",
+            "Second M5 0.4 nozzle",
+            {
+                "inherits": "manufacturer_base",
+                "printer_settings_id": "Second M5 0.4 nozzle",
+                "printer_variant": "0.4",
+            },
+        )
+        self._write_profile(
+            "process",
+            "Second Quality",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Second Quality",
+                "compatible_printers": ["Second M5 0.4 nozzle"],
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Second PLA",
+            {
+                "filament_settings_id": "Second PLA",
+                "compatible_printers": ["Second M5 0.4 nozzle"],
+            },
+        )
+        user_process = self._write_user_profile(
+            "process",
+            "Always visible user process",
+            {
+                "inherits": "common_process",
+                "print_settings_id": "Always visible user process",
+                "compatible_printers": ["unrelated machine"],
+            },
+        )
+        user_filament = self._write_user_profile(
+            "filament",
+            "Always visible user filament",
+            {
+                "filament_settings_id": "Always visible user filament",
+                "compatible_printers": ["unrelated machine"],
+            },
+        )
+
+        result = self.service().match(
+            self._gcode(omit=("fan_min_speed", "fan_max_speed")),
+            self.installation,
+            self.adapter,
+            selected_profile_ids={"machine": str(second_machine)},
+            include_all_profiles=True,
+        )
+
+        self.assertEqual(result.selected.machine.path, second_machine.resolve())
+        self.assertIn(
+            "Second Quality",
+            {item.profile_id for item in result.process_options},
+        )
+        self.assertIn(
+            "Second PLA",
+            {item.profile_id for item in result.filament_options},
+        )
+        self.assertNotIn(
+            "Quality 0.2",
+            {item.profile_id for item in result.process_options},
+        )
+        self.assertNotIn(
+            "Example PLA",
+            {item.profile_id for item in result.filament_options},
+        )
+        self.assertIn(
+            "Always visible user process",
+            {item.profile_id for item in result.process_options},
+        )
+        self.assertIn(
+            "Always visible user filament",
+            {item.profile_id for item in result.filament_options},
+        )
+
+        incompatible_selection = self.service().match(
+            self._gcode(omit=("fan_min_speed", "fan_max_speed")),
+            self.installation,
+            self.adapter,
+            selected_profile_ids={
+                "machine": str(second_machine),
+                "process": str(user_process),
+                "filament": str(user_filament),
+            },
+        )
+        self.assertEqual(
+            incompatible_selection.state,
+            ProfileMatchState.UNAVAILABLE,
+        )
+        self.assertFalse(incompatible_selection.can_use_stl_mode)
+        self.assertTrue(any(
+            issue.code
+            is ProfileExclusionCode.INCOMPATIBLE_PROFILE_COMBINATION
+            for candidate in incompatible_selection.candidates
+            for issue in candidate.exclusions
+        ))
+
+    def test_active_system_printer_prioritizes_related_user_printer(self) -> None:
+        user_machine = (
+            self.profile_root
+            / "user"
+            / "default"
+            / "machine"
+            / "My Example M5.json"
+        )
+        user_machine.parent.mkdir(parents=True)
+        user_machine.write_text(
+            json.dumps(
+                {
+                    "name": "My Example M5",
+                    "type": "machine",
+                    "inherits": "Example M5 0.4 nozzle",
+                    "printer_settings_id": "My Example M5",
+                    "instantiation": "true",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self._write_user_profile(
+            "machine",
+            "Unrelated user machine",
+            {
+                "inherits": "common_machine",
+                "printer_settings_id": "Unrelated user machine",
+                "printer_model": "Unrelated model",
+                "printer_variant": "0.6",
+                "nozzle_diameter": ["0.6"],
+                "instantiation": "true",
+            },
+        )
+        hidden_base = self._write_profile(
+            "machine",
+            "abstract_hidden_machine",
+            {
+                "instantiation": "false",
+                "printer_model": "Hidden",
+            },
+        )
+        hidden_before = hidden_base.read_bytes()
+        active_config = self.profile_root / "AnycubicSlicerNext.conf"
+        active_config.write_text(
+            "[presets]\nprinter = Example M5 0.4 nozzle\n",
+            encoding="utf-8",
+        )
+        snapshot = self._gcode(
+            omit=(
+                "printer_settings_id",
+                "printer_model",
+                "print_settings_id",
+                "filament_settings_id",
+            )
+        )
+
+        service = self.service()
+        active_result = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+        )
+
+        self.assertEqual(active_result.profile_filter_source, "slicer")
+        self.assertEqual(
+            {item.profile_id for item in active_result.machine_options},
+            {
+                "Example M5 0.4 nozzle",
+                "My Example M5",
+                "Unrelated user machine",
+            },
+        )
+        self.assertNotIn(
+            "abstract_hidden_machine",
+            {item.profile_id for item in active_result.machine_options},
+        )
+        self.assertEqual(hidden_base.read_bytes(), hidden_before)
+
+        explicit_user_result = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+            selected_profile_ids={
+                "machine": str(user_machine),
+                "process": str(
+                    self.profile_root / "process" / "Quality 0.2.json"
+                ),
+                "filament": str(
+                    self.profile_root / "filament" / "Example PLA.json"
+                ),
+            },
+        )
+        self.assertIsNotNone(explicit_user_result.selected)
+        self.assertIsNot(
+            explicit_user_result.state,
+            ProfileMatchState.UNAVAILABLE,
+        )
+        self.assertTrue(explicit_user_result.can_use_stl_mode)
+        self.assertEqual(
+            explicit_user_result.selected.machine.path,
+            user_machine.resolve(),
+        )
+        self.assertFalse(explicit_user_result.selected.exclusions)
+        self.assertNotIn(
+            "Keine verwendbare Profilkombination",
+            explicit_user_result.message,
+        )
+
+        active_config.write_text(
+            "[presets]\nprinter = Foreign project printer\n",
+            encoding="utf-8",
+        )
+        foreign_result = service.match(
+            snapshot,
+            self.installation,
+            self.adapter,
+        )
+        self.assertEqual(foreign_result.profile_filter_source, "user")
+        self.assertEqual(
+            {item.profile_id for item in foreign_result.machine_options},
+            {
+                "Example M5 0.4 nozzle",
+                "My Example M5",
+                "Unrelated user machine",
+            },
         )
 
     def test_gui_slicer_change_discards_mapping_and_marks_preview_stale(self) -> None:
@@ -812,6 +1423,99 @@ class Phase15RealTemporaryProbeTest(unittest.TestCase):
                 temporary_paths = [Path(value) for value in settings_value.split(";")]
                 self.assertTrue(temporary_paths)
                 self.assertTrue(all(not path.exists() for path in temporary_paths))
+            finally:
+                fixture.tearDown()
+
+    def test_derived_user_machine_aligns_only_temporary_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fixture = Phase15ProfileTests(
+                "test_01_complete_embedded_configuration_is_reconstructed"
+            )
+            fixture.setUp()
+            try:
+                user_machine = fixture._write_user_profile(
+                    "machine",
+                    "My Example M5",
+                    {
+                        "inherits": "Example M5 0.4 nozzle",
+                        "printer_settings_id": "My Example M5",
+                        "instantiation": "true",
+                    },
+                )
+                process = (
+                    fixture.profile_root / "process" / "Quality 0.2.json"
+                )
+                filament = (
+                    fixture.profile_root / "filament" / "Example PLA.json"
+                )
+                source_bytes = {
+                    path: path.read_bytes()
+                    for path in (user_machine, process, filament)
+                }
+                runner = ProbeRunner()
+                adapter = AnycubicSlicerNextAdapter(runner=runner)
+                installation = fixture._installation(
+                    adapter,
+                    fixture.profile_root,
+                    SlicerFamily.ORCA_BAMBU_ANYCUBIC,
+                )
+                service = ProfileMatchingService(
+                    inventory_service=ProfileInventoryService(),
+                    validator=SlicerProfileProbeValidator(
+                        diagnostics_root=root / "diagnostics"
+                    ),
+                )
+
+                result = service.match(
+                    fixture._gcode(
+                        omit=(
+                            "printer_settings_id",
+                            "printer_model",
+                            "print_settings_id",
+                            "filament_settings_id",
+                        )
+                    ),
+                    installation,
+                    adapter,
+                    selected_profile_ids={
+                        "machine": str(user_machine),
+                        "process": str(process),
+                        "filament": str(filament),
+                    },
+                )
+
+                self.assertIsNotNone(result.selected)
+                self.assertEqual(
+                    result.selected.validation_state,
+                    ProfileValidationState.PROBE_VALIDATED,
+                )
+                self.assertTrue(result.can_use_stl_mode)
+                loaded_by_type = {
+                    str(payload["type"]): payload
+                    for payload in runner.loaded_profiles
+                }
+                self.assertEqual(
+                    loaded_by_type["machine"]["name"],
+                    "Example M5 0.4 nozzle",
+                )
+                self.assertEqual(
+                    loaded_by_type["machine"]["printer_settings_id"],
+                    "Example M5 0.4 nozzle",
+                )
+                self.assertEqual(loaded_by_type["machine"]["from"], "system")
+                self.assertEqual(
+                    loaded_by_type["process"]["compatible_printers"],
+                    ["Example M5 0.4 nozzle"],
+                )
+                self.assertEqual(
+                    loaded_by_type["filament"]["compatible_printers"],
+                    ["Example M5 0.4 nozzle"],
+                )
+                self.assertEqual(
+                    {path: path.read_bytes() for path in source_bytes},
+                    source_bytes,
+                )
             finally:
                 fixture.tearDown()
 

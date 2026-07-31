@@ -73,7 +73,20 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         if appdata:
             for directory in self.user_directories:
                 base = Path(appdata) / directory
-                roots.extend((base / "user", base / "profiles", base))
+                # Orca-family applications keep the presets visible in their
+                # selectors in the active ``user`` and ``system`` catalogues.
+                # Never recurse over the complete application data root here:
+                # it also contains profile backups, OTA payloads, logs and
+                # crash data.  Treating those historical mirrors as current
+                # presets created duplicates, false user origins and broken
+                # inheritance chains.
+                roots.extend(
+                    (
+                        base / "user",
+                        base / "system",
+                        base / "profiles",
+                    )
+                )
         return existing_paths(roots)
 
     def build_slice_command(

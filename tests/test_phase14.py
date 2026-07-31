@@ -367,7 +367,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
         self.assertFalse(result.installations[0].can_slice)
         self.assertIn("nur erkannt", result.installations[0].display_name)
 
-    def test_last_confirmed_selection_is_only_a_fallback(self) -> None:
+    def test_last_confirmed_selection_remains_authoritative(self) -> None:
         adapter = FakeAdapter("choice", "Choice", SlicerFamily.OTHER)
         first = make_executable(self.root / "first", "choice.exe")
         second = make_executable(self.root / "second", "choice.exe")
@@ -398,7 +398,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
         exact = service.discover_installations(
             source_identity("choice", "Choice", "2.0", SlicerFamily.OTHER)
         )
-        self.assertEqual(exact.recommended.version, "2.0")
+        self.assertEqual(exact.recommended.version, "1.0")
 
 
 class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
@@ -430,6 +430,90 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
             kind=kind,
             path=path,
             source="test",
+        )
+
+    def test_anycubic_inventory_uses_only_active_profile_catalogues(self) -> None:
+        appdata = self.root / "appdata"
+        slicer_data = appdata / "AnycubicSlicerNext"
+        install_root = self.root / "AnycubicSlicerNext"
+        executable = install_root / "AnycubicSlicerNext.exe"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.write_bytes(b"MZ")
+
+        profile_paths = {
+            "Bundled": install_root
+            / "resources"
+            / "profiles"
+            / "Anycubic"
+            / "machine"
+            / "Bundled.json",
+            "User": slicer_data
+            / "user"
+            / "default"
+            / "machine"
+            / "User.json",
+            "System": slicer_data
+            / "system"
+            / "Anycubic"
+            / "machine"
+            / "System.json",
+            "Backup": slicer_data
+            / "user_backup-v1.0"
+            / "default"
+            / "machine"
+            / "Backup.json",
+            "OTA": slicer_data
+            / "ota"
+            / "machine"
+            / "OTA.json",
+        }
+        for name, path in profile_paths.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "name": name,
+                        "type": "machine",
+                        "instantiation": "true",
+                    }
+                ),
+                encoding="utf-8",
+            )
+        before = {
+            path: hashlib.sha256(path.read_bytes()).digest()
+            for path in profile_paths.values()
+        }
+
+        adapter = AnycubicSlicerNextAdapter()
+        with patch.dict(os.environ, {"APPDATA": str(appdata)}):
+            roots = adapter.profile_roots_for(executable)
+            installation = SlicerInstallation(
+                adapter_id=adapter.adapter_id,
+                product_name=adapter.product_name,
+                version="1.0",
+                executable_path=executable,
+                verified=True,
+                capabilities=FULL_CAPABILITIES,
+                discovery_source=SlicerDiscoverySource.KNOWN_PATH,
+                family=SlicerFamily.ORCA_BAMBU_ANYCUBIC,
+                support_level=SlicerSupportLevel.FULL,
+                profile_roots=roots,
+            )
+            records = adapter.discover_profiles(installation)
+
+        by_name = {record.name: record for record in records}
+        self.assertEqual(set(by_name), {"Bundled", "User", "System"})
+        self.assertEqual(by_name["Bundled"].source, "system")
+        self.assertEqual(by_name["System"].source, "system")
+        self.assertEqual(by_name["User"].source, "user")
+        self.assertNotIn(slicer_data.resolve(), set(roots))
+        self.assertNotIn((slicer_data / "ota").resolve(), set(roots))
+        self.assertEqual(
+            {
+                path: hashlib.sha256(path.read_bytes()).digest()
+                for path in profile_paths.values()
+            },
+            before,
         )
 
     def request(self, runner: ConfigurableRunner) -> tuple[AnycubicSlicerNextAdapter, SliceRequest]:
@@ -659,11 +743,14 @@ class FakeGuiSlicerService:
     def __init__(self, result: SlicerDiscoveryResult) -> None:
         self.result = result
         self.remembered: list[str | None] = []
+        self.discovery_calls = 0
 
     def discover_installations(self, source_slicer=None, force=False):
+        self.discovery_calls += 1
         return self.result
 
     def add_manual_installation(self, path, source_slicer=None):
+        self.discovery_calls += 1
         return self.result
 
     def remember_selection(self, identity_key):
@@ -735,6 +822,31 @@ class Phase14GuiTests(unittest.TestCase):
         self.assertEqual(window.selected_slicer_installation, second)
         window.slicer_combo.setCurrentIndex(0)
         self.assertEqual(service.remembered[-1], first.identity_key)
+        window.close()
+
+    def test_gui_reuses_completed_discovery_without_periodic_rescan(self) -> None:
+        installation = self.installation("single", "Single")
+        result = SlicerDiscoveryResult(
+            installations=(installation,),
+            recommended_key=installation.identity_key,
+            gui_state=SlicerGuiState.AVAILABLE,
+            message="Automatische Slicer-Verarbeitung verfügbar",
+        )
+        service = FakeGuiSlicerService(result)
+        window = MainWindow(
+            user_settings_path=self.root / "user.json",
+            slicer_service=service,
+        )
+
+        window.start_slicer_discovery()
+        self.wait_for_discovery(window)
+        window.start_slicer_discovery()
+        self.app.processEvents()
+
+        self.assertEqual(service.discovery_calls, 1)
+        self.assertFalse(hasattr(window, "_profile_watch_timer"))
+        self.assertTrue(window.slicer_refresh_button.isEnabled())
+        self.assertTrue(window.slicer_manual_button.isEnabled())
         window.close()
 
     def test_gui_marks_detection_only_installation_neutrally(self) -> None:

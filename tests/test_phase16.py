@@ -451,10 +451,11 @@ class Phase16Tests(unittest.TestCase):
     def test_20_stl_calibration_exports_only_converged_candidate(self) -> None:
         output = self.root / "calibrated_stl"
         source_hash = hashlib.sha256(self.source.read_bytes()).digest()
+        adapter = FakeAdapter(tower_gcode(path_size=1.0, feed=60))
         result = CalibrationService().calibrate(
             self.snapshot,
             GenerationSettings(target_layer_time_s=2.0),
-            adapter=FakeAdapter(tower_gcode(path_size=1.0, feed=60)),
+            adapter=adapter,
             profile=self.profile,
             output_directory=output,
             config=CalibrationConfig(mode=CalibrationMode.STL, maximum_iterations=3),
@@ -463,10 +464,96 @@ class Phase16Tests(unittest.TestCase):
         self.assertTrue(result.stl_path.is_file())
         self.assertIsNone(result.gcode_path)
         self.assertTrue(result.report_path.is_file())
+        self.assertEqual(len(adapter.requests), 2)
+        self.assertEqual(len(result.iterations), 2)
+        self.assertIsNone(
+            result.iterations[0].maximum_slicer_result_change_s
+        )
+        self.assertFalse(result.iterations[0].slicer_result_stable)
+        self.assertLessEqual(
+            result.iterations[1].maximum_slicer_result_change_s,
+            CalibrationConfig().time_tolerance_s,
+        )
+        self.assertTrue(result.iterations[1].slicer_result_stable)
         self.assertEqual(hashlib.sha256(self.source.read_bytes()).digest(), source_hash)
         warnings = " ".join(result.warnings)
         self.assertIn("zeitprognose", warnings.casefold())
         self.assertNotIn("The calibrated STL", warnings)
+
+    def test_adaptive_rounds_continue_only_for_noticeable_slicer_changes(self) -> None:
+        adapter = SequencedAdapter(
+            [
+                tower_gcode(path_size=1.0, feed=60),
+                tower_gcode(path_size=1.0, feed=90),
+                tower_gcode(path_size=1.0, feed=90),
+            ]
+        )
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "adaptive_stable",
+            config=CalibrationConfig(maximum_iterations=5),
+        )
+
+        self.assertTrue(result.success, result.failures)
+        self.assertEqual(len(adapter.requests), 3)
+        self.assertGreater(
+            result.iterations[1].maximum_slicer_result_change_s,
+            CalibrationConfig().time_tolerance_s,
+        )
+        self.assertFalse(result.iterations[1].slicer_result_stable)
+        self.assertTrue(result.iterations[2].slicer_result_stable)
+
+    def test_adaptive_rounds_stop_at_limit_when_results_keep_changing(self) -> None:
+        adapter = SequencedAdapter(
+            [
+                tower_gcode(path_size=1.0, feed=60),
+                tower_gcode(path_size=1.0, feed=90),
+                tower_gcode(path_size=1.0, feed=60),
+                tower_gcode(path_size=1.0, feed=90),
+                tower_gcode(path_size=1.0, feed=60),
+            ]
+        )
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "adaptive_unstable",
+            config=CalibrationConfig(maximum_iterations=5),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(len(adapter.requests), 5)
+        self.assertEqual(len(result.iterations), 5)
+        self.assertTrue(
+            all(
+                not iteration.slicer_result_stable
+                for iteration in result.iterations
+            )
+        )
+        self.assertEqual(
+            result.failures[-1].code,
+            CalibrationFailureCode.STALLED,
+        )
+        self.assertIn("instabil", result.failures[-1].message)
+
+    def test_single_round_fast_mode_remains_supported(self) -> None:
+        adapter = FakeAdapter(tower_gcode(path_size=1.0, feed=60))
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "single_fast",
+            config=CalibrationConfig(maximum_iterations=1),
+        )
+
+        self.assertTrue(result.success, result.failures)
+        self.assertEqual(len(adapter.requests), 1)
+        self.assertTrue(result.iterations[0].slicer_result_stable)
 
     def test_21_gcode_calibration_exports_reanalyzed_combined_file(self) -> None:
         output = self.root / "calibrated_gcode"

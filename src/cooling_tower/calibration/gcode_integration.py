@@ -127,18 +127,26 @@ def _numbers(value: object) -> tuple[float, ...]:
                 result.extend(_numbers(item))
             else:
                 try:
-                    result.append(float(item))
-                except (TypeError, ValueError):
+                    number = float(item)
+                    if math.isfinite(number):
+                        result.append(number)
+                except (TypeError, ValueError, OverflowError):
                     pass
         return tuple(result)
     if isinstance(value, str):
-        return tuple(
-            float(match)
-            for match in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value)
-        )
+        result = []
+        for match in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value):
+            try:
+                number = float(match)
+            except (ValueError, OverflowError):
+                continue
+            if math.isfinite(number):
+                result.append(number)
+        return tuple(result)
     try:
-        return (float(value),)
-    except (TypeError, ValueError):
+        number = float(value)
+        return (number,) if math.isfinite(number) else ()
+    except (TypeError, ValueError, OverflowError):
         return ()
 
 

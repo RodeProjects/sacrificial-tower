@@ -1,6 +1,10 @@
 """Safe, extensible slicer discovery and adapter infrastructure."""
 
 from cooling_tower.slicers.adapter import SlicerAdapter
+from cooling_tower.slicers.active_presets import (
+    ActivePresetSelection,
+    read_active_presets,
+)
 from cooling_tower.slicers.errors import (
     SlicerError,
     SlicerProcessCancelled,
@@ -111,6 +115,7 @@ from cooling_tower.slicers.profile_probe import (
 )
 
 __all__ = [
+    "ActivePresetSelection",
     "EffectiveProfile",
     "AnycubicSlicerNextAdapter",
     "BambuStudioAdapter",
@@ -186,6 +191,7 @@ __all__ = [
     "critical_values",
     "metadata_values",
     "profile_mapping_key",
+    "read_active_presets",
     "role_for_profile",
     "scan_gcode_profile_evidence",
     "write_profile_match_report",

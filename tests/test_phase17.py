@@ -23,6 +23,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 from PySide6.QtCore import QCoreApplication, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtTest import QTest
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui.background_jobs import JobKind
@@ -368,6 +369,25 @@ class Phase17Tests(unittest.TestCase):
         )
         preview.dispose()
 
+    def test_export_rechecks_copied_artifact_and_removes_partial_run(self) -> None:
+        request = self.request()
+        preview = PreviewService().prepare(request)
+        output_root = self.root / "out"
+
+        def replace_during_copy(_source: Path, destination: Path) -> None:
+            Path(destination).write_bytes(b"changed during copy")
+
+        with patch(
+            "cooling_tower.preview.export_service.shutil.copy2",
+            side_effect=replace_during_copy,
+        ):
+            with self.assertRaisesRegex(StalePreviewError, "während des Exports"):
+                PreviewExportService().export(preview, request, output_root)
+
+        self.assertTrue(output_root.is_dir())
+        self.assertEqual(list(output_root.iterdir()), [])
+        preview.dispose()
+
     def test_19_obsolete_background_result_cannot_replace_current(self) -> None:
         window = self.window()
         window._preview_request_id = 4
@@ -703,6 +723,14 @@ class Phase17Tests(unittest.TestCase):
             window._export_calibration_config().maximum_iterations,
             5,
         )
+        self.assertIn(
+            "Mindestens 2, höchstens 3",
+            window.preview_quality_buttons["balanced"].toolTip(),
+        )
+        self.assertIn(
+            "Mindestens 2, höchstens 5",
+            window.preview_quality_buttons["exact"].toolTip(),
+        )
         window.close()
 
     def test_30_zero_iterations_create_analytical_stl_without_calibrator(self) -> None:
@@ -711,9 +739,13 @@ class Phase17Tests(unittest.TestCase):
                 raise AssertionError("The slicer calibrator must not be called")
 
         request = self.request(
+            settings=GenerationSettings(target_layer_time_s=13.0),
             calibration_config=CalibrationConfig(
                 mode=CalibrationMode.STL,
                 maximum_iterations=0,
+                time_tolerance_s=0.12,
+                profile_change_tolerance_mm=0.02,
+                slicer_metadata_tolerance_s=0.65,
             ),
         )
         preview = PreviewService(ForbiddenCalibrator()).prepare(request)
@@ -721,6 +753,10 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(preview.slicer_optimized)
         self.assertIsNone(preview.calibration)
         self.assertIn("deaktiviert", preview.generation_kind)
+        self.assertEqual(preview.target_layer_time_s, 13.0)
+        self.assertEqual(preview.calibration_time_tolerance_s, 0.12)
+        self.assertEqual(preview.calibration_profile_tolerance_mm, 0.02)
+        self.assertEqual(preview.calibration_metadata_tolerance_s, 0.65)
         self.assertTrue(preview.artifact_path.is_file())
         exported = PreviewExportService().export(
             preview,
@@ -1005,6 +1041,181 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(ready.action_availability_widget.isVisible())
         self.assertIn("korrigieren", ready.export_availability_label.text())
         ready.close()
+
+    def test_39_dev_checkbox_hides_input_errors_and_unblocks_export(self) -> None:
+        window = self.ready_window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.show()
+        self.app.processEvents()
+
+        title_layout = window.reset_button.parentWidget().layout().itemAt(0).layout()
+        self.assertLess(
+            title_layout.indexOf(window.validation_bypass_checkbox),
+            title_layout.indexOf(window.reset_button),
+        )
+        self.assertFalse(window.validation_bypass_checkbox.isChecked())
+
+        window.maximum_outer_spin.setValue(1.0)
+        window.validate_form()
+        self.app.processEvents()
+        maximum_outer_setting = window._setting_widgets[
+            "maximum_outer_radius_mm"
+        ]
+        self.assertTrue(maximum_outer_setting.editor.property("invalid"))
+        self.assertTrue(window.validation_label.text().strip())
+        self.assertFalse(window.export_button.isEnabled())
+
+        window.validation_bypass_checkbox.setChecked(True)
+        self.app.processEvents()
+        self.assertFalse(maximum_outer_setting.editor.property("invalid"))
+        self.assertFalse(window.validation_label.text().strip())
+        self.assertTrue(window.error_panel.isHidden())
+        self.assertFalse(window.action_availability_widget.isVisible())
+        self.assertTrue(window.export_button.isEnabled())
+        self.assertFalse(window.preview_button.isEnabled())
+
+        window.validation_bypass_checkbox.setChecked(False)
+        self.app.processEvents()
+        self.assertTrue(maximum_outer_setting.editor.property("invalid"))
+        self.assertTrue(window.validation_label.text().strip())
+        self.assertFalse(window.export_button.isEnabled())
+        window.close()
+
+    def test_40_dev_checkbox_visual_states_keep_size_and_contrast(self) -> None:
+        window = self.ready_window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
+        window.show()
+        self.app.processEvents()
+        checkbox = window.validation_bypass_checkbox
+
+        stylesheet = window.styleSheet()
+        selector = "QCheckBox#validationBypassCheckBox,"
+        style_block = stylesheet[
+            stylesheet.index(selector):
+            stylesheet.index("QCheckBox#automaticBaseWidth,")
+        ]
+        self.assertNotIn("__CHECKBOX_CHECK_ICON__", stylesheet)
+        self.assertIn("QCheckBox#validationBypassCheckBox:focus", style_block)
+        self.assertIn("border: 1px solid transparent;", style_block)
+        self.assertNotIn("border: 2px", style_block)
+        self.assertIn("background: #e5f0f8;", style_block)
+        self.assertIn("background: #ffffff;", style_block)
+        self.assertIn("width: 16px;", style_block)
+        self.assertIn("height: 16px;", style_block)
+
+        def dimensions() -> tuple:
+            return (
+                checkbox.geometry(),
+                checkbox.size(),
+                checkbox.sizeHint(),
+                checkbox.minimumSizeHint(),
+            )
+
+        initial = dimensions()
+        QTest.mouseMove(checkbox, QPoint(4, checkbox.height() // 2))
+        self.app.processEvents()
+        self.assertEqual(dimensions(), initial)
+
+        QTest.mousePress(
+            checkbox,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(4, checkbox.height() // 2),
+        )
+        self.app.processEvents()
+        self.assertEqual(dimensions(), initial)
+        QTest.mouseRelease(
+            checkbox,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(4, checkbox.height() // 2),
+        )
+        checkbox.setFocus()
+        self.app.processEvents()
+        self.assertEqual(dimensions(), initial)
+        window.close()
+
+    def test_41_preview_quality_summary_explains_and_refreshes_exact_result(self) -> None:
+        dialog = PreviewDialog()
+        unstable_iteration = SimpleNamespace(
+            maximum_remaining_deficit_s=0.42,
+            deficient_layer_count=2,
+            maximum_slicer_result_change_s=0.31,
+            maximum_profile_change_mm=0.06,
+            evaluation=SimpleNamespace(maximum_metadata_difference_s=0.9),
+        )
+        unstable_calibration = SimpleNamespace(
+            configured_iteration_count=5,
+            iterations=(
+                SimpleNamespace(),
+                SimpleNamespace(),
+                SimpleNamespace(),
+                SimpleNamespace(),
+                unstable_iteration,
+            ),
+            failures=(SimpleNamespace(message="Ergebnisse blieben instabil."),),
+        )
+        first = SimpleNamespace(
+            scene=preview_scene(),
+            calibrated=False,
+            slicer_optimized=False,
+            output_mode=OutputMode.STL,
+            calibration=unstable_calibration,
+            minimum_verified_layer_time_s=11.58,
+            target_layer_time_s=12.0,
+            calibration_time_tolerance_s=0.15,
+            calibration_profile_tolerance_mm=0.03,
+            calibration_metadata_tolerance_s=0.75,
+        )
+
+        dialog.set_preview(first)
+        summary = dialog.quality_label.text()
+        self.assertIn("Exakt nicht bestätigt", summary)
+        self.assertIn("Durchläufe: 5 von maximal 5", summary)
+        self.assertIn("0.420 s > 0.150 s", summary)
+        self.assertIn("0.310 s > 0.150 s", summary)
+        self.assertIn("0.060 mm > 0.030 mm", summary)
+        self.assertIn("0.900 s > 0.750 s", summary)
+        self.assertIn("Ergebnisse blieben instabil", summary)
+        self.assertEqual(dialog.quality_label.property("state"), "error")
+
+        stable_iteration = SimpleNamespace(
+            maximum_remaining_deficit_s=0.05,
+            deficient_layer_count=0,
+            maximum_slicer_result_change_s=0.04,
+            maximum_profile_change_mm=0.01,
+            evaluation=SimpleNamespace(maximum_metadata_difference_s=0.1),
+        )
+        second = SimpleNamespace(
+            scene=preview_scene(),
+            calibrated=True,
+            slicer_optimized=False,
+            output_mode=OutputMode.STL,
+            calibration=SimpleNamespace(
+                configured_iteration_count=5,
+                iterations=(SimpleNamespace(), stable_iteration),
+                failures=(),
+            ),
+            minimum_verified_layer_time_s=11.95,
+            target_layer_time_s=12.0,
+            calibration_time_tolerance_s=0.15,
+            calibration_profile_tolerance_mm=0.03,
+            calibration_metadata_tolerance_s=0.75,
+        )
+
+        dialog.set_preview(second)
+        refreshed = dialog.quality_label.text()
+        self.assertIn("Exakt bestätigt", refreshed)
+        self.assertIn("Durchläufe: 2 von maximal 5", refreshed)
+        self.assertIn("0.040 s ≤ 0.150 s", refreshed)
+        self.assertNotIn("0.310 s", refreshed)
+        self.assertNotIn("Ergebnisse blieben instabil", refreshed)
+        self.assertEqual(dialog.quality_label.property("state"), "success")
+
+        dialog.set_building("Neue Vorschau wird erstellt")
+        self.assertIn("wird für die neue Vorschau aktualisiert", dialog.quality_label.text())
+        self.assertNotIn("Exakt bestätigt", dialog.quality_label.text())
+        dialog.close()
 
 
 if __name__ == "__main__":

@@ -238,6 +238,21 @@ class SlicerDiscoveryService:
         if not installations:
             return None
 
+        # An explicit selection made in this application is authoritative on
+        # the next start.  G-code metadata still helps choose a sensible
+        # default when no remembered installation exists, but must not make
+        # the Slicer selector jump away from the user's last choice.
+        remembered = next(
+            (
+                item
+                for item in installations
+                if item.identity_key == last_selected_key
+            ),
+            None,
+        )
+        if remembered is not None:
+            return remembered
+
         source_product = _normalised_product(
             source.product_name if source is not None else None
         )
@@ -265,8 +280,6 @@ class SlicerDiscoveryService:
                         value += 40
             if item.support_level is SlicerSupportLevel.FULL:
                 value += 50
-            if item.identity_key == last_selected_key:
-                value += 30
             return value, _version_tuple(item.version)
 
         return max(installations, key=score)

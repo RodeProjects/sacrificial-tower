@@ -248,7 +248,17 @@ class SecureSlicerProcessRunner:
                 common.update(details)
                 record_diagnostic(event, **common)
                 if state_callback is not None:
-                    state_callback(event, common)
+                    try:
+                        state_callback(event, common)
+                    except Exception as error:
+                        # A diagnostic observer must never interrupt process
+                        # supervision after the external slicer has started.
+                        record_diagnostic(
+                            "slicer_process_state_callback_failed",
+                            backend=self.backend_name,
+                            source_event=event,
+                            error_type=type(error).__name__,
+                        )
 
             report(
                 "slicer_process_state",

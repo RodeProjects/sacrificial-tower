@@ -10,6 +10,7 @@ from typing import Any, Mapping, Protocol, Sequence
 from cooling_tower.models.analysis import GCodeAnalysisSnapshot
 from cooling_tower.models.gcode_metadata import GCodeMetadata, SlicerFamily
 from cooling_tower.slicers.adapter import SlicerAdapter
+from cooling_tower.slicers.active_presets import read_active_presets
 from cooling_tower.slicers.models import (
     EffectiveProfile,
     ProfileKind,
@@ -78,6 +79,26 @@ class GCodeProfileEvidence:
     @property
     def active_tool_count(self) -> int:
         return max(self.tool_indices, default=0) + 1
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileFilterContext:
+    source: str
+    machine_ids: tuple[str, ...] = ()
+    process_ids: tuple[str, ...] = ()
+    filament_ids: tuple[str, ...] = ()
+    printer_model: str | None = None
+    nozzle_diameters_mm: tuple[float, ...] = ()
+    source_path: Path | None = None
+    active_preset_fingerprint: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        return bool(
+            self.machine_ids
+            or self.printer_model
+            or self.nozzle_diameters_mm
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +227,7 @@ class ProfileMatchingService:
         *,
         selected_profile_ids: Mapping[str, str] | None = None,
         force_inventory: bool = False,
+        include_all_profiles: bool = False,
     ) -> ProfileMatchResult:
         inventory = self.inventory_service.load(
             adapter,
@@ -227,17 +249,39 @@ class ProfileMatchingService:
             if value
         }
 
-        machine_options = self._selectable_options(
+        all_machine_options = self._selectable_options(
             resolved,
             (ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL),
         )
-        process_options = self._selectable_options(
+        all_process_options = self._selectable_options(
             resolved,
             (ProfileRole.PROCESS,),
         )
-        filament_options = self._selectable_options(
+        all_filament_options = self._selectable_options(
             resolved,
             (ProfileRole.FILAMENT,),
+        )
+        filter_context = self._profile_filter_context(
+            source_values,
+            selected_profile_ids,
+            installation,
+            resolved,
+        )
+        (
+            machine_options,
+            process_options,
+            filament_options,
+            profiles_filtered,
+            filter_summary,
+        ) = self._filter_profile_options(
+            resolved,
+            filter_context,
+            include_all_profiles=include_all_profiles,
+            all_options=(
+                all_machine_options,
+                all_process_options,
+                all_filament_options,
+            ),
         )
         role_groups = self._role_groups(resolved)
         source_ids = self._source_identifiers(source_values)
@@ -269,6 +313,13 @@ class ProfileMatchingService:
         machines = self._merge_machine_options(ranked_roles)
         processes = ranked_roles[ProfileRole.PROCESS]
         filaments = ranked_roles[ProfileRole.FILAMENT]
+        known_machine_profiles = tuple(
+            item
+            for item in resolved
+            if item.valid
+            and item.role
+            in {ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL}
+        )
 
         rejected_resolution = tuple(
             item
@@ -285,6 +336,7 @@ class ProfileMatchingService:
             machines,
             processes,
             filaments,
+            known_machine_profiles,
         )
         if not candidates and rejected_resolution:
             candidates = tuple(
@@ -315,6 +367,24 @@ class ProfileMatchingService:
                 source_profile_fingerprint=source_profile_fingerprint,
                 source_critical_fingerprint=source_critical_fingerprint,
                 gcode_restrictions=("Keine gültige Profilkombination.",),
+                profiles_filtered=profiles_filtered,
+                profile_filter_source=(
+                    filter_context.source if filter_context.usable else None
+                ),
+                profile_filter_summary=filter_summary,
+                unfiltered_option_counts=(
+                    len(all_machine_options),
+                    len(all_process_options),
+                    len(all_filament_options),
+                ),
+                visible_option_counts=(
+                    len(machine_options),
+                    len(process_options),
+                    len(filament_options),
+                ),
+                active_preset_fingerprint=(
+                    filter_context.active_preset_fingerprint
+                ),
             )
 
         selected = usable[0]
@@ -396,6 +466,62 @@ class ProfileMatchingService:
                 if outcome.state is ProfileValidationState.INVALID:
                     state = ProfileMatchState.UNAVAILABLE
 
+        display_filter_context = filter_context
+        if selected.machine is not None:
+            # The actual selected machine is the authoritative context for
+            # visible system process/filament presets. This second, cheap
+            # filtering pass prevents a broader initial G-code or user-printer
+            # context from mixing system presets for several machines.
+            resolved_selected_machine = next(
+                (
+                    item
+                    for item in selected.resolved_profiles
+                    if item.role
+                    in {
+                        ProfileRole.MACHINE_VARIANT,
+                        ProfileRole.MACHINE_MODEL,
+                    }
+                    and item.record.path == selected.machine.path
+                ),
+                None,
+            )
+            selected_model = (
+                str(
+                    resolved_selected_machine.effective_values.get(
+                        "printer_model",
+                        "",
+                    )
+                ).strip()
+                if resolved_selected_machine is not None
+                else ""
+            )
+            display_filter_context = replace(
+                filter_context,
+                machine_ids=(str(selected.machine.path),),
+                printer_model=selected_model or None,
+                nozzle_diameters_mm=(
+                    _profile_nozzle_diameters(resolved_selected_machine)
+                    if resolved_selected_machine is not None
+                    else ()
+                ),
+            )
+            (
+                machine_options,
+                process_options,
+                filament_options,
+                profiles_filtered,
+                filter_summary,
+            ) = self._filter_profile_options(
+                resolved,
+                display_filter_context,
+                include_all_profiles=include_all_profiles,
+                all_options=(
+                    all_machine_options,
+                    all_process_options,
+                    all_filament_options,
+                ),
+            )
+
         requires_confirmation = (
             state in {ProfileMatchState.COMPATIBLE, ProfileMatchState.AMBIGUOUS}
             and not user_confirmed
@@ -436,6 +562,24 @@ class ProfileMatchingService:
             source_profile_fingerprint=source_profile_fingerprint,
             source_critical_fingerprint=source_critical_fingerprint,
             gcode_restrictions=restrictions,
+            profiles_filtered=profiles_filtered,
+            profile_filter_source=(
+                filter_context.source if filter_context.usable else None
+            ),
+            profile_filter_summary=filter_summary,
+            unfiltered_option_counts=(
+                len(all_machine_options),
+                len(all_process_options),
+                len(all_filament_options),
+            ),
+            visible_option_counts=(
+                len(machine_options),
+                len(process_options),
+                len(filament_options),
+            ),
+            active_preset_fingerprint=(
+                filter_context.active_preset_fingerprint
+            ),
         )
 
     def confirm(self, result: ProfileMatchResult) -> ProfileMatchResult:
@@ -462,7 +606,15 @@ class ProfileMatchingService:
         inventory = self.inventory_service.cached_inventory(
             result.execution_slicer
         )
-        return inventory is None or self.inventory_service.is_stale(inventory)
+        if inventory is None or self.inventory_service.is_stale(inventory):
+            return True
+        if result.profile_filter_source == "slicer":
+            current = read_active_presets(result.execution_slicer)
+            return (
+                current.fingerprint_sha256
+                != result.active_preset_fingerprint
+            )
+        return False
 
     def _gcode_evidence(
         self,
@@ -483,9 +635,13 @@ class ProfileMatchingService:
     def _role_groups(
         resolved: Sequence[ResolvedProfile],
     ) -> dict[ProfileRole, tuple[ResolvedProfile, ...]]:
-        result: dict[ProfileRole, list[ResolvedProfile]] = {}
-        seen: set[tuple[ProfileRole, str, str | None]] = set()
+        selected: dict[
+            ProfileRole,
+            dict[tuple[ProfileRole, str, str | None], ResolvedProfile],
+        ] = {}
         for item in resolved:
+            if not item.valid or not _is_selectable_profile(item):
+                continue
             # Vendor resources, OTA mirrors and the local system cache often
             # expose the same effective preset at several paths.  This is one
             # candidate and must not create artificial ambiguity.
@@ -494,11 +650,623 @@ class ProfileMatchingService:
                 item.record.profile_id.casefold(),
                 item.fingerprint_sha256,
             )
-            if key in seen:
+            current = selected.setdefault(item.role, {}).get(key)
+            if current is None or ProfileMatchingService._option_preference(
+                item
+            ) < ProfileMatchingService._option_preference(current):
+                selected[item.role][key] = item
+        return {
+            role: tuple(items.values())
+            for role, items in selected.items()
+        }
+
+    @classmethod
+    def _profile_filter_context(
+        cls,
+        source_values: Mapping[str, Any],
+        selected_profile_ids: Mapping[str, str],
+        installation: SlicerInstallation,
+        resolved: Sequence[ResolvedProfile],
+    ) -> ProfileFilterContext:
+        gcode_machine_ids = _text_values(
+            source_values.get("printer_settings_id")
+        )
+        gcode_process_ids = _text_values(
+            source_values.get("print_settings_id")
+        )
+        gcode_filament_ids = _text_values(
+            source_values.get("filament_settings_id")
+        )
+        printer_model_values = _text_values(source_values.get("printer_model"))
+        printer_model = (
+            printer_model_values[0] if printer_model_values else None
+        )
+        gcode_nozzles = _positive_finite_numbers(
+            source_values.get("nozzle_diameter")
+        )
+
+        selected_machine = selected_profile_ids.get("machine")
+        if selected_machine:
+            resolved_machine = next(
+                (
+                    item
+                    for item in resolved
+                    if item.valid
+                    and item.role
+                    in {
+                        ProfileRole.MACHINE_VARIANT,
+                        ProfileRole.MACHINE_MODEL,
+                    }
+                    and _record_matches_id(item.record, selected_machine)
+                ),
+                None,
+            )
+            # The manually selected machine, including its inherited model
+            # and nozzle metadata, is authoritative for filtering. Retaining
+            # those values from the imported G-code would suppress the system
+            # presets belonging to a deliberately selected machine variant.
+            machine_id = (
+                str(resolved_machine.record.path)
+                if resolved_machine is not None
+                else selected_machine
+            )
+            selected_model = (
+                str(
+                    resolved_machine.effective_values.get(
+                        "printer_model",
+                        "",
+                    )
+                ).strip()
+                if resolved_machine is not None
+                else ""
+            )
+            return ProfileFilterContext(
+                source="manual",
+                machine_ids=(machine_id,),
+                process_ids=(
+                    (selected_profile_ids["process"],)
+                    if selected_profile_ids.get("process")
+                    else ()
+                ),
+                filament_ids=(
+                    (selected_profile_ids["filament"],)
+                    if selected_profile_ids.get("filament")
+                    else ()
+                ),
+                printer_model=selected_model or None,
+                nozzle_diameters_mm=(
+                    _profile_nozzle_diameters(resolved_machine)
+                    if resolved_machine is not None
+                    else ()
+                ),
+            )
+
+        gcode_context = ProfileFilterContext(
+            source="gcode",
+            machine_ids=gcode_machine_ids,
+            process_ids=gcode_process_ids,
+            filament_ids=gcode_filament_ids,
+            printer_model=printer_model,
+            nozzle_diameters_mm=gcode_nozzles,
+        )
+        machine_profiles = tuple(
+            item
+            for item in resolved
+            if item.valid
+            and _is_selectable_profile(item)
+            and item.role
+            in {ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL}
+        )
+        if (gcode_machine_ids or printer_model) and any(
+            cls._machine_context_score(item, gcode_context) > 0
+            for item in machine_profiles
+        ):
+            return gcode_context
+
+        active = read_active_presets(installation)
+        active_context = ProfileFilterContext(
+            source="slicer",
+            machine_ids=active.printer_ids,
+            process_ids=active.process_ids,
+            filament_ids=active.filament_ids,
+            printer_model=None,
+            nozzle_diameters_mm=(gcode_nozzles or active.nozzle_diameters_mm),
+            source_path=active.source_path,
+            active_preset_fingerprint=active.fingerprint_sha256,
+        )
+        active_machines = tuple(
+            item
+            for item in machine_profiles
+            if cls._machine_context_score(item, active_context) > 0
+        )
+        if active.has_printer_context and active_machines:
+            related_user_machines = cls._related_user_machine_profiles(
+                active_machines,
+                machine_profiles,
+            )
+            if related_user_machines:
+                related_ids = tuple(
+                    dict.fromkeys(
+                        (
+                            *active_context.machine_ids,
+                            *(
+                                item.record.profile_id
+                                for item in related_user_machines
+                            ),
+                        )
+                    )
+                )
+                return replace(active_context, machine_ids=related_ids)
+            return active_context
+
+        # A foreign project can leave the slicer's persisted active preset on
+        # an unavailable project-only printer.  In that case, locally stored
+        # user machine presets are stronger evidence of printers the user has
+        # deliberately configured than that stale foreign identifier.
+        user_machines = tuple(
+            item
+            for item in machine_profiles
+            if item.record.source.casefold() == "user"
+            and _nozzle_values_compatible(
+                gcode_nozzles,
+                _profile_nozzle_diameters(item),
+            )
+        )
+        if user_machines:
+            return ProfileFilterContext(
+                source="user",
+                machine_ids=tuple(
+                    dict.fromkeys(
+                        item.record.profile_id for item in user_machines
+                    )
+                ),
+                nozzle_diameters_mm=gcode_nozzles,
+                source_path=active.source_path,
+                active_preset_fingerprint=active.fingerprint_sha256,
+            )
+        if gcode_nozzles:
+            return ProfileFilterContext(
+                source="gcode",
+                machine_ids=(),
+                process_ids=gcode_process_ids,
+                filament_ids=gcode_filament_ids,
+                printer_model=None,
+                nozzle_diameters_mm=gcode_nozzles,
+            )
+        if gcode_context.usable:
+            return gcode_context
+        if active.has_printer_context:
+            return active_context
+        return ProfileFilterContext(source="none")
+
+    @staticmethod
+    def _related_user_machine_profiles(
+        active_machines: Sequence[ResolvedProfile],
+        machine_profiles: Sequence[ResolvedProfile],
+    ) -> tuple[ResolvedProfile, ...]:
+        active_identifiers = {
+            value.casefold()
+            for item in active_machines
+            for value in _profile_identifiers(item)
+        }
+        active_models = {
+            str(item.effective_values.get("printer_model", ""))
+            .strip()
+            .casefold()
+            for item in active_machines
+            if str(item.effective_values.get("printer_model", "")).strip()
+        }
+        active_nozzles = tuple(
+            value
+            for item in active_machines
+            for value in _profile_nozzle_diameters(item)
+        )
+        result: list[ResolvedProfile] = []
+        for item in machine_profiles:
+            if item.record.source.casefold() != "user":
                 continue
-            seen.add(key)
-            result.setdefault(item.role, []).append(item)
-        return {key: tuple(value) for key, value in result.items()}
+            own_identifiers = {
+                value.casefold() for value in _profile_identifiers(item)
+            }
+            inherited_identifiers = {
+                value.casefold()
+                for record in item.chain[:-1]
+                for value in (record.profile_id, record.name)
+            }
+            model = str(
+                item.effective_values.get("printer_model", "")
+            ).strip().casefold()
+            same_identity = bool(own_identifiers & active_identifiers)
+            inherits_active = bool(
+                inherited_identifiers & active_identifiers
+            )
+            same_model = bool(model and model in active_models)
+            nozzle_matches = _nozzle_values_compatible(
+                active_nozzles,
+                _profile_nozzle_diameters(item),
+            )
+            if nozzle_matches and (
+                same_identity or inherits_active or same_model
+            ):
+                result.append(item)
+        return tuple(result)
+
+    @classmethod
+    def _filter_profile_options(
+        cls,
+        resolved: Sequence[ResolvedProfile],
+        context: ProfileFilterContext,
+        *,
+        include_all_profiles: bool,
+        all_options: tuple[
+            tuple[ProfileRecord, ...],
+            tuple[ProfileRecord, ...],
+            tuple[ProfileRecord, ...],
+        ],
+    ) -> tuple[
+        tuple[ProfileRecord, ...],
+        tuple[ProfileRecord, ...],
+        tuple[ProfileRecord, ...],
+        bool,
+        str,
+    ]:
+        all_counts = tuple(len(items) for items in all_options)
+        known_machine_profiles = tuple(
+            item
+            for item in resolved
+            if item.valid
+            and item.role
+            in {ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL}
+        )
+        machine_candidates = tuple(
+            item
+            for item in known_machine_profiles
+            if _is_selectable_profile(item)
+        )
+        scored_machines = tuple(
+            (item, cls._machine_context_score(item, context))
+            for item in machine_candidates
+        )
+        best_machine_score = max(
+            (score for _item, score in scored_machines),
+            default=0,
+        )
+        machines = tuple(
+            item
+            for item, score in scored_machines
+            if best_machine_score > 0 and score == best_machine_score
+        )
+        user_machines = tuple(
+            item
+            for item in machine_candidates
+            if item.record.source.casefold() == "user"
+        )
+        inherited_system_ids = {
+            identifier.casefold()
+            for item in machines
+            if item.record.source.casefold() == "user"
+            for identifier in item.record.inherits
+        }
+        inherited_system_machines = tuple(
+            item
+            for item in machine_candidates
+            if item.record.source.casefold() != "user"
+            and bool(
+                inherited_system_ids.intersection(
+                    {
+                        item.record.profile_id.casefold(),
+                        item.record.name.casefold(),
+                    }
+                )
+            )
+        )
+        visible_machines = (
+            machine_candidates
+            if include_all_profiles
+            else (
+                *user_machines,
+                *machines,
+                *inherited_system_machines,
+            )
+        )
+        if not visible_machines and not context.usable:
+            # Without any user or active machine evidence the selector must
+            # still offer a way to establish a context manually.
+            visible_machines = machine_candidates
+        machine_options = cls._selectable_options(
+            visible_machines,
+            (ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL),
+        )
+
+        def role_is_visible(item: ResolvedProfile) -> bool:
+            if item.record.source.casefold() == "user":
+                return True
+            return bool(machines) and cls._profile_matches_machine_context(
+                item,
+                machines,
+                context,
+                known_machine_profiles,
+            )
+
+        process_resolved = tuple(
+            item
+            for item in resolved
+            if item.valid
+            and _is_selectable_profile(item)
+            and item.role is ProfileRole.PROCESS
+            and role_is_visible(item)
+        )
+        filament_resolved = tuple(
+            item
+            for item in resolved
+            if item.valid
+            and _is_selectable_profile(item)
+            and item.role is ProfileRole.FILAMENT
+            and role_is_visible(item)
+        )
+        process_options = cls._selectable_options(
+            process_resolved,
+            (ProfileRole.PROCESS,),
+        )
+        filament_options = cls._selectable_options(
+            filament_resolved,
+            (ProfileRole.FILAMENT,),
+        )
+
+        visible_counts = (
+            len(machine_options),
+            len(process_options),
+            len(filament_options),
+        )
+        filtered = any(
+            visible < total
+            for visible, total in zip(visible_counts, all_counts)
+        )
+        source_label = {
+            "gcode": "G-Code",
+            "slicer": "zuletzt gespeicherte Slicer-Auswahl",
+            "user": "lokale Benutzer-Druckerprofile",
+            "manual": "manuelle Profilauswahl",
+        }.get(context.source, context.source)
+        identity = cls._filter_context_label(context)
+        mode = (
+            "alle Maschinenprofile; System-Presets weiterhin druckerbezogen"
+            if include_all_profiles
+            else "aktive Maschinenprofile"
+        )
+        summary = (
+            "Profilfilter\n"
+            f"Quelle: {source_label}\n"
+            f"Drucker: {identity}\n"
+            f"Modus: {mode}\n"
+            f"Sichtbar: Maschine {visible_counts[0]}/{all_counts[0]}  ·  "
+            f"Filament {visible_counts[2]}/{all_counts[2]}  ·  "
+            f"Prozess {visible_counts[1]}/{all_counts[1]}"
+        )
+        if not machines:
+            summary += (
+                "\nHinweis: Bis zur Auswahl eines Maschinenprofils werden "
+                "nur User-Presets für Filament und Prozess angezeigt."
+            )
+        return (
+            machine_options,
+            process_options,
+            filament_options,
+            filtered,
+            summary,
+        )
+
+    @staticmethod
+    def _machine_context_score(
+        item: ResolvedProfile,
+        context: ProfileFilterContext,
+    ) -> int:
+        if not _nozzle_values_compatible(
+            context.nozzle_diameters_mm,
+            _profile_nozzle_diameters(item),
+        ):
+            return 0
+        identifiers = {
+            value.casefold() for value in _profile_identifiers(item)
+        }
+        requested_ids = {value.casefold() for value in context.machine_ids}
+        if requested_ids:
+            if identifiers.intersection(requested_ids) or any(
+                _record_matches_id(item.record, value)
+                for value in context.machine_ids
+            ):
+                return 300
+            return 0
+        model = str(item.effective_values.get("printer_model", "")).strip()
+        if context.printer_model:
+            if model.casefold() == context.printer_model.casefold():
+                return 200 + int(bool(_profile_nozzle_diameters(item)))
+            return 0
+        if context.nozzle_diameters_mm:
+            return 100 if _profile_nozzle_diameters(item) else 50
+        return 0
+
+    @classmethod
+    def _profile_matches_machine_context(
+        cls,
+        item: ResolvedProfile,
+        machines: Sequence[ResolvedProfile],
+        context: ProfileFilterContext,
+        known_machines: Sequence[ResolvedProfile],
+    ) -> bool:
+        machine_names = {
+            value.casefold()
+            for machine in machines
+            for value in _machine_compatibility_identifiers(machine)
+        }
+        compatible = {
+            value.casefold()
+            for value in _compatibility_values(
+                item.effective_values.get("compatible_printers")
+            )
+        }
+        if compatible and not machine_names.intersection(compatible):
+            return False
+        if not compatible:
+            # A few Orca/Anycubic system catalogues omit compatibility fields
+            # from otherwise explicitly machine-scoped presets. Their stable
+            # naming convention is ``preset @ machine preset``. Treat the
+            # suffix as a restriction only when it resolves to a real machine
+            # in the same slicer inventory, so genuinely generic profiles and
+            # unrelated uses of ``@`` remain visible.
+            inferred_scopes = _recognized_machine_scopes(
+                item,
+                known_machines,
+            )
+            if inferred_scopes:
+                selected_machine_scopes = {
+                    _normalise_profile_identity(value)
+                    for machine in machines
+                    for value in _machine_scope_identifiers(machine)
+                }
+                if not inferred_scopes.issubset(selected_machine_scopes):
+                    return False
+        condition = str(
+            item.effective_values.get("compatible_printers_condition", "")
+            or ""
+        ).strip()
+        return cls._compatible_condition_matches(
+            condition,
+            machines,
+            context,
+        )
+
+    @staticmethod
+    def _compatible_condition_matches(
+        condition: str,
+        machines: Sequence[ResolvedProfile],
+        context: ProfileFilterContext,
+    ) -> bool:
+        if not condition:
+            return True
+        if len(condition) > 4096:
+            return True
+        nozzle_requirements = tuple(
+            float(value)
+            for value in re.findall(
+                r"nozzle_diameter(?:\[\d+\])?\s*==\s*([0-9]+(?:\.[0-9]+)?)",
+                condition,
+                flags=re.IGNORECASE,
+            )
+        )
+        if (
+            nozzle_requirements
+            and context.nozzle_diameters_mm
+            and not _nozzle_values_compatible(
+                context.nozzle_diameters_mm,
+                nozzle_requirements,
+            )
+        ):
+            return False
+
+        # Support the common Orca-family literal machine constraints without
+        # evaluating arbitrary preset expressions. Multiple allowed values for
+        # one key are treated as alternatives; different constrained keys all
+        # have to match. Unsupported syntax remains unknown and is included.
+        literal_keys = {
+            value.casefold()
+            for value in re.findall(
+                r"\b(printer_model|printer_variant|printer_settings_id)\s*[!=]=",
+                condition,
+                flags=re.IGNORECASE,
+            )
+        }
+        has_cross_key_or = bool(
+            len(literal_keys) > 1
+            and re.search(r"(?:\bor\b|\|\|)", condition, re.IGNORECASE)
+        )
+        for key in (() if has_cross_key_or else literal_keys):
+            allowed = {
+                match[2].casefold()
+                for match in re.findall(
+                    rf"\b({key})\s*==\s*([\"'])(.*?)\2",
+                    condition,
+                    flags=re.IGNORECASE,
+                )
+                if match[2]
+            }
+            forbidden = {
+                match[2].casefold()
+                for match in re.findall(
+                    rf"\b({key})\s*!=\s*([\"'])(.*?)\2",
+                    condition,
+                    flags=re.IGNORECASE,
+                )
+                if match[2]
+            }
+            machine_values = {
+                str(value).strip().strip('"').casefold()
+                for machine in machines
+                for value in (
+                    _profile_identifiers(machine)
+                    if key == "printer_settings_id"
+                    else _as_sequence(machine.effective_values.get(key))
+                )
+                if str(value).strip().strip('"')
+            }
+            if allowed and not machine_values.intersection(allowed):
+                return False
+            if forbidden and machine_values.intersection(forbidden):
+                return False
+
+        printer_notes = "\n".join(
+            str(machine.effective_values.get("printer_notes", ""))
+            for machine in machines
+        )
+        positive_patterns = re.findall(
+            r"printer_notes\s*=~\s*/(.+?)/",
+            condition,
+            flags=re.IGNORECASE,
+        )
+        negative_patterns = re.findall(
+            r"printer_notes\s*!~\s*/(.+?)/",
+            condition,
+            flags=re.IGNORECASE,
+        )
+        positive_matches = tuple(
+            _safe_printer_note_pattern_match(pattern, printer_notes)
+            for pattern in positive_patterns[:16]
+        )
+        negative_matches = tuple(
+            _safe_printer_note_pattern_match(pattern, printer_notes)
+            for pattern in negative_patterns[:16]
+        )
+        if positive_matches:
+            if any(value is True for value in positive_matches):
+                pass
+            elif any(value is None for value in positive_matches):
+                # Unsupported expression syntax is not reliable evidence of
+                # incompatibility.
+                return True
+            else:
+                return False
+        if any(value is True for value in negative_matches):
+            return False
+        return True
+
+    @staticmethod
+    def _filter_context_label(context: ProfileFilterContext) -> str:
+        values: list[str] = []
+        if context.machine_ids:
+            identity = context.machine_ids[0]
+            path = Path(identity)
+            label = path.stem if path.is_absolute() else identity
+            if len(context.machine_ids) > 1:
+                label += f" (+{len(context.machine_ids) - 1} zugehörig)"
+            values.append(label)
+        elif context.printer_model:
+            values.append(context.printer_model)
+        if context.nozzle_diameters_mm:
+            rendered = ", ".join(
+                f"{value:g} mm" for value in context.nozzle_diameters_mm
+            )
+            values.append(f"Düse {rendered}")
+        return " · ".join(values) or "aktiver Drucker"
 
     @staticmethod
     def _selectable_options(
@@ -509,7 +1277,11 @@ class ProfileMatchingService:
 
         selected: dict[tuple[str, str], ResolvedProfile] = {}
         for item in resolved:
-            if not item.valid or item.role not in roles:
+            if (
+                not item.valid
+                or not _is_selectable_profile(item)
+                or item.role not in roles
+            ):
                 continue
             role_key = (
                 "machine"
@@ -557,8 +1329,10 @@ class ProfileMatchingService:
             0
             if source == "user" and "user" in parts
             else 0
-            if source == "system" and "resources" in parts
+            if source == "system" and "system" in parts
             else 1
+            if source == "system" and "resources" in parts
+            else 2
         )
         return (
             source_rank,
@@ -681,6 +1455,7 @@ class ProfileMatchingService:
         machines,
         processes,
         filaments,
+        known_machines: Sequence[ResolvedProfile],
     ) -> tuple[ProfileBundleMatch, ...]:
         if not machines or not processes or not filaments:
             return ()
@@ -717,6 +1492,7 @@ class ProfileMatchingService:
                 filament,
                 effective_values,
                 gcode_evidence,
+                known_machines,
             )
             candidate_critical = critical_values(effective_values)
             differences: list[ProfileValueDifference] = []
@@ -811,6 +1587,7 @@ class ProfileMatchingService:
         filament: ResolvedProfile,
         effective: Mapping[str, Any],
         gcode_evidence: GCodeProfileEvidence,
+        known_machines: Sequence[ResolvedProfile],
     ) -> tuple[ProfileHardExclusion, ...]:
         issues: list[ProfileHardExclusion] = []
         self._exclude_value_mismatch(
@@ -870,16 +1647,26 @@ class ProfileMatchingService:
                     "Nicht unterstütztes Filament-/Werkzeugwechselverfahren erkannt.",
                 )
             )
-        machine_names = {
-            machine.record.name.casefold(),
-            machine.record.profile_id.casefold(),
-            str(effective.get("printer_settings_id", "")).casefold(),
-        }
+        validation_context = ProfileFilterContext(
+            source="validation",
+            machine_ids=(str(machine.record.path),),
+            printer_model=(
+                str(machine.effective_values.get("printer_model", "")).strip()
+                or None
+            ),
+            nozzle_diameters_mm=(
+                _positive_finite_numbers(source_values.get("nozzle_diameter"))
+                or _profile_nozzle_diameters(machine)
+            ),
+        )
         for item in (process, filament):
-            compatible = _as_sequence(item.effective_values.get("compatible_printers"))
-            if compatible and not any(
-                str(value).casefold() in machine_names for value in compatible
-            ):
+            incompatible = not self._profile_matches_machine_context(
+                item,
+                (machine,),
+                validation_context,
+                known_machines,
+            )
+            if incompatible:
                 issues.append(
                     ProfileHardExclusion(
                         ProfileExclusionCode.INCOMPATIBLE_PROFILE_COMBINATION,
@@ -1067,6 +1854,94 @@ def _profile_identifiers(resolved: ResolvedProfile) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
+def _machine_compatibility_identifiers(
+    resolved: ResolvedProfile,
+) -> tuple[str, ...]:
+    """Return exact machine identities carried by the resolved preset chain."""
+
+    values = list(_profile_identifiers(resolved))
+    for record in resolved.chain:
+        values.extend((record.profile_id, record.name))
+    for key in ("printer_model", "printer_variant"):
+        values.extend(
+            str(value)
+            for value in _as_sequence(resolved.effective_values.get(key))
+            if str(value).strip()
+        )
+    return tuple(
+        dict.fromkeys(value for value in values if str(value).strip())
+    )
+
+
+def _machine_scope_identifiers(
+    resolved: ResolvedProfile,
+) -> tuple[str, ...]:
+    """Return stable preset identities suitable for ``preset @ machine``."""
+
+    values = list(_profile_identifiers(resolved))
+    for record in resolved.chain:
+        values.extend((record.profile_id, record.name))
+    return tuple(
+        dict.fromkeys(value for value in values if str(value).strip())
+    )
+
+
+def _recognized_machine_scopes(
+    profile: ResolvedProfile,
+    known_machines: Sequence[ResolvedProfile],
+) -> frozenset[str]:
+    known = {
+        _normalise_profile_identity(value)
+        for machine in known_machines
+        for value in _machine_scope_identifiers(machine)
+    }
+    scopes = {
+        _normalise_profile_identity(scope)
+        for identifier in _profile_identifiers(profile)
+        for prefix, separator, scope in (str(identifier).rpartition("@"),)
+        if separator and prefix.strip() and scope.strip()
+    }
+    # Some vendor catalogues contain stale machine-bound filament entries
+    # whose referenced machine preset is no longer shipped. A conventional
+    # ``<diameter> nozzle`` suffix is still unambiguous machine-scope evidence,
+    # whereas abstract bases such as ``@acbase`` remain unrestricted.
+    structured = {
+        scope
+        for scope in scopes
+        if re.search(
+            r"\b\d+(?:[.,]\d+)?\s*(?:mm\s*)?nozzle\b",
+            scope,
+        )
+    }
+    return frozenset(
+        scope for scope in scopes if scope in known or scope in structured
+    )
+
+
+def _normalise_profile_identity(value: Any) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value).strip().strip('"'),
+    ).casefold()
+
+
+def _is_selectable_profile(resolved: ResolvedProfile) -> bool:
+    """Mirror the slicer's hidden abstract-preset behaviour conservatively."""
+
+    value = resolved.record.metadata.get("instantiation")
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().casefold() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
 def _record_matches_id(record: ProfileRecord, selected_id: str) -> bool:
     normalized = selected_id.casefold()
     return (
@@ -1082,6 +1957,102 @@ def _as_sequence(value: Any) -> tuple[Any, ...]:
     if isinstance(value, (list, tuple, set, frozenset)):
         return tuple(value)
     return (value,)
+
+
+def _text_values(value: Any) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in _as_sequence(value):
+        text = str(item).strip().strip('"')
+        folded = text.casefold()
+        if text and folded not in seen:
+            seen.add(folded)
+            result.append(text)
+    return tuple(result)
+
+
+def _positive_finite_numbers(value: Any) -> tuple[float, ...]:
+    result: list[float] = []
+    for item in _as_sequence(value):
+        for token in re.findall(
+            r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)",
+            str(item),
+        ):
+            number = float(token)
+            if math.isfinite(number) and number > 0 and not any(
+                math.isclose(number, existing, abs_tol=1e-6)
+                for existing in result
+            ):
+                result.append(number)
+    return tuple(result)
+
+
+def _profile_nozzle_diameters(
+    resolved: ResolvedProfile,
+) -> tuple[float, ...]:
+    values = _positive_finite_numbers(
+        resolved.effective_values.get("nozzle_diameter")
+    )
+    if values:
+        return values
+    values = _positive_finite_numbers(
+        resolved.effective_values.get("printer_variant")
+    )
+    if values:
+        return values
+    return _positive_finite_numbers(resolved.record.metadata.get("nozzle_diameter"))
+
+
+def _nozzle_values_compatible(
+    requested: Sequence[float],
+    candidate: Sequence[float],
+) -> bool:
+    if not requested or not candidate:
+        return True
+    return any(
+        math.isclose(left, right, rel_tol=1e-5, abs_tol=1e-4)
+        for left in requested
+        for right in candidate
+    )
+
+
+def _compatibility_values(value: Any) -> tuple[str, ...]:
+    values: list[str] = []
+    for item in _as_sequence(value):
+        values.extend(
+            part.strip().strip('"')
+            for part in re.split(r"[;\r\n]+", str(item))
+            if part.strip().strip('"')
+        )
+    return tuple(dict.fromkeys(values))
+
+
+def _safe_printer_note_pattern_match(
+    pattern: str,
+    printer_notes: str,
+) -> bool | None:
+    """Evaluate the common ``.*literal.*`` form without executing profile regex."""
+
+    value = pattern.strip()
+    if not value or len(value) > 256:
+        return None
+    if value.startswith("^"):
+        value = value[1:]
+    if value.endswith("$") and not value.endswith(r"\$"):
+        value = value[:-1]
+    while value.startswith(".*"):
+        value = value[2:]
+    while value.endswith(".*"):
+        value = value[:-2]
+    # Conditions shipped by the supported slicers predominantly wrap a
+    # literal marker in ``.*``. Anything more expressive remains unknown and
+    # is included conservatively instead of running untrusted regex syntax.
+    if re.search(r"[\[\]{}()+?*|]", value):
+        return None
+    literal = re.sub(r"\\([.^$\\/])", r"\1", value).strip()
+    if not literal:
+        return None
+    return literal.casefold() in printer_notes.casefold()
 
 
 def _normalise_value(value: Any) -> Any:

@@ -20,6 +20,7 @@ from cooling_tower.slicers.profile_matching import (
 )
 from cooling_tower.slicers.profile_models import (
     ProfileBundleMatch,
+    ProfileRole,
     ProfileValidationState,
     stable_json_fingerprint,
 )
@@ -169,16 +170,42 @@ class SlicerProfileProbeValidator(ProfileBundleValidator):
                 if key in values:
                     values[key] = _profile_json_value(value, values[key])
 
+        machine_name = _temporary_machine_identity(bundle)
+        if machine_name:
+            # Flattening a derived user machine removes its inheritance link.
+            # Orca-family CLIs then compare process/filament compatibility
+            # against the temporary machine preset name. Use the compatible
+            # inherited identity while retaining every effective user setting.
+            # Align only our isolated temporary copies; source profiles remain
+            # untouched, and the bundle already passed app-side validation.
+            for role in (ProfileKind.PROCESS.value, ProfileKind.FILAMENT.value):
+                values = role_values.get(role)
+                if values is not None:
+                    values["compatible_printers"] = [machine_name]
+
         temporary_records: list[ProfileRecord] = []
         for record in records:
             values = role_values[record.kind.value]
             values["inherits"] = ""
             values.setdefault("type", record.kind.value)
-            values.setdefault("from", "user")
+            # The temporary machine intentionally carries the compatible
+            # inherited system identity. Anycubic includes ``from`` in its CLI
+            # preset-compatibility model, so the flattened process/filament
+            # copies must use the same coherent origin. The files themselves
+            # still live exclusively in our isolated temporary directory.
+            values["from"] = "system"
             # Orca-family compatibility rules refer to the concrete preset
             # name. A synthetic display name would make an otherwise valid
             # process appear incompatible with its machine.
-            values["name"] = record.name
+            is_machine = (
+                profile.machine is not None
+                and record.path == profile.machine.path
+            )
+            values["name"] = machine_name if is_machine else record.name
+            if is_machine:
+                # Anycubic's CLI uses the setting ID as well as the display
+                # name when resolving compatible process presets.
+                values["printer_settings_id"] = machine_name
             destination = profile_root / f"{record.kind.value}.json"
             destination.write_text(
                 json.dumps(values, ensure_ascii=False, indent=2) + "\n",
@@ -255,3 +282,50 @@ def _profile_json_value(value: Any, existing: Any) -> Any:
     if isinstance(converted, list) and len(converted) == 1:
         return converted[0]
     return converted
+
+
+def _temporary_machine_identity(bundle: ProfileBundleMatch) -> str:
+    """Choose the inherited machine alias accepted by flattened CLI presets."""
+
+    profile = bundle.effective_profile
+    machine_record = profile.machine
+    if machine_record is None:
+        return ""
+    machine = next(
+        (
+            item
+            for item in bundle.resolved_profiles
+            if item.record.path == machine_record.path
+            and item.role
+            in {ProfileRole.MACHINE_MODEL, ProfileRole.MACHINE_VARIANT}
+        ),
+        None,
+    )
+    if machine is None:
+        return machine_record.name
+
+    compatible_targets: list[str] = []
+    for item in bundle.resolved_profiles:
+        if item is machine:
+            continue
+        value = item.effective_values.get("compatible_printers")
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        compatible_targets.extend(
+            str(candidate).strip().strip('"')
+            for candidate in values
+            if candidate is not None and str(candidate).strip().strip('"')
+        )
+    normalized_targets = {
+        _normalized_profile_name(value): value
+        for value in compatible_targets
+    }
+    for record in reversed(machine.chain):
+        for identity in (record.profile_id, record.name):
+            target = normalized_targets.get(_normalized_profile_name(identity))
+            if target is not None:
+                return target
+    return machine_record.name
+
+
+def _normalized_profile_name(value: Any) -> str:
+    return " ".join(str(value).strip().strip('"').casefold().split())

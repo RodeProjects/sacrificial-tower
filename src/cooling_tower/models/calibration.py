@@ -190,6 +190,8 @@ class CalibrationIteration:
     maximum_profile_change_mm: float
     elapsed_s: float
     evaluation: SliceEvaluation
+    maximum_slicer_result_change_s: float | None = None
+    slicer_result_stable: bool = False
     final_combined_gcode_path: Path | None = None
 
 
@@ -271,6 +273,10 @@ class CalibrationResult:
                     "deficient_layer_count": item.deficient_layer_count,
                     "total_remaining_deficit_s": item.total_remaining_deficit_s,
                     "maximum_profile_change_mm": item.maximum_profile_change_mm,
+                    "maximum_slicer_result_change_s": (
+                        item.maximum_slicer_result_change_s
+                    ),
+                    "slicer_result_stable": item.slicer_result_stable,
                     "elapsed_s": item.elapsed_s,
                     "final_combined_gcode_path": (
                         str(item.final_combined_gcode_path)

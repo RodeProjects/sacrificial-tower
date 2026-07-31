@@ -101,7 +101,8 @@ QLabel#sectionHeading {
     padding: 12px 2px 2px 2px;
 }
 
-QLabel#helpText, QLabel#calculatedHint, QLabel#predictionFootnote {
+QLabel#helpText, QLabel#calculatedHint, QLabel#predictionFootnote,
+QLabel#profileFilterLabel {
     color: #5a6b7d;
     background: #f7f9fb;
     border-radius: 5px;
@@ -115,6 +116,41 @@ QLabel#previewHintLabel, QLabel#previewDetailsLabel {
     border-radius: 5px;
     padding: 5px 7px;
     font-size: 9.5pt;
+}
+
+QLabel#previewQualityLabel {
+    color: #34495e;
+    background: #f5f8fb;
+    border: 1px solid #cbd7e3;
+    border-left: 4px solid #7890a8;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 9.3pt;
+}
+QLabel#previewQualityLabel[state="success"] {
+    color: #145c3c;
+    background: #edf8f2;
+    border-color: #92c9ad;
+    border-left-color: #23865a;
+}
+QLabel#previewQualityLabel[state="warning"],
+QLabel#previewQualityLabel[state="stale"] {
+    color: #774807;
+    background: #fff7e6;
+    border-color: #e0b96d;
+    border-left-color: #c68517;
+}
+QLabel#previewQualityLabel[state="error"] {
+    color: #84251f;
+    background: #fff1f0;
+    border-color: #e3a29d;
+    border-left-color: #bd3b32;
+}
+QLabel#previewQualityLabel[state="building"] {
+    color: #365d7a;
+    background: #eef5fa;
+    border-color: #adc5d7;
+    border-left-color: #4e7d9f;
 }
 
 /* ---------- Karten und aufklappbare Bereiche ---------- */
@@ -992,6 +1028,108 @@ QCheckBox:hover {
     color: #0f5d91;
     background: #f1f7fb;
     border-radius: 5px;
+}
+
+QCheckBox#validationBypassCheckBox,
+QCheckBox#validationBypassCheckBox:hover,
+QCheckBox#validationBypassCheckBox:pressed,
+QCheckBox#validationBypassCheckBox:focus {
+    color: #21384f;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 3px 6px;
+}
+
+QCheckBox#validationBypassCheckBox:hover {
+    color: #0f5d91;
+    background: #e5f0f8;
+}
+
+QCheckBox#validationBypassCheckBox:pressed {
+    color: #0f5d91;
+    background: #d8e8f3;
+}
+
+QCheckBox#validationBypassCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background: #ffffff;
+    border: 1px solid #71879a;
+    border-radius: 3px;
+}
+
+QCheckBox#validationBypassCheckBox::indicator:hover {
+    background: #ffffff;
+    border-color: #1769aa;
+}
+
+QCheckBox#validationBypassCheckBox::indicator:pressed {
+    background: #eef5fa;
+    border-color: #105784;
+}
+
+QCheckBox#validationBypassCheckBox::indicator:checked {
+    image: url("__CHECKBOX_CHECK_ICON__");
+    background: #1769aa;
+    border-color: #105784;
+}
+
+QCheckBox#validationBypassCheckBox::indicator:checked:hover {
+    background: #105b93;
+    border-color: #0d4c7e;
+}
+
+QCheckBox#validationBypassCheckBox::indicator:checked:pressed {
+    background: #0d4c7e;
+    border-color: #093c64;
+}
+
+QCheckBox#showAllProfilesCheckBox,
+QCheckBox#showAllProfilesCheckBox:hover,
+QCheckBox#showAllProfilesCheckBox:pressed,
+QCheckBox#showAllProfilesCheckBox:focus {
+    color: #21384f;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 3px 6px;
+}
+QCheckBox#showAllProfilesCheckBox:hover {
+    color: #0f5d91;
+    background: #e5f0f8;
+}
+QCheckBox#showAllProfilesCheckBox:pressed {
+    color: #0f5d91;
+    background: #d8e8f3;
+}
+QCheckBox#showAllProfilesCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background: #ffffff;
+    border: 1px solid #71879a;
+    border-radius: 3px;
+}
+QCheckBox#showAllProfilesCheckBox::indicator:hover {
+    background: #ffffff;
+    border-color: #1769aa;
+}
+QCheckBox#showAllProfilesCheckBox::indicator:pressed {
+    background: #eef5fa;
+    border-color: #105784;
+}
+QCheckBox#showAllProfilesCheckBox::indicator:checked {
+    image: url("__CHECKBOX_CHECK_ICON__");
+    background: #1769aa;
+    border-color: #105784;
+}
+QCheckBox#showAllProfilesCheckBox::indicator:checked:hover {
+    background: #105b93;
+    border-color: #0d4c7e;
+}
+QCheckBox#showAllProfilesCheckBox::indicator:checked:pressed {
+    background: #0d4c7e;
+    border-color: #093c64;
 }
 
 QCheckBox#automaticBaseWidth,
