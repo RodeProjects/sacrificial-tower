@@ -1944,11 +1944,20 @@ def _is_selectable_profile(resolved: ResolvedProfile) -> bool:
 
 def _record_matches_id(record: ProfileRecord, selected_id: str) -> bool:
     normalized = selected_id.casefold()
-    return (
+    if (
         record.profile_id.casefold() == normalized
         or record.name.casefold() == normalized
         or str(record.path).casefold() == normalized
-    )
+    ):
+        return True
+
+    selected_path = Path(selected_id).expanduser()
+    if not selected_path.is_absolute():
+        return False
+    try:
+        return record.path.samefile(selected_path)
+    except (OSError, ValueError):
+        return False
 
 
 def _as_sequence(value: Any) -> tuple[Any, ...]:

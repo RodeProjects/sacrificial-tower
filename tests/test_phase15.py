@@ -1153,11 +1153,14 @@ class Phase15ProfileTests(unittest.TestCase):
             },
         )
 
+        aliased_second_machine = (
+            second_machine.parent / ".." / "machine" / second_machine.name
+        )
         result = self.service().match(
             self._gcode(omit=("fan_min_speed", "fan_max_speed")),
             self.installation,
             self.adapter,
-            selected_profile_ids={"machine": str(second_machine)},
+            selected_profile_ids={"machine": str(aliased_second_machine)},
             include_all_profiles=True,
         )
 
