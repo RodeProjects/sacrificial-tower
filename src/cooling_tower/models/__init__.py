@@ -26,6 +26,14 @@ from cooling_tower.models.gcode_metadata import (
     build_profile_fingerprint,
 )
 from cooling_tower.models.layer import LayerData
+from cooling_tower.models.source import (
+    GCodeOrigin,
+    PreSliceProvenance,
+    PreparedAnalysisSource,
+    SourceArtifact,
+    SourceChangedError,
+    SourceKind,
+)
 from cooling_tower.models.timing import (
     LayerTimingState,
     TimeCapacityIssue,
@@ -76,6 +84,12 @@ __all__ = [
     "UnsupportedMetadataSchemaError",
     "build_profile_fingerprint",
     "LayerData",
+    "GCodeOrigin",
+    "PreSliceProvenance",
+    "PreparedAnalysisSource",
+    "SourceArtifact",
+    "SourceChangedError",
+    "SourceKind",
     "LayerTimingState",
     "TimeCapacityIssue",
     "TimingConfidenceState",

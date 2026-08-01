@@ -24,6 +24,12 @@ from cooling_tower.persistence.analysis_cache import (
     PersistentGCodeAnalysisCache,
     UnsupportedPersistentAnalysisCacheError,
 )
+from cooling_tower.persistence.preslice_cache import (
+    DEFAULT_MAXIMUM_PRESLICE_CACHE_ENTRIES,
+    PRESLICE_CACHE_SCHEMA_VERSION,
+    PreSliceCache,
+    PreSliceCacheEntry,
+)
 
 __all__ = [
     "ConcurrentDocumentChangeError",
@@ -44,4 +50,8 @@ __all__ = [
     "PersistentAnalysisCacheError",
     "PersistentGCodeAnalysisCache",
     "UnsupportedPersistentAnalysisCacheError",
+    "DEFAULT_MAXIMUM_PRESLICE_CACHE_ENTRIES",
+    "PRESLICE_CACHE_SCHEMA_VERSION",
+    "PreSliceCache",
+    "PreSliceCacheEntry",
 ]

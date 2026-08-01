@@ -21,7 +21,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui.main_window import MainWindow
-from cooling_tower.models import SlicerFamily
+from cooling_tower.gui.workflow_controller import WorkflowStage
+from cooling_tower.models import SourceArtifact, SlicerFamily
 from cooling_tower.services import GCodeAnalysisService
 from cooling_tower.slicers import (
     AnycubicSlicerNextAdapter,
@@ -637,6 +638,8 @@ class Phase15ProfileTests(unittest.TestCase):
             profile_service=matching_service,
         )
         window.analysis_snapshot = snapshot
+        window.source_artifact = SourceArtifact.capture(snapshot.gcode_path)
+        window.workflow._set_stage(WorkflowStage.MATCHING_PROFILES, force=True)
         window.slicer_discovery_result = discovery
         window._populating_slicer_combo = True
         window.slicer_combo.addItem(
@@ -646,6 +649,17 @@ class Phase15ProfileTests(unittest.TestCase):
         window._populating_slicer_combo = False
         window._profile_request_id = 3
         window._on_profile_matching_succeeded(3, result)
+        self.assertTrue(window.profile_match_result.requires_confirmation)
+        self.assertFalse(window.profile_match_result.user_confirmed)
+        self.assertFalse(window.profile_confirm_button.isHidden())
+        self.assertEqual(
+            window.profile_confirm_button.text(),
+            "Einstellungen bestätigen",
+        )
+        self.assertIs(
+            window.workflow.stage,
+            WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION,
+        )
         self.assertGreater(window.machine_profile_combo.count(), 0)
         self.assertGreater(window.process_profile_combo.count(), 0)
         self.assertGreater(window.filament_profile_combo.count(), 0)

@@ -205,8 +205,42 @@ class DistributionAndPathTests(unittest.TestCase):
         self.assertIsNotNone(store.last_migration_backup)
         self.assertEqual(
             json.loads(path.read_text(encoding="utf-8"))["schema_version"],
-            1,
+            2,
         )
+        self.assertEqual(loaded.profile_selections, {})
+        assert store.last_migration_backup is not None
+        self.assertEqual(
+            json.loads(store.last_migration_backup.read_text(encoding="utf-8")),
+            {
+                "confirmed_paths": [str(executable)],
+                "last_selected_key": "adapter|path",
+            },
+        )
+
+        direct_path = self.root / "slicer_settings_v1.json"
+        direct_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "confirmed_paths": [str(executable)],
+                    "last_selected_key": "adapter|path",
+                }
+            ),
+            encoding="utf-8",
+        )
+        direct_store = SlicerPreferenceStore(direct_path)
+        direct = direct_store.load()
+        self.assertEqual(direct.profile_selections, {})
+        self.assertEqual(
+            json.loads(direct_path.read_text(encoding="utf-8")),
+            {
+                "schema_version": 2,
+                "confirmed_paths": [str(executable)],
+                "last_selected_key": "adapter|path",
+                "profile_selections": {},
+            },
+        )
+        self.assertIsNotNone(direct_store.last_migration_backup)
 
         corrupt_path = self.root / "corrupt_slicer_settings.json"
         corrupt_path.write_bytes(b"not json")
@@ -215,6 +249,18 @@ class DistributionAndPathTests(unittest.TestCase):
         with self.assertRaises(VersionedDocumentWriteBlockedError):
             corrupt_store.confirm_path(executable)
         self.assertEqual(corrupt_path.read_bytes(), b"not json")
+
+        future_path = self.root / "future_slicer_settings.json"
+        future_bytes = (
+            b'{"schema_version": 99, "profile_selections": '
+            b'{"newer|slicer": {}}}'
+        )
+        future_path.write_bytes(future_bytes)
+        future_store = SlicerPreferenceStore(future_path)
+        self.assertEqual(future_store.load().profile_selections, {})
+        with self.assertRaises(VersionedDocumentWriteBlockedError):
+            future_store.confirm_path(executable)
+        self.assertEqual(future_path.read_bytes(), future_bytes)
 
     def test_profile_mappings_migrate_and_block_future_schema_writes(self) -> None:
         path = self.root / "profile_mappings.json"

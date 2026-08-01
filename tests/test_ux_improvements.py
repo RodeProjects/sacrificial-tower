@@ -194,6 +194,63 @@ class UxImprovementTests(unittest.TestCase):
         )
         window.close()
 
+    def test_02a_stl_rejected_and_ready_action_states_are_complete(self) -> None:
+        source = (
+            PROJECT_ROOT
+            / "tests"
+            / "fixtures"
+            / "stl"
+            / "test_model_manifold.stl"
+        )
+        drop_zone = GCodeDropZone()
+        reload_requests: list[bool] = []
+        remove_requests: list[bool] = []
+        drop_zone.reload_requested.connect(lambda: reload_requests.append(True))
+        drop_zone.remove_requested.connect(lambda: remove_requests.append(True))
+
+        self.assertTrue(drop_zone.set_file(source))
+        drop_zone.set_analysis_state("rejected")
+        self.app.processEvents()
+        self.assertFalse(drop_zone.prompt_label.isHidden())
+        self.assertTrue(drop_zone.info_widget.isHidden())
+        self.assertFalse(drop_zone.browse_button.isHidden())
+        self.assertFalse(drop_zone.reload_button.isHidden())
+        self.assertFalse(drop_zone.remove_button.isHidden())
+        self.assertTrue(drop_zone.remove_button.isEnabled())
+        self.assertEqual(drop_zone.browse_button.text(), "Andere Datei auswählen")
+        self.assertEqual(drop_zone.reload_button.text(), "STL neu einlesen")
+        self.assertEqual(drop_zone.remove_button.text(), "STL entfernen")
+        reload_column = drop_zone.actions_layout.getItemPosition(
+            drop_zone.actions_layout.indexOf(drop_zone.reload_button)
+        )[1]
+        remove_column = drop_zone.actions_layout.getItemPosition(
+            drop_zone.actions_layout.indexOf(drop_zone.remove_button)
+        )[1]
+        self.assertGreater(remove_column, reload_column)
+        drop_zone.reload_button.click()
+        self.assertEqual(reload_requests, [True])
+
+        drop_zone.set_analysis_state("ready")
+        self.app.processEvents()
+        self.assertFalse(drop_zone.info_widget.isHidden())
+        self.assertFalse(drop_zone.browse_button.isHidden())
+        self.assertFalse(drop_zone.reload_button.isHidden())
+        self.assertFalse(drop_zone.remove_button.isHidden())
+        self.assertEqual(drop_zone.remove_button.text(), "STL entfernen")
+        drop_zone.remove_button.click()
+        self.assertEqual(remove_requests, [True])
+
+        drop_zone.set_analysis_state("preslice_failed")
+        self.app.processEvents()
+        self.assertFalse(drop_zone.info_widget.isHidden())
+        self.assertTrue(drop_zone.browse_button.isEnabled())
+        self.assertTrue(drop_zone.reload_button.isEnabled())
+        self.assertTrue(drop_zone.remove_button.isEnabled())
+        self.assertFalse(drop_zone.browse_button.isHidden())
+        self.assertFalse(drop_zone.reload_button.isHidden())
+        self.assertFalse(drop_zone.remove_button.isHidden())
+        drop_zone.close()
+
     def test_03_reconstructed_configuration_starts_collapsed_and_fits_content(self) -> None:
         window = self.window()
         window.show()

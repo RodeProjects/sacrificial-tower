@@ -1,7 +1,11 @@
 # Kühlturm-Generator
 
-Die Anwendung analysiert die Layerzeiten eines Referenz-G-Codes und erzeugt
-einen hohlen, wasserdichten Kühlturm als binäre STL. Außen- und Innenkontur
+Die Anwendung nimmt über einen gemeinsamen Dateibereich wahlweise eine
+`.gcode`- oder `.stl`-Datei entgegen. Vorhandener G-Code wird direkt
+analysiert; eine gültige STL wird nach ausdrücklicher Slicer- und
+Profilbestätigung isoliert vorgeslict. Beide Wege verwenden anschließend
+dieselbe Layerzeit-, Prognose-, Vorschau- und Kühlturmpipeline. Der erzeugte
+hohle, wasserdichte Kühlturm wird als binäre STL exportiert. Außen- und Innenkontur
 folgen einem adaptiv abgetasteten, C²-stetigen Quintic-Spline. Zunächst wächst
 der Außenradius bei gleichbleibender Mindestwand; erst am regulären
 Maximalradius wird die Wand fließend dicker. Hohlraum, Winkelgrenzen,
@@ -34,9 +38,25 @@ gestartet werden:
 python main.py
 ```
 
-In der Oberfläche eine `.gcode`-Datei ablegen oder auswählen, Ziel-Layerzeit
-und Geometrie einstellen, die Vorschau erstellen und den geprüften Kühlturm
-anschließend exportieren.
+In der Oberfläche eine `.gcode`- oder `.stl`-Datei ablegen oder auswählen. Der
+Typ wird automatisch erkannt und anschließend inhaltlich geprüft. Danach
+Slicer-, Drucker-, Prozess- und Filamentzuordnung kontrollieren und ausdrücklich
+bestätigen, Ziel-Layerzeit und Geometrie einstellen, die Vorschau erstellen und
+den geprüften Kühlturm exportieren. Nur der STL-Weg führt dabei einen
+Pre-Slice aus; ein vorhandener G-Code wird niemals erneut geslict.
+
+Eine STL wird nur freigegeben, wenn jede enthaltene Komponente ein
+geschlossenes, konsistent ausgerichtetes Volumen ohne degenerierte oder
+doppelte Flächen und ohne nicht-manifold Kanten bildet. Kritische, tiefe oder
+komponentenübergreifende Flächenüberschneidungen blockieren ebenfalls. Eine
+begrenzte Anzahl ausschließlich flacher, lokaler Überschneidungen innerhalb
+einer ansonsten eindeutigen geschlossenen Komponente darf dagegen mit einem
+sichtbaren Geometriehinweis fortgesetzt werden; der nachfolgende Pre-Slice
+muss weiterhin einen belastbaren G-Code erzeugen. Die Anwendung verändert oder
+repariert das Modell nicht. Fehlerhafte Modelle müssen im Slicer, CAD- oder
+Modellierungsprogramm korrigiert und neu exportiert werden. Der vollständige
+Quellenablauf, die Sicherheitsgrenzen und Cache-Invalidierung sind in
+[`docs/source_workflow.md`](docs/source_workflow.md) dokumentiert.
 
 Die gewünschte Layerzeit wird in der GUI im Abschnitt
 `2. Zielzeit und Berechnung` unter `Ziel-Layerzeit [s]` eingestellt.
@@ -72,8 +92,11 @@ Die Paketverantwortungen, der einheitliche Thread-Lebenszyklus und die Regeln
 für künftige Erweiterungen sind in
 [`docs/architecture.md`](docs/architecture.md) beschrieben.
 
-Nach der Auswahl wird der G-Code sofort im Hintergrund analysiert. Änderungen
-der Ziel-Layerzeit werden anschließend ohne erneutes Einlesen live bewertet.
+Nach der Auswahl wird die Quelle sofort in einem abbrechbaren Hintergrundjob
+geprüft. G-Code wird anschließend analysiert. Eine STL wird zuerst streng
+geometrisch validiert und erst nach bestätigter Profilzuordnung in einem
+programmeigenen temporären Verzeichnis geslict. Änderungen der Ziel-Layerzeit
+werden danach ohne erneutes Einlesen oder Slicen live bewertet.
 Wenn kein Layer die Zielzeit unterschreitet, zeigt die Oberfläche
 `Kein Kühlturm erforderlich` an und erzeugt weder eine STL noch einen leeren
 Laufordner. Wird ein Turm benötigt, endet er beim letzten Layer mit Zeitdefizit
@@ -94,7 +117,7 @@ Der allgemeine Button `Alle Standardwerte` setzt weiterhin die gesamte
 Oberfläche zurück.
 
 Der Standfuß ist standardmäßig mindestens 20 mm breit und wird ansonsten mit
-dem Faktor `0,2 × vollständige G-Code-Objekthöhe` berechnet. Alternativ lässt sich
+dem Faktor `0,2 × ermittelte Modellhöhe` berechnet. Alternativ lässt sich
 ein manueller Außendurchmesser ab 20 mm wählen. Aufweitungs- und
 Verjüngungswinkel werden getrennt relativ zur vertikalen Z-Achse eingestellt;
 beide Standardwerte betragen 50°.
@@ -218,6 +241,12 @@ extern erkannte Profiländerung löst eine neue Zuordnung aus. Jeder erfolgreich
 GUI-Lauf schreibt den technischen Bericht `analysis/profile_match.json`; die
 Hauptoberfläche zeigt weiterhin nur neutrale, tatsächlich belegte Angaben.
 
+Die zuletzt ausdrücklich ausgewählten beziehungsweise bestätigten Maschinen-,
+Prozess- und Filamentprofile werden getrennt je Slicerinstallation
+schema-versioniert gespeichert und beim nächsten Start wieder vorausgewählt.
+Nicht mehr vorhandene oder inzwischen inkompatible Presets fallen kontrolliert
+auf die aktuell ermittelte Standardzuordnung zurück.
+
 ## Phase 16: slicerbasierte Kalibrierung
 
 Die analytische Turmform kann jetzt über `GenerationService.calibrate(...)`
@@ -250,10 +279,10 @@ sind gleich hoch, unabhängig einklappbare Karten behalten ihre natürliche
 Höhe und alle Inhalte beginnen oben. Beschriftungen bleiben links, während die
 gleich großen Editoren und Reset-Schaltflächen rechts ausgerichtet sind.
 
-Der erste erfolgreiche Abschluss der G-Code-Analyse und Slicererkennung
+Der erste erfolgreiche Abschluss der Quellenanalyse und Slicererkennung
 animiert Erfolgszustand und automatisches Einklappen für 1.000 ms. Alle
 weiteren Animationen verwenden 250 ms und eine spätere manuelle Kartenwahl
-wird nicht überschrieben. Referenz-G-Code kann erneut eingelesen werden, die
+wird nicht überschrieben. Die Quelle kann erneut eingelesen werden, die
 eingebettete Konfiguration liegt geschlossen im Slicer-Bereich und automatisch
 erkannte Slicer werden direkt neben dem Titel „Slicer“ gekennzeichnet.
 
@@ -262,13 +291,16 @@ Trennung zum fixen Fußbereich und die invertierte Rotation per linker
 Maustaste vervollständigen die Überarbeitung. Hinweise werden als kompakte,
 fenstergebundene Popover dargestellt und können weder rechts noch links aus
 dem jeweiligen Fenster ragen. Icon-Hinweise erscheinen ausschließlich während
-des Hoverns. Der leere G-Code-Bereich blendet Dateidaten und Folgeaktionen aus,
+des Hoverns. Der leere Quellenbereich blendet Dateidaten und Folgeaktionen aus,
 behält aber seine Höhe; während der Analyse erscheinen die Dateidaten und nach
 erfolgreichem Abschluss zusätzlich die Aktionen zum Neueinlesen und Entfernen.
-Der Startzustand erklärt außerdem den Weg vom Slicer-Objekt zum importierbaren
-G-Code. Das anfängliche Pfeilsymbol neben „Referenz-G-Code“ wird mit eigener
+Der Startzustand erklärt beide unterstützten Eingabewege. Das anfängliche
+Pfeilsymbol neben „STL oder G-Code“ wird mit eigener
 Renderbreite und deutlich größerer Schrift als die nachfolgenden Statussymbole
-dargestellt.
+dargestellt. Nach einer abgelehnten STL bleibt die Ablagefläche zusammen mit
+Dateiauswahl, Neueinlesen und Entfernen sichtbar. Eine neu abgelegte Datei
+ersetzt die abgelehnte Quelle und wird unmittelbar vollständig neu geprüft;
+Entfernen stellt die leere Startübersicht wieder her.
 
 Die einklappbare Prognose besitzt einen leichten lila Kartenhintergrund sowie
 getrennte Spalten für Bezeichnung, Wert und Hinweise. Ihr kompakter gelber
@@ -278,11 +310,13 @@ Solange nur analytisch geschätzt wird, warnt sie vor der geringen Genauigkeit
 und bietet bei einem verwendbaren Slicer eine einmalige, stets auf fünf
 Durchläufe festgelegte Slicer-Schätzung an. Hinweistext und lila Aktionsbutton
 bilden dabei zwei bündige Zeilen derselben Box. Analytische Schätzungen sind
-orange, Slicer-Schätzungen lila gekennzeichnet. Das Vorschaufenster startet in einer
-  um genau einen Mausradschritt herausgezoomten Seitenansicht, enthält einen eigenen Export-Button, wird
-  vor dem Anzeigen zuverlässig normalisiert und nach Möglichkeit rechts neben
-  dem Hauptfenster angeordnet. Exporthinweise wachsen nur bis zur tatsächlich
-  benötigten Texthöhe.
+orange, Slicer-Schätzungen lila gekennzeichnet. Das Vorschaufenster startet in
+einer um genau einen Mausradschritt herausgezoomten Seitenansicht. Dabei steht
+das Originalobjekt immer links und der erzeugte Kühlturm rechts; die Legende
+nennt zusätzlich die Breite und Tiefe der Druckplatte. Das Fenster enthält
+einen eigenen Export-Button, wird vor dem Anzeigen zuverlässig normalisiert und
+nach Möglichkeit rechts neben dem Hauptfenster angeordnet. Exporthinweise
+wachsen nur bis zur tatsächlich benötigten Texthöhe.
 
 Abmessungen, Standfuß und Überhänge sind in der gemeinsamen Karte
 „Turmgeometrie“ fachlich getrennt. In der breiten Ansicht stehen die
@@ -358,6 +392,12 @@ python -m unittest tests.test_phase14 -v
 python -m unittest tests.test_phase15 -v
 python -m unittest tests.test_phase18 -v
 python -m unittest tests.test_acceleration_timing -v
+python -m unittest tests.test_source_recognition -v
+python -m unittest tests.test_stl_validation -v
+python -m unittest tests.test_stl_profile_matching -v
+python -m unittest tests.test_source_preslice -v
+python -m unittest tests.test_preslice_cache -v
+python -m unittest tests.test_source_workflow -v
 ```
 
 Der echte lokale Anycubic-Integrationslauf ist bewusst opt-in, damit normale
@@ -367,7 +407,15 @@ Regressionstests keine externen Programme starten:
 $env:COOLING_TOWER_RUN_REAL_SLICER_TESTS="1"
 python -m unittest tests.test_phase14.Phase14RealAnycubicIntegrationTest -v
 python -m unittest tests.test_phase15.Phase15RealAnycubicProfileTest -v
+python -m unittest tests.test_real_source_preslice.RealSourcePreSliceAnycubicTests -v
 ```
+
+Der neue Quellenlauf prüft dabei einen erfolgreichen STL-Pre-Slice, den
+erneuten Bezug aus dem validierten Cache, unveränderte Quell- und Profildateien
+sowie einen kontrollierten Abbruch ohne Teilergebnis. Ein zusätzlicher realer
+Test führt die bereitgestellte Manifold-STL mit den tatsächlich in Anycubic
+Slicer Next angelegten Benutzerprofilen durch. Fehlende CLI-Typinformationen
+dieser GUI-Presets werden nur in isolierten temporären Kopien ergänzt.
 
 ## Legacy-Ausgaben migrieren
 

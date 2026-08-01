@@ -871,6 +871,20 @@ QFrame#gcodeDropZone[loaded="true"] {
     border: 1px solid #bfd2e2;
 }
 
+QLabel#stlValidationMessage[severity="error"] {
+    background: #fff2f0;
+    border: 1px solid #f0b8b2;
+    border-radius: 6px;
+    color: #8f2118;
+}
+
+QLabel#stlValidationMessage[severity="warning"] {
+    background: #fff8e8;
+    border: 1px solid #e7c875;
+    border-radius: 6px;
+    color: #76520b;
+}
+
 QLabel#gcodeInfoCaption {
     color: #647586;
     font-weight: 600;

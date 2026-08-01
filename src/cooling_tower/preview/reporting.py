@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from cooling_tower.preview.models import OutputMode, PreviewRequest, PreviewResult
 
 
-TECHNICAL_REPORT_SCHEMA_VERSION = 1
+TECHNICAL_REPORT_SCHEMA_VERSION = 2
 
 _STATE_LABELS = {
     "disabled": "Slicer-Durchläufe wurden vom Benutzer deaktiviert",
@@ -260,6 +260,87 @@ def _profile_details(request: PreviewRequest) -> dict[str, Any]:
     }
 
 
+def _source_provenance(request: PreviewRequest) -> dict[str, Any]:
+    artifact = request.source_artifact
+    prepared = request.prepared_analysis_source
+    profile = request.effective_profile
+    installation = getattr(profile, "installation", None)
+    preslice = (
+        prepared.preslice_provenance
+        if prepared is not None
+        else None
+    )
+    return {
+        "original_input_kind": (
+            artifact.source_kind.value if artifact is not None else "gcode"
+        ),
+        "original_file": (
+            str(artifact.original_path)
+            if artifact is not None
+            else str(request.source_path)
+        ),
+        "original_size_bytes": (
+            artifact.original_size if artifact is not None else None
+        ),
+        "original_modified_ns": (
+            artifact.original_mtime_ns if artifact is not None else None
+        ),
+        "original_sha256": (
+            artifact.original_sha256
+            if artifact is not None
+            else getattr(request.snapshot, "content_sha256", None)
+        ),
+        "analysis_gcode": str(request.source_path),
+        "analysis_gcode_origin": (
+            prepared.gcode_origin.value if prepared is not None else "user_supplied"
+        ),
+        "analysis_gcode_sha256": (
+            prepared.gcode_sha256
+            if prepared is not None
+            else getattr(request.snapshot, "content_sha256", None)
+        ),
+        "slicer": {
+            "identity_key": request.slicer_identity_key,
+            "adapter_id": getattr(installation, "adapter_id", None),
+            "product_name": getattr(installation, "product_name", None),
+            "version": (
+                getattr(installation, "version", None)
+                or (prepared.slicer_version if prepared is not None else None)
+            ),
+            "gcode_identity": (
+                _value(prepared.slicer_identity.to_dict())
+                if prepared is not None
+                and prepared.slicer_identity is not None
+                else None
+            ),
+        },
+        "confirmed_profiles": {
+            "machine": getattr(getattr(profile, "machine", None), "profile_id", None),
+            "process": getattr(getattr(profile, "process", None), "profile_id", None),
+            "filaments": [
+                getattr(item, "profile_id", None)
+                for item in getattr(profile, "filaments", ())
+            ],
+            "effective_profile_fingerprint": (
+                prepared.effective_profile_fingerprint
+                if prepared is not None
+                else request.profile_fingerprint
+            ),
+        },
+        "preslice": (
+            {
+                "created_at_utc": preslice.created_at_utc,
+                "duration_s": preslice.duration_s,
+                "cache_key": preslice.cache_key,
+                "cache_hit": preslice.cache_hit,
+                "adapter_version": preslice.adapter_version,
+            }
+            if preslice is not None
+            else None
+        ),
+    }
+
+
 def build_technical_report(
     preview: PreviewResult,
     request: PreviewRequest,
@@ -296,6 +377,7 @@ def build_technical_report(
         "output_mode": preview.output_mode.value,
         "source_gcode": str(request.source_path),
         "source_sha256": preview.source_sha256,
+        "source_provenance": _source_provenance(request),
         "output_path": str(output_path.resolve()),
         "output_sha256": output_sha256,
         "calibrated": preview.calibrated,
@@ -425,6 +507,17 @@ def build_user_report(
         f"Erstellt: {created_at.astimezone().strftime('%d.%m.%Y %H:%M:%S %Z')}",
         f"Ausgabe: {output_path}",
         f"Modus: {preview.output_mode.value.upper()}",
+        "Ursprüngliche Eingabe: "
+        f"{request.output_source_path.name} "
+        f"({request.source_artifact.source_kind.value.upper() if request.source_artifact else 'GCODE'})",
+        "Analysegrundlage: "
+        + (
+            "automatisch erzeugter Pre-Slice-G-Code"
+            if request.prepared_analysis_source is not None
+            and request.prepared_analysis_source.gcode_origin.value
+            == "generated_preslice"
+            else "vom Benutzer bereitgestellter G-Code"
+        ),
         "",
     ]
     if preview.calibrated:

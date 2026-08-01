@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from cooling_tower.models.gcode_metadata import SlicerFamily, SlicerIdentity
 
 
-SLICER_PREFERENCES_SCHEMA_VERSION = 1
+SLICER_PREFERENCES_SCHEMA_VERSION = 2
 
 
 class SlicerCapability(str, Enum):
@@ -97,6 +97,18 @@ class SlicerInstallation:
             and self.support_level is SlicerSupportLevel.FULL
             and SlicerCapability.CLI_SLICE in self.capabilities
         )
+
+    @property
+    def automatically_discovered(self) -> bool:
+        """Whether this installation was found without a user-owned choice."""
+
+        return self.discovery_source in {
+            SlicerDiscoverySource.REGISTRY_SYSTEM,
+            SlicerDiscoverySource.REGISTRY_USER,
+            SlicerDiscoverySource.APP_PATHS,
+            SlicerDiscoverySource.KNOWN_PATH,
+            SlicerDiscoverySource.START_MENU,
+        }
 
     @property
     def display_name(self) -> str:
@@ -256,3 +268,46 @@ class SlicerPreferences:
     schema_version: int = SLICER_PREFERENCES_SCHEMA_VERSION
     confirmed_paths: tuple[Path, ...] = ()
     last_selected_key: str | None = None
+    profile_selections: Mapping[str, SlicerProfileSelections] = field(
+        default_factory=dict
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileSelectionReference:
+    """Stable and path-specific identity of one user-selected preset."""
+
+    profile_id: str
+    path: Path | None = None
+
+    def __post_init__(self) -> None:
+        profile_id = str(self.profile_id).strip()
+        if not profile_id:
+            raise ValueError("A remembered profile requires a stable ID.")
+        object.__setattr__(self, "profile_id", profile_id)
+        if self.path is not None:
+            object.__setattr__(
+                self,
+                "path",
+                Path(self.path).expanduser().resolve(),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class SlicerProfileSelections:
+    """Last explicit machine, process and filament choices for one slicer."""
+
+    machine: ProfileSelectionReference | None = None
+    process: ProfileSelectionReference | None = None
+    filament: ProfileSelectionReference | None = None
+
+    def as_mapping(self) -> dict[str, ProfileSelectionReference]:
+        return {
+            role: reference
+            for role, reference in (
+                ("machine", self.machine),
+                ("process", self.process),
+                ("filament", self.filament),
+            )
+            if reference is not None
+        }

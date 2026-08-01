@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.slicers.errors import SlicerSourceMutationError
@@ -25,8 +27,16 @@ def fingerprint_profile_sources(
 ) -> tuple[ProfileSourceFingerprint, ...]:
     """Hash every source profile without opening it for writing."""
 
+    return fingerprint_profile_paths(profile.source_paths)
+
+
+def fingerprint_profile_paths(
+    paths: Iterable[Path],
+) -> tuple[ProfileSourceFingerprint, ...]:
+    """Hash a complete resolved preset chain without changing any source."""
+
     fingerprints: list[ProfileSourceFingerprint] = []
-    for path in dict.fromkeys(item.resolve() for item in profile.source_paths):
+    for path in dict.fromkeys(Path(item).resolve() for item in paths):
         try:
             stat = path.stat()
             digest = sha256_file(path)
@@ -43,6 +53,34 @@ def fingerprint_profile_sources(
             )
         )
     return tuple(fingerprints)
+
+
+def profile_sources_fingerprint(profile: EffectiveProfile) -> str:
+    """Return one stable digest binding every slicer-owned profile source."""
+
+    return profile_paths_fingerprint(profile.source_paths)
+
+
+def profile_paths_fingerprint(paths: Iterable[Path]) -> str:
+    """Return one digest for all selected and inherited profile sources."""
+
+    payload = [
+        {
+            "path": str(item.path).casefold(),
+            "size": item.size,
+            "modified_ns": item.modified_ns,
+            "sha256": item.sha256,
+        }
+        for item in fingerprint_profile_paths(paths)
+    ]
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def assert_profile_sources_unchanged(
@@ -76,7 +114,15 @@ def assert_profile_sources_unchanged(
 def protect_profile_sources(profile: EffectiveProfile) -> Iterator[None]:
     """Guard original slicer profiles across an external slicer invocation."""
 
-    fingerprints = fingerprint_profile_sources(profile)
+    with protect_profile_paths(profile.source_paths):
+        yield
+
+
+@contextmanager
+def protect_profile_paths(paths: Iterable[Path]) -> Iterator[None]:
+    """Guard selected presets and every inherited source as one unit."""
+
+    fingerprints = fingerprint_profile_paths(paths)
     try:
         yield
     finally:

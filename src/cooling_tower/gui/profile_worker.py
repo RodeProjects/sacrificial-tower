@@ -12,8 +12,10 @@ from cooling_tower.diagnostic_events import (
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.models import GCodeAnalysisSnapshot
 from cooling_tower.slicers import (
+    ProfileMatchingContext,
     ProfileMatchResult,
     ProfileMatchingService,
+    ProfileSelectionReference,
     SlicerAdapter,
     SlicerInstallation,
 )
@@ -31,11 +33,13 @@ class ProfileMatchingWorker(CancelableWorker):
         self,
         request_id: int,
         service: ProfileMatchingService,
-        snapshot: GCodeAnalysisSnapshot,
+        source: GCodeAnalysisSnapshot | ProfileMatchingContext,
         installation: SlicerInstallation,
         adapter: SlicerAdapter,
         *,
-        selected_profile_ids: Mapping[str, str] | None = None,
+        selected_profile_ids: Mapping[
+            str, str | ProfileSelectionReference
+        ] | None = None,
         force_inventory: bool = False,
         include_all_profiles: bool = False,
         stale_check_result: ProfileMatchResult | None = None,
@@ -43,7 +47,12 @@ class ProfileMatchingWorker(CancelableWorker):
         super().__init__()
         self.request_id = request_id
         self.service = service
-        self.snapshot = snapshot
+        self.source = source
+        self.snapshot = (
+            source.gcode_snapshot
+            if isinstance(source, ProfileMatchingContext)
+            else source
+        )
         self.installation = installation
         self.adapter = adapter
         self.selected_profile_ids = dict(selected_profile_ids or {})
@@ -62,6 +71,11 @@ class ProfileMatchingWorker(CancelableWorker):
                 selected_profile_role_count=len(self.selected_profile_ids),
                 forced_inventory=self.force_inventory,
                 include_all_profiles=self.include_all_profiles,
+                source_kind=(
+                    self.source.source_kind.value
+                    if isinstance(self.source, ProfileMatchingContext)
+                    else "gcode"
+                ),
                 stale_check=self.stale_check_result is not None,
             )
             try:
@@ -95,7 +109,7 @@ class ProfileMatchingWorker(CancelableWorker):
                         self._diagnose_cancelled("during_stale_check")
                     return
                 result = self.service.match(
-                    self.snapshot,
+                    self.source,
                     self.installation,
                     self.adapter,
                     selected_profile_ids=self.selected_profile_ids,

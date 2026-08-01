@@ -19,6 +19,8 @@ from cooling_tower.slicers.discovery import (
 )
 from cooling_tower.slicers.errors import SlicerError, UnsupportedSlicerExecutableError
 from cooling_tower.slicers.models import (
+    ProfileRecord,
+    ProfileSelectionReference,
     SlicerCandidate,
     SlicerDiscoveryResult,
     SlicerDiscoverySource,
@@ -231,6 +233,27 @@ class SlicerDiscoveryService:
     def remember_selection(self, identity_key: str | None) -> None:
         if self.preference_store is not None:
             self.preference_store.set_last_selected(identity_key)
+
+    def remember_profile_selection(
+        self,
+        identity_key: str,
+        role: str,
+        profile: ProfileRecord,
+    ) -> None:
+        if self.preference_store is not None:
+            self.preference_store.set_profile_selection(
+                identity_key,
+                role,
+                profile,
+            )
+
+    def remembered_profile_selections(
+        self,
+        identity_key: str,
+    ) -> dict[str, ProfileSelectionReference]:
+        if self.preference_store is None:
+            return {}
+        return self.preference_store.profile_selections_for(identity_key)
 
     def adapter_for(self, installation: SlicerInstallation) -> SlicerAdapter:
         for adapter in self.adapters:

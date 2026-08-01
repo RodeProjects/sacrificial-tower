@@ -249,21 +249,36 @@ class Phase18UiTests(unittest.TestCase):
             capabilities=frozenset(),
             discovery_source=SlicerDiscoverySource.KNOWN_PATH,
         )
-        window._set_slicer_header_summary(automatic)
-        self.assertEqual(window.slicer_group.summary(), automatic.display_name)
-        self.assertEqual(
-            window.slicer_group.title_note_label.text(),
-            "(automatisch erkannt)",
-        )
-        self.assertEqual(
-            window.slicer_group.title_note_label.property("severity"),
-            "success",
-        )
+        automatic_sources = {
+            SlicerDiscoverySource.REGISTRY_SYSTEM,
+            SlicerDiscoverySource.REGISTRY_USER,
+            SlicerDiscoverySource.APP_PATHS,
+            SlicerDiscoverySource.KNOWN_PATH,
+            SlicerDiscoverySource.START_MENU,
+        }
+        for source in SlicerDiscoverySource:
+            installation = replace(automatic, discovery_source=source)
+            window._set_slicer_header_summary(installation)
+            self.assertEqual(
+                window.slicer_group.summary(),
+                installation.display_name,
+            )
+            self.assertEqual(
+                installation.automatically_discovered,
+                source in automatic_sources,
+            )
+            if source in automatic_sources:
+                self.assertEqual(
+                    window.slicer_group.title_note_label.text(),
+                    "(automatisch erkannt)",
+                )
+                self.assertEqual(
+                    window.slicer_group.title_note_label.property("severity"),
+                    "success",
+                )
+            else:
+                self.assertTrue(window.slicer_group.title_note_label.isHidden())
         self.assertTrue(window.slicer_group.summary_note_label.isHidden())
-        window._set_slicer_header_summary(
-            replace(automatic, discovery_source=SlicerDiscoverySource.MANUAL)
-        )
-        self.assertTrue(window.slicer_group.title_note_label.isHidden())
         window.close()
 
     def test_header_space_hover_chevrons_footer_and_prediction_padding(self) -> None:
@@ -671,6 +686,9 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(900, 700)
         window.show()
+        self.app.processEvents()
+        main_geometry = window.geometry()
+        main_window_state = window.windowState()
         window.preview_dialog.setWindowState(Qt.WindowState.WindowMaximized)
         window._show_preview_dialog()
         self.assertEqual(window.preview_dialog.windowOpacity(), 0.0)
@@ -680,6 +698,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.preview_dialog.windowOpacity(), 1.0)
         self.assertFalse(window.preview_dialog.isMaximized())
         self.assertFalse(window.preview_dialog.isFullScreen())
+        self.assertEqual(window.geometry(), main_geometry)
+        self.assertEqual(window.windowState(), main_window_state)
         self.assertEqual(
             window.preview_dialog.geometry(),
             window._preview_target_geometry,
@@ -807,7 +827,10 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         window.slicer_group.show()
         self.app.processEvents()
-        self.assertEqual(window.status_label.text(), "Bitte G-Code auswählen")
+        self.assertEqual(
+            window.status_label.text(),
+            "Bitte STL oder G-Code auswählen",
+        )
         self.assertEqual(window.source_group.status_icon.text(), "⇧")
         self.assertIn("Objekt im Slicer", window.gcode_import_guide.text())
         self.assertIn("G-Code exportieren", window.gcode_import_guide.text())
@@ -952,7 +975,11 @@ class Phase18UiTests(unittest.TestCase):
             output_mode=SimpleNamespace(value="stl"),
         )
         window.preview_dialog.set_preview(result)
-        self.assertEqual(window.preview_dialog.canvas.yaw_deg, 90.0)
+        self.assertEqual(window.preview_dialog.canvas.yaw_deg, 0.0)
+        self.assertEqual(
+            window.preview_dialog.bed_legend.text(),
+            "■ Druckplatte (100 × 100 mm)",
+        )
         self.assertAlmostEqual(
             window.preview_dialog.canvas.zoom,
             PreviewCanvas.SIDE_VIEW_ZOOM,
@@ -970,6 +997,203 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(
             window.preview_dialog.export_button.text(),
             "Kühlturm exportieren",
+        )
+        window.close()
+
+    def test_side_view_selects_an_axis_that_keeps_both_objects_apart(self) -> None:
+        canvas = PreviewCanvas()
+        canvas.resize(800, 600)
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(0, 0, 0), Point3D(10, 1, 8)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(4, 5, 0), Point3D(6, 6, 12)),
+            ),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(5, 5.5),
+            source_segment_count=1,
+            displayed_segment_count=1,
+            tower_height_mm=12,
+        )
+        canvas.set_scene(scene)
+        canvas.side_view()
+
+        self.assertEqual(canvas.yaw_deg, -90.0)
+        context = canvas._projection_context()
+        object_x = tuple(
+            context.project_raw(point)[0]
+            for segment in scene.object_segments
+            for point in (segment.start, segment.end)
+        )
+        tower_x = tuple(
+            context.project_raw(point)[0]
+            for segment in scene.tower_segments
+            for point in (segment.start, segment.end)
+        )
+        self.assertLess(max(object_x), min(tower_x))
+
+    def test_side_view_keeps_object_left_for_every_tower_quadrant(self) -> None:
+        for tower_x_mm, tower_y_mm in (
+            (10, 50),
+            (90, 50),
+            (50, 10),
+            (50, 90),
+            (10, 10),
+            (90, 90),
+        ):
+            with self.subTest(tower=(tower_x_mm, tower_y_mm)):
+                canvas = PreviewCanvas()
+                scene = PreviewScene(
+                    object_segments=(
+                        LineSegment3D(
+                            Point3D(45, 45, 0),
+                            Point3D(55, 55, 8),
+                        ),
+                    ),
+                    tower_segments=(
+                        LineSegment3D(
+                            Point3D(tower_x_mm, tower_y_mm, 0),
+                            Point3D(tower_x_mm, tower_y_mm, 12),
+                        ),
+                    ),
+                    bed_bounds=BedBounds(0, 100, 0, 100),
+                    tower_center_xy_mm=(tower_x_mm, tower_y_mm),
+                    source_segment_count=1,
+                    displayed_segment_count=1,
+                    tower_height_mm=12,
+                )
+                canvas.set_scene(scene)
+                canvas.side_view()
+
+                context = canvas._projection_context()
+                object_x = tuple(
+                    context.project_raw(point)[0]
+                    for segment in scene.object_segments
+                    for point in (segment.start, segment.end)
+                )
+                tower_x = tuple(
+                    context.project_raw(point)[0]
+                    for segment in scene.tower_segments
+                    for point in (segment.start, segment.end)
+                )
+                self.assertLess(max(object_x), min(tower_x))
+
+    def test_refreshing_preview_preserves_view_pan_fit_mode_and_exact_zoom(self) -> None:
+        window = self.window()
+
+        def result(offset: float):
+            return SimpleNamespace(
+                scene=PreviewScene(
+                    object_segments=(
+                        LineSegment3D(
+                            Point3D(offset, 0, 0),
+                            Point3D(offset + 2, 2, 3),
+                        ),
+                    ),
+                    tower_segments=(
+                        LineSegment3D(
+                            Point3D(offset + 8, 0, 0),
+                            Point3D(offset + 9, 1, 10),
+                        ),
+                    ),
+                    bed_bounds=BedBounds(0, 100, 0, 100),
+                    tower_center_xy_mm=(offset + 8.5, 0.5),
+                    source_segment_count=1,
+                    displayed_segment_count=1,
+                    tower_height_mm=10,
+                ),
+                calibrated=False,
+                slicer_optimized=False,
+                output_mode=SimpleNamespace(value="stl"),
+            )
+
+        window.preview_dialog.set_preview(result(0.0))
+        canvas = window.preview_dialog.canvas
+        canvas.fit_scene()
+        canvas.apply_camera_state(
+            {
+                "yaw_deg": 37.25,
+                "pitch_deg": 16.5,
+                "zoom": 2.3456789,
+                "pan_x": 41.25,
+                "pan_y": -19.75,
+            }
+        )
+        state_before = canvas.camera_state()
+        self.assertTrue(canvas._fit_whole_bed)
+
+        window.preview_dialog.set_preview(result(3.0))
+
+        self.assertEqual(canvas.camera_state(), state_before)
+        self.assertTrue(canvas._fit_whole_bed)
+        window.close()
+
+    def test_side_view_handles_diagonal_placement_with_overlapping_xy_bounds(self) -> None:
+        canvas = PreviewCanvas()
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(0, 0, 0), Point3D(20, 0, 5)),
+                LineSegment3D(Point3D(20, 0, 5), Point3D(20, 5, 0)),
+                LineSegment3D(Point3D(20, 5, 0), Point3D(0, 5, 5)),
+                LineSegment3D(Point3D(0, 5, 5), Point3D(0, 0, 0)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(19, 7, 0), Point3D(22, 4, 8)),
+                LineSegment3D(Point3D(22, 4, 8), Point3D(25, 7, 0)),
+                LineSegment3D(Point3D(25, 7, 0), Point3D(22, 10, 8)),
+                LineSegment3D(Point3D(22, 10, 8), Point3D(19, 7, 0)),
+            ),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(22, 7),
+            source_segment_count=4,
+            displayed_segment_count=4,
+            tower_height_mm=8,
+        )
+        canvas.set_scene(scene)
+        canvas.side_view()
+
+        self.assertNotIn(canvas.yaw_deg, (0.0, -90.0))
+        context = canvas._projection_context()
+        object_x = tuple(
+            context.project_raw(point)[0]
+            for segment in scene.object_segments
+            for point in (segment.start, segment.end)
+        )
+        tower_x = tuple(
+            context.project_raw(point)[0]
+            for segment in scene.tower_segments
+            for point in (segment.start, segment.end)
+        )
+        self.assertLess(max(object_x), min(tower_x))
+
+    def test_preview_formats_offset_bed_dimensions_in_legend(self) -> None:
+        window = self.window()
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(0, 0, 0), Point3D(1, 1, 1)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(5, 0, 0), Point3D(6, 1, 10)),
+            ),
+            bed_bounds=BedBounds(-10, 244.5, 5, 205),
+            tower_center_xy_mm=(5.5, 0.5),
+            source_segment_count=1,
+            displayed_segment_count=1,
+            tower_height_mm=10,
+        )
+        window.preview_dialog.set_preview(
+            SimpleNamespace(
+                scene=scene,
+                calibrated=False,
+                slicer_optimized=False,
+                output_mode=SimpleNamespace(value="stl"),
+            )
+        )
+
+        self.assertEqual(
+            window.preview_dialog.bed_legend.text(),
+            "■ Druckplatte (254,5 × 200 mm)",
         )
         window.close()
 

@@ -12,14 +12,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from cooling_tower.models import SourceKind
+from cooling_tower.services import SourceRecognitionError, recognize_source
 
 
-class GCodeDropZone(QFrame):
-    """Reusable drag-and-drop and file-dialog input for one .gcode file."""
+class SourceDropZone(QFrame):
+    """Unified drag-and-drop and file-dialog input for one STL or G-code."""
 
     EMPTY_MINIMUM_HEIGHT_PX = 184
+    EMPTY_PROMPT = (
+        "STL oder G-Code hier ablegen\n"
+        "oder über den Dialog auswählen"
+    )
+    REJECTED_PROMPT = (
+        "Andere STL oder G-Code hier ablegen\n"
+        "Die bisherige Datei wird ersetzt und direkt neu geprüft"
+    )
 
     file_selected = Signal(str)
+    source_selected = Signal(str, str)
     file_rejected = Signal(str)
     reload_requested = Signal()
     remove_requested = Signal()
@@ -31,12 +42,11 @@ class GCodeDropZone(QFrame):
         self.setProperty("dragActive", False)
         self.setProperty("loaded", False)
         self._selected_path: Path | None = None
+        self._selected_kind: SourceKind | None = None
         self._display_state = "empty"
 
         self.root_layout = QVBoxLayout(self)
-        self.prompt_label = QLabel(
-            "G-Code hier ablegen\noder über den Dialog auswählen"
-        )
+        self.prompt_label = QLabel(self.EMPTY_PROMPT)
         self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.root_layout.addWidget(self.prompt_label, 1)
 
@@ -48,6 +58,7 @@ class GCodeDropZone(QFrame):
         self.file_name_label = QLabel("–")
         self.file_name_label.setObjectName("dropFileName")
         self.file_size_label = QLabel("–")
+        self.file_type_label = QLabel("–")
         self.file_path_label = QLabel("–")
         self.file_path_label.setObjectName("gcodeFilePath")
         self.file_path_label.setWordWrap(True)
@@ -58,6 +69,7 @@ class GCodeDropZone(QFrame):
             self.status_value_label,
             self.file_name_label,
             self.file_size_label,
+            self.file_type_label,
         ):
             # Kurze Werte bleiben einzeilig. Nur der Pfad darf umbrechen,
             # wenn die tatsächlich verfügbare Breite nicht ausreicht.
@@ -65,6 +77,7 @@ class GCodeDropZone(QFrame):
         for row, (caption, value_label) in enumerate(
             (
                 ("Status", self.status_value_label),
+                ("Dateityp", self.file_type_label),
                 ("Dateiname", self.file_name_label),
                 ("Dateigröße", self.file_size_label),
                 ("Dateipfad", self.file_path_label),
@@ -87,7 +100,7 @@ class GCodeDropZone(QFrame):
         # constructed.  Giving them an owner immediately prevents Qt from
         # treating them as temporary top-level windows before the action layout
         # reparents them.
-        self.browse_button = QPushButton("G-Code auswählen …", self)
+        self.browse_button = QPushButton("STL oder G-Code auswählen …", self)
         self.browse_button.clicked.connect(self.select_file)
         self.remove_button = QPushButton("G-Code entfernen", self)
         self.remove_button.setObjectName("removeGcodeButton")
@@ -116,30 +129,45 @@ class GCodeDropZone(QFrame):
     def selected_path(self) -> Path | None:
         return self._selected_path
 
+    @property
+    def selected_kind(self) -> SourceKind | None:
+        return self._selected_kind
+
     def select_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Referenz-G-Code auswählen",
+            "STL oder G-Code auswählen",
             str(self._selected_path.parent if self._selected_path else Path.home()),
-            "G-Code-Dateien (*.gcode);;Alle Dateien (*.*)",
+            "Unterstützte Dateien (*.gcode *.stl);;G-Code (*.gcode);;STL (*.stl)",
         )
         if selected:
             self.set_file(selected)
 
     def set_file(self, path: str | Path) -> bool:
-        candidate = Path(path).expanduser()
-        if (
-            candidate.suffix.lower() != ".gcode"
-            or not candidate.exists()
-            or not candidate.is_file()
-        ):
-            message = "Bitte eine vorhandene .gcode-Datei auswählen."
-            self.file_rejected.emit(message)
+        try:
+            recognized = recognize_source(path)
+        except (OSError, SourceRecognitionError, ValueError) as error:
+            self.file_rejected.emit(str(error))
             return False
-        self._selected_path = candidate.resolve()
+        self._selected_path = recognized.path
+        self._selected_kind = recognized.source_kind
         self.setProperty("loaded", True)
-        size = self._selected_path.stat().st_size
-        self.status_value_label.setText("Analyse wird vorbereitet")
+        size = recognized.size_bytes
+        if recognized.source_kind is SourceKind.STL:
+            self.status_value_label.setText(
+                "STL-Modell erkannt – Geometrie wird geprüft"
+            )
+            self.remove_button.setText("STL entfernen")
+            self.reload_button.setText("STL neu einlesen")
+            self.browse_button.setText("Andere Datei auswählen")
+        else:
+            # The owner immediately replaces this established compatibility
+            # status with its detailed running status.
+            self.status_value_label.setText("Analyse wird vorbereitet")
+            self.remove_button.setText("G-Code entfernen")
+            self.reload_button.setText("G-Code neu einlesen")
+            self.browse_button.setText("Andere Datei auswählen")
+        self.file_type_label.setText(recognized.format_description)
         self.file_name_label.setText(self._selected_path.name)
         self.file_size_label.setText(_format_size(size))
         self.file_path_label.setText(str(self._selected_path))
@@ -150,6 +178,9 @@ class GCodeDropZone(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
         self.file_selected.emit(str(self._selected_path))
+        self.source_selected.emit(
+            str(self._selected_path), recognized.source_kind.value
+        )
         return True
 
     def set_status(self, status: str) -> None:
@@ -158,24 +189,36 @@ class GCodeDropZone(QFrame):
     def set_analysis_state(self, state: str) -> None:
         """Switch between the empty, analyzing, failed and ready presentations."""
 
-        if state not in {"empty", "analyzing", "failed", "ready"}:
-            raise ValueError(f"Unbekannter G-Code-Anzeigestatus: {state}")
+        if state not in {
+            "empty",
+            "analyzing",
+            "failed",
+            "preslice_failed",
+            "rejected",
+            "ready",
+        }:
+            raise ValueError(f"Unbekannter Quellen-Anzeigestatus: {state}")
         self._apply_display_state(state)
 
     def clear_file(self) -> None:
         self._selected_path = None
+        self._selected_kind = None
         self.setProperty("loaded", False)
         self.status_value_label.setText("Keine Datei ausgewählt")
         self.file_name_label.setText("–")
         self.file_size_label.setText("–")
+        self.file_type_label.setText("–")
         self.file_path_label.setText("–")
         self.file_info_label.clear()
+        self.browse_button.setText("STL oder G-Code auswählen …")
+        self.remove_button.setText("G-Code entfernen")
+        self.reload_button.setText("G-Code neu einlesen")
         self._apply_display_state("empty")
         self.style().unpolish(self)
         self.style().polish(self)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if self._first_valid_url(event.mimeData().urls()) is not None:
+        if self._single_supported_url(event.mimeData().urls()) is not None:
             event.acceptProposedAction()
             self._set_drag_active(True)
         else:
@@ -187,10 +230,11 @@ class GCodeDropZone(QFrame):
 
     def dropEvent(self, event) -> None:  # noqa: N802
         self._set_drag_active(False)
-        path = self._first_valid_url(event.mimeData().urls())
+        urls = event.mimeData().urls()
+        path = self._single_supported_url(urls)
         if path is None:
             self.file_rejected.emit(
-                "Im Drop-Inhalt wurde keine gültige .gcode-Datei gefunden."
+                "Bitte genau eine vorhandene STL- oder G-Code-Datei ablegen."
             )
             event.ignore()
             return
@@ -198,14 +242,18 @@ class GCodeDropZone(QFrame):
             event.acceptProposedAction()
 
     @staticmethod
-    def _first_valid_url(urls) -> Path | None:
+    def _single_supported_url(urls) -> Path | None:
+        supported: list[Path] = []
         for url in urls:
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.suffix.lower() == ".gcode" and path.is_file():
-                return path
-        return None
+            if path.suffix.casefold() in {".gcode", ".stl"} and path.is_file():
+                supported.append(path)
+        return supported[0] if len(supported) == 1 and len(urls) == 1 else None
+
+    # Compatibility for earlier tests and extensions.
+    _first_valid_url = _single_supported_url
 
     def _set_drag_active(self, active: bool) -> None:
         self.setProperty("dragActive", active)
@@ -217,26 +265,39 @@ class GCodeDropZone(QFrame):
         empty = state == "empty"
         ready = state == "ready"
         failed = state == "failed"
-        self.prompt_label.setVisible(empty)
-        self.info_widget.setVisible(not empty)
+        preslice_failed = state == "preslice_failed"
+        rejected = state == "rejected"
+        actions_ready = ready or preslice_failed or rejected
+        self.prompt_label.setText(
+            self.REJECTED_PROMPT if rejected else self.EMPTY_PROMPT
+        )
+        self.prompt_label.setVisible(empty or rejected)
+        self.info_widget.setVisible(not empty and not rejected)
         self.actions_widget.show()
         self.browse_button.show()
-        self.reload_button.setVisible(ready)
-        self.remove_button.setVisible(ready)
-        self.reload_button.setEnabled(ready)
-        self.remove_button.setEnabled(ready)
+        self.reload_button.setVisible(actions_ready)
+        self.remove_button.setVisible(actions_ready)
+        self.reload_button.setEnabled(actions_ready)
+        self.remove_button.setEnabled(actions_ready)
 
         while self.actions_layout.count():
             self.actions_layout.takeAt(0)
         for column in range(3):
             self.actions_layout.setColumnStretch(column, 0)
-        if ready:
+        if actions_ready:
             self.actions_layout.addWidget(self.browse_button, 0, 0)
             self.actions_layout.addWidget(self.reload_button, 0, 1)
             self.actions_layout.addWidget(self.remove_button, 0, 2)
             for column in range(3):
                 self.actions_layout.setColumnStretch(column, 1)
-        elif empty or failed:
+        elif failed:
+            self.actions_layout.addWidget(self.browse_button, 0, 0)
+            self.actions_layout.addWidget(self.reload_button, 0, 1)
+            self.reload_button.show()
+            self.reload_button.setEnabled(True)
+            self.actions_layout.setColumnStretch(0, 1)
+            self.actions_layout.setColumnStretch(1, 1)
+        elif empty:
             self.actions_layout.addWidget(
                 self.browse_button,
                 0,
@@ -259,3 +320,7 @@ def _format_size(size_bytes: int) -> str:
             return f"{value:.{decimals}f} {unit}"
         value /= 1024.0
     return f"{size_bytes} B"
+
+
+# Public compatibility alias. New code should use SourceDropZone.
+GCodeDropZone = SourceDropZone

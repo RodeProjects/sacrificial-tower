@@ -18,6 +18,7 @@ from cooling_tower.slicers.models import (
     ProfileCandidate,
     ProfileKind,
     ProfileRecord,
+    ProfileSelectionReference,
     SliceRequest,
     SliceResult,
     SlicerCandidate,
@@ -27,6 +28,7 @@ from cooling_tower.slicers.models import (
     SlicerGuiState,
     SlicerInstallation,
     SlicerPreferences,
+    SlicerProfileSelections,
     SlicerSupportLevel,
 )
 from cooling_tower.slicers.process import (
@@ -54,7 +56,11 @@ from cooling_tower.slicers.profile_safety import (
     ProfileSourceFingerprint,
     assert_profile_copies_are_isolated,
     assert_profile_sources_unchanged,
+    fingerprint_profile_paths,
     fingerprint_profile_sources,
+    profile_paths_fingerprint,
+    profile_sources_fingerprint,
+    protect_profile_paths,
     protect_profile_sources,
 )
 from cooling_tower.slicers.adapters import (
@@ -88,6 +94,7 @@ from cooling_tower.slicers.profile_matching import (
     GCodeProfileEvidence,
     ProfileBundleValidator,
     ProfileMatchingService,
+    ProfileMatchingContext,
     ProfileValidationOutcome,
     StructuralProfileValidator,
     critical_values,
@@ -96,6 +103,7 @@ from cooling_tower.slicers.profile_matching import (
 )
 from cooling_tower.slicers.profile_models import (
     ConfirmedProfileMapping,
+    ProfileConfirmation,
     ProfileBundleMatch,
     ProfileExclusionCode,
     ProfileFileState,
@@ -130,6 +138,7 @@ __all__ = [
     "BackendValidationReport",
     "CRITICAL_PROFILE_KEYS",
     "ConfirmedProfileMapping",
+    "ProfileConfirmation",
     "GCodeProfileEvidence",
     "ProfileBundleMatch",
     "ProfileBundleValidator",
@@ -143,6 +152,7 @@ __all__ = [
     "ProfileMatchResult",
     "ProfileMatchState",
     "ProfileMatchingService",
+    "ProfileMatchingContext",
     "ProfileOrigin",
     "ProfileRole",
     "ProfileValidationOutcome",
@@ -154,6 +164,7 @@ __all__ = [
     "ProfileCandidate",
     "ProfileKind",
     "ProfileRecord",
+    "ProfileSelectionReference",
     "SecureSlicerProcessRunner",
     "SlicerProcessRunner",
     "QProcessSlicerProcessRunner",
@@ -176,6 +187,7 @@ __all__ = [
     "SlicerGuiState",
     "SlicerInstallation",
     "SlicerPreferences",
+    "SlicerProfileSelections",
     "SlicerProcessCancelled",
     "SlicerProcessError",
     "SlicerSourceMutationError",
@@ -198,6 +210,10 @@ __all__ = [
     "ProfileSourceFingerprint",
     "assert_profile_copies_are_isolated",
     "assert_profile_sources_unchanged",
+    "fingerprint_profile_paths",
     "fingerprint_profile_sources",
+    "profile_paths_fingerprint",
+    "profile_sources_fingerprint",
+    "protect_profile_paths",
     "protect_profile_sources",
 ]

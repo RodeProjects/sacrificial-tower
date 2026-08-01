@@ -281,6 +281,15 @@ class PreviewService:
         notify = progress_callback or (lambda _percent, _status: None)
         signature = request.signature()
         source = request.source_path
+        if not request.original_source_is_current():
+            raise PreviewBuildError(
+                "Die ursprüngliche Quelldatei wurde seit ihrer Prüfung verändert."
+            )
+        prepared = request.prepared_analysis_source
+        if prepared is not None and not prepared.matches_analysis_gcode():
+            raise PreviewBuildError(
+                "Der vorbereitete Analyse-G-Code wurde seit seiner Prüfung verändert."
+            )
         owner = tempfile.TemporaryDirectory(prefix="cooling_tower_preview_")
         root = Path(owner.name)
         try:

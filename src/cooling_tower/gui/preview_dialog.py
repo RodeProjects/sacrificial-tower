@@ -182,7 +182,10 @@ class PreviewDialog(QDialog):
     def set_preview(self, result: PreviewResult) -> None:
         self.state = PreviewState.CURRENT
         first_scene = self.canvas.scene is None
-        self.canvas.set_scene(result.scene)
+        self.canvas.set_scene(
+            result.scene,
+            preserve_view=not first_scene,
+        )
         if first_scene:
             self.canvas.side_view()
         self.state_label.setText("✓ Vorschau ist aktuell")
@@ -192,6 +195,14 @@ class PreviewDialog(QDialog):
             "Slicer-gestützte Schätzung"
             if result.calibrated or result.slicer_optimized
             else "analytischer STL-Fallback"
+        )
+        bed = result.scene.bed_bounds
+        bed_width_mm = bed.maximum_x_mm - bed.minimum_x_mm
+        bed_depth_mm = bed.maximum_y_mm - bed.minimum_y_mm
+        self.bed_legend.setText(
+            "■ Druckplatte "
+            f"({self._format_dimension(bed_width_mm)} × "
+            f"{self._format_dimension(bed_depth_mm)} mm)"
         )
         self.details_label.setText(
             f"Ausgabe: {result.output_mode.value.upper()} · {calibration} · "
@@ -205,6 +216,12 @@ class PreviewDialog(QDialog):
         self.update_button.setText("Vorschau aktualisieren")
         self.update_button.setEnabled(True)
         self.export_button.setEnabled(True)
+
+    @staticmethod
+    def _format_dimension(value_mm: float) -> str:
+        """Format a bed dimension compactly with the German decimal mark."""
+
+        return f"{value_mm:.2f}".rstrip("0").rstrip(".").replace(".", ",")
 
     def mark_stale(self) -> None:
         if self.canvas.scene is None:

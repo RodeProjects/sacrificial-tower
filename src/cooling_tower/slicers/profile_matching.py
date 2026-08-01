@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
 from cooling_tower.models.analysis import GCodeAnalysisSnapshot
-from cooling_tower.models.gcode_metadata import GCodeMetadata, SlicerFamily
+from cooling_tower.models.gcode_metadata import (
+    GCodeMetadata,
+    SlicerFamily,
+    SlicerIdentity,
+)
+from cooling_tower.models.source import SourceArtifact, SourceKind
 from cooling_tower.slicers.adapter import SlicerAdapter
 from cooling_tower.slicers.active_presets import read_active_presets
 from cooling_tower.slicers.models import (
     EffectiveProfile,
     ProfileKind,
     ProfileRecord,
+    ProfileSelectionReference,
     SlicerInstallation,
 )
 from cooling_tower.slicers.profile_inventory import (
@@ -79,6 +85,43 @@ class GCodeProfileEvidence:
     @property
     def active_tool_count(self) -> int:
         return max(self.tool_indices, default=0) + 1
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileMatchingContext:
+    """Neutral input for G-code evidence or an STL source inventory match."""
+
+    source_kind: SourceKind
+    source_artifact: SourceArtifact | None = None
+    gcode_snapshot: GCodeAnalysisSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_kind is SourceKind.GCODE and self.gcode_snapshot is None:
+            raise ValueError("Für G-Code fehlt der Analyse-Snapshot.")
+        if self.source_kind is SourceKind.STL and self.source_artifact is None:
+            raise ValueError("Für STL fehlt die unveränderliche Quellenidentität.")
+        if (
+            self.source_artifact is not None
+            and self.source_artifact.source_kind is not self.source_kind
+        ):
+            raise ValueError("Profilkontext und Quellenidentität widersprechen sich.")
+        if self.source_kind is SourceKind.STL and self.gcode_snapshot is not None:
+            raise ValueError("STL-Profilmatching darf keinen G-Code-Snapshot vortäuschen.")
+
+    @classmethod
+    def from_gcode(
+        cls,
+        snapshot: GCodeAnalysisSnapshot,
+        source_artifact: SourceArtifact | None = None,
+    ) -> "ProfileMatchingContext":
+        return cls(SourceKind.GCODE, source_artifact, snapshot)
+
+    @classmethod
+    def from_stl(
+        cls,
+        source_artifact: SourceArtifact,
+    ) -> "ProfileMatchingContext":
+        return cls(SourceKind.STL, source_artifact, None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,14 +264,22 @@ class ProfileMatchingService:
 
     def match(
         self,
-        snapshot: GCodeAnalysisSnapshot,
+        source: GCodeAnalysisSnapshot | ProfileMatchingContext,
         installation: SlicerInstallation,
         adapter: SlicerAdapter,
         *,
-        selected_profile_ids: Mapping[str, str] | None = None,
+        selected_profile_ids: Mapping[
+            str, str | ProfileSelectionReference
+        ] | None = None,
         force_inventory: bool = False,
         include_all_profiles: bool = False,
     ) -> ProfileMatchResult:
+        context = (
+            source
+            if isinstance(source, ProfileMatchingContext)
+            else ProfileMatchingContext.from_gcode(source)
+        )
+        snapshot = context.gcode_snapshot
         inventory = self.inventory_service.load(
             adapter,
             installation,
@@ -236,18 +287,44 @@ class ProfileMatchingService:
         )
         resolver = ProfileInheritanceResolver(inventory, adapter)
         resolved = resolver.resolve_all()
-        source_values = metadata_values(snapshot.metadata)
-        source_critical = critical_values(source_values)
-        source_critical_fingerprint = stable_json_fingerprint(source_critical)
-        source_profile_fingerprint = (
-            snapshot.metadata.profile_fingerprint.digest_sha256
-        )
-        gcode_evidence = self._gcode_evidence(snapshot)
-        selected_profile_ids = {
+        if snapshot is not None:
+            source_values = metadata_values(snapshot.metadata)
+            source_critical = critical_values(source_values)
+            source_critical_fingerprint = stable_json_fingerprint(source_critical)
+            source_profile_fingerprint = (
+                snapshot.metadata.profile_fingerprint.digest_sha256
+            )
+            source_slicer = snapshot.metadata.slicer
+            gcode_evidence = self._gcode_evidence(snapshot)
+        else:
+            artifact = context.source_artifact
+            assert artifact is not None
+            source_values = {}
+            source_critical = {}
+            source_critical_fingerprint = stable_json_fingerprint(
+                {
+                    "source_kind": context.source_kind.value,
+                    "source_sha256": artifact.original_sha256,
+                }
+            )
+            source_profile_fingerprint = f"stl:{artifact.original_sha256}"
+            source_slicer = SlicerIdentity()
+            gcode_evidence = GCodeProfileEvidence(
+                absolute_xy_known=False,
+                relative_xy_extrusion_seen=False,
+                extrusion_mode_known=False,
+                tool_indices=(),
+                special_procedure_seen=False,
+            )
+        requested_profile_selections = {
             str(key).casefold(): value
             for key, value in (selected_profile_ids or {}).items()
             if value
         }
+        remembered_selection_requested = any(
+            isinstance(value, ProfileSelectionReference)
+            for value in requested_profile_selections.values()
+        )
 
         all_machine_options = self._selectable_options(
             resolved,
@@ -260,6 +337,12 @@ class ProfileMatchingService:
         all_filament_options = self._selectable_options(
             resolved,
             (ProfileRole.FILAMENT,),
+        )
+        selected_profile_ids = _resolve_selected_profile_ids(
+            requested_profile_selections,
+            machine_options=all_machine_options,
+            process_options=all_process_options,
+            filament_options=all_filament_options,
         )
         filter_context = self._profile_filter_context(
             source_values,
@@ -283,11 +366,63 @@ class ProfileMatchingService:
                 all_filament_options,
             ),
         )
+        # Candidate generation must use the same contextual inventory that
+        # backs the selectors.  Previously the UI displayed the filtered
+        # 2/20/25 records while matching independently examined the first ten
+        # records of every unfiltered role.  A valid combination could then be
+        # displayed but reported as unavailable until any manual selection
+        # happened to promote its three paths.
+        candidate_options = (
+            machine_options,
+            process_options,
+            filament_options,
+        )
+        if include_all_profiles:
+            # "Alle Profile anzeigen" only expands the catalogue.  It must
+            # not replace the safe automatic proposal with arbitrary machines
+            # that are unrelated to the active/filter context.
+            candidate_options = self._filter_profile_options(
+                resolved,
+                filter_context,
+                include_all_profiles=False,
+                all_options=(
+                    all_machine_options,
+                    all_process_options,
+                    all_filament_options,
+                ),
+            )[:3]
+        candidate_paths = {
+            "machine": {
+                Path(record.path).resolve()
+                for record in candidate_options[0]
+            },
+            "process": {
+                Path(record.path).resolve()
+                for record in candidate_options[1]
+            },
+            "filament": {
+                Path(record.path).resolve()
+                for record in candidate_options[2]
+            },
+        }
         role_groups = self._role_groups(resolved)
         source_ids = self._source_identifiers(source_values)
         ranked_roles = {
             role: self._rank_role_records(
-                role_groups.get(role, ()),
+                tuple(
+                    item
+                    for item in role_groups.get(role, ())
+                    if Path(item.record.path).resolve()
+                    in candidate_paths[
+                        "machine"
+                        if role
+                        in {
+                            ProfileRole.MACHINE_VARIANT,
+                            ProfileRole.MACHINE_MODEL,
+                        }
+                        else role.value
+                    ]
+                ),
                 role,
                 source_values,
                 source_critical,
@@ -338,6 +473,53 @@ class ProfileMatchingService:
             filaments,
             known_machine_profiles,
         )
+        if not candidates:
+            # Preserve hard-exclusion diagnostics (for example an explicitly
+            # identified 0.6 mm source against a 0.4 mm inventory) when the
+            # contextual filter intentionally leaves a selector empty. Never
+            # promote a hidden usable bundle: this fallback is diagnostic
+            # only and therefore accepted solely when every bundle is invalid.
+            diagnostic_ranked_roles = {
+                role: self._rank_role_records(
+                    role_groups.get(role, ()),
+                    role,
+                    source_values,
+                    source_critical,
+                    source_ids.get(role, ()),
+                    selected_profile_ids.get(role.value)
+                    or (
+                        selected_profile_ids.get("machine")
+                        if role
+                        in {
+                            ProfileRole.MACHINE_VARIANT,
+                            ProfileRole.MACHINE_MODEL,
+                        }
+                        else None
+                    ),
+                )
+                for role in (
+                    ProfileRole.MACHINE_VARIANT,
+                    ProfileRole.MACHINE_MODEL,
+                    ProfileRole.PROCESS,
+                    ProfileRole.FILAMENT,
+                )
+            }
+            diagnostic_candidates = self._build_candidates(
+                installation,
+                snapshot,
+                source_values,
+                source_critical,
+                source_ids,
+                gcode_evidence,
+                self._merge_machine_options(diagnostic_ranked_roles),
+                diagnostic_ranked_roles[ProfileRole.PROCESS],
+                diagnostic_ranked_roles[ProfileRole.FILAMENT],
+                known_machine_profiles,
+            )
+            if diagnostic_candidates and not any(
+                candidate.usable for candidate in diagnostic_candidates
+            ):
+                candidates = diagnostic_candidates
         if not candidates and rejected_resolution:
             candidates = tuple(
                 self._invalid_resolution_candidate(
@@ -349,6 +531,18 @@ class ProfileMatchingService:
 
         usable = tuple(candidate for candidate in candidates if candidate.usable)
         if not usable:
+            if remembered_selection_requested:
+                # Slicer updates can leave individually existing presets
+                # mutually incompatible. A persisted convenience preference
+                # must never make an otherwise usable source unavailable.
+                return self.match(
+                    source,
+                    installation,
+                    adapter,
+                    selected_profile_ids=None,
+                    force_inventory=False,
+                    include_all_profiles=include_all_profiles,
+                )
             return ProfileMatchResult(
                 state=ProfileMatchState.UNAVAILABLE,
                 selected=None,
@@ -361,7 +555,7 @@ class ProfileMatchingService:
                 can_use_stl_mode=False,
                 can_use_gcode_mode=False,
                 message="Keine verwendbare Profilkombination gefunden.",
-                source_slicer=snapshot.metadata.slicer,
+                source_slicer=source_slicer,
                 execution_slicer=installation,
                 inventory_fingerprint=inventory.fingerprint_sha256,
                 source_profile_fingerprint=source_profile_fingerprint,
@@ -385,19 +579,24 @@ class ProfileMatchingService:
                 active_preset_fingerprint=(
                     filter_context.active_preset_fingerprint
                 ),
+                source_kind=context.source_kind,
             )
 
         selected = usable[0]
         state = self._classify(
             usable,
             source_ids,
-            snapshot.metadata.slicer.family,
+            source_slicer.family,
             installation.family,
         )
         explicit_selection = bool(selected_profile_ids)
         user_confirmed = False
 
-        if not explicit_selection and self._is_reconstructable(source_values, source_critical):
+        if (
+            snapshot is not None
+            and not explicit_selection
+            and self._is_reconstructable(source_values, source_critical)
+        ):
             outcome = self.validator.validate(
                 adapter,
                 selected,
@@ -413,7 +612,7 @@ class ProfileMatchingService:
                     validation_message=outcome.message,
                 )
                 state = ProfileMatchState.RECONSTRUCTED
-        if state is not ProfileMatchState.RECONSTRUCTED:
+        if snapshot is not None and state is not ProfileMatchState.RECONSTRUCTED:
             outcome = self.validator.validate(
                 adapter,
                 selected,
@@ -435,7 +634,7 @@ class ProfileMatchingService:
                 source_profile_fingerprint=source_profile_fingerprint,
                 source_critical_fingerprint=source_critical_fingerprint,
             )
-            if self.mapping_store is not None
+            if self.mapping_store is not None and snapshot is not None
             else None
         )
         if mapping is not None and state is not ProfileMatchState.RECONSTRUCTED:
@@ -523,20 +722,34 @@ class ProfileMatchingService:
             )
 
         requires_confirmation = (
-            state in {ProfileMatchState.COMPATIBLE, ProfileMatchState.AMBIGUOUS}
-            and not user_confirmed
+            (
+                context.source_kind is SourceKind.STL
+                and state is not ProfileMatchState.UNAVAILABLE
+            )
+            or (
+                state in {ProfileMatchState.COMPATIBLE, ProfileMatchState.AMBIGUOUS}
+                and not user_confirmed
+            )
         )
-        restrictions = self._gcode_restrictions(
-            snapshot,
-            installation,
-            selected,
-            state,
-            gcode_evidence,
+        restrictions = (
+            self._gcode_restrictions(
+                snapshot,
+                installation,
+                selected,
+                state,
+                gcode_evidence,
+            )
+            if snapshot is not None
+            else ()
         )
         can_use_gcode = not restrictions and not requires_confirmation
         can_use_stl = (
             state is not ProfileMatchState.UNAVAILABLE
             and selected.validation_state is not ProfileValidationState.INVALID
+            and installation.can_slice
+        )
+        effective_profile_fingerprint = stable_json_fingerprint(
+            selected.effective_profile.effective_values
         )
         message = (
             selected.validation_message
@@ -556,7 +769,7 @@ class ProfileMatchingService:
             can_use_stl_mode=can_use_stl,
             can_use_gcode_mode=can_use_gcode,
             message=message,
-            source_slicer=snapshot.metadata.slicer,
+            source_slicer=source_slicer,
             execution_slicer=installation,
             inventory_fingerprint=inventory.fingerprint_sha256,
             source_profile_fingerprint=source_profile_fingerprint,
@@ -580,6 +793,8 @@ class ProfileMatchingService:
             active_preset_fingerprint=(
                 filter_context.active_preset_fingerprint
             ),
+            source_kind=context.source_kind,
+            effective_profile_fingerprint=effective_profile_fingerprint,
         )
 
     def confirm(self, result: ProfileMatchResult) -> ProfileMatchResult:
@@ -597,8 +812,17 @@ class ProfileMatchingService:
             result,
             user_confirmed=True,
             requires_confirmation=False,
+            can_use_stl_mode=(
+                result.execution_slicer.can_slice
+                and result.selected.validation_state
+                is not ProfileValidationState.INVALID
+            ),
             can_use_gcode_mode=not restrictions,
-            message="Profilkombination wurde bestätigt und sicher gespeichert.",
+            message=(
+                "STL-Profile wurden bestätigt; das Modell kann analysiert werden."
+                if result.source_kind is SourceKind.STL
+                else "Profilkombination wurde bestätigt und sicher gespeichert."
+            ),
             gcode_restrictions=restrictions,
         )
 
@@ -936,6 +1160,16 @@ class ProfileMatchingService:
             for item, score in scored_machines
             if best_machine_score > 0 and score == best_machine_score
         )
+        if (
+            not machines
+            and not context.usable
+            and len(machine_candidates) == 1
+        ):
+            # A slicer installation with exactly one selectable machine has
+            # an unambiguous local context even when it persists no active
+            # preset file. Expose its compatible system process/filament
+            # records instead of leaving both selectors empty.
+            machines = machine_candidates
         user_machines = tuple(
             item
             for item in machine_candidates
@@ -1447,7 +1681,7 @@ class ProfileMatchingService:
     def _build_candidates(
         self,
         installation: SlicerInstallation,
-        snapshot: GCodeAnalysisSnapshot,
+        snapshot: GCodeAnalysisSnapshot | None,
         source_values: Mapping[str, Any],
         source_critical: Mapping[str, Any],
         source_ids: Mapping[ProfileRole, tuple[str, ...]],
@@ -1527,7 +1761,8 @@ class ProfileMatchingService:
                 )
             )
             cross_slicer = (
-                snapshot.metadata.slicer.family is not SlicerFamily.UNKNOWN
+                snapshot is not None
+                and snapshot.metadata.slicer.family is not SlicerFamily.UNKNOWN
                 and snapshot.metadata.slicer.family is not installation.family
             )
             evidence = tuple(
@@ -1579,7 +1814,7 @@ class ProfileMatchingService:
 
     def _hard_exclusions(
         self,
-        snapshot: GCodeAnalysisSnapshot,
+        snapshot: GCodeAnalysisSnapshot | None,
         source_values: Mapping[str, Any],
         installation: SlicerInstallation,
         machine: ResolvedProfile,
@@ -1616,6 +1851,8 @@ class ProfileMatchingService:
         )
         printable_height = _to_float(effective.get("printable_height"))
         if (
+            snapshot is not None
+            and
             printable_height is not None
             and printable_height + 1e-6 < snapshot.maximum_print_z_mm
         ):
@@ -1942,6 +2179,75 @@ def _is_selectable_profile(resolved: ResolvedProfile) -> bool:
     }
 
 
+def _resolve_selected_profile_ids(
+    selections: Mapping[str, str | ProfileSelectionReference],
+    *,
+    machine_options: Sequence[ProfileRecord],
+    process_options: Sequence[ProfileRecord],
+    filament_options: Sequence[ProfileRecord],
+) -> dict[str, str]:
+    """Resolve remembered references against this inventory, role by role.
+
+    The concrete path wins when it still belongs to the inventory.  A stable
+    profile ID is the fallback when a slicer update moved the preset.  Missing
+    roles are deliberately omitted so normal matching can select its current
+    safe default independently for each role.
+    """
+
+    options_by_role = {
+        "machine": machine_options,
+        "process": process_options,
+        "filament": filament_options,
+    }
+    resolved: dict[str, str] = {}
+    for role, selection in selections.items():
+        options = options_by_role.get(role)
+        if options is None:
+            continue
+        selected_record: ProfileRecord | None = None
+        if isinstance(selection, ProfileSelectionReference):
+            if selection.path is not None:
+                selected_record = next(
+                    (
+                        record
+                        for record in options
+                        if _paths_refer_to_same_file(record.path, selection.path)
+                    ),
+                    None,
+                )
+            if selected_record is None:
+                selected_record = next(
+                    (
+                        record
+                        for record in options
+                        if record.profile_id.casefold()
+                        == selection.profile_id.casefold()
+                    ),
+                    None,
+                )
+        elif isinstance(selection, str) and selection.strip():
+            selected_record = next(
+                (
+                    record
+                    for record in options
+                    if _record_matches_id(record, selection)
+                ),
+                None,
+            )
+        if selected_record is not None:
+            resolved[role] = str(selected_record.path)
+    return resolved
+
+
+def _paths_refer_to_same_file(first: Path, second: Path) -> bool:
+    if str(first).casefold() == str(second).casefold():
+        return True
+    try:
+        return first.samefile(second)
+    except (OSError, ValueError):
+        return False
+
+
 def _record_matches_id(record: ProfileRecord, selected_id: str) -> bool:
     normalized = selected_id.casefold()
     if (
@@ -1954,10 +2260,7 @@ def _record_matches_id(record: ProfileRecord, selected_id: str) -> bool:
     selected_path = Path(selected_id).expanduser()
     if not selected_path.is_absolute():
         return False
-    try:
-        return record.path.samefile(selected_path)
-    except (OSError, ValueError):
-        return False
+    return _paths_refer_to_same_file(record.path, selected_path)
 
 
 def _as_sequence(value: Any) -> tuple[Any, ...]:

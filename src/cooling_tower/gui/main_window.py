@@ -64,6 +64,8 @@ from cooling_tower.gui.preview_worker import PreviewWorker
 from cooling_tower.gui.profile_worker import ProfileMatchingWorker
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
+from cooling_tower.gui.stl_validation_worker import StlValidationWorker
+from cooling_tower.gui.source_preslice_worker import SourcePreSliceWorker
 from cooling_tower.gui.support_report_dialog import SupportReportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
@@ -76,7 +78,7 @@ from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowSt
 from cooling_tower.gui.widgets import (
     AutoHeightTextEdit,
     FooterNoticeDropdown,
-    GCodeDropZone,
+    SourceDropZone,
     InfoToolButton,
     NumericSettingWidget,
     ResponsiveCardGrid,
@@ -91,16 +93,21 @@ from cooling_tower.models import (
     CalibrationConfig,
     CalibrationMode,
     FeasibilityIssue,
+    GCodeOrigin,
     GCodeAnalysisSnapshot,
+    PreparedAnalysisSource,
     GenerationSettings,
     ProfileFeasibilityAssessment,
     TowerNeedAssessment,
+    SourceArtifact,
+    SourceKind,
 )
 from cooling_tower.distribution import (
     DistributionChannel,
     detect_distribution_channel,
 )
 from cooling_tower.persistence import migrate_legacy_configuration
+from cooling_tower.persistence import PreSliceCache
 from cooling_tower.preview import (
     OutputMode,
     PreviewExportResult,
@@ -110,19 +117,29 @@ from cooling_tower.preview import (
     PreviewService,
     PreviewState,
 )
-from cooling_tower.services import GCodeAnalysisService, assess_tower_need
+from cooling_tower.services import (
+    GCodeAnalysisService,
+    SourcePreSliceResult,
+    SourcePreSliceService,
+    StlValidationResult,
+    StlValidationService,
+    assess_tower_need,
+)
 from cooling_tower.slicers import (
     ProfileInventoryService,
+    ProfileConfirmation,
     ProfileMappingStore,
     ProfileMatchResult,
     ProfileMatchingService,
+    ProfileMatchingContext,
     ProfileMatchState,
+    ProfileSelectionReference,
     SlicerDiscoveryResult,
     SlicerDiscoveryService,
-    SlicerDiscoverySource,
     SlicerGuiState,
     SlicerInstallation,
     SlicerPreferenceStore,
+    SlicerProcessError,
     SlicerProfileProbeValidator,
 )
 from cooling_tower.version import (
@@ -552,6 +569,8 @@ class MainWindow(QMainWindow):
         user_settings_path: str | Path | None = None,
         default_settings_path: str | Path | None = None,
         analysis_service: GCodeAnalysisService | None = None,
+        stl_validation_service: StlValidationService | None = None,
+        preslice_service: SourcePreSliceService | None = None,
         slicer_service: SlicerDiscoveryService | None = None,
         profile_service: ProfileMatchingService | None = None,
         preview_service: PreviewService | None = None,
@@ -610,6 +629,19 @@ class MainWindow(QMainWindow):
                 user_config_root / "gcode_analysis_cache.json"
             )
         )
+        self.stl_validation_service = (
+            stl_validation_service or StlValidationService()
+        )
+        self.preslice_service = preslice_service or SourcePreSliceService(
+            analysis_service=self.analysis_service,
+            workspace_parent=self.user_data_root / "temporary",
+            diagnostics_root=(
+                self.user_data_root / "diagnostics" / "source_preslice"
+            ),
+            cache=PreSliceCache(
+                self.user_data_root / "cache" / "source_preslice"
+            ),
+        )
         self._slicer_service_was_injected = slicer_service is not None
         self.slicer_service = slicer_service or SlicerDiscoveryService(
             preference_store=SlicerPreferenceStore(
@@ -667,15 +699,24 @@ class MainWindow(QMainWindow):
         self._profile_request_id = 0
         self._pending_profile_match: dict[str, object] | None = None
         self.profile_match_result: ProfileMatchResult | None = None
+        self.confirmed_profile_context: ProfileConfirmation | None = None
         self._populating_profile_combos = False
         self.profile_preview_outdated = False
         self._analysis_request_id = 0
+        self._stl_validation_request_id = 0
+        self._preslice_request_id = 0
         self._analysis_failed = False
         self._closing = False
         self.analysis_snapshot: GCodeAnalysisSnapshot | None = None
         self.tower_assessment: TowerNeedAssessment | None = None
         self.profile_feasibility: ProfileFeasibilityAssessment | None = None
         self.current_gcode_path: Path | None = None
+        self.current_source_path: Path | None = None
+        self.current_source_kind: SourceKind | None = None
+        self.source_artifact: SourceArtifact | None = None
+        self.stl_validation_result: StlValidationResult | None = None
+        self.source_preslice_result: SourcePreSliceResult | None = None
+        self.prepared_analysis_source: PreparedAnalysisSource | None = None
         self._feasibility_request_id = 0
         self._preview_request_id = 0
         self.current_preview: PreviewResult | None = None
@@ -737,9 +778,6 @@ class MainWindow(QMainWindow):
             self._start_feasibility_validation
         )
         self._build_ui()
-        self._main_geometry_before_preview: QRect | None = None
-        self._main_was_maximized_before_preview = False
-        self._preview_layout_adjusted = False
         self._preview_target_geometry: QRect | None = None
         self._hint_controller = WindowHintController(self)
         self._internal_dialog_reveal_filter = _InternalDialogRevealFilter(self)
@@ -974,7 +1012,7 @@ class MainWindow(QMainWindow):
         self.content_layout.setSpacing(10)
 
         source_group = SectionCard(
-            "Referenz-G-Code",
+            "STL oder G-Code",
             collapsible=True,
             expanded=True,
             state=SectionState.ACTIVE,
@@ -1003,9 +1041,8 @@ class MainWindow(QMainWindow):
         self.gcode_import_guide_icon.setFixedWidth(22)
         self.gcode_import_guide = QLabel(
             "Noch kein fertiger G-Code?\n"
-            "Objekt im Slicer mit den gewünschten Einstellungen slicen → "
-            "G-Code exportieren → G-Code anschließend hier im "
-            f"{APP_NAME} importieren."
+            "Lege die STL direkt ab oder bereite das Objekt im Slicer vor, "
+            "G-Code exportieren und hier ablegen. Profile werden geprüft."
         )
         self.gcode_import_guide.setObjectName("gcodeImportGuide")
         self.gcode_import_guide.setWordWrap(True)
@@ -1016,8 +1053,10 @@ class MainWindow(QMainWindow):
         )
         gcode_guide_layout.addWidget(self.gcode_import_guide, 1)
         source_layout.addWidget(self.gcode_import_guide_row)
-        self.drop_zone = GCodeDropZone()
-        self.drop_zone.file_selected.connect(self._on_file_selected)
+        # This remains an informational hint only. The drop zone below is the
+        # sole interactive entry point for both supported source types.
+        self.drop_zone = SourceDropZone()
+        self.drop_zone.source_selected.connect(self._on_source_selected)
         self.drop_zone.file_rejected.connect(self._show_input_error)
         self.drop_zone.reload_requested.connect(self.reload_gcode)
         self.drop_zone.remove_requested.connect(self.remove_gcode)
@@ -1046,6 +1085,51 @@ class MainWindow(QMainWindow):
         self.gcode_progress_status_widget.setLayout(gcode_progress_status)
         self.gcode_progress_status_widget.hide()
         source_layout.addWidget(self.gcode_progress_status_widget)
+        self.preslice_cancel_button = QPushButton("Pre-Slice abbrechen")
+        self.preslice_cancel_button.setObjectName("presliceCancelButton")
+        self.preslice_cancel_button.clicked.connect(self.cancel_source_preslice)
+        self.preslice_cancel_button.hide()
+        source_layout.addWidget(
+            self.preslice_cancel_button,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+
+        self.stl_validation_message = QLabel()
+        self.stl_validation_message.setObjectName("stlValidationMessage")
+        self.stl_validation_message.setProperty("severity", "neutral")
+        self.stl_validation_message.setWordWrap(True)
+        # Match the 10 px horizontal / 8 px vertical padding of the other
+        # notice cards. Explicit contents margins remain effective for every
+        # severity, including future colour variants.
+        self.stl_validation_message.setContentsMargins(10, 8, 10, 8)
+        self.stl_validation_message.hide()
+        source_layout.addWidget(self.stl_validation_message)
+        self.stl_validation_details_toggle = QPushButton(
+            "Technische Details anzeigen ▸"
+        )
+        self.stl_validation_details_toggle.setObjectName(
+            "stlValidationDetailsToggle"
+        )
+        self.stl_validation_details_toggle.setCheckable(True)
+        self.stl_validation_details_toggle.hide()
+        self.stl_validation_details = QTextEdit()
+        self.stl_validation_details.setObjectName("stlValidationDetails")
+        self.stl_validation_details.setReadOnly(True)
+        self.stl_validation_details.setMaximumHeight(180)
+        self.stl_validation_details.hide()
+        self.stl_validation_details_toggle.toggled.connect(
+            lambda expanded: (
+                self.stl_validation_details_toggle.setText(
+                    "Technische Details ausblenden ▾"
+                    if expanded
+                    else "Technische Details anzeigen ▸"
+                ),
+                self.stl_validation_details.setVisible(expanded),
+            )
+        )
+        source_layout.addWidget(self.stl_validation_details_toggle)
+        source_layout.addWidget(self.stl_validation_details)
 
         self.reconstructed_config_toggle = QPushButton(
             "Rekonstruierte Konfiguration anzeigen ▸"
@@ -1281,11 +1365,17 @@ class MainWindow(QMainWindow):
         self.slicer_details_divider.setFixedHeight(1)
         slicer_layout.addWidget(self.slicer_details_divider)
         self.profile_status_label = QLabel(
-            "Profilzuordnung beginnt nach G-Code- und Slicerauswahl."
+            "Profilzuordnung beginnt nach Quellen- und Slicerauswahl."
         )
         self.profile_status_label.setObjectName("profileStatusLabel")
         self.profile_status_label.setWordWrap(True)
         self.profile_status_label.setProperty("state", "pending")
+        self.profile_effective_summary_label = QLabel()
+        self.profile_effective_summary_label.setObjectName(
+            "profileEffectiveSummaryLabel"
+        )
+        self.profile_effective_summary_label.setWordWrap(True)
+        self.profile_effective_summary_label.hide()
         self.profile_confirm_button = QPushButton("Profilzuordnung bestätigen")
         self.profile_confirm_button.setObjectName("profileConfirmButton")
         self.profile_confirm_button.setEnabled(False)
@@ -1302,6 +1392,7 @@ class MainWindow(QMainWindow):
         self.profile_diagnostics.setMaximumHeight(110)
         self.profile_diagnostics.hide()
         slicer_layout.addWidget(self.profile_status_label)
+        slicer_layout.addWidget(self.profile_effective_summary_label)
         slicer_layout.addWidget(self.profile_confirm_button)
         slicer_layout.addWidget(self.profile_origin_label)
         slicer_layout.addWidget(self.profile_diagnostics)
@@ -1353,7 +1444,9 @@ class MainWindow(QMainWindow):
             "Zeit-Sicherheitsfaktor",
             self.safety_factor_spin,
         )
-        self.tower_need_label = QLabel("Bitte zuerst einen G-Code auswählen.")
+        self.tower_need_label = QLabel(
+            "Bitte zuerst eine STL- oder G-Code-Datei auswählen."
+        )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
         self.tower_need_label.setProperty("state", "pending")
@@ -1461,15 +1554,15 @@ class MainWindow(QMainWindow):
             METRICS.form_control_height_px
         )
         self.automatic_base_checkbox.setToolTip(
-            "Die Standfußbreite wird aus der vollständigen "
-            "G-Code-Objekthöhe abgeleitet."
+            "Die Standfußbreite wird aus der vollständig ermittelten "
+            "Modellhöhe abgeleitet."
         )
         automatic_row = QWidget()
         automatic_layout = QGridLayout(automatic_row)
         automatic_layout.setContentsMargins(0, 2, 0, 2)
         self.automatic_base_info_button = InfoToolButton(
             "Ist die Automatik aktiv, wird die Standfußbreite aus der "
-            "vollständigen Höhe des analysierten G-Codes berechnet. Nach dem "
+            "vollständig ermittelten Modellhöhe berechnet. Nach dem "
             "Ausschalten kann der Außendurchmesser manuell eingegeben werden.",
             automatic_row,
             accessible_name=(
@@ -1736,7 +1829,7 @@ class MainWindow(QMainWindow):
         self.prediction_method_label.setObjectName("predictionMethodBadge")
         self.prediction_method_label.setProperty("mode", "pending")
         self.prediction_label = QLabel(
-            "Die Schätzung ist nach der G-Code- und Geometrieanalyse verfügbar."
+            "Die Schätzung ist nach der Quellen- und Geometrieanalyse verfügbar."
         )
         self.prediction_label.setObjectName("predictionLabel")
         self.prediction_label.setWordWrap(True)
@@ -2052,7 +2145,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p %")
         self.progress_bar.hide()
-        self.status_label = QLabel("Bitte G-Code auswählen")
+        self.status_label = QLabel("Bitte STL oder G-Code auswählen")
         self.status_label.setObjectName("statusLabel")
         self.status_icon_label = QLabel("⇧")
         self.status_icon_label.setObjectName("progressStatusIcon")
@@ -2091,7 +2184,7 @@ class MainWindow(QMainWindow):
         notice_layout.addWidget(self.warning_text)
         self.notice_panel.hide()
         self.export_availability_label = QLabel(
-            "Export/Vorschau nicht möglich: Bitte zuerst einen G-Code auswählen."
+            "Export/Vorschau nicht möglich: Bitte zuerst STL oder G-Code auswählen."
         )
         self.export_availability_label.setObjectName(
             "exportAvailabilityLabel"
@@ -3187,6 +3280,8 @@ class MainWindow(QMainWindow):
             profile_fingerprint=profile_fingerprint,
             effective_profile=effective_profile,
             adapter=adapter,
+            source_artifact=self.source_artifact,
+            prepared_analysis_source=self.prepared_analysis_source,
         )
 
     def _invalidate_preview(
@@ -3276,12 +3371,22 @@ class MainWindow(QMainWindow):
             return "Die einmalige Slicer-Schätzung wird gerade erstellt."
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             return "Die Vorschau wird gerade erstellt."
+        if self.current_source_path is None and self.current_gcode_path is None:
+            return "Bitte zuerst STL oder G-Code auswählen."
         if self.current_gcode_path is None:
-            return "Bitte zuerst einen G-Code auswählen."
+            return (
+                "Die STL wird noch geprüft, geslict oder analysiert."
+                if self.current_source_kind is SourceKind.STL
+                else "Der G-Code wird noch analysiert."
+            )
         if self._analysis_failed:
-            return "Die G-Code-Analyse ist fehlgeschlagen."
+            return (
+                "Die STL-Vorbereitung oder Analyse ist fehlgeschlagen."
+                if self.current_source_kind is SourceKind.STL
+                else "Die G-Code-Analyse ist fehlgeschlagen."
+            )
         if self.analysis_snapshot is None:
-            return "Der G-Code wird noch analysiert."
+            return "Die Quelle wird noch analysiert."
         if not self._phase17_static_valid and not validation_bypassed:
             return "Bitte ungültige oder unvollständige Eingaben korrigieren."
         if self.tower_assessment is None:
@@ -3344,7 +3449,7 @@ class MainWindow(QMainWindow):
             # new G-code updates its profile assignment, but must not repeat
             # the visible Slicer detection workflow or briefly disable its
             # controls. The explicit refresh action remains the rescan path.
-            if self.analysis_snapshot is not None:
+            if self._profile_matching_context() is not None:
                 self.start_profile_matching()
             return
         if self.background_job_manager.has_active(
@@ -3438,6 +3543,10 @@ class MainWindow(QMainWindow):
                 installation
                 for installation in result.installations
                 if installation.verified
+                and (
+                    self.current_source_kind is not SourceKind.STL
+                    or installation.can_slice
+                )
             )
             for index, installation in enumerate(verified_installations):
                 label = installation.display_name
@@ -3508,7 +3617,12 @@ class MainWindow(QMainWindow):
                 icon="✓",
                 state="success",
             )
-            self.workflow.slicer_succeeded(selected.display_name)
+            if self._profile_matching_context() is not None:
+                self.workflow.begin_profile_matching()
+            else:
+                # Session-level discovery may also be inspected without a
+                # loaded source; keep that standalone view usable.
+                self.workflow.slicer_succeeded(selected.display_name)
             self._set_slicer_header_summary(selected)
         else:
             self._slicer_header_installation = None
@@ -3518,11 +3632,16 @@ class MainWindow(QMainWindow):
                 icon="!",
                 state="warning",
             )
-            self.workflow.slicer_unavailable(
-                "Kein verwendbarer Slicer erkannt"
-            )
+            if self.current_source_kind is SourceKind.STL:
+                self.workflow.required_slicer_unavailable(
+                    "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
+                )
+            else:
+                self.workflow.slicer_unavailable(
+                    "Kein verwendbarer Slicer erkannt"
+                )
         self._refresh_prediction()
-        if self.analysis_snapshot is not None:
+        if self._profile_matching_context() is not None:
             self.start_profile_matching()
 
     def _on_slicer_discovery_failed(
@@ -3545,7 +3664,12 @@ class MainWindow(QMainWindow):
             icon="!",
             state="warning",
         )
-        self.workflow.slicer_unavailable("Analytischer Betrieb verfügbar")
+        if self.current_source_kind is SourceKind.STL:
+            self.workflow.required_slicer_unavailable(
+                "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
+            )
+        else:
+            self.workflow.slicer_unavailable("Analytischer Betrieb verfügbar")
 
     def _on_slicer_selection_changed(self, _index: int) -> None:
         if self._populating_slicer_combo:
@@ -3564,7 +3688,7 @@ class MainWindow(QMainWindow):
             "Profilzuordnung wird für den gewählten Slicer neu bestimmt.",
             "pending",
         )
-        if self.analysis_snapshot is not None:
+        if self._profile_matching_context() is not None:
             self.start_profile_matching()
 
     def _update_slicer_detail(self) -> None:
@@ -3601,12 +3725,13 @@ class MainWindow(QMainWindow):
         summary = installation.display_name
         self.workflow.update_slicer_summary(summary)
         self.slicer_group.set_summary(summary)
-        automatically_detected = (
-            installation.discovery_source is not SlicerDiscoverySource.MANUAL
-        )
         self.slicer_group.set_summary_note(None)
         self.slicer_group.set_title_note(
-            "(automatisch erkannt)" if automatically_detected else None,
+            (
+                "(automatisch erkannt)"
+                if installation.automatically_discovered
+                else None
+            ),
             severity="success",
         )
         self._refresh_slicer_header_profiles(installation)
@@ -3640,8 +3765,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._refresh_slicer_section_layout)
 
     def _clear_profile_assignment(self, message: str, state: str) -> None:
+        self._discard_source_preslice("profile_context_changed")
         self._pending_profile_match = None
         self.profile_match_result = None
+        self.confirmed_profile_context = None
         self._reset_profile_filter_controls()
         self._populating_profile_combos = True
         try:
@@ -3660,6 +3787,8 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.profile_status_label)
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
+        self.profile_effective_summary_label.clear()
+        self.profile_effective_summary_label.hide()
         if hasattr(self, "profile_origin_label"):
             self.profile_origin_label.setText(
                 "Profilherkunft wird nach einer belastbaren Zuordnung angezeigt."
@@ -3679,20 +3808,51 @@ class MainWindow(QMainWindow):
             "gefiltert."
         )
 
+    def _profile_matching_context(self) -> ProfileMatchingContext | None:
+        if self.current_source_kind is SourceKind.STL:
+            if (
+                self.source_artifact is None
+                or self.stl_validation_result is None
+                or not self.stl_validation_result.valid
+            ):
+                return None
+            return ProfileMatchingContext.from_stl(self.source_artifact)
+        if self.analysis_snapshot is None:
+            return None
+        return ProfileMatchingContext.from_gcode(
+            self.analysis_snapshot,
+            self.source_artifact,
+        )
+
     def start_profile_matching(
         self,
         *,
-        selected_profile_ids: dict[str, str] | None = None,
+        selected_profile_ids: dict[
+            str, str | ProfileSelectionReference
+        ] | None = None,
         force_inventory: bool = False,
         stale_check_only: bool = False,
         include_all_profiles: bool | None = None,
     ) -> None:
         if self._closing:
             return
-        snapshot = self.analysis_snapshot
+        source_context = self._profile_matching_context()
         installation = self.selected_slicer_installation
-        if snapshot is None or installation is None:
+        if source_context is None or installation is None:
             return
+        if selected_profile_ids is None and not stale_check_only:
+            remembered = getattr(
+                self.slicer_service,
+                "remembered_profile_selections",
+                None,
+            )
+            if callable(remembered):
+                try:
+                    restored = remembered(installation.identity_key)
+                except (OSError, TypeError, ValueError, RuntimeError):
+                    restored = {}
+                if restored:
+                    selected_profile_ids = dict(restored)
         show_all_profiles = (
             self.show_all_profiles_checkbox.isChecked()
             if include_all_profiles is None
@@ -3741,6 +3901,8 @@ class MainWindow(QMainWindow):
         self._profile_request_id += 1
         request_id = self._profile_request_id
         if not stale_check_only:
+            self.confirmed_profile_context = None
+            self.workflow.begin_profile_matching()
             self.profile_status_label.setText(
                 "Profile werden inventarisiert, aufgelöst und geprüft …"
             )
@@ -3751,7 +3913,7 @@ class MainWindow(QMainWindow):
         worker = ProfileMatchingWorker(
             request_id,
             self.profile_service,
-            snapshot,
+            source_context,
             installation,
             adapter,
             selected_profile_ids=selected_profile_ids,
@@ -3787,6 +3949,24 @@ class MainWindow(QMainWindow):
             or result.execution_slicer.identity_key != installation.identity_key
         ):
             return
+        if (
+            self.source_artifact is not None
+            and result.source_kind is SourceKind.GCODE
+            and result.selected is not None
+        ):
+            # Persisted mappings and reconstructed evidence may preselect the
+            # safest bundle, but each concrete newly loaded source still gets
+            # one explicit visible confirmation in this workflow.
+            result = replace(
+                result,
+                requires_confirmation=True,
+                user_confirmed=False,
+                can_use_gcode_mode=False,
+                message=(
+                    "Zuordnung wurde vorausgewählt; Einstellungen bitte "
+                    "für diese G-Code-Datei bestätigen."
+                ),
+            )
         self.profile_match_result = result
         self._populate_profile_combos(result)
         self.show_all_profiles_checkbox.setEnabled(True)
@@ -3803,9 +3983,13 @@ class MainWindow(QMainWindow):
             ProfileMatchState.UNAVAILABLE: "error",
         }
         mode_text = (
-            " Slicerbasierte STL-Optimierung verfügbar."
+            " Slicerbasierte STL-Optimierung; Pre-Slice nach Bestätigung verfügbar."
             if result.can_use_stl_mode
-            else " Analytischer STL-Fallback wird verwendet."
+            else (
+                " Für diese STL steht kein sicherer Pre-Slice zur Verfügung."
+                if result.source_kind is SourceKind.STL
+                else " Analytischer STL-Fallback wird verwendet."
+            )
         )
         profile_message = (
             "Effektive G-Code-Konfiguration wurde rekonstruiert und validiert."
@@ -3817,12 +4001,37 @@ class MainWindow(QMainWindow):
             "state", state_names[result.state]
         )
         self._refresh_widget_style(self.profile_status_label)
+        self.profile_confirm_button.setText(
+            "Einstellungen bestätigen und Modell analysieren"
+            if result.source_kind is SourceKind.STL
+            else "Einstellungen bestätigen"
+        )
         self.profile_confirm_button.setVisible(result.requires_confirmation)
         self.profile_confirm_button.setEnabled(result.requires_confirmation)
         self.profile_origin_label.setText(self._profile_origin_text(result))
         self.profile_origin_label.show()
         selected = result.selected
         if selected is not None:
+            values = selected.effective_profile.effective_values
+
+            def first_value(*keys: str) -> object | None:
+                value = next(
+                    (values[key] for key in keys if values.get(key) not in (None, "")),
+                    None,
+                )
+                if isinstance(value, (list, tuple)) and len(value) == 1:
+                    return value[0]
+                return value
+
+            nozzle = first_value("nozzle_diameter", "machine_nozzle_size")
+            layer_height = first_value("layer_height")
+            self.profile_effective_summary_label.setText(
+                "Bestätigungswerte · Düse: "
+                f"{nozzle if nozzle is not None else 'nicht angegeben'} mm · "
+                "Layerhöhe: "
+                f"{layer_height if layer_height is not None else 'nicht angegeben'} mm"
+            )
+            self.profile_effective_summary_label.show()
             validation_labels = {
                 "invalid": "ungültig",
                 "structurally_valid": "strukturell gültig",
@@ -3846,9 +4055,15 @@ class MainWindow(QMainWindow):
             )
             self.profile_diagnostics.setVisible(bool(diagnostics))
         else:
+            self.profile_effective_summary_label.clear()
+            self.profile_effective_summary_label.hide()
             self.profile_diagnostics.clear()
             self.profile_diagnostics.hide()
         self._invalidate_preview("Die wirksame Profilzuordnung wurde geändert.")
+        if result.requires_confirmation:
+            self.workflow.wait_for_profile_confirmation()
+        elif result.selected is not None and result.source_kind is SourceKind.GCODE:
+            self.workflow.slicer_succeeded(result.execution_slicer.display_name)
         self._refresh_stl_availability()
 
     def _populate_profile_combos(self, result: ProfileMatchResult) -> None:
@@ -3977,7 +4192,9 @@ class MainWindow(QMainWindow):
     def _on_profile_selection_changed(self, _changed_role: str) -> None:
         if self._populating_profile_combos or self.profile_match_result is None:
             return
+        self._discard_source_preslice("profile_selection_changed")
         self._refresh_slicer_header_profiles()
+        self.confirmed_profile_context = None
         selections = {
             "machine": self.machine_profile_combo.currentData(),
             "process": self.process_profile_combo.currentData(),
@@ -3988,6 +4205,10 @@ class MainWindow(QMainWindow):
             for role, value in selections.items()
             if isinstance(value, str)
         }
+        self._remember_profile_selection(
+            _changed_role,
+            selected_profile_ids.get(_changed_role),
+        )
         if _changed_role == "machine":
             machine = selected_profile_ids.get("machine")
             if machine is None:
@@ -4009,9 +4230,54 @@ class MainWindow(QMainWindow):
             selected_profile_ids=selected_profile_ids,
         )
 
+    def _remember_profile_selection(
+        self,
+        role: str,
+        selected_identifier: str | None,
+    ) -> None:
+        """Persist only a real combo-box choice, never an automatic proposal."""
+
+        installation = self.selected_slicer_installation
+        result = self.profile_match_result
+        remember = getattr(
+            self.slicer_service,
+            "remember_profile_selection",
+            None,
+        )
+        if (
+            installation is None
+            or result is None
+            or not callable(remember)
+            or not isinstance(selected_identifier, str)
+        ):
+            return
+        option_name = {
+            "machine": "machine_options",
+            "process": "process_options",
+            "filament": "filament_options",
+        }.get(role)
+        if option_name is None:
+            return
+        selected = next(
+            (
+                record
+                for record in getattr(result, option_name, ())
+                if str(record.path).casefold()
+                == selected_identifier.casefold()
+            ),
+            None,
+        )
+        if selected is None:
+            return
+        try:
+            remember(installation.identity_key, role, selected)
+        except (OSError, TypeError, ValueError, RuntimeError):
+            # Preference persistence must never interrupt profile validation.
+            return
+
     def _on_show_all_profiles_toggled(self, checked: bool) -> None:
         if (
-            self.analysis_snapshot is None
+            self._profile_matching_context() is None
             or self.selected_slicer_installation is None
         ):
             return
@@ -4042,9 +4308,35 @@ class MainWindow(QMainWindow):
         result = self.profile_match_result
         if result is None or not result.requires_confirmation:
             return
+        if self.source_artifact is not None and not self.source_artifact.matches_current_file(
+            verify_content=True
+        ):
+            self.profile_status_label.setText(
+                "Die Quelldatei wurde geändert. Bitte die Datei erneut prüfen."
+            )
+            self.profile_status_label.setProperty("state", "error")
+            self._refresh_widget_style(self.profile_status_label)
+            return
+        for role, combo in (
+            ("machine", self.machine_profile_combo),
+            ("process", self.process_profile_combo),
+            ("filament", self.filament_profile_combo),
+        ):
+            selected_identifier = combo.currentData()
+            self._remember_profile_selection(
+                role,
+                selected_identifier
+                if isinstance(selected_identifier, str)
+                else None,
+            )
         try:
+            confirmation = (
+                ProfileConfirmation.from_result(result, self.source_artifact)
+                if self.source_artifact is not None
+                else None
+            )
             confirmed = self.profile_service.confirm(result)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, SlicerProcessError) as error:
             self.profile_status_label.setText(
                 "Profilzuordnung konnte nicht gespeichert werden: "
                 f"{german_user_message(error)}"
@@ -4053,6 +4345,15 @@ class MainWindow(QMainWindow):
             self._refresh_widget_style(self.profile_status_label)
             return
         self.profile_match_result = confirmed
+        self.confirmed_profile_context = confirmation
+        if self.prepared_analysis_source is not None:
+            self.prepared_analysis_source = replace(
+                self.prepared_analysis_source,
+                slicer_version=confirmed.execution_slicer.version,
+                effective_profile_fingerprint=(
+                    confirmed.effective_profile_fingerprint
+                ),
+            )
         self._refresh_slicer_header_profiles()
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
@@ -4064,7 +4365,326 @@ class MainWindow(QMainWindow):
         self.profile_origin_label.setText(self._profile_origin_text(confirmed))
         self.profile_origin_label.show()
         self._invalidate_preview("Die Profilzuordnung wurde bestätigt.")
+        if confirmed.source_kind is SourceKind.STL:
+            if confirmation is None:
+                self._on_source_preslice_failed(
+                    self._preslice_request_id,
+                    "Die Profilbestätigung konnte nicht an die STL gebunden werden.",
+                    "Fehlender ProfileConfirmation-Kontext.",
+                )
+                return
+            self.start_source_preslice()
+        else:
+            self.workflow.slicer_succeeded(
+                confirmed.execution_slicer.display_name
+            )
         self._refresh_stl_availability()
+
+    def start_source_preslice(self) -> None:
+        validation = self.stl_validation_result
+        profile_match = self.profile_match_result
+        confirmation = self.confirmed_profile_context
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or validation is None
+            or not validation.valid
+            or profile_match is None
+            or not profile_match.user_confirmed
+            or confirmation is None
+        ):
+            self.profile_status_label.setText(
+                "Der Pre-Slice benötigt eine gültige STL und vollständig "
+                "bestätigte Profile."
+            )
+            self.profile_status_label.setProperty("state", "error")
+            self._refresh_widget_style(self.profile_status_label)
+            return
+        try:
+            adapter = self.slicer_service.adapter_for(
+                profile_match.execution_slicer
+            )
+        except Exception as error:
+            self._preslice_request_id += 1
+            self._on_source_preslice_failed(
+                self._preslice_request_id,
+                str(error),
+                f"{type(error).__name__}: {error}",
+            )
+            return
+
+        self._discard_source_preslice("preslice_replaced")
+        self._preslice_request_id += 1
+        request_id = self._preslice_request_id
+        self.workflow.begin_preslice()
+        self.drop_zone.set_status("Modell wird geslict")
+        self.drop_zone.set_analysis_state("analyzing")
+        self.gcode_progress_bar.setRange(0, 100)
+        self.gcode_progress_bar.setFormat("%p %")
+        self.gcode_progress_bar.setValue(0)
+        self.gcode_progress_bar.show()
+        self.gcode_progress_status_widget.show()
+        self.preslice_cancel_button.setEnabled(True)
+        self.preslice_cancel_button.show()
+        self._set_gcode_progress_status(
+            "Slicer wird vorbereitet …",
+            icon="⏳",
+            state="running",
+        )
+        self._set_main_status(
+            "Slicer wird vorbereitet …",
+            icon="⏳",
+            state="running",
+        )
+        worker = SourcePreSliceWorker(
+            request_id,
+            self.preslice_service,
+            validation,
+            profile_match,
+            confirmation,
+            adapter,
+        )
+        worker.progress.connect(self._on_source_preslice_progress)
+        worker.succeeded.connect(self._on_source_preslice_succeeded)
+        worker.failed.connect(self._on_source_preslice_failed)
+        worker.cancelled.connect(self._on_source_preslice_cancelled)
+        self.background_job_manager.start_job(
+            kind=JobKind.PRESLICE,
+            request_id=request_id,
+            worker=worker,
+        )
+
+    def cancel_source_preslice(self) -> None:
+        if not self.background_job_manager.has_active(JobKind.PRESLICE):
+            return
+        self.preslice_cancel_button.setEnabled(False)
+        self._set_gcode_progress_status(
+            "Pre-Slice wird kontrolliert abgebrochen …",
+            icon="⏳",
+            state="running",
+        )
+        self.background_job_manager.cancel_jobs(
+            JobKind.PRESLICE,
+            reason="preslice_cancelled_by_user",
+        )
+
+    def _on_source_preslice_progress(
+        self,
+        request_id: int,
+        percent: int,
+        status: str,
+        busy: bool,
+    ) -> None:
+        if request_id != self._preslice_request_id:
+            return
+        if busy:
+            self.gcode_progress_bar.setRange(0, 0)
+            self.gcode_progress_bar.setFormat("")
+        else:
+            self.gcode_progress_bar.setRange(0, 100)
+            self.gcode_progress_bar.setFormat("%p %")
+            self.gcode_progress_bar.setValue(max(0, min(100, int(percent))))
+        if (
+            percent >= 70
+            and self.workflow.stage is WorkflowStage.PRESLICING_MODEL
+        ):
+            self.workflow.begin_preslice_analysis()
+        rendered = german_user_message(status)
+        self.drop_zone.set_status(rendered)
+        self._set_gcode_progress_status(
+            rendered,
+            icon="⏳",
+            state="running",
+        )
+        self._set_main_status(rendered, icon="⏳", state="running")
+
+    def _on_source_preslice_succeeded(
+        self,
+        request_id: int,
+        result: SourcePreSliceResult,
+    ) -> None:
+        if request_id != self._preslice_request_id or self._closing:
+            result.cleanup()
+            return
+        artifact = self.source_artifact
+        confirmation = self.confirmed_profile_context
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or artifact is None
+            or confirmation is None
+            or result.prepared_source.source_artifact != artifact
+            or not confirmation.matches_source(artifact)
+            or not artifact.matches_current_file(verify_content=True)
+            or not result.prepared_source.matches_analysis_gcode()
+        ):
+            result.cleanup()
+            self._on_source_preslice_failed(
+                request_id,
+                "Das Pre-Slice-Ergebnis ist nicht mehr der aktuellen Quelle "
+                "und Profilauswahl zugeordnet.",
+                "Veraltetes oder nachträglich verändertes Pre-Slice-Ergebnis.",
+            )
+            return
+        self._cleanup_source_preslice_result()
+        self.source_preslice_result = result
+        self.prepared_analysis_source = result.prepared_source
+        self.current_gcode_path = result.prepared_source.analysis_gcode_path
+        self._analysis_failed = False
+        self._workflow_error_message = None
+        self.gcode_progress_bar.setRange(0, 100)
+        self.gcode_progress_bar.setFormat("%p %")
+        self.gcode_progress_bar.setValue(100)
+        self.gcode_progress_bar.show()
+        self.preslice_cancel_button.hide()
+        self.drop_zone.set_status("Pre-Slice und Analyse abgeschlossen")
+        self.drop_zone.set_analysis_state("ready")
+        self._set_gcode_progress_status(
+            "Pre-Slice und G-Code-Analyse abgeschlossen",
+            icon="✓",
+            state="success",
+        )
+        self._clear_stl_validation_details()
+        snapshot = result.analysis_snapshot
+        self._adopt_common_analysis_snapshot(snapshot)
+        self._show_reconstructed_configuration(snapshot)
+        profile_match = self.profile_match_result
+        slicer_summary = (
+            profile_match.execution_slicer.display_name
+            if profile_match is not None
+            else "Pre-Slice abgeschlossen"
+        )
+        source_name = artifact.original_path.name
+        self.workflow.preslice_succeeded(
+            f"{source_name} · automatisch geslict · {snapshot.layer_count} Layer",
+            slicer_summary,
+        )
+        self._set_main_status(
+            f"{snapshot.layer_count} Layer aus der STL analysiert · "
+            f"ermittelte Modellhöhe {snapshot.maximum_print_z_mm:.3f} mm",
+            icon="✓",
+            state="success",
+        )
+        self._refresh_stl_availability()
+
+    def _on_source_preslice_failed(
+        self,
+        request_id: int,
+        message: str,
+        details: str,
+    ) -> None:
+        if request_id != self._preslice_request_id or self._closing:
+            return
+        self.current_gcode_path = None
+        self.analysis_snapshot = None
+        self.prepared_analysis_source = None
+        self._analysis_failed = True
+        rendered = german_user_message(message)
+        self._workflow_error_message = rendered
+        self.gcode_progress_bar.setRange(0, 100)
+        self.gcode_progress_bar.setFormat("%p %")
+        self.gcode_progress_bar.setValue(0)
+        self.gcode_progress_bar.show()
+        self.preslice_cancel_button.hide()
+        self.drop_zone.set_status("Pre-Slice fehlgeschlagen")
+        # The STL itself remains accepted. Keep all source actions available
+        # even though only the subsequent slicer invocation failed.
+        self.drop_zone.set_analysis_state("preslice_failed")
+        self._set_gcode_progress_status(
+            "Pre-Slice fehlgeschlagen",
+            icon="✕",
+            state="error",
+        )
+        self.stl_validation_message.setText(
+            "Das Modell konnte mit den bestätigten Einstellungen nicht "
+            f"sicher analysiert werden. {rendered}"
+        )
+        self.stl_validation_message.show()
+        self.stl_validation_details.setPlainText(details)
+        self.stl_validation_details_toggle.show()
+        self.workflow.preslice_failed("Pre-Slice fehlgeschlagen")
+        self._set_main_status(
+            "Pre-Slice fehlgeschlagen",
+            icon="✕",
+            state="error",
+        )
+        self._reset_preslice_confirmation_for_retry(rendered)
+        self.validate_form()
+
+    def _on_source_preslice_cancelled(self, request_id: int) -> None:
+        if request_id != self._preslice_request_id or self._closing:
+            return
+        self.current_gcode_path = None
+        self.analysis_snapshot = None
+        self.prepared_analysis_source = None
+        self.gcode_progress_bar.setRange(0, 100)
+        self.gcode_progress_bar.setFormat("%p %")
+        self.gcode_progress_bar.setValue(0)
+        self.preslice_cancel_button.hide()
+        self.drop_zone.set_status("Pre-Slice abgebrochen")
+        self.drop_zone.set_analysis_state("ready")
+        self._set_gcode_progress_status(
+            "Pre-Slice wurde abgebrochen",
+            icon="○",
+            state="pending",
+        )
+        self.workflow.preslice_failed("Pre-Slice abgebrochen")
+        self._reset_preslice_confirmation_for_retry(
+            "Der Pre-Slice wurde abgebrochen."
+        )
+        self._set_main_status(
+            "Pre-Slice abgebrochen",
+            icon="○",
+            state="idle",
+        )
+        self.validate_form()
+
+    def _reset_preslice_confirmation_for_retry(self, message: str) -> None:
+        result = self.profile_match_result
+        if result is not None and result.source_kind is SourceKind.STL:
+            self.profile_match_result = replace(
+                result,
+                user_confirmed=False,
+                requires_confirmation=True,
+            )
+            self.confirmed_profile_context = None
+            self.profile_confirm_button.setText(
+                "Einstellungen bestätigen und Modell analysieren"
+            )
+            self.profile_confirm_button.setEnabled(True)
+            self.profile_confirm_button.show()
+            self.profile_status_label.setText(message)
+            self.profile_status_label.setProperty("state", "error")
+            self._refresh_widget_style(self.profile_status_label)
+            self.workflow.begin_profile_matching()
+            self.workflow.wait_for_profile_confirmation()
+
+    def _cleanup_source_preslice_result(self) -> None:
+        result = self.source_preslice_result
+        self.source_preslice_result = None
+        if result is not None:
+            result.cleanup()
+
+    def _discard_source_preslice(self, reason: str) -> None:
+        if not hasattr(self, "background_job_manager"):
+            return
+        had_preslice = bool(
+            self.source_preslice_result is not None
+            or self.background_job_manager.has_active(JobKind.PRESLICE)
+        )
+        self._preslice_request_id += 1
+        self.background_job_manager.cancel_jobs(
+            JobKind.PRESLICE,
+            reason=reason,
+        )
+        self._cleanup_source_preslice_result()
+        self.prepared_analysis_source = None
+        if had_preslice and self.current_source_kind is SourceKind.STL:
+            self.current_gcode_path = None
+            self.analysis_snapshot = None
+            self.tower_assessment = None
+            self.profile_feasibility = None
+            self._clear_feasibility_issues()
+        if hasattr(self, "preslice_cancel_button"):
+            self.preslice_cancel_button.hide()
 
     def _check_profile_inventory_changes(self) -> None:
         if (
@@ -4397,7 +5017,10 @@ class MainWindow(QMainWindow):
         icon: str = "○",
         state: str = "idle",
     ) -> None:
-        prominent = text == "Bitte G-Code auswählen"
+        prominent = text in {
+            "Bitte G-Code auswählen",
+            "Bitte STL oder G-Code auswählen",
+        }
         self.status_icon_label.setProperty("prominent", prominent)
         self.status_icon_label.setMinimumWidth(24 if prominent else 18)
         self._refresh_widget_style(self.status_icon_label)
@@ -5095,6 +5718,8 @@ class MainWindow(QMainWindow):
             )
             return
         self._analysis_request_id += 1
+        self._stl_validation_request_id += 1
+        self._discard_source_preslice("source_removed")
         self._workflow_error_message = None
         self._profile_request_id += 1
         self._feasibility_request_id += 1
@@ -5103,6 +5728,10 @@ class MainWindow(QMainWindow):
         self.background_job_manager.cancel_jobs(
             JobKind.ANALYSIS,
             reason="gcode_removed",
+        )
+        self.background_job_manager.cancel_jobs(
+            JobKind.STL_VALIDATION,
+            reason="source_removed",
         )
         self.background_job_manager.cancel_jobs(
             JobKind.PROFILE_MATCH,
@@ -5121,6 +5750,11 @@ class MainWindow(QMainWindow):
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
         self.current_gcode_path = None
+        self.current_source_path = None
+        self.current_source_kind = None
+        self.source_artifact = None
+        self.stl_validation_result = None
+        self.prepared_analysis_source = None
         self.analysis_snapshot = None
         self.tower_assessment = None
         self.profile_feasibility = None
@@ -5134,13 +5768,14 @@ class MainWindow(QMainWindow):
         self.gcode_progress_bar.setValue(0)
         self.gcode_progress_bar.hide()
         self.gcode_progress_status_widget.hide()
+        self._clear_stl_validation_details()
         self._show_reconstructed_configuration(None)
         self._clear_profile_assignment(
-            "Profilzuordnung beginnt nach G-Code- und Slicerauswahl.",
+            "Profilzuordnung beginnt nach Quellen- und Slicerauswahl.",
             "pending",
         )
         self._set_tower_need_message(
-            "Bitte zuerst einen G-Code auswählen.", "pending"
+            "Bitte zuerst eine STL- oder G-Code-Datei auswählen.", "pending"
         )
         self.result_label.clear()
         self.warning_text.clear()
@@ -5156,7 +5791,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_widget_style(self.preview_hint_label)
         self._set_main_status(
-            "Bitte G-Code auswählen",
+            "Bitte STL oder G-Code auswählen",
             icon="⇧",
             state="idle",
         )
@@ -5165,7 +5800,7 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def reload_gcode(self) -> None:
-        """Read and analyse the selected G-code again from disk."""
+        """Read and validate the selected source again from disk."""
 
         if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
@@ -5173,13 +5808,20 @@ class MainWindow(QMainWindow):
                 "neu eingelesen werden."
             )
             return
-        path = self.current_gcode_path or self.drop_zone.selected_path
+        path = (
+            self.current_source_path
+            or self.current_gcode_path
+            or self.drop_zone.selected_path
+        )
         if path is None or not path.is_file():
             self._show_input_error(
-                "Die ausgewählte G-Code-Datei ist nicht mehr verfügbar."
+                "Die ausgewählte Quelldatei ist nicht mehr verfügbar."
             )
             return
-        self._on_file_selected(str(path.resolve()))
+        if self.current_source_path is None and self.current_gcode_path is not None:
+            self._on_file_selected(str(path.resolve()))
+            return
+        self.drop_zone.set_file(path.resolve())
 
     def _on_base_mode_changed(self, state: int) -> None:
         if self._closing:
@@ -5202,16 +5844,63 @@ class MainWindow(QMainWindow):
         self._schedule_feasibility_validation()
 
     def _on_file_selected(self, path: str) -> None:
+        """Compatibility entry point for a directly supplied G-code."""
+
+        self._on_source_selected(path, SourceKind.GCODE.value)
+
+    def _on_source_selected(self, path: str, source_kind: str) -> None:
+        kind = SourceKind(source_kind)
+        resolved = Path(path).resolve()
+        self.current_source_path = resolved
+        self.current_source_kind = kind
+        self.source_artifact = None
+        if kind is SourceKind.STL:
+            self._prepare_for_replaced_source(
+                "Eine andere STL-Datei wurde ausgewählt."
+            )
+            self.current_gcode_path = None
+            self.workflow.begin_source_validation(is_stl=True)
+            self.drop_zone.set_status(
+                "STL-Modell erkannt – Geometrie wird geprüft"
+            )
+            self._set_main_status(
+                "STL-Modell erkannt – Geometrie wird geprüft",
+                icon="⏳",
+                state="running",
+            )
+            self._start_stl_validation(resolved)
+            self.validate_form()
+            return
+
+        self.current_gcode_path = resolved
+        self._start_selected_gcode()
+
+    def _prepare_for_replaced_source(self, reason: str) -> None:
         self._last_changed_setting_name = None
         self._workflow_error_message = None
-        self.workflow.begin_analysis()
-        self._invalidate_preview("Eine andere G-Code-Datei wurde ausgewählt.")
-        self.current_gcode_path = Path(path)
+        self._analysis_request_id += 1
+        self._discard_source_preslice("source_replaced")
+        self.background_job_manager.cancel_jobs(
+            JobKind.ANALYSIS,
+            reason="source_replaced",
+        )
+        self._stl_validation_request_id += 1
+        self.background_job_manager.cancel_jobs(
+            JobKind.STL_VALIDATION,
+            reason="source_replaced",
+        )
+        self.background_job_manager.cancel_jobs(
+            JobKind.PROFILE_MATCH,
+            reason="source_replaced",
+        )
+        self._invalidate_preview(reason)
         self.analysis_snapshot = None
+        self.stl_validation_result = None
+        self._clear_stl_validation_details()
         self.profile_preview_outdated = True
         self._profile_request_id += 1
         self._clear_profile_assignment(
-            "Profilzuordnung wartet auf die neue G-Code-Analyse.",
+            "Profilzuordnung wartet auf die neue Quellenanalyse.",
             "pending",
         )
         self.tower_assessment = None
@@ -5229,11 +5918,215 @@ class MainWindow(QMainWindow):
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(False)
         self.validation_label.clear()
-        self.drop_zone.set_status("Analyse läuft")
         self._show_reconstructed_configuration(None)
         self._refresh_prediction()
+
+    def _start_selected_gcode(self) -> None:
+        if self.current_gcode_path is None:
+            return
+        self.workflow.begin_analysis()
+        self._prepare_for_replaced_source(
+            "Eine andere G-Code-Datei wurde ausgewählt."
+        )
+        self.drop_zone.set_status("Analyse läuft")
         self._start_gcode_analysis(self.current_gcode_path)
         self.validate_form()
+
+    def _start_stl_validation(self, path: Path) -> None:
+        self.background_job_manager.cancel_jobs(
+            JobKind.STL_VALIDATION,
+            reason="stl_validation_replaced",
+        )
+        self._stl_validation_request_id += 1
+        request_id = self._stl_validation_request_id
+        self.workflow.begin_source_validation(is_stl=True)
+        self.drop_zone.set_analysis_state("analyzing")
+        self.gcode_progress_bar.setValue(0)
+        self.gcode_progress_bar.show()
+        self.gcode_progress_status_widget.show()
+        self._set_gcode_progress_status(
+            "STL-Geometrie wird geprüft …",
+            icon="⏳",
+            state="running",
+        )
+        worker = StlValidationWorker(
+            request_id,
+            path,
+            self.stl_validation_service,
+        )
+        worker.progress.connect(self._on_stl_validation_progress)
+        worker.succeeded.connect(self._on_stl_validation_succeeded)
+        worker.failed.connect(self._on_stl_validation_failed)
+        self.background_job_manager.start_job(
+            kind=JobKind.STL_VALIDATION,
+            request_id=request_id,
+            worker=worker,
+        )
+
+    def _on_stl_validation_progress(
+        self,
+        request_id: int,
+        percent: int,
+        status: str,
+    ) -> None:
+        if request_id != self._stl_validation_request_id:
+            return
+        self.gcode_progress_bar.setValue(max(0, min(100, int(percent))))
+        self._set_gcode_progress_status(
+            status,
+            icon="⏳",
+            state="running",
+        )
+        self.drop_zone.set_status("STL-Geometrie wird geprüft")
+
+    def _on_stl_validation_succeeded(
+        self,
+        request_id: int,
+        result: StlValidationResult,
+    ) -> None:
+        if request_id != self._stl_validation_request_id:
+            return
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or self.current_source_path is None
+            or result.source_artifact.original_path
+            != self.current_source_path.resolve()
+        ):
+            return
+        self.stl_validation_result = result
+        self.source_artifact = result.source_artifact
+        self.gcode_progress_bar.setValue(100)
+        self.gcode_progress_bar.show()
+        self.gcode_progress_status_widget.show()
+        if not result.valid:
+            self._analysis_failed = True
+            self._workflow_error_message = (
+                "Die STL ist non-manifold (nicht vollständig geschlossen) "
+                "oder geometrisch nicht gültig."
+            )
+            self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
+            self.drop_zone.set_analysis_state("rejected")
+            self.gcode_progress_bar.hide()
+            self.gcode_progress_status_widget.hide()
+            self._set_gcode_progress_status(
+                "STL-Prüfung fehlgeschlagen",
+                icon="✕",
+                state="error",
+            )
+            self.stl_validation_message.setText(
+                "Die STL ist non-manifold (nicht vollständig geschlossen) "
+                "oder geometrisch nicht gültig. Das Modell "
+                "enthält offene, überlappende oder fehlerhaft verbundene "
+                "Flächen. Das Modell muss manifold (vollständig "
+                "geschlossen) sein, damit Layerzeiten zuverlässig ermittelt "
+                "werden können. "
+                "Bitte im Slicer, CAD- oder "
+                "3D-Programm korrigieren und erneut exportieren."
+            )
+            self.stl_validation_message.setProperty("severity", "error")
+            self._refresh_widget_style(self.stl_validation_message)
+            self.stl_validation_message.show()
+            self.stl_validation_details.setPlainText(result.technical_summary)
+            self.stl_validation_details_toggle.show()
+            self.workflow.source_invalid("STL-Geometrie ist ungültig")
+            self._set_main_status(
+                "Die STL ist non-manifold (nicht vollständig geschlossen)",
+                icon="✕",
+                state="error",
+            )
+            self.validate_form()
+            return
+
+        self._analysis_failed = False
+        self._workflow_error_message = None
+        self.drop_zone.set_status("STL-Prüfung abgeschlossen")
+        self.drop_zone.set_analysis_state("ready")
+        self._set_gcode_progress_status(
+            "STL-Geometrie ist manifold (vollständig geschlossen)",
+            icon="✓",
+            state="success",
+        )
+        if result.warning_issues:
+            self.stl_validation_message.setText(
+                "Die STL wurde akzeptiert. Hinweis: Es wurden nur "
+                "geringfügige lokale Flächenüberschneidungen erkannt. "
+                "Die übrige Geometrie ist manifold (vollständig "
+                "geschlossen) und konsistent. "
+                "Der Pre-Slice prüft zusätzlich, ob der ausgewählte Slicer "
+                "einen belastbaren G-Code erzeugt."
+            )
+            self.stl_validation_message.setProperty("severity", "warning")
+            self._refresh_widget_style(self.stl_validation_message)
+            self.stl_validation_message.show()
+            self.stl_validation_details.setPlainText(result.technical_summary)
+            self.stl_validation_details_toggle.show()
+        self.workflow.source_validation_succeeded(
+            f"{self.current_source_path.name} · {result.face_count} Dreiecke"
+        )
+        if result.warning_issues:
+            self.source_group.set_summary_note(
+                "mit Geometriehinweis",
+                severity="warning",
+            )
+        self._set_main_status(
+            f"STL geprüft · {result.face_count} Dreiecke · "
+            f"{result.component_count} Komponente(n)",
+            icon="✓",
+            state="success",
+        )
+        if (
+            self._slicer_service_was_injected
+            or os.environ.get("QT_QPA_PLATFORM", "").casefold() != "offscreen"
+        ):
+            self.start_slicer_discovery()
+        self.validate_form()
+
+    def _on_stl_validation_failed(
+        self,
+        request_id: int,
+        message: str,
+        details: str,
+    ) -> None:
+        if request_id != self._stl_validation_request_id:
+            return
+        self.stl_validation_result = None
+        self.source_artifact = None
+        self._analysis_failed = True
+        self._workflow_error_message = german_user_message(message)
+        self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
+        self.drop_zone.set_analysis_state("rejected")
+        self.gcode_progress_bar.hide()
+        self.gcode_progress_status_widget.hide()
+        self.stl_validation_message.setText(
+            "Die STL konnte nicht vollständig und sicher gelesen werden. "
+            "Bitte die Datei erneut exportieren oder eine andere STL auswählen."
+        )
+        self.stl_validation_message.setProperty("severity", "error")
+        self._refresh_widget_style(self.stl_validation_message)
+        self.stl_validation_message.show()
+        self.stl_validation_details.setPlainText(details)
+        self.stl_validation_details_toggle.show()
+        self.workflow.source_invalid("STL-Prüfung fehlgeschlagen")
+        self._set_main_status(
+            "STL-Prüfung fehlgeschlagen",
+            icon="✕",
+            state="error",
+        )
+        self.validate_form()
+
+    def _clear_stl_validation_details(self) -> None:
+        if not hasattr(self, "stl_validation_details"):
+            return
+        self.stl_validation_message.clear()
+        self.stl_validation_message.setProperty("severity", "neutral")
+        self._refresh_widget_style(self.stl_validation_message)
+        self.stl_validation_message.hide()
+        self.stl_validation_details.clear()
+        self.stl_validation_details.hide()
+        self.stl_validation_details_toggle.setChecked(False)
+        self.stl_validation_details_toggle.hide()
+        if hasattr(self, "source_group"):
+            self.source_group.set_summary_note(None)
 
     def _start_gcode_analysis(self, path: Path) -> None:
         self.background_job_manager.cancel_jobs(
@@ -5302,10 +6195,39 @@ class MainWindow(QMainWindow):
             return
         if snapshot.gcode_path != self.current_gcode_path.resolve():
             return
-        self.analysis_snapshot = snapshot
-        self._workflow_error_message = None
-        self._update_local_window_layer_limit(snapshot.layer_count)
+        try:
+            if snapshot.content_sha256:
+                self.source_artifact = SourceArtifact(
+                    source_kind=SourceKind.GCODE,
+                    original_path=snapshot.gcode_path,
+                    original_size=snapshot.file_size_bytes,
+                    original_mtime_ns=snapshot.file_modified_ns,
+                    original_sha256=snapshot.content_sha256,
+                )
+            elif self.current_gcode_path is not None:
+                self.source_artifact = SourceArtifact.capture(
+                    self.current_gcode_path,
+                    source_kind=SourceKind.GCODE,
+                )
+            if self.source_artifact is None:
+                raise ValueError("Die G-Code-Quelle konnte nicht gebunden werden.")
+            self.prepared_analysis_source = PreparedAnalysisSource.capture(
+                source_artifact=self.source_artifact,
+                analysis_gcode_path=snapshot.gcode_path,
+                gcode_origin=GCodeOrigin.USER_SUPPLIED,
+                slicer_identity=snapshot.metadata.slicer,
+                slicer_version=snapshot.metadata.slicer.version,
+            )
+        except (OSError, ValueError) as error:
+            self._on_analysis_failed(
+                request_id,
+                str(error),
+                f"{type(error).__name__}: {error}",
+            )
+            return
         self._analysis_failed = False
+        self._adopt_common_analysis_snapshot(snapshot)
+        self._workflow_error_message = None
         self.drop_zone.set_status("Analyse abgeschlossen")
         self.drop_zone.set_analysis_state("ready")
         self.gcode_progress_bar.setValue(100)
@@ -5328,9 +6250,6 @@ class MainWindow(QMainWindow):
                 icon="✓",
                 state="success",
             )
-        self._refresh_tower_assessment()
-        self.validate_form()
-        self._schedule_feasibility_validation()
         if (
             self._slicer_service_was_injected
             or os.environ.get("QT_QPA_PLATFORM", "").casefold() != "offscreen"
@@ -5340,6 +6259,18 @@ class MainWindow(QMainWindow):
             self.workflow.slicer_unavailable(
                 "Slicer-Suche in dieser Sitzung deaktiviert"
             )
+
+    def _adopt_common_analysis_snapshot(
+        self,
+        snapshot: GCodeAnalysisSnapshot,
+    ) -> None:
+        """Enter the shared cooling-tower pipeline for either source kind."""
+
+        self.analysis_snapshot = snapshot
+        self._update_local_window_layer_limit(snapshot.layer_count)
+        self._refresh_tower_assessment()
+        self.validate_form()
+        self._schedule_feasibility_validation()
 
     def _update_local_window_layer_limit(self, layer_count: int) -> None:
         """Use the analyzed G-code's layer count as the visible upper bound."""
@@ -6245,14 +7176,30 @@ class MainWindow(QMainWindow):
         """Return a bounded, non-file-content snapshot for local support."""
 
         source: dict[str, object] = {
-            "loaded": self.current_gcode_path is not None,
+            "loaded": self.current_source_path is not None,
+            "source_kind": (
+                self.current_source_kind.value
+                if self.current_source_kind is not None
+                else None
+            ),
+            "analysis_gcode_available": self.current_gcode_path is not None,
         }
-        if self.current_gcode_path is not None:
+        if self.source_artifact is not None:
+            source["suffix"] = self.source_artifact.original_path.suffix.casefold()
+            source["size_bytes"] = self.source_artifact.original_size
+        elif self.current_gcode_path is not None:
             source["suffix"] = self.current_gcode_path.suffix.casefold()
             try:
                 source["size_bytes"] = self.current_gcode_path.stat().st_size
             except OSError:
                 source["size_bytes"] = None
+        prepared = self.prepared_analysis_source
+        if prepared is not None:
+            source["gcode_origin"] = prepared.gcode_origin.value
+            provenance = prepared.preslice_provenance
+            source["preslice_cache_hit"] = bool(
+                provenance is not None and provenance.cache_hit
+            )
 
         discovery = self.slicer_discovery_result
         slicer_context: dict[str, object] = {
@@ -6338,7 +7285,7 @@ class MainWindow(QMainWindow):
 
         return {
             "workflow_stage": self.workflow.stage.value,
-            "source_gcode": source,
+            "source": source,
             "analysis": {
                 "available": self.analysis_snapshot is not None,
                 "layer_count": (
@@ -6565,7 +7512,7 @@ class MainWindow(QMainWindow):
             if object_height is None:
                 self.automatic_base_width_label.setText(
                     "Automatische Breite: mindestens 20,00 mm; der genaue "
-                    "Wert folgt aus der vollständigen G-Code-Objekthöhe."
+                    "Wert folgt aus der ermittelten Modellhöhe."
                 )
             else:
                 width = max(
@@ -6574,7 +7521,7 @@ class MainWindow(QMainWindow):
                 )
                 self.automatic_base_width_label.setText(
                     f"Automatische Breite bei {object_height:.2f} mm "
-                    f"G-Code-Objekthöhe: {width:.2f} mm "
+                    f"{self._source_height_description()}: {width:.2f} mm "
                     "(0,2 mm je 1 mm)"
                 )
         else:
@@ -6582,6 +7529,13 @@ class MainWindow(QMainWindow):
                 f"Manuelle Standfußbreite: "
                 f"{self.manual_base_width_spin.value():.2f} mm"
             )
+
+    def _source_height_description(self) -> str:
+        if self.current_source_kind is SourceKind.STL:
+            return "Höhe des automatisch geslicten Modells"
+        if self.current_source_kind is SourceKind.GCODE:
+            return "Höhe des analysierten G-Codes"
+        return "ermittelte Modellhöhe"
 
     def validate_form(self) -> bool:
         field_records: dict[str, list[str]] = {}
@@ -7262,35 +8216,30 @@ class MainWindow(QMainWindow):
             self.preview_dialog.setGeometry(target)
             return
 
-        self._main_geometry_before_preview = self.geometry()
-        self._main_was_maximized_before_preview = self.isMaximized()
-        if self.isMaximized():
-            self.showNormal()
-
-        usable_width = available.width() - 2 * margin - gap
-        minimum_main = self.minimumWidth()
-        preview_width = min(
-            preview_width,
-            max(preview_minimum_width, usable_width - minimum_main),
+        direct_left_x = main_frame.left() - gap - preview_width
+        if direct_left_x >= available.left():
+            x = direct_left_x
+        else:
+            # There is no non-overlapping slot on this screen. Keep the main
+            # window completely untouched and clamp only the non-modal preview
+            # to the available desktop. Overlap is preferable to resizing or
+            # moving the user's working window.
+            x = min(
+                max(direct_x, available.left() + margin),
+                available.right() - preview_width - margin + 1,
+            )
+        y = min(
+            max(main_frame.top(), available.top() + margin),
+            available.bottom() - preview_height - margin + 1,
         )
-        main_width = max(minimum_main, usable_width - preview_width)
-        preview_width = max(preview_minimum_width, usable_width - main_width)
-        x = available.left() + margin
-        main_height = min(
-            max(self.minimumHeight(), self.height()),
-            available.height() - 2 * margin,
-        )
-        main_y = available.top() + margin
-        self.setGeometry(x, main_y, main_width, main_height)
         target = QRect(
-            x + main_width + gap,
-            available.top() + margin,
+            x,
+            y,
             preview_width,
             preview_height,
         )
         self._preview_target_geometry = target
         self.preview_dialog.setGeometry(target)
-        self._preview_layout_adjusted = True
 
     def _enforce_preview_window_geometry(self) -> None:
         """Keep the first preview opening normal-sized and beside the main window."""
@@ -7317,17 +8266,6 @@ class MainWindow(QMainWindow):
 
     def _restore_main_after_preview(self) -> None:
         self._preview_target_geometry = None
-        if self._closing or not self._preview_layout_adjusted:
-            return
-        geometry = self._main_geometry_before_preview
-        was_maximized = self._main_was_maximized_before_preview
-        self._preview_layout_adjusted = False
-        self._main_geometry_before_preview = None
-        self._main_was_maximized_before_preview = False
-        if geometry is not None:
-            self.setGeometry(geometry)
-        if was_maximized:
-            self.showMaximized()
 
     def start_preview(self) -> None:
         self.validate_form()
@@ -7971,6 +8909,7 @@ class MainWindow(QMainWindow):
             return
 
         self._save_user_settings()
+        self._cleanup_source_preslice_result()
         if self.current_preview is not None:
             self.current_preview.dispose()
             self.current_preview = None

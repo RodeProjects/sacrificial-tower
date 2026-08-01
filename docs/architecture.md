@@ -27,7 +27,8 @@ nicht überschreibende Legacy-Übernahme stehen in
 - `slicers`: Erkennung, Profilinventar und abgesicherte Slicer-Aufrufe
 - `calibration`: slicerbasierte Iteration und G-Code-Auswertung
 - `preview`: Vorschauaufbau, Export und Berichte
-- `services`: Anwendungsfälle für Analyse, Generierung und Ausgabe
+- `services`: Anwendungsfälle für Quellenerkennung, STL-Prüfung, Pre-Slice,
+  Analyse, Generierung und Ausgabe
 - `gui`: Qt-Oberfläche und dünne Worker für lang laufende Anwendungsfälle
 - `persistence`: versionierte, gesicherte und atomare Benutzerdaten
 
@@ -52,9 +53,49 @@ bleiben Qt-unabhängig.
   und über `VersionedJsonStore` schrittweise, gesichert und atomar migriert. Die
   verbindlichen Regeln für neue Einstellungs- und Profilschemata stehen in
   `docs/settings_migrations.md`.
+- `slicer_settings.json` ordnet die letzten expliziten Maschinen-, Prozess- und
+  Filamententscheidungen der stabilen Identität einer konkreten
+  Slicerinstallation zu. Pfad und Profil-ID werden gemeinsam gespeichert;
+  unauffindbare Rollen oder inkompatibel gewordene Pakete fallen auf das
+  aktuelle Matching zurück.
 - `config/distribution.json` ist unveränderliche Build-Metadaten. Der Kanal
   `standalone` darf den Sacrificial-Tower-Updater verwenden; der Kanal
   `microsoft-store` schaltet ihn zwingend ab.
+
+## Quellen- und Analysepipeline
+
+Die GUI besitzt einen einzigen quellenneutralen Einstieg. `SourceArtifact`
+hält die unveränderte Benutzereingabe einschließlich Hash fest;
+`PreparedAnalysisSource` hält getrennt davon den analysierten G-Code und seine
+Herkunft. Ein vorhandener G-Code wird direkt vorbereitet. Eine STL muss zuerst
+die strenge `StlValidationService`-Prüfung und die ausdrückliche
+Profilbestätigung bestehen und wird danach durch `SourcePreSliceService`
+isoliert in G-Code überführt. Beide Pfade münden ausschließlich in
+`GCodeAnalysisSnapshot`; Turmprofil, Prognose, Vorschau, Kalibrierung und Export
+enthalten keine STL-Sonderberechnung.
+
+Die fachliche Zustandsmaschine unterscheidet Quelle, Validierung,
+Slicererkennung, Profilzuordnung und optionalen Pre-Slice explizit. Zulässige
+Übergänge werden zentral geprüft. Jeder Quellentausch erhöht die Request-ID,
+bricht zugehörige Jobs ab und verwirft Analyse-, Bestätigungs-, Cache-,
+Prognose- und Vorschauzustand. Später eintreffende Worker-Ergebnisse dürfen nur
+bei identischer Request-ID übernommen werden.
+
+`PreSliceCache` ist ein optionaler Beschleuniger, keine fachliche
+Wahrheitsquelle. Sein vollständiger Schlüssel bindet Quelle, Slicer, Profile,
+effektive Werte, Adapter und Parser. Jeder Treffer wird in einen neuen
+temporären Arbeitsbereich kopiert, erneut gehasht, analysiert und gegen die
+Bestätigung geprüft. Persistenz erfolgt schema-versioniert und atomar; ein
+unsicherer, zukünftiger oder beschädigter Index wird ignoriert, aber nicht
+überschrieben. Die vollständigen Regeln stehen in `docs/source_workflow.md`.
+
+Benutzerquellen und sämtliche Slicerdateien sind unveränderliche Eingaben.
+Temporäre Ausgaben, Profilkopien, Diagnose und Cache liegen außerhalb von
+Quell- und Slicerverzeichnissen. Produktionscode darf dort niemals Dateien
+anlegen, ändern, umbenennen oder entfernen. Orca-Familienadapter ergänzen
+fehlende, katalogvererbte Profiltypen ausschließlich in kurzlebigen Kopien des
+isolierten Slicer-Arbeitsbereichs. Bestätigung und Cache binden auch sämtliche
+geerbten Basisprofile ein.
 
 ## Thread-Lebenszyklus
 

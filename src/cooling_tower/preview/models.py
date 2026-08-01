@@ -14,6 +14,8 @@ from cooling_tower.models import (
     CalibrationConfig,
     CalibrationMode,
     GenerationSettings,
+    PreparedAnalysisSource,
+    SourceArtifact,
 )
 
 
@@ -84,6 +86,16 @@ class PreviewRequest:
     profile_fingerprint: str | None = None
     effective_profile: Any = field(default=None, compare=False, repr=False)
     adapter: Any = field(default=None, compare=False, repr=False)
+    source_artifact: SourceArtifact | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+    prepared_analysis_source: PreparedAnalysisSource | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
     maximum_object_segments: int = 60_000
 
     def __post_init__(self) -> None:
@@ -112,10 +124,40 @@ class PreviewRequest:
             raise ValueError(
                 "Die G-Code-Ausgabe benötigt mindestens einen Slicer-Durchlauf."
             )
+        prepared = self.prepared_analysis_source
+        artifact = self.source_artifact
+        if prepared is not None:
+            if prepared.analysis_gcode_path != self.source_path:
+                raise ValueError(
+                    "Der vorbereitete Analysekontext gehört nicht zum G-Code-Snapshot."
+                )
+            if artifact is not None and prepared.source_artifact != artifact:
+                raise ValueError(
+                    "Originalquelle und vorbereiteter Analysekontext widersprechen sich."
+                )
+        if artifact is not None and prepared is None:
+            if artifact.source_kind.value == "gcode" and artifact.original_path != self.source_path:
+                raise ValueError(
+                    "Die G-Code-Originalquelle gehört nicht zum Analyse-Snapshot."
+                )
 
     @property
     def source_path(self) -> Path:
         return Path(getattr(self.snapshot, "gcode_path")).resolve()
+
+    @property
+    def output_source_path(self) -> Path:
+        """User-facing source used exclusively for run and artifact names."""
+
+        if self.source_artifact is not None:
+            return self.source_artifact.original_path
+        return self.source_path
+
+    def original_source_is_current(self) -> bool:
+        artifact = self.source_artifact
+        return artifact is None or artifact.matches_current_file(
+            verify_content=True
+        )
 
     def signature_payload(self) -> dict[str, Any]:
         source = self.source_path
@@ -135,6 +177,27 @@ class PreviewRequest:
         return {
             "preview_schema_version": PREVIEW_SCHEMA_VERSION,
             "source": source_state,
+            "original_source": (
+                {
+                    "kind": self.source_artifact.source_kind.value,
+                    "path": str(self.source_artifact.original_path),
+                    "size_bytes": self.source_artifact.original_size,
+                    "modified_ns": self.source_artifact.original_mtime_ns,
+                    "sha256": self.source_artifact.original_sha256,
+                }
+                if self.source_artifact is not None
+                else None
+            ),
+            "gcode_origin": (
+                self.prepared_analysis_source.gcode_origin.value
+                if self.prepared_analysis_source is not None
+                else None
+            ),
+            "analysis_gcode_sha256": (
+                self.prepared_analysis_source.gcode_sha256
+                if self.prepared_analysis_source is not None
+                else getattr(self.snapshot, "content_sha256", None)
+            ),
             "analysis_file_size": getattr(
                 self.snapshot, "file_size_bytes", None
             ),

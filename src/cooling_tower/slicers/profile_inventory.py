@@ -24,7 +24,7 @@ from cooling_tower.slicers.profile_models import (
 )
 
 
-_PROFILE_SUFFIXES = {".json", ".ini", ".cfg"}
+_PROFILE_SUFFIXES = {".json", ".ini", ".cfg", ".info"}
 DEFAULT_MAXIMUM_PROFILE_INVENTORY_CACHE_BYTES = 64 * 1024 * 1024
 
 _CACHE_LOCKS_GUARD = RLock()

@@ -95,6 +95,7 @@ _JOURNAL_SAFE_KEYS = frozenset(
         "backend",
         "bundle_size_bytes",
         "cache_kind",
+        "cache_hit",
         "calibrated",
         "calibration_failure_codes",
         "calibration_iteration_count",

@@ -24,6 +24,30 @@ from cooling_tower.services.tower_need_service import (
     assess_tower_need,
     layers_for_tower,
 )
+from cooling_tower.services.source_recognition import (
+    SOURCE_SNIFF_LIMIT_BYTES,
+    SourceRecognitionError,
+    SourceRecognitionResult,
+    recognize_source,
+)
+from cooling_tower.services.stl_validation import (
+    StlFormat,
+    StlIssueCode,
+    StlValidationCancelled,
+    StlValidationError,
+    StlValidationIssue,
+    StlValidationLimits,
+    StlValidationResult,
+    StlValidationService,
+)
+from cooling_tower.services.source_preslice import (
+    PRESLICE_ADAPTER_VERSION,
+    SourcePreSliceCancelled,
+    SourcePreSliceError,
+    SourcePreSliceResult,
+    SourcePreSliceService,
+    build_preslice_cache_key,
+)
 
 __all__ = [
     "AnalysisCancelled",
@@ -34,6 +58,23 @@ __all__ = [
     "FeasibilityCancelled",
     "MigrationService",
     "OutputService",
+    "SOURCE_SNIFF_LIMIT_BYTES",
+    "SourceRecognitionError",
+    "SourceRecognitionResult",
+    "StlFormat",
+    "StlIssueCode",
+    "StlValidationCancelled",
+    "StlValidationError",
+    "StlValidationIssue",
+    "StlValidationLimits",
+    "StlValidationResult",
+    "StlValidationService",
+    "PRESLICE_ADAPTER_VERSION",
+    "SourcePreSliceCancelled",
+    "SourcePreSliceError",
+    "SourcePreSliceResult",
+    "SourcePreSliceService",
+    "build_preslice_cache_key",
     "assess_tower_need",
     "assess_profile_feasibility",
     "build_analysis_diagnostic_report",
@@ -42,4 +83,5 @@ __all__ = [
     "format_generation_report",
     "format_no_tower_report",
     "layers_for_tower",
+    "recognize_source",
 ]

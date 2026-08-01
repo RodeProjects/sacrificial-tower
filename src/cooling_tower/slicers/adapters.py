@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import json
 import os
 from pathlib import Path
 
@@ -109,28 +110,38 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 "Sicherheitsabbruch: Fuer Kalibrierung duerfen dem Slicer nur "
                 "temporaere Profilkopien uebergeben werden."
             )
-        settings = [
-            record.path
+        settings_records = tuple(
+            record
             for record in (profile.machine, profile.process)
             if record is not None
-        ]
-        if not settings:
+        )
+        if len(settings_records) != 2:
             raise SlicerProcessError(
                 "Für das CLI-Slicing fehlt ein vollständiges Maschinen-/Prozessprofil."
             )
         isolated_data = working_root / "slicer_data"
         isolated_data.mkdir(parents=True, exist_ok=True)
+        cli_profiles = working_root / "effective_profiles"
+        cli_profiles.mkdir(parents=True, exist_ok=True)
+        settings = tuple(
+            self._materialize_cli_profile(record, cli_profiles, index)
+            for index, record in enumerate(settings_records)
+        )
+        filaments = tuple(
+            self._materialize_cli_profile(record, cli_profiles, index)
+            for index, record in enumerate(profile.filaments)
+        )
         arguments: list[str] = [
             "--datadir",
             str(isolated_data),
             "--load-settings",
             ";".join(str(path) for path in settings),
         ]
-        if profile.filaments:
+        if filaments:
             arguments.extend(
                 (
                     "--load-filaments",
-                    ";".join(str(record.path) for record in profile.filaments),
+                    ";".join(str(path) for path in filaments),
                 )
             )
         arguments.extend(
@@ -146,6 +157,54 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
             )
         )
         return profile.installation.executable_path, tuple(arguments)
+
+    @staticmethod
+    def _materialize_cli_profile(
+        record: ProfileRecord,
+        destination_root: Path,
+        index: int,
+    ) -> Path:
+        """Create a typed, read-only-source profile copy for Orca-family CLIs.
+
+        GUI-created user presets commonly omit ``type`` because their parent
+        catalogue supplies it. The standalone CLI rejects those same files
+        with ``unknown config type``. Supplying a typed copy in the isolated
+        working directory mirrors the GUI catalogue context without changing
+        any slicer-owned file.
+        """
+
+        if record.kind not in {
+            ProfileKind.MACHINE,
+            ProfileKind.PROCESS,
+            ProfileKind.FILAMENT,
+        }:
+            raise SlicerProcessError(
+                f"Profil '{record.name}' besitzt keinen CLI-fähigen Typ."
+            )
+        try:
+            payload = json.loads(record.path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise SlicerProcessError(
+                f"Profil '{record.name}' konnte nicht sicher für den CLI-Lauf "
+                "vorbereitet werden."
+            ) from error
+        if not isinstance(payload, dict):
+            raise SlicerProcessError(
+                f"Profil '{record.name}' besitzt kein gültiges JSON-Objekt."
+            )
+        declared_type = str(payload.get("type", "")).strip().casefold()
+        if declared_type and declared_type != record.kind.value:
+            raise SlicerProcessError(
+                f"Profil '{record.name}' meldet den widersprüchlichen Typ "
+                f"'{declared_type}'."
+            )
+        payload["type"] = record.kind.value
+        destination = destination_root / f"{record.kind.value}_{index}.json"
+        destination.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return destination.resolve()
 
 
 class AnycubicSlicerNextAdapter(OrcaFamilyAdapter):

@@ -39,6 +39,15 @@ class PreviewExportService:
                 "Die Vorschau stimmt nicht mehr mit den aktuellen Einstellungen überein."
             )
         source = request.source_path
+        if not request.original_source_is_current():
+            raise StalePreviewError(
+                "Die ursprüngliche Quelldatei wurde nach der Vorschau verändert."
+            )
+        prepared = request.prepared_analysis_source
+        if prepared is not None and not prepared.matches_analysis_gcode():
+            raise StalePreviewError(
+                "Der vorbereitete Analyse-G-Code wurde nach der Vorschau verändert."
+            )
         if not source.is_file() or sha256_file(source) != preview.source_sha256:
             raise StalePreviewError(
                 "Der Quell-G-Code wurde nach der Vorschau verändert."
@@ -56,7 +65,7 @@ class PreviewExportService:
         root.mkdir(parents=True, exist_ok=True)
         created_at = datetime.now().astimezone()
         stamp = created_at.strftime("%Y%m%d_%H%M%S")
-        source_name = sanitize_filename_component(source.stem)
+        source_name = sanitize_filename_component(request.output_source_path.stem)
         base_name = f"{stamp}_{source_name}"
         suffix = 2
         destination = root / base_name

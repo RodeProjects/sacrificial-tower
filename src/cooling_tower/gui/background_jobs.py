@@ -22,6 +22,8 @@ class JobKind(str, Enum):
     SLICER_DISCOVERY = "slicer"
     PROFILE_MATCH = "profile"
     ANALYSIS = "analysis"
+    STL_VALIDATION = "stl-validation"
+    PRESLICE = "preslice"
     FEASIBILITY = "feasibility"
     SLICER_PREDICTION = "prediction"
     PREVIEW = "preview"

@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cooling_tower.models.gcode_metadata import SlicerFamily, SlicerIdentity
+from cooling_tower.models.source import SourceArtifact, SourceKind
 from cooling_tower.slicers.models import (
     EffectiveProfile,
     ProfileRecord,
     SlicerInstallation,
 )
+from cooling_tower.slicers.profile_safety import profile_paths_fingerprint
 
 
 PROFILE_INVENTORY_SCHEMA_VERSION = 1
@@ -216,6 +218,18 @@ class ProfileBundleMatch:
             else None
         )
 
+    @property
+    def source_paths(self) -> tuple[Path, ...]:
+        """All selected and inherited profile files used by this bundle."""
+
+        paths = list(self.effective_profile.source_paths)
+        paths.extend(
+            record.path
+            for resolved in self.resolved_profiles
+            for record in resolved.chain
+        )
+        return tuple(dict.fromkeys(path.resolve() for path in paths))
+
     def to_report_dict(self) -> dict[str, Any]:
         return {
             "bundle_id": self.bundle_id,
@@ -285,12 +299,15 @@ class ProfileMatchResult:
     unfiltered_option_counts: tuple[int, int, int] = (0, 0, 0)
     visible_option_counts: tuple[int, int, int] = (0, 0, 0)
     active_preset_fingerprint: str | None = None
+    source_kind: SourceKind = SourceKind.GCODE
+    effective_profile_fingerprint: str | None = None
 
     def to_report_dict(self) -> dict[str, Any]:
         return {
             "profile_report_schema_version": PROFILE_REPORT_SCHEMA_VERSION,
             "state": self.state.value,
             "message": self.message,
+            "source_kind": self.source_kind.value,
             "execution_slicer": {
                 "adapter_id": self.execution_slicer.adapter_id,
                 "product_name": self.execution_slicer.product_name,
@@ -320,7 +337,72 @@ class ProfileMatchResult:
             "inventory_fingerprint": self.inventory_fingerprint,
             "source_profile_fingerprint": self.source_profile_fingerprint,
             "source_critical_fingerprint": self.source_critical_fingerprint,
+            "effective_profile_fingerprint": self.effective_profile_fingerprint,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileConfirmation:
+    """One explicit profile confirmation bound to an immutable source."""
+
+    source_kind: SourceKind
+    source_path: Path
+    source_sha256: str
+    source_size_bytes: int
+    source_modified_ns: int
+    slicer_identity_key: str
+    slicer_path: Path
+    slicer_version: str | None
+    machine_profile_id: str
+    process_profile_id: str
+    filament_profile_ids: tuple[str, ...]
+    effective_profile_fingerprint: str
+    profile_sources_fingerprint: str
+    confirmed_utc: str
+
+    @classmethod
+    def from_result(
+        cls,
+        result: ProfileMatchResult,
+        source: SourceArtifact,
+    ) -> "ProfileConfirmation":
+        selected = result.selected
+        if selected is None or selected.machine is None or selected.process is None:
+            raise ValueError("Die Profilbestätigung ist unvollständig.")
+        if not selected.effective_profile.filaments:
+            raise ValueError("Für die Profilbestätigung fehlt das Filament.")
+        fingerprint = result.effective_profile_fingerprint or stable_json_fingerprint(
+            selected.effective_profile.effective_values
+        )
+        return cls(
+            source_kind=source.source_kind,
+            source_path=source.original_path,
+            source_sha256=source.original_sha256,
+            source_size_bytes=source.original_size,
+            source_modified_ns=source.original_mtime_ns,
+            slicer_identity_key=result.execution_slicer.identity_key,
+            slicer_path=result.execution_slicer.executable_path,
+            slicer_version=result.execution_slicer.version,
+            machine_profile_id=selected.machine.profile_id,
+            process_profile_id=selected.process.profile_id,
+            filament_profile_ids=tuple(
+                item.profile_id for item in selected.effective_profile.filaments
+            ),
+            effective_profile_fingerprint=fingerprint,
+            profile_sources_fingerprint=profile_paths_fingerprint(
+                selected.source_paths
+            ),
+            confirmed_utc=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def matches_source(self, source: SourceArtifact) -> bool:
+        return (
+            self.source_kind is source.source_kind
+            and self.source_path == source.original_path
+            and self.source_sha256 == source.original_sha256
+            and self.source_size_bytes == source.original_size
+            and self.source_modified_ns == source.original_mtime_ns
+        )
 
 
 @dataclass(frozen=True, slots=True)

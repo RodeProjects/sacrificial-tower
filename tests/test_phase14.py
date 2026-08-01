@@ -400,6 +400,123 @@ class Phase14DiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(exact.recommended.version, "1.0")
 
+    def test_profile_choices_survive_sessions_and_remain_isolated_per_slicer(
+        self,
+    ) -> None:
+        def profile(name: str, kind: ProfileKind) -> ProfileRecord:
+            path = self.root / "profiles" / kind.value / f"{name}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"name": name}), encoding="utf-8")
+            return ProfileRecord(
+                adapter_id="choice",
+                profile_id=f"stable-{name}",
+                name=name,
+                kind=kind,
+                path=path,
+                source="user",
+            )
+
+        first_key = "choice|c:\\slicers\\first.exe"
+        second_key = "choice|c:\\slicers\\second.exe"
+        machine = profile("machine", ProfileKind.MACHINE)
+        process = profile("process", ProfileKind.PROCESS)
+        filament = profile("filament", ProfileKind.FILAMENT)
+        other_machine = profile("other-machine", ProfileKind.MACHINE)
+
+        service = self.service(())
+        service.remember_profile_selection(first_key, "machine", machine)
+        service.remember_profile_selection(first_key, "process", process)
+        service.remember_profile_selection(first_key, "filament", filament)
+        service.remember_profile_selection(second_key, "machine", other_machine)
+        self.preferences.set_last_selected(first_key)
+        self.preferences.confirm_path(self.root / "choice.exe")
+
+        reopened = SlicerDiscoveryService(
+            adapters=(),
+            discovery=StaticCandidateDiscovery(()),
+            preference_store=SlicerPreferenceStore(self.preferences.path),
+        )
+        first = reopened.remembered_profile_selections(first_key)
+        second = reopened.remembered_profile_selections(second_key)
+        self.assertEqual(set(first), {"machine", "process", "filament"})
+        self.assertEqual(first["machine"].profile_id, "stable-machine")
+        self.assertEqual(first["process"].path, process.path)
+        self.assertEqual(first["filament"].path, filament.path)
+        self.assertEqual(set(second), {"machine"})
+        self.assertEqual(second["machine"].profile_id, "stable-other-machine")
+        self.assertEqual(self.preferences.load().last_selected_key, first_key)
+        self.assertTrue(self.preferences.load().confirmed_paths)
+
+    def test_invalid_remembered_profile_entries_are_dropped_per_role(self) -> None:
+        path = self.preferences.path
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "confirmed_paths": [],
+                    "last_selected_key": None,
+                    "profile_selections": {
+                        "valid|slicer": {
+                            "machine": {
+                                "profile_id": "machine-id",
+                                "path": str(self.root / "machine.json"),
+                            },
+                            "process": {"profile_id": ""},
+                            "filament": 42,
+                            "unknown": {"profile_id": "ignored"},
+                        },
+                        "": {"machine": {"profile_id": "ignored"}},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = self.preferences.load()
+
+        self.assertEqual(set(loaded.profile_selections), {"valid|slicer"})
+        self.assertEqual(
+            set(loaded.profile_selections["valid|slicer"].as_mapping()),
+            {"machine"},
+        )
+        rewritten = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(rewritten["profile_selections"]["valid|slicer"]),
+            {"machine"},
+        )
+        self.assertIsNotNone(self.preferences.last_migration_backup)
+
+    def test_profile_choice_write_is_atomic_on_replace_failure(self) -> None:
+        profile_path = self.root / "machine.json"
+        profile_path.write_text("{}", encoding="utf-8")
+        profile = ProfileRecord(
+            adapter_id="choice",
+            profile_id="machine",
+            name="Machine",
+            kind=ProfileKind.MACHINE,
+            path=profile_path,
+            source="user",
+        )
+        self.preferences.set_profile_selection("choice|first", "machine", profile)
+        original = self.preferences.path.read_bytes()
+
+        with patch(
+            "cooling_tower.persistence.versioned_json.os.replace",
+            side_effect=OSError("replace failed"),
+        ):
+            with self.assertRaisesRegex(OSError, "replace failed"):
+                self.preferences.set_profile_selection(
+                    "choice|second",
+                    "machine",
+                    profile,
+                )
+
+        self.assertEqual(self.preferences.path.read_bytes(), original)
+        self.assertEqual(
+            tuple(self.preferences.path.parent.glob(".slicers.json.*.tmp")),
+            (),
+        )
+
 
 class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -606,6 +723,60 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         ):
             self.assertIn(argument, command)
         self.assertNotIn("shell", " ".join(command).casefold())
+
+    def test_anycubic_cli_receives_typed_isolated_profile_copies(self) -> None:
+        for record in (self.machine, self.process, self.filament):
+            payload = json.loads(record.path.read_text(encoding="utf-8"))
+            payload.pop("type")
+            payload["inherits"] = f"Base {record.kind.value}"
+            record.path.write_text(json.dumps(payload), encoding="utf-8")
+        before = {
+            record.path: hashlib.sha256(record.path.read_bytes()).digest()
+            for record in (self.machine, self.process, self.filament)
+        }
+        adapter, request = self.request(ConfigurableRunner())
+
+        prepared = adapter.prepare_slice(request)
+        try:
+            settings_value = prepared.arguments[
+                prepared.arguments.index("--load-settings") + 1
+            ]
+            filament_value = prepared.arguments[
+                prepared.arguments.index("--load-filaments") + 1
+            ]
+            copies = tuple(
+                Path(value)
+                for value in (*settings_value.split(";"), *filament_value.split(";"))
+            )
+            self.assertEqual(
+                [
+                    json.loads(path.read_text(encoding="utf-8"))["type"]
+                    for path in copies
+                ],
+                ["machine", "process", "filament"],
+            )
+            self.assertTrue(
+                all(path.is_relative_to(prepared.working_root) for path in copies)
+            )
+            self.assertFalse(any(path in before for path in copies))
+            self.assertEqual(
+                {
+                    path: hashlib.sha256(path.read_bytes()).digest()
+                    for path in before
+                },
+                before,
+            )
+        finally:
+            adapter.cleanup_prepared_slice(prepared)
+
+    def test_anycubic_cli_rejects_a_contradictory_profile_type(self) -> None:
+        self.machine.path.write_text(
+            json.dumps({"name": "machine", "type": "filament"}),
+            encoding="utf-8",
+        )
+        adapter, request = self.request(ConfigurableRunner())
+        with self.assertRaisesRegex(SlicerProcessError, "widersprüchlichen Typ"):
+            adapter.prepare_slice(request)
 
     def test_derived_machine_profile_resolves_to_full_base_profile(self) -> None:
         profile_root = self.root / "profiles" / "machine"

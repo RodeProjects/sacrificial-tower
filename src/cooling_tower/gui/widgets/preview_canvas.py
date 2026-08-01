@@ -71,10 +71,16 @@ class PreviewCanvas(QWidget):
         self._fit_whole_bed = False
         self._prepared_frame: _PreparedLineFrame | None = None
 
-    def set_scene(self, scene: PreviewScene | None) -> None:
+    def set_scene(
+        self,
+        scene: PreviewScene | None,
+        *,
+        preserve_view: bool = False,
+    ) -> None:
         self.scene = scene
         self._prepared_frame = None
-        self.fit_objects(emit=False)
+        if not preserve_view:
+            self.fit_objects(emit=False)
         self.update()
 
     def camera_state(self) -> dict[str, float]:
@@ -141,13 +147,160 @@ class PreviewCanvas(QWidget):
         self._emit_camera()
 
     def side_view(self) -> None:
-        self.yaw_deg = 90.0
+        self.yaw_deg = self._side_by_side_yaw_deg()
         self.pitch_deg = 0.0
         self.fit_objects(emit=False)
         # Zwei Mausradstufen weiter heraus als die automatische Anpassung.
         # So bleibt in der initialen Seitenansicht sichtbar Luft um hohe Türme.
         self.zoom = self.SIDE_VIEW_ZOOM
         self._emit_camera()
+
+    @staticmethod
+    def _xy_bounds(
+        segments: Iterable[LineSegment3D],
+    ) -> tuple[float, float, float, float] | None:
+        minimum_x = math.inf
+        maximum_x = -math.inf
+        minimum_y = math.inf
+        maximum_y = -math.inf
+        found = False
+        for segment in segments:
+            for point in (segment.start, segment.end):
+                minimum_x = min(minimum_x, point.x)
+                maximum_x = max(maximum_x, point.x)
+                minimum_y = min(minimum_y, point.y)
+                maximum_y = max(maximum_y, point.y)
+                found = True
+        if not found:
+            return None
+        return minimum_x, maximum_x, minimum_y, maximum_y
+
+    @staticmethod
+    def _interval_gap(
+        first_minimum: float,
+        first_maximum: float,
+        second_minimum: float,
+        second_maximum: float,
+    ) -> float:
+        return max(
+            0.0,
+            second_minimum - first_maximum,
+            first_minimum - second_maximum,
+        )
+
+    def _side_by_side_yaw_deg(self) -> float:
+        """Choose a horizontal projection that separates object and tower."""
+
+        scene = self.scene
+        if scene is None:
+            return 90.0
+        object_bounds = self._xy_bounds(scene.object_segments)
+        tower_bounds = self._xy_bounds(scene.tower_segments)
+        if object_bounds is None or tower_bounds is None:
+            return 90.0
+
+        object_min_x, object_max_x, object_min_y, object_max_y = object_bounds
+        object_center_x = (object_min_x + object_max_x) / 2.0
+        object_center_y = (object_min_y + object_max_y) / 2.0
+        tower_center_x, tower_center_y = scene.tower_center_xy_mm
+        closest_object_x = min(
+            max(tower_center_x, object_min_x),
+            object_max_x,
+        )
+        closest_object_y = min(
+            max(tower_center_y, object_min_y),
+            object_max_y,
+        )
+
+        def yaw_for_vector(delta_x: float, delta_y: float) -> float | None:
+            if math.hypot(delta_x, delta_y) <= 1e-9:
+                return None
+            return math.degrees(math.atan2(-delta_y, delta_x))
+
+        candidates = [0.0, -90.0]
+        nearest_yaw = yaw_for_vector(
+            tower_center_x - closest_object_x,
+            tower_center_y - closest_object_y,
+        )
+        center_yaw = yaw_for_vector(
+            tower_center_x - object_center_x,
+            tower_center_y - object_center_y,
+        )
+        for candidate in (nearest_yaw, center_yaw):
+            if candidate is not None and all(
+                abs(candidate - existing) > 1e-9
+                for existing in candidates
+            ):
+                candidates.append(candidate)
+
+        def projected_interval(
+            segments: Iterable[LineSegment3D],
+            yaw_deg: float,
+        ) -> tuple[float, float]:
+            yaw = math.radians(yaw_deg)
+            cosine = math.cos(yaw)
+            sine = math.sin(yaw)
+            values = (
+                cosine * point.x - sine * point.y
+                for segment in segments
+                for point in (segment.start, segment.end)
+            )
+            first = next(values)
+            minimum = maximum = first
+            for value in values:
+                minimum = min(minimum, value)
+                maximum = max(maximum, value)
+            return minimum, maximum
+
+        def separation_score(yaw_deg: float) -> float:
+            object_minimum, object_maximum = projected_interval(
+                scene.object_segments,
+                yaw_deg,
+            )
+            tower_minimum, tower_maximum = projected_interval(
+                scene.tower_segments,
+                yaw_deg,
+            )
+            gap = self._interval_gap(
+                object_minimum,
+                object_maximum,
+                tower_minimum,
+                tower_maximum,
+            )
+            if gap <= 0.0:
+                overlap = min(object_maximum, tower_maximum) - max(
+                    object_minimum,
+                    tower_minimum,
+                )
+                gap = -max(0.0, overlap)
+            total_span = max(object_maximum, tower_maximum) - min(
+                object_minimum,
+                tower_minimum,
+            )
+            return gap / max(total_span, 1e-9)
+
+        # Evaluate actual preview geometry, not only its bounding boxes. This
+        # also handles diagonal corner placements whose X/Y bounding boxes
+        # overlap although object and tower are geometrically separate.
+        selected_yaw = max(candidates, key=separation_score)
+
+        # A projection and the same projection rotated by 180 degrees have an
+        # identical separation score, but reverse the visual order. Keep the
+        # source object predictably on the left and the generated tower on the
+        # right in both the initial and explicit side views.
+        object_interval = projected_interval(
+            scene.object_segments,
+            selected_yaw,
+        )
+        tower_interval = projected_interval(
+            scene.tower_segments,
+            selected_yaw,
+        )
+        object_center = sum(object_interval) / 2.0
+        tower_center = sum(tower_interval) / 2.0
+        if object_center > tower_center:
+            selected_yaw += 180.0
+        return (selected_yaw + 180.0) % 360.0 - 180.0
 
     def top_view(self) -> None:
         """Look vertically down onto the print bed and fitted objects."""

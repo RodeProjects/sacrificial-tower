@@ -137,6 +137,9 @@ Die maschinenlesbare Fassung befindet sich in
 - Der Export bleibt unabhängig von der optionalen Vorschau möglich.
 - Die erste Kameraansicht und der Button „Seitenansicht“ verwenden dieselbe,
   weiter herausgezoomte Seitenansicht.
+- In beiden Ansichten steht das Originalobjekt unabhängig von seiner Lage
+  links und der erzeugte Kühlturm rechts.
+- Die Vorschau nennt Breite und Tiefe der verwendeten Druckplatte.
 - Ein rechtsbündiger Button „Kühlturm exportieren“ verwendet denselben
   Exportzustand wie die Hauptansicht.
 - Beim ersten Öffnen steht das Fenster nach Möglichkeit rechts neben dem

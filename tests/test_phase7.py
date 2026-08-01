@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui import MainWindow
 from cooling_tower.gui.widgets import GCodeDropZone
-from cooling_tower.models import GenerationSettings
+from cooling_tower.models import GCodeOrigin, GenerationSettings, SourceKind
 from cooling_tower.services import GenerationService
 
 
@@ -80,6 +80,24 @@ class GuiTestCase(unittest.TestCase):
             self.assertIsNotNone(self.window.profile_feasibility)
 
 class GCodeInputTests(GuiTestCase):
+    def test_direct_gcode_enters_shared_prepared_analysis_pipeline(self) -> None:
+        self._select_file()
+        prepared = self.window.prepared_analysis_source
+        self.assertIsNotNone(prepared)
+        assert prepared is not None
+        self.assertIs(prepared.gcode_origin, GCodeOrigin.USER_SUPPLIED)
+        self.assertIs(prepared.source_artifact.source_kind, SourceKind.GCODE)
+        self.assertEqual(prepared.analysis_gcode_path, self.gcode.resolve())
+        self.assertEqual(
+            prepared.gcode_sha256,
+            self.window.analysis_snapshot.content_sha256,
+        )
+        self.assertIsNotNone(self.window.tower_assessment)
+        self.assertIn(
+            "Höhe des analysierten G-Codes",
+            self.window.automatic_base_width_label.text(),
+        )
+
     def test_gcode_can_be_loaded_with_drop_event(self) -> None:
         mime = QMimeData()
         mime.setUrls([QUrl.fromLocalFile(str(self.gcode))])

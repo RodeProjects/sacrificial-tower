@@ -351,7 +351,7 @@ class Phase17Tests(unittest.TestCase):
         report = json.loads(result.report_path.read_text(encoding="utf-8"))
         self.assertEqual(report["preview_signature"], request.signature())
         self.assertEqual(report["output_sha256"], result.output_sha256)
-        self.assertEqual(report["technical_report_schema_version"], 1)
+        self.assertEqual(report["technical_report_schema_version"], 2)
         self.assertIn("calibration", report)
         self.assertIn("source", report)
         self.assertIn("request", report)

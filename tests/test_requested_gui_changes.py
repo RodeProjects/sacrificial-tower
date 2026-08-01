@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -432,6 +433,80 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertEqual(
             classify_profile_source(installation, mirrored_system, "user"),
             "system",
+        )
+
+        anycubic = replace(
+            installation,
+            adapter_id="anycubic_slicer_next",
+        )
+        anycubic_system_mirror = (
+            self.root
+            / "appdata"
+            / "AnycubicSlicerNext"
+            / "user"
+            / "default"
+            / "process"
+            / "mirrored.json"
+        )
+        anycubic_account_preset = (
+            self.root
+            / "appdata"
+            / "AnycubicSlicerNext"
+            / "user"
+            / "489681"
+            / "process"
+            / "custom.json"
+        )
+        anycubic_local_preset = anycubic_system_mirror.with_name("local.json")
+        anycubic_system_mirror.parent.mkdir(parents=True)
+        anycubic_system_mirror.write_text("{}", encoding="utf-8")
+        anycubic_system_mirror.with_suffix(".info").write_text(
+            "sync_info =\n"
+            "user_id =\n"
+            "setting_id =\n"
+            "base_id = GP004\n",
+            encoding="utf-8",
+        )
+        anycubic_local_preset.write_text("{}", encoding="utf-8")
+        anycubic_local_preset.with_suffix(".info").write_text(
+            "sync_info = update\n"
+            "user_id =\n"
+            "setting_id =\n"
+            "base_id = GP004\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            classify_profile_source(
+                anycubic,
+                anycubic_system_mirror,
+                "user",
+            ),
+            "system",
+        )
+        self.assertEqual(
+            classify_profile_source(
+                anycubic,
+                anycubic_account_preset,
+                "user",
+            ),
+            "user",
+        )
+        self.assertEqual(
+            classify_profile_source(
+                anycubic,
+                anycubic_local_preset,
+                "user",
+            ),
+            "user",
+        )
+        bambu = replace(installation, adapter_id="bambu_studio")
+        self.assertEqual(
+            classify_profile_source(
+                bambu,
+                anycubic_system_mirror,
+                "user",
+            ),
+            "user",
         )
 
     def test_only_explicit_user_profiles_use_the_user_category(self) -> None:

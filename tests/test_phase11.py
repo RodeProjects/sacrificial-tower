@@ -703,7 +703,10 @@ class LiveValidationTests(GuiCase):
             layer_heights=(0.2, 0.2, 199.6),
         )
         self.assertAlmostEqual(self.window.tower_assessment.tower_end_z_mm, 0.4)
-        self.assertIn("200.00 mm G-Code-Objekthöhe", self.window.automatic_base_width_label.text())
+        self.assertIn(
+            "200.00 mm ermittelte Modellhöhe",
+            self.window.automatic_base_width_label.text(),
+        )
         self.assertIn("40.00 mm", self.window.automatic_base_width_label.text())
 
     def test_feasible_tower_enables_generation(self) -> None:

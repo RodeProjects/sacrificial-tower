@@ -151,8 +151,23 @@ def classify_profile_source(
     if executable_root == resolved or executable_root in resolved.parents:
         return "system"
 
-    parts = {part.casefold() for part in resolved.parts}
+    ordered_parts = tuple(part.casefold() for part in resolved.parts)
+    parts = set(ordered_parts)
     if parts.intersection({"system", "resources", "vendor"}):
+        return "system"
+    # Anycubic Slicer Next may mirror bundled presets below ``user/default``,
+    # but it can also store genuine anonymous/local user presets there.  Its
+    # small sidecar distinguishes a catalogue mirror by a base id without any
+    # user, sync or setting identity.  Keep the exception both adapter- and
+    # metadata-scoped; the directory name alone is not sufficient evidence.
+    if (
+        installation.adapter_id == "anycubic_slicer_next"
+        and any(
+            ordered_parts[index : index + 2] == ("user", "default")
+            for index in range(max(0, len(ordered_parts) - 1))
+        )
+        and _is_anycubic_catalogue_mirror(path)
+    ):
         return "system"
     if "project" in parts or declared_source == "project":
         return "project"
@@ -173,6 +188,25 @@ def classify_profile_source(
         ):
             return "user"
     return "system"
+
+
+def _is_anycubic_catalogue_mirror(path: Path) -> bool:
+    sidecar = path.with_suffix(".info")
+    try:
+        if not sidecar.is_file() or sidecar.stat().st_size > 16 * 1024:
+            return False
+        text = sidecar.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
+        return False
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip().casefold()] = value.strip()
+    return bool(values.get("base_id")) and not any(
+        values.get(key)
+        for key in ("sync_info", "user_id", "setting_id")
+    )
 
 
 class BaseSlicerAdapter:
