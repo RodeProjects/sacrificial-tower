@@ -56,6 +56,7 @@ from cooling_tower.slicers import (
     ProfileMatchState,
     ProfileRecord,
     ProfileValidationState,
+    SliceRequest,
     SliceResult,
     SlicerCapability,
     SlicerDiscoverySource,
@@ -316,7 +317,11 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             self.assertEqual(request.purpose, "source_preslice")
             self.assertEqual(request.temporary_overrides, {})
             self.assertEqual(request.timeout_s, 17)
-            self.assertEqual(request.model_path, self.source)
+            self.assertEqual(
+                request.model_path,
+                self.validation.source_artifact.original_path,
+            )
+            self.assertTrue(request.model_path.samefile(self.source))
             self.assertTrue(request.output_directory.is_relative_to(result.workspace_root))
             self.assertTrue(any(busy for _, _, busy in phases))
             analysis_phases = [
@@ -337,6 +342,37 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             workspace = result.workspace_root
             result.cleanup()
             self.assertFalse(workspace.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows-spezifischer Pfadalias-Test")
+    def test_slice_request_canonicalizes_windows_short_path_alias(self) -> None:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32_768)
+        length = ctypes.windll.kernel32.GetShortPathNameW(  # type: ignore[attr-defined]
+            str(self.source),
+            buffer,
+            len(buffer),
+        )
+        if length == 0 or length >= len(buffer):
+            self.skipTest("Für die Test-STL ist kein Windows-Kurzpfad verfügbar.")
+
+        short_path = Path(buffer.value)
+        canonical_path = self.validation.source_artifact.original_path
+        if os.path.normcase(str(short_path)) == os.path.normcase(
+            str(canonical_path)
+        ):
+            self.skipTest("Windows verwendet für die Test-STL keinen abweichenden Alias.")
+
+        selected = self.match.selected
+        assert selected is not None
+        request = SliceRequest(
+            model_path=short_path,
+            profile=selected.effective_profile,
+            output_directory=self.app_root / "short-path-output",
+        )
+
+        self.assertEqual(request.model_path, canonical_path)
+        self.assertTrue(request.model_path.samefile(short_path))
 
     def test_non_blocking_geometry_warning_is_allowed_to_reach_preslice(self) -> None:
         validation = replace(

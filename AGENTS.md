@@ -28,6 +28,25 @@
 - Ein Push darf erst erfolgen, nachdem der Benutzer ihn ausdrücklich erlaubt
   hat. Ohne diese Freigabe weder pushen noch sie aus dem Kontext ableiten.
 
+## CI-Absicherung bei direkten Pushes
+
+- Vor einem direkten Push nach `main` muss der letzte abgeschlossene Lauf des
+  GitHub-Actions-Workflows `Tests` für `main` geprüft werden. Ist dieser Lauf
+  fehlgeschlagen, muss die Ursache vor einem weiteren Push untersucht und ein
+  noch vorhandener Fehler behoben werden.
+- Die lokale Abschlussprüfung muss mindestens den in `.github/workflows/tests.yml`
+  verwendeten Befehl `python -m unittest discover -s tests -q` umfassen. Weitere
+  für die Änderung relevante Tests bleiben zusätzlich erforderlich.
+- Nach einem direkten Push nach `main` muss der dadurch ausgelöste Workflow
+  `Tests` bis zum Abschluss beobachtet werden. Die Push-Aufgabe darf erst als
+  erfolgreich abgeschlossen gemeldet werden, wenn dieser Lauf erfolgreich ist.
+  Bei einem Fehlschlag sind die Actions-Logs unmittelbar auszuwerten und der
+  Benutzer ist mit der konkreten Ursache zu informieren.
+- Die CI-Prüfung kann mit `gh run list`, `gh run watch --exit-status` und
+  `gh run view --log-failed` erfolgen. Eine fehlende GitHub-CLI-Authentifizierung
+  betrifft nur diese CI-Abfrage und ist kein Nachweis für ein Problem mit dem
+  separat konfigurierten SSH-Zugriff von Git.
+
 ## Migration von Benutzerdaten
 
 - Persistierte Benutzereinstellungen und zukünftige Einstellungsprofile müssen
