@@ -215,6 +215,13 @@ class SourcePreSliceService:
                 snapshot = self.analysis_service.analyze(
                     gcode_path,
                     force=True,
+                    progress_callback=lambda percent, status: (
+                        self._forward_analysis_progress(
+                            notify,
+                            percent,
+                            status,
+                        )
+                    ),
                     cancellation_callback=cancelled.is_set,
                 )
             except AnalysisCancelled as error:
@@ -278,6 +285,20 @@ class SourcePreSliceService:
             _safe_cleanup_workspace(workspace)
             self._raise_if_source_changed(source, cause=error)
             raise SourcePreSliceError(str(error)) from error
+
+    @staticmethod
+    def _forward_analysis_progress(
+        notify: PreSliceProgressCallback,
+        percent: int,
+        status: str,
+    ) -> None:
+        analysis_percent = max(0, min(100, int(percent)))
+        overall_percent = 70 + round(analysis_percent * 19 / 100)
+        notify(
+            overall_percent,
+            f"{status} ({analysis_percent} %)",
+            False,
+        )
 
     def _validate_request(
         self,
@@ -426,6 +447,13 @@ class SourcePreSliceService:
                 snapshot = self.analysis_service.analyze(
                     target,
                     force=True,
+                    progress_callback=lambda percent, status: (
+                        self._forward_analysis_progress(
+                            notify,
+                            percent,
+                            status,
+                        )
+                    ),
                     cancellation_callback=cancellation_event.is_set,
                 )
             except AnalysisCancelled as error:

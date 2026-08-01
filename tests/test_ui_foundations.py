@@ -254,13 +254,16 @@ class UiFoundationTests(unittest.TestCase):
         self.assertTrue(slicer.isChecked())
         self.assertFalse(downstream.isHidden())
 
-    def test_main_window_starts_with_only_the_gcode_workflow_card(self) -> None:
+    def test_main_window_starts_with_the_combined_preparation_card(self) -> None:
         settings_path = Path(self.temporary.name) / "settings.json"
         window = MainWindow(user_settings_path=settings_path)
         window.show()
         self.app.processEvents()
+        self.assertTrue(window.workflow_group.isVisible())
         self.assertTrue(window.source_group.isVisible())
-        self.assertTrue(window.slicer_group.isHidden())
+        self.assertTrue(window.slicer_group.isVisible())
+        self.assertTrue(window.workflow_group.isAncestorOf(window.source_group))
+        self.assertTrue(window.workflow_group.isAncestorOf(window.slicer_group))
         self.assertTrue(window.ready_grid.isHidden())
         for widget in (
             window.stl_notice_frame,

@@ -13,6 +13,7 @@ from cooling_tower.models.source import SourceArtifact, SourceKind
 from cooling_tower.slicers.models import (
     EffectiveProfile,
     ProfileRecord,
+    ProfileSelectionReference,
     SlicerInstallation,
 )
 from cooling_tower.slicers.profile_safety import profile_paths_fingerprint
@@ -128,6 +129,145 @@ class ProfileInventory:
             if record.profile_id.casefold() in wanted
             or record.name.casefold() in wanted
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileCatalog:
+    """Source-independent, read-only profile choices for one installation."""
+
+    execution_slicer: SlicerInstallation
+    inventory_fingerprint: str
+    machine_options: tuple[ProfileRecord, ...]
+    process_options: tuple[ProfileRecord, ...]
+    filament_options: tuple[ProfileRecord, ...]
+    rejected_profile_count: int = 0
+
+    @property
+    def complete(self) -> bool:
+        return bool(
+            self.machine_options
+            and self.process_options
+            and self.filament_options
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileCatalogConfirmation:
+    """Session confirmation of exact profile files before a source is loaded."""
+
+    slicer_identity_key: str
+    inventory_fingerprint: str
+    machine_profile_id: str
+    machine_path: Path
+    process_profile_id: str
+    process_path: Path
+    filament_profile_id: str
+    filament_path: Path
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "machine_profile_id",
+            "process_profile_id",
+            "filament_profile_id",
+        ):
+            value = str(getattr(self, field_name)).strip()
+            if not value:
+                raise ValueError("Die Profilbestätigung benötigt stabile IDs.")
+            object.__setattr__(self, field_name, value)
+        for field_name in (
+            "machine_path",
+            "process_path",
+            "filament_path",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                Path(getattr(self, field_name)).resolve(),
+            )
+
+    @classmethod
+    def from_catalog(
+        cls,
+        catalog: "ProfileCatalog",
+        *,
+        machine_path: str | Path,
+        process_path: str | Path,
+        filament_path: str | Path,
+        machine_profile_id: str | None = None,
+        process_profile_id: str | None = None,
+        filament_profile_id: str | None = None,
+    ) -> "ProfileCatalogConfirmation":
+        selections = {
+            "machine": Path(machine_path).resolve(),
+            "process": Path(process_path).resolve(),
+            "filament": Path(filament_path).resolve(),
+        }
+        requested_ids = {
+            "machine": machine_profile_id,
+            "process": process_profile_id,
+            "filament": filament_profile_id,
+        }
+        options = {
+            "machine": catalog.machine_options,
+            "process": catalog.process_options,
+            "filament": catalog.filament_options,
+        }
+        selected_records: dict[str, ProfileRecord] = {}
+        for role, path in selections.items():
+            candidates = tuple(
+                item
+                for item in options[role]
+                if item.path.resolve() == path
+                and (
+                    requested_ids[role] is None
+                    or item.profile_id.casefold()
+                    == str(requested_ids[role]).strip().casefold()
+                )
+            )
+            if len(candidates) != 1:
+                raise ValueError(
+                    "Die Profilauswahl ist im aktuellen Profilkatalog "
+                    f"nicht mehr eindeutig: {role}."
+                )
+            if not candidates[0].path.is_file():
+                raise ValueError(
+                    f"Die ausgewählte Profildatei fehlt: {role}."
+                )
+            selected_records[role] = candidates[0]
+        return cls(
+            slicer_identity_key=catalog.execution_slicer.identity_key,
+            inventory_fingerprint=catalog.inventory_fingerprint,
+            machine_profile_id=selected_records["machine"].profile_id,
+            machine_path=selections["machine"],
+            process_profile_id=selected_records["process"].profile_id,
+            process_path=selections["process"],
+            filament_profile_id=selected_records["filament"].profile_id,
+            filament_path=selections["filament"],
+        )
+
+    def matches_catalog(self, catalog: "ProfileCatalog") -> bool:
+        return (
+            self.slicer_identity_key == catalog.execution_slicer.identity_key
+            and self.inventory_fingerprint == catalog.inventory_fingerprint
+        )
+
+    def selected_profile_ids(
+        self,
+    ) -> dict[str, ProfileSelectionReference]:
+        return {
+            "machine": ProfileSelectionReference(
+                self.machine_profile_id,
+                self.machine_path,
+            ),
+            "process": ProfileSelectionReference(
+                self.process_profile_id,
+                self.process_path,
+            ),
+            "filament": ProfileSelectionReference(
+                self.filament_profile_id,
+                self.filament_path,
+            ),
+        }
 
 
 @dataclass(frozen=True, slots=True)

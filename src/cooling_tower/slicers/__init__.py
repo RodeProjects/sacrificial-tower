@@ -103,6 +103,8 @@ from cooling_tower.slicers.profile_matching import (
 )
 from cooling_tower.slicers.profile_models import (
     ConfirmedProfileMapping,
+    ProfileCatalog,
+    ProfileCatalogConfirmation,
     ProfileConfirmation,
     ProfileBundleMatch,
     ProfileExclusionCode,
@@ -138,6 +140,8 @@ __all__ = [
     "BackendValidationReport",
     "CRITICAL_PROFILE_KEYS",
     "ConfirmedProfileMapping",
+    "ProfileCatalog",
+    "ProfileCatalogConfirmation",
     "ProfileConfirmation",
     "GCodeProfileEvidence",
     "ProfileBundleMatch",

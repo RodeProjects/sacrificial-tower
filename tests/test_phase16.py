@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,8 @@ from cooling_tower.slicers import (
     EffectiveProfile,
     ProfileKind,
     ProfileRecord,
+    ProfileRole,
+    ResolvedProfile,
     SliceResult,
     SlicerCapability,
     SlicerDiscoverySource,
@@ -126,6 +129,31 @@ class SequencedAdapter:
         return SliceResult(
             True, 0, ("fake",), (path,), path, (), "ok", "", 0.01
         )
+
+
+class TransientAnycubicCompatibilityAdapter(FakeAdapter):
+    adapter_id = "anycubic_slicer_next"
+
+    def __init__(self, gcode: str) -> None:
+        super().__init__(gcode)
+        self.attempt_count = 0
+
+    def slice_model(self, request):
+        self.attempt_count += 1
+        if self.attempt_count == 1:
+            return SliceResult(
+                False,
+                -17,
+                ("fake-anycubic",),
+                (),
+                None,
+                (),
+                "process not compatible with printer",
+                "",
+                0.01,
+                failure_reason="Der Slicer wurde mit Fehlercode -17 beendet.",
+            )
+        return super().slice_model(request)
 
 
 class Phase16Tests(unittest.TestCase):
@@ -236,10 +264,7 @@ class Phase16Tests(unittest.TestCase):
             self.assertEqual(record.source, "temporary")
             payload = json.loads(record.path.read_text(encoding="utf-8"))
             self.assertEqual(payload["type"], record.kind.value)
-            self.assertEqual(
-                payload["from"],
-                "system" if record.kind is ProfileKind.MACHINE else "user",
-            )
+            self.assertEqual(payload["from"], "system")
         for record in (calibrated.process, *calibrated.filaments):
             payload = json.loads(record.path.read_text(encoding="utf-8"))
             self.assertEqual(payload["slow_down_layer_time"], "0")
@@ -253,6 +278,127 @@ class Phase16Tests(unittest.TestCase):
                     self.filament.write_text("{}", encoding="utf-8")
         finally:
             self.filament.write_bytes(before)
+
+    def test_02c_calibration_harmonizes_derived_anycubic_machine_identity(self) -> None:
+        base_machine_path = self.root / "base_machine.json"
+        base_machine_path.write_text(
+            json.dumps(
+                {
+                    "name": "Anycubic Base 0.4 nozzle",
+                    "type": "machine",
+                    "printer_settings_id": "Anycubic Base 0.4 nozzle",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.machine.write_text(
+            json.dumps(
+                {
+                    "name": "My derived machine",
+                    "from": "User",
+                    "inherits": "Anycubic Base 0.4 nozzle",
+                    "printer_settings_id": "My derived machine",
+                }
+            ),
+            encoding="utf-8",
+        )
+        machine = ProfileRecord(
+            self.profile.installation.adapter_id,
+            "My derived machine",
+            "My derived machine",
+            ProfileKind.MACHINE,
+            self.machine,
+            "user",
+            inherits=("Anycubic Base 0.4 nozzle",),
+        )
+        base_machine = ProfileRecord(
+            self.profile.installation.adapter_id,
+            "Anycubic Base 0.4 nozzle",
+            "Anycubic Base 0.4 nozzle",
+            ProfileKind.MACHINE,
+            base_machine_path,
+            "system",
+        )
+        profile = EffectiveProfile(
+            self.profile.installation,
+            machine,
+            self.profile.process,
+            self.profile.filaments,
+            self.profile.effective_values,
+        )
+        compatible = ["Anycubic Base 0.4 nozzle"]
+        resolved = {
+            machine.path: ResolvedProfile(
+                machine,
+                ProfileRole.MACHINE_VARIANT,
+                (base_machine, machine),
+                {
+                    "name": machine.name,
+                    "printer_settings_id": machine.name,
+                },
+                "machine-fingerprint",
+                True,
+            ),
+            profile.process.path: ResolvedProfile(
+                profile.process,
+                ProfileRole.PROCESS,
+                (profile.process,),
+                {
+                    "name": profile.process.name,
+                    "compatible_printers": compatible,
+                },
+                "process-fingerprint",
+                True,
+            ),
+            profile.filaments[0].path: ResolvedProfile(
+                profile.filaments[0],
+                ProfileRole.FILAMENT,
+                (profile.filaments[0],),
+                {
+                    "name": profile.filaments[0].name,
+                    "compatible_printers": compatible,
+                },
+                "filament-fingerprint",
+                True,
+            ),
+        }
+        source_paths = (
+            base_machine_path,
+            self.machine,
+            self.process,
+            self.filament,
+        )
+        before = {path: path.read_bytes() for path in source_paths}
+
+        with patch(
+            "cooling_tower.calibration.slice_evaluator._resolve_orca_role_profiles",
+            return_value=resolved,
+        ):
+            calibrated, _overrides = build_calibration_profile(
+                profile,
+                self.root / "derived_profile",
+            )
+
+        machine_payload = json.loads(
+            calibrated.machine.path.read_text(encoding="utf-8")
+        )
+        process_payload = json.loads(
+            calibrated.process.path.read_text(encoding="utf-8")
+        )
+        filament_payload = json.loads(
+            calibrated.filaments[0].path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(machine_payload["name"], compatible[0])
+        self.assertEqual(machine_payload["printer_settings_id"], compatible[0])
+        self.assertEqual(process_payload["compatible_printers"], compatible)
+        self.assertEqual(filament_payload["compatible_printers"], compatible)
+        self.assertEqual(machine_payload["from"], "system")
+        self.assertEqual(process_payload["from"], "system")
+        self.assertEqual(filament_payload["from"], "system")
+        self.assertEqual(
+            {path: path.read_bytes() for path in source_paths},
+            before,
+        )
 
     def test_03_slice_evaluator_uses_acceleration_aware_layer_components(self) -> None:
         result = FakeAdapter(tower_gcode()).slice_model(
@@ -594,6 +740,24 @@ class Phase16Tests(unittest.TestCase):
         self.assertFalse(output.exists())
         self.assertEqual(result.failures[-1].code, CalibrationFailureCode.SLICER_FAILURE)
 
+    def test_23b_transient_anycubic_profile_failure_is_retried_once(self) -> None:
+        adapter = TransientAnycubicCompatibilityAdapter(tower_gcode())
+        statuses: list[str] = []
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "anycubic-retry",
+            config=CalibrationConfig(maximum_iterations=1),
+            progress_callback=lambda _percent, status: statuses.append(status),
+        )
+        self.assertEqual(adapter.attempt_count, 2)
+        self.assertIsNot(result.state, CalibrationState.SLICER_FAILED)
+        self.assertTrue(
+            any("neu synchronisiert" in status for status in statuses)
+        )
+
     def test_24_unreachable_calibration_does_not_claim_success(self) -> None:
         output = self.root / "unreachable"
         result = CalibrationService().calibrate(
@@ -769,7 +933,7 @@ class Phase16RealAnycubicTest(unittest.TestCase):
                 copied.process.path.read_text(encoding="utf-8")
             )
             self.assertEqual(filament_payload["type"], "filament")
-            self.assertEqual(filament_payload["from"], "user")
+            self.assertEqual(filament_payload["from"], "system")
             import trimesh
 
             model = root / "probe.stl"

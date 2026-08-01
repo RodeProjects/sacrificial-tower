@@ -29,6 +29,7 @@ from cooling_tower.slicers.profile_inventory import (
 )
 from cooling_tower.slicers.profile_mappings import ProfileMappingStore
 from cooling_tower.slicers.profile_models import (
+    ProfileCatalog,
     ProfileBundleMatch,
     ProfileExclusionCode,
     ProfileHardExclusion,
@@ -261,6 +262,44 @@ class ProfileMatchingService:
         self._gcode_evidence_cache: dict[
             tuple[Path, int, int], GCodeProfileEvidence
         ] = {}
+
+    def catalog(
+        self,
+        installation: SlicerInstallation,
+        adapter: SlicerAdapter,
+        *,
+        force_inventory: bool = False,
+    ) -> ProfileCatalog:
+        """Load selectable profiles without requiring or modifying a source.
+
+        Inventory discovery is intentionally read-only. Compatibility and
+        effective-value validation remain part of :meth:`match` once a real
+        STL or G-code source is available.
+        """
+
+        inventory = self.inventory_service.load(
+            adapter,
+            installation,
+            force=force_inventory,
+        )
+        resolved = ProfileInheritanceResolver(inventory, adapter).resolve_all()
+        return ProfileCatalog(
+            execution_slicer=installation,
+            inventory_fingerprint=inventory.fingerprint_sha256,
+            machine_options=self._selectable_options(
+                resolved,
+                (ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL),
+            ),
+            process_options=self._selectable_options(
+                resolved,
+                (ProfileRole.PROCESS,),
+            ),
+            filament_options=self._selectable_options(
+                resolved,
+                (ProfileRole.FILAMENT,),
+            ),
+            rejected_profile_count=sum(not item.valid for item in resolved),
+        )
 
     def match(
         self,

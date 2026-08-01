@@ -172,7 +172,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertFalse(label.alignment() & Qt.AlignmentFlag.AlignRight)
         window.close()
 
-    def test_slicer_header_grows_for_slicer_and_three_profiles(self) -> None:
+    def test_slicer_header_stays_compact_and_profiles_remain_accessible(self) -> None:
         window = self.window()
         window.machine_profile_combo.addItem("Kobra 3 V2")
         window.process_profile_combo.addItem("0,20 mm Standard")
@@ -194,20 +194,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window._set_slicer_header_summary(installation)
         self.app.processEvents()
 
-        rendered_keys = window.slicer_group.summary_key_label.text()
-        rendered_values = window.slicer_group.summary_label.text()
-        for key in (
-            "Slicer",
-            "Maschinenprofil",
-            "Prozessprofil",
-            "Filamentprofil",
-        ):
-            self.assertIn(f"<b>{key}:</b>", rendered_keys)
-        self.assertIn(installation.display_name, rendered_values)
-        self.assertIn("Kobra 3 V2", rendered_values)
-        self.assertIn("0,20 mm Standard", rendered_values)
-        self.assertIn("PLA Schwarz", rendered_values)
-        self.assertNotIn("(automatisch erkannt)", rendered_values)
+        self.assertEqual(
+            window.slicer_group.summary_label.text(),
+            installation.display_name,
+        )
         self.assertEqual(
             window.slicer_group.title_note_label.text(),
             "(automatisch erkannt)",
@@ -221,40 +211,18 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertTrue(window.slicer_group.summary_note_label.isHidden())
         self.assertEqual(
-            window.slicer_group.summary_details(),
-            (
-                "Maschinenprofil: Kobra 3 V2",
-                "Filamentprofil: PLA Schwarz",
-                "Prozessprofil: 0,20 mm Standard",
-            ),
-        )
-        self.assertTrue(
-            window.slicer_group.summary_key_label.alignment()
-            & Qt.AlignmentFlag.AlignRight
-        )
-        self.assertFalse(
-            window.slicer_group.summary_key_label.alignment()
-            & Qt.AlignmentFlag.AlignLeft
-        )
-        self.assertTrue(
-            window.slicer_group.summary_label.alignment()
-            & Qt.AlignmentFlag.AlignLeft
-        )
-        self.assertFalse(
-            window.slicer_group.summary_label.alignment()
-            & Qt.AlignmentFlag.AlignRight
-        )
-        self.assertTrue(
-            window.slicer_group.summary_note_label.alignment()
-            & Qt.AlignmentFlag.AlignRight
-        )
-        self.assertGreater(
             window.slicer_group.header.height(),
             METRICS.card_header_height_px,
         )
-        self.assertEqual(window.slicer_group.header_layout.stretch(0), 1)
-        self.assertEqual(window.slicer_group.header_layout.stretch(2), 0)
-        self.assertEqual(window.slicer_group.header_layout.stretch(3), 0)
+        self.assertEqual(
+            window.slicer_group.header.height(),
+            window.source_group.header.height(),
+        )
+        accessible = window.slicer_selector_column.accessibleDescription()
+        self.assertIn(f"Slicer: {installation.display_name}", accessible)
+        self.assertIn("Maschinenprofil: Kobra 3 V2", accessible)
+        self.assertIn("Filamentprofil: PLA Schwarz", accessible)
+        self.assertIn("Prozessprofil: 0,20 mm Standard", accessible)
         self.assertTrue(
             window.slicer_group.title_label.alignment()
             & Qt.AlignmentFlag.AlignLeft
@@ -262,30 +230,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         left_layout = window.slicer_group.header_left.layout()
         self.assertTrue(left_layout.alignment() & Qt.AlignmentFlag.AlignLeft)
         self.assertEqual(window.slicer_group.title_label.text(), "Slicer")
-        self.assertLess(
-            window.slicer_group.title_label.geometry().right(),
-            window.slicer_group.title_note_label.geometry().left(),
-        )
-        self.assertGreaterEqual(
-            window.slicer_group.header_left.width(),
-            window.slicer_group.header_left.sizeHint().width(),
-        )
-        self.assertLessEqual(
-            window.slicer_group.summary_label.width(),
-            window.slicer_group.summary_label.maximumWidth(),
-        )
-        self.assertLess(
-            window.slicer_group.header_left.geometry().right(),
-            window.slicer_group.summary_key_label.geometry().left(),
-        )
-        self.assertLess(
-            window.slicer_group.summary_key_label.geometry().right(),
-            window.slicer_group.summary_label.geometry().left(),
-        )
-        self.assertLess(
-            window.slicer_group.summary_label.geometry().right(),
-            window.slicer_group.toggle_button.geometry().left(),
-        )
+        self.assertTrue(window.slicer_group.toggle_button.isHidden())
         window.close()
 
     def test_regular_card_headers_keep_the_standard_height(self) -> None:
@@ -374,18 +319,11 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.profile_match_result = result
         window.start_profile_matching = lambda **kwargs: requests.append(kwargs)
         window.machine_profile_combo.setCurrentIndex(2)
-        self.assertEqual(len(requests), 1)
-        selected_ids = requests[0]["selected_profile_ids"]
-        self.assertEqual(set(selected_ids), {"machine"})
-        self.assertTrue(
-            all(Path(value).is_absolute() for value in selected_ids.values())
-        )
+        self.assertEqual(requests, [])
+        self.assertTrue(window.profile_confirm_button.isEnabled())
+        self.assertIn("erneut bestätigt", window.profile_status_label.text())
         window.filament_profile_combo.setCurrentIndex(2)
-        self.assertEqual(len(requests), 2)
-        self.assertEqual(
-            set(requests[1]["selected_profile_ids"]),
-            {"machine", "process", "filament"},
-        )
+        self.assertEqual(requests, [])
         window.close()
 
     def test_profile_origin_uses_real_storage_location(self) -> None:
@@ -984,7 +922,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertGreater(
             grid.mapTo(window.settings_content, QPoint(0, 0)).y(),
-            window.slicer_group.geometry().bottom(),
+            window.workflow_group.geometry().bottom(),
         )
 
         window.geometry_settings_group.setChecked(False)

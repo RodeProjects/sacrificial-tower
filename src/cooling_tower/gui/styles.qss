@@ -402,27 +402,35 @@ QWidget#numericSettingRow {
 }
 
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="left"],
-QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] {
+QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"],
+QWidget#preparationSplit QFrame#sectionCard[subsection="left"],
+QWidget#preparationSplit QFrame#sectionCard[subsection="right"] {
     background: #ffffff;
     border: none;
     border-radius: 8px;
 }
 
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardHeader,
-QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardHeader {
+QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardHeader,
+QWidget#preparationSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardHeader,
+QWidget#preparationSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardHeader {
     background: #f5f7f9;
     border: none;
     border-radius: 0;
 }
 
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardBody,
-QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBody {
+QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBody,
+QWidget#preparationSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardBody,
+QWidget#preparationSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBody {
     background: #ffffff;
     border: none;
 }
 
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardBodyDivider,
-QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBodyDivider {
+QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBodyDivider,
+QWidget#preparationSplit QFrame#sectionCard[subsection="left"] > QFrame#sectionCardBodyDivider,
+QWidget#preparationSplit QFrame#sectionCard[subsection="right"] > QFrame#sectionCardBodyDivider {
     background: #e0e5ea;
     border: none;
 }
@@ -453,6 +461,46 @@ QFrame#geometryVerticalDivider {
     border: none;
     min-width: 1px;
     max-width: 1px;
+}
+
+QFrame#preparationVerticalDivider,
+QFrame#preparationHorizontalDivider {
+    background: #d6dee8;
+    border: none;
+}
+
+QWidget#preparationOverview,
+QWidget#preparationRequirements {
+    background: #ffffff;
+    border: none;
+}
+
+QLabel#preparationRequirementIcon {
+    font-size: 10.5pt;
+    font-weight: 750;
+}
+
+QLabel#preparationRequirementIcon[state="complete"],
+QLabel#preparationRequirementText[state="complete"] {
+    color: #176b45;
+}
+
+QLabel#preparationRequirementIcon[state="missing"] {
+    color: #b42318;
+}
+
+QLabel#preparationRequirementText[state="missing"] {
+    color: #526274;
+}
+
+QFrame#preparationVerticalDivider {
+    min-width: 1px;
+    max-width: 1px;
+}
+
+QFrame#preparationHorizontalDivider {
+    min-height: 1px;
+    max-height: 1px;
 }
 
 QFrame#geometryCalculationSection {
@@ -914,10 +962,18 @@ QLabel#gcodeImportGuideIcon {
     font-weight: 700;
 }
 
-QPushButton#reconstructedConfigToggle {
+QPushButton#reconstructedConfigToggle,
+QPushButton#slicerAnalysisDetailsToggle {
     text-align: left;
     background: #f7f9fc;
     border-color: #d6dee8;
+}
+
+QFrame#slicerAnalysisDetails {
+    background: #fbfcfd;
+    border: 1px solid #e2e8ee;
+    border-radius: 7px;
+    padding: 8px;
 }
 
 QTextEdit#reconstructedConfigText, QTextEdit#profileDiagnostics {
@@ -1615,6 +1671,10 @@ QProgressBar#gcodeAnalysisProgressBar::chunk {
     border-radius: 5px;
 }
 QProgressBar#slicerDiscoveryProgressBar::chunk {
+    background: #26965f;
+    border-radius: 5px;
+}
+QProgressBar#preparationProgressBar::chunk {
     background: #26965f;
     border-radius: 5px;
 }

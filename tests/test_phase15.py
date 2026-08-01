@@ -680,14 +680,15 @@ class Phase15ProfileTests(unittest.TestCase):
             profile_filter_source="manual",
         )
         window.show_all_profiles_checkbox.setChecked(False)
+        self.assertFalse(requests[-1]["include_all_profiles"])
+        selected_machine = requests[-1]["selected_profile_ids"]["machine"]
         self.assertEqual(
-            requests[-1],
-            {
-                "selected_profile_ids": {
-                    "machine": str(result.selected.machine.path),
-                },
-                "include_all_profiles": False,
-            },
+            selected_machine.profile_id,
+            result.selected.machine.profile_id,
+        )
+        self.assertEqual(
+            selected_machine.path,
+            result.selected.machine.path,
         )
         window.close()
         app.processEvents()
@@ -1401,7 +1402,7 @@ class Phase15ProfileTests(unittest.TestCase):
         window.profile_match_result = result
         window.profile_preview_outdated = False
         calls: list[bool] = []
-        window.start_profile_matching = lambda **_kwargs: calls.append(True)
+        window.start_profile_catalog_loading = lambda **_kwargs: calls.append(True)
         window.slicer_combo.setCurrentIndex(1)
         self.assertIsNone(window.profile_match_result)
         self.assertTrue(window.profile_preview_outdated)

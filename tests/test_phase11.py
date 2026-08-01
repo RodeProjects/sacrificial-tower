@@ -663,7 +663,8 @@ class NumericSettingWidgetTests(GuiCase):
             self.assertGreater(dark_pixels, 0)
 
     def test_keyboard_entry_and_tab_navigation_work(self) -> None:
-        self.window.workflow.slicer_unavailable("Tastaturtest")
+        self.window.workflow.analysis_succeeded("tastatur.gcode")
+        self.window.workflow.slicer_succeeded("Tastaturtest")
         QTest.qWait(300)
         editor = self.window.target_time_spin
         editor.setFocus()
@@ -902,6 +903,7 @@ class StartupLayoutAndLifecycleTests(GuiCase):
                 "from cooling_tower.gui import MainWindow",
                 "app=QApplication([])",
                 "win=MainWindow()",
+                "win.workflow.analysis_succeeded('layout.gcode')",
                 "win.workflow.slicer_succeeded('Layouttest')",
                 "win.show()",
                 "[group.setChecked(True) for group in (win.geometry_group,win.stability_group,win.geometry_settings_group)]",

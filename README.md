@@ -200,6 +200,13 @@ unkontrollierter Scan aller Laufwerke statt. Jeder Kandidat wird anhand von
 Dateiversionsinformationen oder einem kurzen, ungefährlichen Versions-/Hilfe-
 Aufruf verifiziert, bevor er in der GUI erscheint.
 
+Die Erkennung startet unmittelbar nach dem Aufbau des Hauptfensters. Direkt
+danach werden die zugehörigen Maschinen-, Prozess- und Filamentprofile
+quellunabhängig und ausschließlich lesend inventarisiert. Damit kann die
+Slicer- und Profilauswahl schon vor einer STL- oder G-Code-Datei bestätigt
+werden. Die spätere dateispezifische Kompatibilitätsprüfung bleibt zwingend
+und bindet nur exakt unveränderte Profil-IDs und Profilpfade automatisch.
+
 Mehrere Produkte und Versionen werden einzeln angeboten. Die Vorauswahl
 berücksichtigt die im Quell-G-Code belegte Slicerfamilie und Version; der
 Benutzer kann sie jederzeit ändern oder über `EXE auswählen …` eine portable
@@ -221,8 +228,9 @@ werden ausschließlich gelesen und niemals verändert.
 
 ## Phase 15: Belastbare Profilzuordnung
 
-Nach G-Code-Analyse und Slicerauswahl inventarisiert die Anwendung die
-zugänglichen Maschinen-, Prozess- und Filamentprofile getrennt. Mehrstufige
+Direkt nach der Slicerauswahl inventarisiert die Anwendung die zugänglichen
+Maschinen-, Prozess- und Filamentprofile getrennt; dafür ist keine Quelldatei
+erforderlich. Mehrstufige
 Vererbungen werden zu effektiven Werten aufgelöst; Düsengröße, Technologie,
 G-Code-Dialekt, Bauraum, Extruderzahl und Profilversion wirken als harte
 Ausschlusskriterien. Profilnamen dienen nur als schwacher Zusatzhinweis.
@@ -273,18 +281,32 @@ Iterationsergebnissen, Hashwerten und Abbruchursachen stehen im erzeugten
 
 ## Phase 18: UI-Update und Verbesserungen
 
-Die UI-Überarbeitung seit Phase 17 wird als Phase 18 geführt. Einstellkarten
-stehen responsiv in einer oder zwei Spalten; zusammengehörige Geometriekarten
-sind gleich hoch, unabhängig einklappbare Karten behalten ihre natürliche
-Höhe und alle Inhalte beginnen oben. Beschriftungen bleiben links, während die
-gleich großen Editoren und Reset-Schaltflächen rechts ausgerichtet sind.
+Die UI-Überarbeitung seit Phase 17 wird als Phase 18 geführt. Quellen- und
+Slicer-Vorbereitung liegen in einem gemeinsamen Dropdown: breit als zwei durch
+eine vertikale Linie getrennte Spalten, schmal in der festen Reihenfolge
+„STL / G-Code“, Trennlinie, „Slicer“. Eine gemeinsame Fortschrittsleiste liegt
+oberhalb beider grauer Teilköpfe und zeigt sechs reversible Voraussetzungen
+mit rotem X oder grünem Haken. Diese Voraussetzungen sind breit ohne
+zusätzliche Trennlinie gruppiert: links die drei Datei-/Analysebedingungen,
+rechts die drei Slicer-/Profilbedingungen. Schmal steht zuerst die komplette
+Slicer-Gruppe und danach die Datei-/Analysegruppe. Die lokalen
+Fortschrittsleisten sind jeweils das erste Inhaltselement ihrer Spalte,
+erscheinen aber nur während einer aktiven Berechnung und verschwinden bei
+Abschluss wieder. Die Layerzeitanalyse reicht ihren echten Teilfortschritt aus
+dem G-Code-Parser bis zur Anzeige durch. Innen- und Außenabstände entsprechen
+der Turmgeometrie. Die
+Slicer-Auswahl bleibt vertikal in der Reihenfolge Slicer, Maschinenprofil,
+Filamentprofil und Prozessprofil; sekundäre Analyseinformationen liegen in
+einem eigenen Detailbereich.
 
-Der erste erfolgreiche Abschluss der Quellenanalyse und Slicererkennung
-animiert Erfolgszustand und automatisches Einklappen für 1.000 ms. Alle
-weiteren Animationen verwenden 250 ms und eine spätere manuelle Kartenwahl
-wird nicht überschrieben. Die Quelle kann erneut eingelesen werden, die
-eingebettete Konfiguration liegt geschlossen im Slicer-Bereich und automatisch
-erkannte Slicer werden direkt neben dem Titel „Slicer“ gekennzeichnet.
+Der gemeinsame Kopf wird erst nach erfolgreicher G-Code-Analyse – bei einer
+STL nach Pre-Slice und Analyse des erzeugten G-Codes – sowie bestätigtem Slicer-
+und Profilkontext grün, erhält einen Haken und klappt automatisch ein. Erst
+danach erscheinen Einstellungen, Prognose und die festen Aktionen im Fußbereich.
+Fehler, fehlende Bestätigung oder eine geänderte Quelle öffnen den Bereich
+wieder und sperren die Folgeaktionen. Die eingebettete Konfiguration startet
+geschlossen; automatisch erkannte Slicer werden direkt neben dem Titel
+„Slicer“ gekennzeichnet.
 
 Hover-Zustände, Dropdown-Chevrons, gleichmäßige Prognoseabstände, eine dezente
 Trennung zum fixen Fußbereich und die invertierte Rotation per linker

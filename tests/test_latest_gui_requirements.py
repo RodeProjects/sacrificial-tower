@@ -31,6 +31,7 @@ from cooling_tower.gui.main_window import (
     MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
     MainWindow,
 )
+from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.widgets.numeric_setting import (
     LABEL_INFO_SAFETY_GAP_PX,
@@ -588,7 +589,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         future_dialog.setParent(window)
         window.close()
 
-    def test_gcode_guide_has_matching_space_above_and_below(self) -> None:
+    def test_gcode_guide_follows_progress_and_keeps_body_gap_below(self) -> None:
         window = self.window()
         window.resize(900, 900)
         window.show()
@@ -603,13 +604,15 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window.source_group.content_widget,
             QPoint(0, 0),
         ).y()
-        upper_gap = (
-            guide_top
-            - window.source_group.content_widget.contentsRect().top()
-        )
+        progress_bottom = window.gcode_progress_status_widget.mapTo(
+            window.source_group.content_widget,
+            QPoint(0, 0),
+        ).y() + window.gcode_progress_status_widget.height()
+        upper_gap = guide_top - progress_bottom
         lower_gap = drop_zone_top - guide_bottom
 
-        self.assertLessEqual(abs(upper_gap - lower_gap), 1)
+        self.assertEqual(upper_gap, window.source_group.content_layout.spacing())
+        self.assertEqual(lower_gap, METRICS.card_body_vertical_padding_px)
         window.close()
 
     def test_program_legal_placeholder_expands_down_before_scrolling(self) -> None:

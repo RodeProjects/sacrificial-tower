@@ -34,6 +34,7 @@ class ResponsiveCardGrid(QWidget):
         self._entries: list[_GridEntry] = []
         self._two_column: bool | None = None
         self._vertical_separator: QWidget | None = None
+        self._stacked_separator: QWidget | None = None
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setHorizontalSpacing(METRICS.card_spacing_px)
@@ -74,6 +75,16 @@ class ResponsiveCardGrid(QWidget):
             separator.setParent(self)
         self._relayout(force=True)
 
+    def set_stacked_separator(self, separator: QWidget | None) -> None:
+        """Use an explicit divider between paired rows in narrow layouts."""
+
+        if self._stacked_separator is not None:
+            self._stacked_separator.hide()
+        self._stacked_separator = separator
+        if separator is not None:
+            separator.setParent(self)
+        self._relayout(force=True)
+
     def set_breakpoint(self, breakpoint_px: int) -> None:
         self._breakpoint_px = max(1, int(breakpoint_px))
         self._relayout(force=True)
@@ -92,7 +103,12 @@ class ResponsiveCardGrid(QWidget):
         return self.grid.sizeHint()
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt virtual API
-        return self.grid.minimumSize()
+        # A two-column layout's calculated minimum width is the sum of both
+        # child minima. Publishing that width creates a circular constraint:
+        # the widget can then never become narrow enough to cross its stacking
+        # breakpoint after a window was wide once. The vertical minimum remains
+        # useful, while width zero lets the parent drive responsive relayout.
+        return QSize(0, self.grid.minimumSize().height())
 
     def content_height_hint(self) -> int:
         """Return the live height needed by the current responsive layout.
@@ -187,6 +203,7 @@ class ResponsiveCardGrid(QWidget):
             self.grid.takeAt(0)
 
         separator = self._vertical_separator
+        stacked_separator = self._stacked_separator
         if separator is None:
             self.grid.setHorizontalSpacing(METRICS.card_spacing_px)
             self.grid.setColumnStretch(0, 1)
@@ -213,6 +230,8 @@ class ResponsiveCardGrid(QWidget):
                 row += 1
                 continue
             if two_column:
+                if stacked_separator is not None:
+                    stacked_separator.hide()
                 alignment = (
                     Qt.AlignmentFlag.AlignTop
                     if not entry.equal_height
@@ -246,6 +265,12 @@ class ResponsiveCardGrid(QWidget):
                     else (entry.left, entry.right)
                 )
                 self.grid.addWidget(first, row, 0, 1, span)
-                self.grid.addWidget(second, row + 1, 0, 1, span)
-                row += 2
+                if stacked_separator is not None:
+                    stacked_separator.show()
+                    self.grid.addWidget(stacked_separator, row + 1, 0, 1, span)
+                    self.grid.addWidget(second, row + 2, 0, 1, span)
+                    row += 3
+                else:
+                    self.grid.addWidget(second, row + 1, 0, 1, span)
+                    row += 2
         self.updateGeometry()

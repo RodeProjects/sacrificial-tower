@@ -319,6 +319,16 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             self.assertEqual(request.model_path, self.source)
             self.assertTrue(request.output_directory.is_relative_to(result.workspace_root))
             self.assertTrue(any(busy for _, _, busy in phases))
+            analysis_phases = [
+                (percent, status, busy)
+                for percent, status, busy in phases
+                if 70 <= percent < 90 and "%" in status
+            ]
+            self.assertGreaterEqual(len(analysis_phases), 3)
+            self.assertTrue(all(not busy for _, _, busy in analysis_phases))
+            self.assertTrue(
+                any("100 %" in status for _, status, _ in analysis_phases)
+            )
             self.assertEqual(phases[-1][0], 100)
             self.assertEqual(self._digest(self.source), source_hash)
             for path, digest in profile_hashes.items():
@@ -560,11 +570,15 @@ class SourcePreSliceServiceTests(unittest.TestCase):
         first.cleanup()
 
         second_adapter = FakeSliceAdapter()
+        cached_phases: list[tuple[int, str, bool]] = []
         second = service.run(
             stl_validation=self.validation,
             profile_match=self.match,
             confirmation=self.confirmation,
             adapter=second_adapter,
+            progress_callback=lambda percent, status, busy: cached_phases.append(
+                (percent, status, busy)
+            ),
         )
         try:
             self.assertTrue(second.cache_hit)
@@ -574,6 +588,12 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             self.assertEqual(second_adapter.requests, [])
             self.assertEqual(second.analysis_snapshot.layer_count, 2)
             self.assertTrue(second.prepared_source.matches_analysis_gcode())
+            self.assertTrue(
+                any(
+                    70 <= percent < 90 and "%" in status and not busy
+                    for percent, status, busy in cached_phases
+                )
+            )
         finally:
             second.cleanup()
 

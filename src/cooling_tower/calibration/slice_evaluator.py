@@ -9,6 +9,10 @@ from typing import Any, Mapping, Sequence
 from cooling_tower.models import LayerSliceTiming, SliceEvaluation
 from cooling_tower.services.analysis_service import GCodeAnalysisService
 from cooling_tower.slicers import EffectiveProfile, ProfileRecord, SliceResult
+from cooling_tower.slicers.orca_profile_compatibility import (
+    harmonize_temporary_orca_profile_compatibility,
+)
+from cooling_tower.slicers.profile_models import ResolvedProfile
 
 
 COOLING_OVERRIDE_KEYS: Mapping[str, object] = {
@@ -57,7 +61,34 @@ def build_calibration_profile(
 
     if orca_family:
         working_directory.mkdir(parents=True, exist_ok=True)
-        resolved_values = _resolve_orca_role_values(profile)
+        resolved_profiles = _resolve_orca_role_profiles(profile)
+        resolved_values = {
+            path: dict(resolved.effective_values)
+            for path, resolved in resolved_profiles.items()
+        }
+        machine_values = (
+            resolved_values.get(profile.machine.path)
+            if profile.machine is not None
+            else None
+        )
+        dependent_values = tuple(
+            resolved_values.get(record.path, {})
+            for record in (
+                *((profile.process,) if profile.process is not None else ()),
+                *profile.filaments,
+            )
+        )
+        machine_resolved = (
+            resolved_profiles.get(profile.machine.path)
+            if profile.machine is not None
+            else None
+        )
+        machine_identity = harmonize_temporary_orca_profile_compatibility(
+            profile.machine,
+            machine_resolved.chain if machine_resolved is not None else (),
+            machine_values,
+            dependent_values,
+        )
         machine = _materialize_orca_profile_copy(
             profile.machine,
             working_directory / "machine_01.json",
@@ -68,6 +99,7 @@ def build_calibration_profile(
                 if profile.machine is not None
                 else None
             ),
+            compatible_machine_identity=machine_identity,
         )
         process = _materialize_orca_profile_copy(
             profile.process,
@@ -79,6 +111,7 @@ def build_calibration_profile(
                 if profile.process is not None
                 else None
             ),
+            compatible_machine_identity=machine_identity,
         )
         filaments = tuple(
             _materialize_orca_profile_copy(
@@ -87,6 +120,7 @@ def build_calibration_profile(
                 overrides=applied,
                 include_missing_overrides=True,
                 resolved_values=resolved_values.get(record.path),
+                compatible_machine_identity=machine_identity,
             )
             for index, record in enumerate(profile.filaments, start=1)
         )
@@ -113,6 +147,7 @@ def _materialize_orca_profile_copy(
     overrides: Mapping[str, object],
     include_missing_overrides: bool,
     resolved_values: Mapping[str, object] | None,
+    compatible_machine_identity: str,
 ) -> ProfileRecord | None:
     """Create a CLI-compatible copy without ever writing the source profile."""
 
@@ -134,12 +169,18 @@ def _materialize_orca_profile_copy(
     # disposable copy must state the role explicitly.
     payload["name"] = str(payload.get("name") or record.name)
     payload["type"] = record.kind.value
-    original_origin = str(loaded.get("from", record.source)).casefold()
-    payload["from"] = (
-        "system"
-        if record.kind.value == "machine" and original_origin == "system"
-        else "user"
-    )
+    if compatible_machine_identity:
+        if record.kind.value == "machine":
+            payload["name"] = compatible_machine_identity
+            payload["printer_settings_id"] = compatible_machine_identity
+        elif record.kind.value in {"process", "filament"}:
+            payload["compatible_printers"] = [compatible_machine_identity]
+    # All flattened records form one synthetic, self-contained preset family.
+    # Anycubic includes ``from`` in its compatibility model; mixing a system
+    # machine with user process/filament copies can therefore intermittently
+    # reject an otherwise probe-validated combination. This origin exists only
+    # in our temporary workspace and never changes the slicer-owned sources.
+    payload["from"] = "system"
     if resolved_values:
         # The temporary copy is self-contained. This is important when the
         # isolated slicer data directory intentionally contains no user
@@ -203,9 +244,9 @@ def _profile_override_value(
     return rendered
 
 
-def _resolve_orca_role_values(
+def _resolve_orca_role_profiles(
     profile: EffectiveProfile,
-) -> dict[Path, Mapping[str, object]]:
+) -> dict[Path, ResolvedProfile]:
     """Resolve each role's inheritance read-only for self-contained copies."""
 
     try:
@@ -226,7 +267,7 @@ def _resolve_orca_role_values(
             force=True,
         )
         resolver = ProfileInheritanceResolver(inventory, adapter)
-        result: dict[Path, Mapping[str, object]] = {}
+        result: dict[Path, ResolvedProfile] = {}
         records = (
             *((profile.machine,) if profile.machine is not None else ()),
             *((profile.process,) if profile.process is not None else ()),
@@ -235,7 +276,7 @@ def _resolve_orca_role_values(
         for record in records:
             resolved = resolver.resolve(record)
             if resolved.valid and resolved.effective_values:
-                result[record.path] = dict(resolved.effective_values)
+                result[record.path] = resolved
         return result
     except (OSError, StopIteration, ValueError, TypeError):
         # Sparse synthetic fixtures and manually supplied profiles may have no

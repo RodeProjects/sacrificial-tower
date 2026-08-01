@@ -875,6 +875,7 @@ class Phase17Tests(unittest.TestCase):
             window.export_button,
         ):
             self.assertTrue(button.isHidden())
+        window.workflow.analysis_succeeded("test.gcode")
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.app.processEvents()
         self.assertTrue(window.reset_button.isHidden())

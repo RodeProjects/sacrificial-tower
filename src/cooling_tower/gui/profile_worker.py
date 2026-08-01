@@ -12,6 +12,7 @@ from cooling_tower.diagnostic_events import (
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.models import GCodeAnalysisSnapshot
 from cooling_tower.slicers import (
+    ProfileCatalog,
     ProfileMatchingContext,
     ProfileMatchResult,
     ProfileMatchingService,
@@ -19,6 +20,81 @@ from cooling_tower.slicers import (
     SlicerAdapter,
     SlicerInstallation,
 )
+
+
+class ProfileCatalogWorker(CancelableWorker):
+    """Inventory selectable profiles before a source file exists."""
+
+    succeeded = Signal(int, object)
+    failed = Signal(int, str, str)
+    finished = Signal(int)
+
+    def __init__(
+        self,
+        request_id: int,
+        service: ProfileMatchingService,
+        installation: SlicerInstallation,
+        adapter: SlicerAdapter,
+        *,
+        force_inventory: bool = False,
+    ) -> None:
+        super().__init__()
+        self.request_id = request_id
+        self.service = service
+        self.installation = installation
+        self.adapter = adapter
+        self.force_inventory = force_inventory
+
+    @Slot()
+    def run(self) -> None:
+        with self.diagnostic_scope():
+            self.diagnose(
+                "profile_catalog_started",
+                diagnostic_event_schema_version=DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+                forced_inventory=self.force_inventory,
+            )
+            try:
+                if self.cancellation_requested():
+                    return
+                catalog: ProfileCatalog = self.service.catalog(
+                    self.installation,
+                    self.adapter,
+                    force_inventory=self.force_inventory,
+                )
+                if self.cancellation_requested():
+                    return
+                self.diagnose(
+                    "profile_catalog_finished",
+                    diagnostic_event_schema_version=DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+                    outcome="success",
+                    machine_profile_count=len(catalog.machine_options),
+                    process_profile_count=len(catalog.process_options),
+                    filament_profile_count=len(catalog.filament_options),
+                    rejected_profile_count=catalog.rejected_profile_count,
+                    catalog_complete=catalog.complete,
+                )
+                self.succeeded.emit(self.request_id, catalog)
+            except Exception as error:
+                if not self.cancellation_requested():
+                    self.diagnose(
+                        "profile_catalog_failed",
+                        diagnostic_event_schema_version=(
+                            DIAGNOSTIC_EVENT_SCHEMA_VERSION
+                        ),
+                        outcome="failed",
+                        error_code=exception_error_code(
+                            "profile_catalog",
+                            error,
+                        ),
+                        error_type=type(error).__name__,
+                    )
+                    self.failed.emit(
+                        self.request_id,
+                        str(error),
+                        traceback.format_exc(),
+                    )
+            finally:
+                self.finished.emit(self.request_id)
 
 
 class ProfileMatchingWorker(CancelableWorker):

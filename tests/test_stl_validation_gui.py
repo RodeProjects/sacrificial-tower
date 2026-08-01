@@ -120,7 +120,8 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.source_group.isChecked())
             self.assertFalse(window.source_group.content_widget.isHidden())
             self.assertTrue(window.ready_grid.isHidden())
-            self.assertTrue(window.slicer_group.isHidden())
+            self.assertTrue(window.slicer_group.isVisibleTo(window))
+            self.assertTrue(window.workflow_group.isChecked())
             self.assertTrue(window.stl_validation_message.isVisibleTo(window))
             self.assertEqual(
                 window.stl_validation_message.property("severity"),
@@ -140,6 +141,10 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.prompt_label.isVisibleTo(window.drop_zone))
             self.assertTrue(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.gcode_progress_bar.isHidden())
+            self.assertEqual(
+                window.gcode_progress_status_label.text(),
+                "STL-Prüfung fehlgeschlagen",
+            )
             self.assertEqual(window.drop_zone.reload_button.text(), "STL neu einlesen")
             self.assertEqual(window.drop_zone.browse_button.text(), "Andere Datei auswählen")
             self.assertEqual(window.drop_zone.remove_button.text(), "STL entfernen")
@@ -327,7 +332,7 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertEqual(window.source_group.summary_note_label.text(), "")
             self.assertTrue(window.source_group.isChecked())
             self.assertFalse(window.source_group.content_widget.isHidden())
-            self.assertTrue(window.slicer_group.isHidden())
+            self.assertTrue(window.slicer_group.isVisibleTo(window))
             self.assertTrue(window.ready_grid.isHidden())
             self.assertEqual(
                 window.status_label.text(),
@@ -356,6 +361,10 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.prompt_label.isVisibleTo(window.drop_zone))
             self.assertTrue(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.gcode_progress_bar.isHidden())
+            self.assertEqual(
+                window.gcode_progress_status_label.text(),
+                "STL-Prüfung fehlgeschlagen",
+            )
             self.assertFalse(window.drop_zone.browse_button.isHidden())
             self.assertFalse(window.drop_zone.reload_button.isHidden())
             self.assertEqual(

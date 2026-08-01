@@ -547,17 +547,21 @@ class Phase18UiTests(unittest.TestCase):
         )
         window.close()
 
-    def test_initial_gcode_card_keeps_its_previous_natural_height(self) -> None:
+    def test_preparation_columns_have_equal_height_and_aligned_progress(self) -> None:
         window = self.window()
         window.resize(1205, 1393)
         window.show()
         self.app.processEvents()
-        viewport_height = window.settings_scroll.viewport().height()
-        self.assertLess(window.source_group.height(), viewport_height // 2)
-        self.assertLessEqual(
-            window.source_group.height(),
-            window.source_group.sizeHint().height() + 2,
-        )
+        self.assertEqual(window.source_group.height(), window.slicer_group.height())
+        source_y = window.gcode_progress_bar.mapTo(
+            window.workflow_group,
+            window.gcode_progress_bar.rect().topLeft(),
+        ).y()
+        slicer_y = window.slicer_progress_bar.mapTo(
+            window.workflow_group,
+            window.slicer_progress_bar.rect().topLeft(),
+        ).y()
+        self.assertEqual(source_y, slicer_y)
         self.assertGreaterEqual(window.drop_zone.height(), 180)
         window.close()
 
@@ -567,8 +571,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         outer_groups = (
-            window.source_group,
-            window.slicer_group,
+            window.workflow_group,
             window.timing_group,
             window.geometry_settings_group,
             window.prediction_frame,
@@ -581,7 +584,7 @@ class Phase18UiTests(unittest.TestCase):
             'QFrame#sectionCard[outerDropdown="true"] > QFrame#sectionCardHeader',
             window.styleSheet(),
         )
-        initial_header = window.source_group.header.grab().toImage()
+        initial_header = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             initial_header.pixelColor(initial_header.width() // 2, 5).name(),
             "#f0f6fb",
@@ -600,8 +603,7 @@ class Phase18UiTests(unittest.TestCase):
             "#f3f0ff",
         )
         expected_accents = {
-            window.source_group: "#1769aa",
-            window.slicer_group: "#1769aa",
+            window.workflow_group: "#1769aa",
             window.timing_group: "#1769aa",
             window.geometry_settings_group: "#1769aa",
             window.prediction_frame: "#6f52c9",
@@ -647,12 +649,11 @@ class Phase18UiTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.prediction_frame.set_state(SectionState.SUCCESS)
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
-        for group in (window.source_group, window.slicer_group):
-            image = group.header.grab().toImage()
-            self.assertEqual(
-                image.pixelColor(image.width() // 2, 5).name(),
-                "#eef8f2",
-            )
+        image = window.workflow_group.header.grab().toImage()
+        self.assertEqual(
+            image.pixelColor(image.width() // 2, 5).name(),
+            "#eef8f2",
+        )
         prediction_image = window.prediction_frame.grab().toImage()
         self.assertEqual(
             prediction_image.pixelColor(
@@ -673,6 +674,7 @@ class Phase18UiTests(unittest.TestCase):
                 group.status_icon.foregroundRole()
             ).name()
             for group in (
+                window.workflow_group,
                 window.source_group,
                 window.slicer_group,
                 window.prediction_frame,
@@ -842,8 +844,10 @@ class Phase18UiTests(unittest.TestCase):
             "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
         )
         self.assertEqual(window.prediction_frame.title(), "Prognose")
-        self.assertTrue(window.slicer_columns.is_two_column())
-        self.assertTrue(window.slicer_columns_divider.isVisible())
+        self.assertTrue(window.preparation_split.is_two_column())
+        self.assertFalse(window.slicer_columns.is_two_column())
+        self.assertTrue(window.preparation_vertical_divider.isVisible())
+        self.assertTrue(window.slicer_columns_divider.isHidden())
         self.assertEqual(
             [label.text() for label in window._slicer_width_labels],
             ["Slicer", "Maschinenprofil", "Prozessprofil", "Filamentprofil"],
@@ -1735,6 +1739,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertLessEqual(window.warning_text.height(), 60)
         self.assertLess(window.notice_panel.height(), 100)
 
+        window.workflow.analysis_succeeded("layout.gcode")
         window.workflow.slicer_succeeded("Layoutprüfung")
         long_message = "Ausführlicher prüfbarer Hinweis. " * 80
         window.validation_label.setText(long_message)

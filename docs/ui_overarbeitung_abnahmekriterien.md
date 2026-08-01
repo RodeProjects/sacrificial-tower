@@ -14,18 +14,28 @@ Die maschinenlesbare Fassung befindet sich in
   und 200 Prozent Windows-Skalierung ohne horizontales Scrollen bedienbar.
 - Der Scrollbalken liegt zwischen Fensteraußenkante und Inhalt. Die Karten
   behalten links und rechts denselben Inhaltsabstand.
-- Fortschrittsanzeigen enthalten Prozentwert, Statussymbol und einen deutschen
-  Arbeitsschritt unmittelbar unter dem Balken.
+- Lokale Fortschrittsanzeigen enthalten Prozentwert, Statussymbol und einen
+  deutschen Arbeitsschritt. Sie sind nur während aktiver Berechnungen sichtbar
+  und werden bei 100 Prozent, Fehler oder Abbruch wieder ausgeblendet.
+- Eine dauerhaft sichtbare gemeinsame Fortschrittsleiste bildet sechs
+  reversible Voraussetzungen ab. Darunter benennt eine Checkliste jeden Punkt
+  mit rotem X oder grünem Haken. Breit stehen die drei Datei-/Analysepunkte
+  links und die drei Slicer-/Profilpunkte rechts, ohne vertikale Trennlinie.
+  Schmal folgt zuerst die Slicer-/Profilgruppe und danach die
+  Datei-/Analysegruppe.
+- Während der Layerzeitanalyse wird der echte Parserfortschritt im lokalen
+  Balken und im deutschen Statustext fortlaufend sichtbar; die Anzeige bleibt
+  nicht für die gesamte Analyse auf einem einzelnen Wert stehen.
 - Während der Vorschauerstellung zeigen Haupt- und Vorschaufenster bewusst den
   gleichen Fortschritt.
 - Slicerdateien und Slicerprofile werden ausschließlich gelesen und niemals
   verändert.
-- Ein fehlender Slicer blockiert den analytischen STL-Arbeitsweg nicht.
-- Automatisches Einklappen erfolgt nur beim ersten erfolgreichen Abschluss. Eine
-  spätere manuelle Entscheidung des Benutzers wird respektiert.
-- Erfolgsfärbung und automatisches Einklappen dauern beim ersten erfolgreichen
-  Abschluss von Referenz-G-Code und Slicer 1.000 ms. Alle weiteren Animationen
-  dauern 250 ms.
+- Ein fehlender oder noch nicht bestätigter Slicer hält Einstellungen,
+  Prognose und feste Folgeaktionen gesperrt.
+- Der gemeinsame Vorbereitungsbereich klappt nach jedem neu erreichten,
+  vollständigen Erfolg automatisch ein und kann anschließend manuell wieder
+  geöffnet werden.
+- Zustandswechsel, Erfolgsfärbung und Einklappen erfolgen unmittelbar.
 - Karten derselben Reihe sind in der zweispaltigen Darstellung gleich hoch und
   richten ihren Inhalt oben aus.
 - Interaktive Bedienelemente und aufklappbare Kartenköpfe besitzen einen
@@ -39,14 +49,26 @@ Die maschinenlesbare Fassung befindet sich in
   auch bei schmalen Fenstern und langen Inhalten vollständig lesbar.
 - Jede geöffnete Karte trennt ihren Kopf mit einer dünnen, gegenüber dem
   Außenrahmen dezenteren Linie vom Inhalt.
-- Slicer-Dropdowns sind gleich breit, dürfen bis zu einem Drittel der
-  verfügbaren Slicer-Kartenbreite nutzen und öffnen lange Einträge breit genug.
+- „STL / G-Code“ und „Slicer“ liegen in einem gemeinsamen Dropdown. Breit sind
+  sie durch eine vertikale Linie getrennt; schmal folgen sie in dieser
+  Reihenfolge mit horizontaler Trennlinie aufeinander.
+- Beide lokalen Fortschrittsanzeigen sind das erste Element ihrer Spalte. Die
+  gemeinsame Fortschrittsleiste und ihre Voraussetzungen stehen oberhalb
+  beider grauer Teilköpfe. Innen-, Außen- und Mittelabstände entsprechen der
+  Turmgeometrie.
+- Die gleich breiten Slicer-Dropdowns stehen in der Reihenfolge Slicer,
+  Maschinenprofil, Filamentprofil und Prozessprofil. Sekundäre Analyse- und
+  Profilinformationen starten in einem geschlossenen Detailbereich.
 
 ## Verbindliche Oberflächenzustände
 
-### 1. Kein G-Code ausgewählt
+### 1. Keine Quelle ausgewählt
 
-- Der G-Code-Bereich ist der einzige fachliche Arbeitsschritt.
+- Datei- und Slicer-Bereich sind gemeinsam sichtbar; Einstellungen, Prognose
+  und feste Folgeaktionen sind ausgeblendet.
+- Slicer-Erkennung und Profilinventarisierung starten automatisch und warten
+  nicht auf eine STL- oder G-Code-Datei. Die Auswahl kann bereits in diesem
+  Zustand ausdrücklich bestätigt werden.
 - Der feste Status fordert zur G-Code-Auswahl auf; der Bereich erklärt die
   Abfolge Slicen, G-Code exportieren und anschließend importieren.
 - Import-Symbol und Überschrift stehen gemeinsam links; ein verteilter Punkt
@@ -65,14 +87,19 @@ Die maschinenlesbare Fassung befindet sich in
 ### 3. G-Code erfolgreich analysiert
 
 - Dateiname, Layerzahl und erfolgreicher Status sind verfügbar.
+- Die lokale Analysefortschrittsleiste ist nach Abschluss ausgeblendet.
 - Die vollständigen Dateiinformationen bleiben nach erneutem Öffnen erreichbar.
 - Die rekonstruierte Konfiguration startet geschlossen.
 - Die Datei kann über „G-Code neu einlesen“ erneut analysiert werden.
+- Der gemeinsame Vorbereitungsbereich bleibt geöffnet, bis auch Slicer und
+  Profile bestätigt sind.
 
 ### 4. Slicer werden gesucht
 
 - Die Suche zeigt einen eigenen Fortschritt und behauptet noch keine
   unbestätigte Profilzuordnung.
+- Nach der Installationserkennung lädt derselbe Startablauf unmittelbar die
+  zugehörigen Profile, auch wenn noch keine Quelle ausgewählt ist.
 - Der G-Code-Erfolg bleibt erkennbar.
 
 ### 5. Slicer erfolgreich erkannt
@@ -84,14 +111,25 @@ Die maschinenlesbare Fassung befindet sich in
   „(automatisch erkannt)“.
 - Die eingebettete Konfiguration ist im Slicer-Bereich auf- und zuklappbar und
   startet geschlossen.
+- Die lokale Slicer-Fortschrittsleiste verschwindet nach der Inventarisierung;
+  die gemeinsame Leiste zeigt den erreichten Teilstand. Eine
+  dateispezifische Profilbindung wird erst nach einer Quellenanalyse als
+  erfüllt markiert.
 
 ### 6. Kein verwendbarer Slicer erkannt
 
 - Der Zustand wird als Warnung und nicht als Programmfehler dargestellt.
-- Manuelle Auswahl, erneute Suche und analytisches Fortfahren bleiben möglich.
+- Manuelle Auswahl und erneute Suche bleiben möglich; Folgeaktionen bleiben
+  bis zu einer erfolgreichen Bestätigung gesperrt.
 
 ### 7. Einstellungen und Prognose verfügbar
 
+- Datei beziehungsweise erzeugter G-Code wurde erfolgreich analysiert und
+  Slicer sowie Profile wurden bestätigt und sicher an diese Quelle gebunden.
+- Alle sechs Voraussetzungen zeigen einen grünen Haken und die gemeinsame
+  Fortschrittsleiste steht auf 100 Prozent.
+- Der gemeinsame Vorbereitungsbereich ist grün, zeigt einen Haken und ist
+  automatisch eingeklappt.
 - Kühlziel und Prognose sind die visuell wichtigsten Bereiche.
 - Beschriftung und Wert einer Prognosezeile sind eindeutig zuzuordnen.
 - Die Prognose reserviert getrennte Spalten für Beschriftungen, Werte und
@@ -167,6 +205,9 @@ Die maschinenlesbare Fassung befindet sich in
 
 - Karten wechseln am definierten Haltepunkt zwischen zwei Spalten und einer
   Spalte.
+- Die Voraussetzungen wechseln am selben Haltepunkt von Datei links/Slicer
+  rechts zu Slicer oben/Datei unten; zwischen ihren Gruppen erscheint weder
+  breit noch schmal eine Trennlinie.
 - Die beiden Geometrie-Teilbereiche werden nur in der breiten Darstellung
   durch eine senkrechte Linie optisch voneinander getrennt.
 - Eingabefelder, Reset-Buttons und Spinbox-Pfeile überlappen nicht.

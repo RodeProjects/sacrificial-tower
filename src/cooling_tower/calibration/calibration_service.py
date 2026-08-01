@@ -43,6 +43,7 @@ from cooling_tower.services.tower_need_service import assess_tower_need, layers_
 from cooling_tower.slicers import (
     EffectiveProfile,
     SliceRequest,
+    SliceResult,
     assert_profile_copies_are_isolated,
     protect_profile_sources,
 )
@@ -292,26 +293,46 @@ class CalibrationService:
                     round((number - 0.5) / config.maximum_iterations * 90),
                     f"Slicer-Auftrag {number}/{config.maximum_iterations} wird ausgeführt …",
                 )
-                slice_result = adapter.slice_model(
-                    SliceRequest(
-                        model_path=candidate_stl,
-                        profile=calibration_profile,
-                        output_directory=iteration_root / "slice",
-                        diagnostics_root=iteration_root / "diagnostics",
-                        timeout_s=config.timeout_per_slice_s,
-                        cancellation_event=cancellation_event,
-                        temporary_overrides=overrides,
-                        expected_layer_heights_mm=tuple(
-                            float(getattr(layer, "height_mm")) for layer in source_layers
-                        ),
-                        placement_xy_mm=(
-                            (placement.center_x_mm, placement.center_y_mm)
-                            if placement else None
-                        ),
-                        purpose="calibration",
-                        calibration_round=number,
-                    )
+                slice_request = SliceRequest(
+                    model_path=candidate_stl,
+                    profile=calibration_profile,
+                    output_directory=iteration_root / "slice",
+                    diagnostics_root=iteration_root / "diagnostics",
+                    timeout_s=config.timeout_per_slice_s,
+                    cancellation_event=cancellation_event,
+                    temporary_overrides=overrides,
+                    expected_layer_heights_mm=tuple(
+                        float(getattr(layer, "height_mm")) for layer in source_layers
+                    ),
+                    placement_xy_mm=(
+                        (placement.center_x_mm, placement.center_y_mm)
+                        if placement else None
+                    ),
+                    purpose="calibration",
+                    calibration_round=number,
                 )
+                slice_result = adapter.slice_model(slice_request)
+                if (
+                    (cancellation_event is None or not cancellation_event.is_set())
+                    and self._should_retry_anycubic_profile_load(
+                        adapter,
+                        slice_result,
+                    )
+                ):
+                    retry_percent = round(
+                        (number - 0.25) / config.maximum_iterations * 90
+                    )
+                    notify(
+                        retry_percent,
+                        "Anycubic-Profilpaket wird einmalig neu synchronisiert …",
+                    )
+                    record_diagnostic(
+                        "calibration_slicer_retry",
+                        calibration_round=number,
+                        reason="anycubic_profile_compatibility",
+                        first_return_code=slice_result.return_code,
+                    )
+                    slice_result = adapter.slice_model(slice_request)
                 notify(
                     round(number / config.maximum_iterations * 90),
                     f"Slicer-Ergebnis {number}/{config.maximum_iterations} wird ausgewertet …",
@@ -742,6 +763,25 @@ class CalibrationService:
             for point in points
         )
         return hashlib.sha256(payload.encode("ascii")).hexdigest()
+
+    @staticmethod
+    def _should_retry_anycubic_profile_load(
+        adapter: object,
+        result: SliceResult,
+    ) -> bool:
+        if result.success or getattr(adapter, "adapter_id", "") != (
+            "anycubic_slicer_next"
+        ):
+            return False
+        output = f"{result.stdout}\n{result.stderr}".casefold()
+        return (
+            "process not compatible with printer" in output
+            or (
+                result.return_code == -17
+                and "compatible" in output
+                and "printer" in output
+            )
+        )
 
     @staticmethod
     def _failure_code_for_issue(code: str) -> CalibrationFailureCode:

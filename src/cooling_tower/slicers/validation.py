@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cooling_tower.services.analysis_service import GCodeAnalysisService
 from cooling_tower.slicers.models import SliceRequest, SliceResult
 from cooling_tower.slicers.process import SecureSlicerProcessRunner
 from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
@@ -64,6 +63,10 @@ def _slice_semantics(result: SliceResult) -> SliceSemantics:
     product: str | None = None
     selected_metadata: tuple[tuple[str, str], ...] = ()
     if result.success and result.gcode_path is not None:
+        # Import lazily so ``import cooling_tower.slicers`` does not enter the
+        # services package while the slicer facade is still initialising.
+        from cooling_tower.services.analysis_service import GCodeAnalysisService
+
         try:
             snapshot = GCodeAnalysisService().analyze(result.gcode_path, force=True)
         except (OSError, UnicodeError, ValueError):

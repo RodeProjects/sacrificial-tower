@@ -262,6 +262,11 @@ class UxImprovementTests(unittest.TestCase):
         window.slicer_group.show()
         window._show_reconstructed_configuration(snapshot)
         self.app.processEvents()
+        self.assertFalse(
+            window.reconstructed_config_toggle.isVisibleTo(window)
+        )
+        window.slicer_analysis_details_toggle.click()
+        self.app.processEvents()
         self.assertTrue(window.reconstructed_config_toggle.isVisible())
         self.assertFalse(window.reconstructed_config_toggle.isChecked())
         self.assertTrue(window.reconstructed_config_text.isHidden())

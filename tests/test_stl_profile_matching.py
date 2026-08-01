@@ -631,10 +631,11 @@ class StlProfileMatchingTests(unittest.TestCase):
                 discovery,
             )
             deadline = time.monotonic() + 10
-            while window.profile_match_result is None and time.monotonic() < deadline:
+            while window.profile_catalog is None and time.monotonic() < deadline:
                 app.processEvents()
                 QTest.qWait(10)
-            self.assertIsNotNone(window.profile_match_result)
+            self.assertIsNotNone(window.profile_catalog)
+            self.assertTrue(window.profile_confirm_button.isEnabled())
             window.confirm_profile_selection()
             deadline = time.monotonic() + 5
             while not self.adapter.slice_started.is_set() and time.monotonic() < deadline:
@@ -703,10 +704,10 @@ class StlProfileMatchingTests(unittest.TestCase):
                 discovery,
             )
             deadline = time.monotonic() + 10
-            while window.profile_match_result is None and time.monotonic() < deadline:
+            while window.profile_catalog is None and time.monotonic() < deadline:
                 app.processEvents()
                 QTest.qWait(10)
-            self.assertIsNotNone(window.profile_match_result)
+            self.assertIsNotNone(window.profile_catalog)
             self.assertIs(
                 window.workflow.stage,
                 WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION,
@@ -714,10 +715,8 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertTrue(window.profile_confirm_button.isEnabled())
             self.assertEqual(
                 window.profile_confirm_button.text(),
-                "Einstellungen bestätigen und Modell analysieren",
+                "Slicer und Profile bestätigen",
             )
-            self.assertIn("Düse: 0.4 mm", window.profile_effective_summary_label.text())
-            self.assertIn("Layerhöhe: 0.2 mm", window.profile_effective_summary_label.text())
             source_hash = self.artifact.original_sha256
             profile_hashes = {
                 path: path.read_bytes()
@@ -728,10 +727,25 @@ class StlProfileMatchingTests(unittest.TestCase):
                 )
             }
             window.confirm_profile_selection()
+            deadline = time.monotonic() + 10
+            while (
+                window.confirmed_profile_context is None
+                and time.monotonic() < deadline
+            ):
+                app.processEvents()
+                QTest.qWait(10)
             self.assertIsNotNone(window.confirmed_profile_context)
             assert window.confirmed_profile_context is not None
             self.assertTrue(
                 window.confirmed_profile_context.matches_source(self.artifact)
+            )
+            self.assertIn(
+                "Düse: 0.4 mm",
+                window.profile_effective_summary_label.text(),
+            )
+            self.assertIn(
+                "Layerhöhe: 0.2 mm",
+                window.profile_effective_summary_label.text(),
             )
             deadline = time.monotonic() + 10
             while (
@@ -742,6 +756,16 @@ class StlProfileMatchingTests(unittest.TestCase):
                 QTest.qWait(10)
             self.assertIsNotNone(window.source_preslice_result)
             self.assertIs(window.workflow.stage, WorkflowStage.READY)
+            self.assertEqual(window.preparation_progress_bar.value(), 100)
+            self.assertTrue(
+                all(
+                    icon.text() == "✓"
+                    for icon, _label in (
+                        window.preparation_requirement_rows.values()
+                    )
+                )
+            )
+            self.assertFalse(window.ready_grid.isHidden())
             self.assertIsNotNone(window.analysis_snapshot)
             self.assertEqual(window.analysis_snapshot.layer_count, 2)
             self.assertIsNotNone(window.prepared_analysis_source)
@@ -779,6 +803,9 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertFalse(workspace.exists())
             self.assertIsNone(window.source_preslice_result)
             self.assertIsNone(window.analysis_snapshot)
+            self.assertIsNotNone(window.profile_catalog_confirmation)
+            self.assertEqual(window.preparation_progress_bar.value(), 50)
+            self.assertTrue(window.ready_grid.isHidden())
         finally:
             window.close()
             window.deleteLater()
