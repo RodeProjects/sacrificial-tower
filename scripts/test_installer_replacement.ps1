@@ -26,12 +26,10 @@ if (-not $workingRootFull.StartsWith(
     throw "Der Testordner muss innerhalb des Projektordners liegen: $workingRootFull"
 }
 
-$versionParts = $Version.Split('.')
-$patchVersion = [int]$versionParts[2]
-if ($patchVersion -lt 1) {
-    throw 'Der Ersetzungstest benötigt einen Patch-Zähler ab 1.'
-}
-$olderVersion = '{0}.{1}.{2}' -f $versionParts[0], $versionParts[1], ($patchVersion - 1)
+Import-Module (
+    Join-Path $PSScriptRoot 'InstallerReplacementVersion.psm1'
+) -Force
+$olderVersion = Get-OlderInstallerTestVersion -Version $Version
 $isccFull = (Resolve-Path -LiteralPath $IsccPath).Path
 $scriptPath = Join-Path $projectRoot 'installer\SacrificialTower.iss'
 $installRoot = Join-Path $workingRootFull 'program'

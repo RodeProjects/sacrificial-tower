@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -8,6 +10,67 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class UpdatePackagingTests(unittest.TestCase):
+    def test_installer_replacement_supports_minor_and_major_boundaries(
+        self,
+    ) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        if powershell is None:
+            self.skipTest("PowerShell ist für den Installer-Test nicht verfügbar.")
+        module = (
+            PROJECT_ROOT / "scripts" / "InstallerReplacementVersion.psm1"
+        )
+
+        for current, expected in (
+            ("0.5.1", "0.5.0"),
+            ("0.5.0", "0.4.0"),
+            ("1.0.0", "0.0.0"),
+        ):
+            with self.subTest(current=current):
+                completed = subprocess.run(
+                    (
+                        powershell,
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        (
+                            f"Import-Module '{module}'; "
+                            f"Get-OlderInstallerTestVersion -Version '{current}'"
+                        ),
+                    ),
+                    capture_output=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout.strip(), expected)
+
+        unsupported = subprocess.run(
+            (
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                (
+                    f"Import-Module '{module}'; "
+                    "Get-OlderInstallerTestVersion -Version '0.0.0'"
+                ),
+            ),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+        )
+        self.assertNotEqual(unsupported.returncode, 0)
+        self.assertIn("Version 0.0.0", unsupported.stderr)
+        self.assertIn("Testversion", unsupported.stderr)
+
     def test_app_version_is_the_single_release_version_source(self) -> None:
         installer = (
             PROJECT_ROOT / "installer" / "SacrificialTower.iss"
