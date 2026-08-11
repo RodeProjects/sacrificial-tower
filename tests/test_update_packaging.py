@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import io
+import json
 import shutil
 import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+from scripts.verify_release_ci import (
+    ReleaseCiVerificationError,
+    build_workflow_runs_url,
+    fetch_successful_main_run,
+    validate_release_ref,
+    validate_successful_main_run,
+)
 
 
 class UpdatePackagingTests(unittest.TestCase):
@@ -69,6 +81,125 @@ class UpdatePackagingTests(unittest.TestCase):
         )
         self.assertIn('"/DAppVersion=$env:APP_VERSION"', workflow)
         self.assertIn('version_namespace["APP_VERSION"]', spec)
+
+    def test_release_ci_query_is_limited_to_the_exact_main_commit(self) -> None:
+        commit_sha = "a" * 40
+        url = build_workflow_runs_url(
+            "RodeProjects/sacrificial-tower", commit_sha
+        )
+        parsed = urlparse(url)
+        self.assertEqual(parsed.scheme, "https")
+        self.assertEqual(parsed.netloc, "api.github.com")
+        self.assertEqual(
+            parsed.path,
+            (
+                "/repos/RodeProjects/sacrificial-tower/actions/workflows/"
+                "tests.yml/runs"
+            ),
+        )
+        self.assertEqual(
+            parse_qs(parsed.query),
+            {
+                "branch": ["main"],
+                "event": ["push"],
+                "head_sha": [commit_sha],
+                "status": ["success"],
+                "per_page": ["10"],
+            },
+        )
+
+    def test_release_ci_accepts_only_completed_success_for_exact_commit(
+        self,
+    ) -> None:
+        commit_sha = "b" * 40
+        valid_run = {
+            "id": 42,
+            "head_sha": commit_sha,
+            "head_branch": "main",
+            "event": "push",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        self.assertIs(
+            validate_successful_main_run(
+                {"workflow_runs": [valid_run]}, commit_sha
+            ),
+            valid_run,
+        )
+
+        invalid_variants = (
+            {**valid_run, "head_sha": "c" * 40},
+            {**valid_run, "head_branch": "feature"},
+            {**valid_run, "event": "workflow_dispatch"},
+            {**valid_run, "status": "in_progress"},
+            {**valid_run, "conclusion": "failure"},
+        )
+        for invalid_run in invalid_variants:
+            with self.subTest(invalid_run=invalid_run):
+                with self.assertRaises(ReleaseCiVerificationError):
+                    validate_successful_main_run(
+                        {"workflow_runs": [invalid_run]}, commit_sha
+                    )
+
+    def test_release_ci_rejects_unsafe_inputs_before_network_access(
+        self,
+    ) -> None:
+        commit_sha = "d" * 40
+        self.assertEqual(
+            validate_release_ref("refs/heads/main"), "refs/heads/main"
+        )
+        for invalid_ref in ("refs/heads/feature", "refs/tags/v0.5.3", "main"):
+            with self.subTest(invalid_ref=invalid_ref):
+                with self.assertRaises(ReleaseCiVerificationError):
+                    validate_release_ref(invalid_ref)
+
+        for repository, sha in (
+            ("missing-owner", commit_sha),
+            ("owner/", commit_sha),
+            ("owner/repository", "short-sha"),
+        ):
+            with self.subTest(repository=repository, sha=sha):
+                with self.assertRaises(ReleaseCiVerificationError):
+                    build_workflow_runs_url(repository, sha)
+
+        with self.assertRaises(ReleaseCiVerificationError):
+            fetch_successful_main_run(
+                "RodeProjects/sacrificial-tower", commit_sha, ""
+            )
+
+    def test_release_ci_fetch_uses_authenticated_github_request(self) -> None:
+        commit_sha = "e" * 40
+        valid_run = {
+            "id": 84,
+            "head_sha": commit_sha,
+            "head_branch": "main",
+            "event": "push",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        response = io.BytesIO(
+            json.dumps({"workflow_runs": [valid_run]}).encode("utf-8")
+        )
+        with patch(
+            "scripts.verify_release_ci.urlopen", return_value=response
+        ) as open_url:
+            self.assertEqual(
+                fetch_successful_main_run(
+                    "RodeProjects/sacrificial-tower",
+                    commit_sha,
+                    "test-token",
+                ),
+                valid_run,
+            )
+
+        request = open_url.call_args.args[0]
+        self.assertEqual(open_url.call_args.kwargs, {"timeout": 20})
+        self.assertEqual(
+            request.get_header("Authorization"), "Bearer test-token"
+        )
+        self.assertEqual(
+            request.get_header("X-github-api-version"), "2022-11-28"
+        )
 
     def test_pyinstaller_bundle_contains_required_runtime_data(self) -> None:
         spec = (PROJECT_ROOT / "SacrificialTower.spec").read_text(
@@ -224,7 +355,11 @@ class UpdatePackagingTests(unittest.TestCase):
         workflow = (
             PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("python -m unittest discover -s tests -q", workflow)
+        self.assertIn("actions: read", workflow)
+        self.assertIn("scripts/verify_release_ci.py", workflow)
+        self.assertIn('--sha "${{ github.sha }}"', workflow)
+        self.assertIn('--ref "${{ github.ref }}"', workflow)
+        self.assertNotIn("python -m unittest discover -s tests -q", workflow)
         self.assertIn("pyinstaller --noconfirm --clean", workflow)
         self.assertIn("Inno Setup", workflow)
         self.assertIn("Get-FileHash", workflow)

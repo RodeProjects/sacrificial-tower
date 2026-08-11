@@ -58,7 +58,9 @@ und gibt ausschließlich den öffentlichen Anteil aus.
 
 1. `APP_VERSION` in `src/cooling_tower/version.py` erhöhen.
 2. Änderungen vollständig testen, committen und auf `main` übernehmen.
-3. `scripts/publish_update.ps1` im normalen Windows-Benutzerkontext ausführen.
+3. Den GitHub-Actions-Workflow `Tests` für exakt diesen `main`-Commit
+   erfolgreich abschließen lassen.
+4. `scripts/publish_update.ps1` im normalen Windows-Benutzerkontext ausführen.
 
 Das Skript startet den Workflow
 `Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den
@@ -66,6 +68,13 @@ erfolgreichen Build und lädt dessen Artefakt herunter. Anschließend prüft es 
 Ed25519-Signatur sowie Installergröße und SHA-256 erneut. Erst danach erstellt
 es im öffentlichen Update-Repository ein Release und veröffentlicht exakt das
 bereits im privaten Build signierte `latest.json`.
+
+Der Installer-Workflow prüft über die GitHub-API, dass der Workflow `Tests`
+für exakt denselben Commit auf `main` als erfolgreicher Push-Lauf abgeschlossen
+wurde. Ein Lauf eines anderen Commits, Branches oder Ereignisses genügt nicht.
+Die vollständige Testsuite wird deshalb nicht ein zweites Mal im
+Installer-Workflow ausgeführt. Die nativen Prozess-Stresstests bleiben
+zusätzlich im eigenständigen Workflow `Windows-Prozess-Stresstests` isoliert.
 
 Schlägt die Veröffentlichung des Manifests nach dem Erstellen des Releases
 fehl, entfernt das Skript das unvollständige Release wieder. Es verwendet nur
