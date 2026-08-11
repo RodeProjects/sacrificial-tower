@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import math
 
 from PySide6.QtCore import Signal, Qt
@@ -107,12 +108,44 @@ class PreviewDialog(QDialog):
         self.quality_label = QLabel()
         self.quality_label.setObjectName("previewQualityLabel")
         self.quality_label.setWordWrap(True)
+        self.quality_label.setMaximumHeight(260)
+        self.quality_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
         self.quality_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.quality_label.hide()
         self._last_quality_text = ""
         layout.addWidget(self.quality_label)
+        self.quality_details_toggle = QPushButton(
+            "Messwerte des letzten Durchlaufs anzeigen ▸"
+        )
+        self.quality_details_toggle.setObjectName(
+            "previewQualityDetailsToggle"
+        )
+        self.quality_details_toggle.setCheckable(True)
+        self.quality_details_toggle.setFlat(True)
+        self.quality_details_toggle.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.quality_details_toggle.toggled.connect(
+            self._toggle_quality_details
+        )
+        self.quality_details_toggle.hide()
+        layout.addWidget(self.quality_details_toggle)
+        self.quality_details_label = QLabel()
+        self.quality_details_label.setObjectName(
+            "previewQualityDetailsLabel"
+        )
+        self.quality_details_label.setWordWrap(True)
+        self.quality_details_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.quality_details_label.hide()
+        layout.addWidget(self.quality_details_label)
         self.progress = QProgressBar()
         self.progress.setObjectName("previewProgressBar")
         self.progress.setRange(0, 100)
@@ -169,6 +202,7 @@ class PreviewDialog(QDialog):
             "Qualitätsprüfung wird für die neue Vorschau aktualisiert …",
             "building",
         )
+        self._set_quality_details("")
         self.update_button.setText("Vorschau wird erstellt...")
         self.update_button.setEnabled(False)
         self.export_button.setEnabled(False)
@@ -211,6 +245,7 @@ class PreviewDialog(QDialog):
         quality_text, quality_state = self._quality_summary(result)
         self._last_quality_text = quality_text
         self._set_quality_text(quality_text, quality_state)
+        self._set_quality_details(self._last_iteration_summary(result))
         self.progress.hide()
         self.progress_status_widget.hide()
         self.update_button.setText("Vorschau aktualisieren")
@@ -256,6 +291,7 @@ class PreviewDialog(QDialog):
         self.state_label.setProperty("state", "error")
         self._refresh_state_style()
         self._last_quality_text = ""
+        self._set_quality_details("")
         self._set_quality_text(
             "Für die fehlgeschlagene neue Vorschau liegt keine aktuelle "
             "Qualitätsauswertung vor.",
@@ -291,6 +327,23 @@ class PreviewDialog(QDialog):
         style.unpolish(self.quality_label)
         style.polish(self.quality_label)
         self.quality_label.show()
+
+    def _set_quality_details(self, text: str) -> None:
+        text = text.strip()
+        self.quality_details_toggle.setChecked(False)
+        self.quality_details_label.setText(text)
+        self.quality_details_label.hide()
+        self.quality_details_toggle.setVisible(bool(text))
+
+    def _toggle_quality_details(self, expanded: bool) -> None:
+        self.quality_details_toggle.setText(
+            "Messwerte des letzten Durchlaufs ausblenden ▾"
+            if expanded
+            else "Messwerte des letzten Durchlaufs anzeigen ▸"
+        )
+        self.quality_details_label.setVisible(
+            expanded and bool(self.quality_details_label.text().strip())
+        )
 
     @staticmethod
     def _quality_summary(result: PreviewResult) -> tuple[str, str]:
@@ -347,12 +400,6 @@ class PreviewDialog(QDialog):
         time_tolerance = float(
             getattr(result, "calibration_time_tolerance_s", 0.15)
         )
-        profile_tolerance = float(
-            getattr(result, "calibration_profile_tolerance_mm", 0.03)
-        )
-        metadata_tolerance = float(
-            getattr(result, "calibration_metadata_tolerance_s", 0.75)
-        )
         target_time = getattr(result, "target_layer_time_s", None)
         minimum_time = getattr(result, "minimum_verified_layer_time_s", None)
         if PreviewDialog._is_finite(target_time) and PreviewDialog._is_finite(
@@ -370,61 +417,109 @@ class PreviewDialog(QDialog):
                 f"Ziel ({difference:+.3f} s; {relation})"
             )
 
-        if iterations:
-            last = iterations[-1]
-            lines.append("Messwerte des letzten Durchlaufs:")
-            deficit = getattr(last, "maximum_remaining_deficit_s", None)
-            deficient_count = max(
-                0,
-                int(getattr(last, "deficient_layer_count", 0) or 0),
-            )
-            lines.append(
-                PreviewDialog._maximum_value_assessment(
-                    "Zielzeit-Unterschreitung",
-                    deficit,
-                    time_tolerance,
-                    "s",
-                    suffix=f"; {deficient_count} Layer außerhalb der Toleranz",
-                )
-            )
-            lines.append(
-                PreviewDialog._maximum_value_assessment(
-                    "Änderung zum vorherigen Slicer-Durchlauf",
-                    getattr(last, "maximum_slicer_result_change_s", None),
-                    time_tolerance,
-                    "s",
-                )
-            )
-            lines.append(
-                PreviewDialog._maximum_value_assessment(
-                    "Änderung des Geometrieprofils",
-                    getattr(last, "maximum_profile_change_mm", None),
-                    profile_tolerance,
-                    "mm",
-                )
-            )
-            evaluation = getattr(last, "evaluation", None)
-            metadata_difference = getattr(
-                evaluation,
-                "maximum_metadata_difference_s",
-                None,
-            )
-            if metadata_difference is not None:
-                lines.append(
-                    PreviewDialog._maximum_value_assessment(
-                        "Slicer-Metadatenabweichung",
-                        metadata_difference,
-                        metadata_tolerance,
-                        "s",
-                    )
-                )
-
         failures = tuple(getattr(calibration, "failures", ()) or ())
-        for failure in failures:
-            message = str(getattr(failure, "message", "")).strip()
-            if message:
-                lines.append(f"Grund: {message}")
+        lines.extend(PreviewDialog._summarized_failures(failures))
         return "\n".join(lines), state
+
+    @staticmethod
+    def _last_iteration_summary(result: PreviewResult) -> str:
+        calibration = getattr(result, "calibration", None)
+        iterations = tuple(
+            getattr(calibration, "iterations", ()) or ()
+            if calibration is not None
+            else ()
+        )
+        if not iterations:
+            return ""
+        last = iterations[-1]
+        time_tolerance = float(
+            getattr(result, "calibration_time_tolerance_s", 0.15)
+        )
+        profile_tolerance = float(
+            getattr(result, "calibration_profile_tolerance_mm", 0.03)
+        )
+        metadata_tolerance = float(
+            getattr(result, "calibration_metadata_tolerance_s", 0.75)
+        )
+        deficient_count = max(
+            0,
+            int(getattr(last, "deficient_layer_count", 0) or 0),
+        )
+        lines = [
+            PreviewDialog._maximum_value_assessment(
+                "Zielzeit-Unterschreitung",
+                getattr(last, "maximum_remaining_deficit_s", None),
+                time_tolerance,
+                "s",
+                suffix=(
+                    f"; {deficient_count} Layer außerhalb der Toleranz"
+                ),
+            ),
+            PreviewDialog._maximum_value_assessment(
+                "Änderung zum vorherigen Slicer-Durchlauf",
+                getattr(last, "maximum_slicer_result_change_s", None),
+                time_tolerance,
+                "s",
+            ),
+            PreviewDialog._maximum_value_assessment(
+                "Änderung des Geometrieprofils",
+                getattr(last, "maximum_profile_change_mm", None),
+                profile_tolerance,
+                "mm",
+            ),
+        ]
+        metadata_difference = getattr(
+            getattr(last, "evaluation", None),
+            "maximum_metadata_difference_s",
+            None,
+        )
+        if metadata_difference is not None:
+            lines.append(
+                PreviewDialog._maximum_value_assessment(
+                    "Slicer-Metadatenabweichung",
+                    metadata_difference,
+                    metadata_tolerance,
+                    "s",
+                )
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _summarized_failures(
+        failures: tuple[object, ...],
+        *,
+        maximum_unique_reasons: int = 3,
+        maximum_reason_length: int = 180,
+    ) -> tuple[str, ...]:
+        """Deduplicate calibration failures into a bounded result summary."""
+
+        messages = tuple(
+            " ".join(str(getattr(failure, "message", "")).split())
+            for failure in failures
+            if str(getattr(failure, "message", "")).strip()
+        )
+        if not messages:
+            return ()
+        counts = Counter(messages)
+        summarized: list[str] = []
+        displayed_occurrences = 0
+        for message, count in counts.most_common(maximum_unique_reasons):
+            compact = (
+                message
+                if len(message) <= maximum_reason_length
+                else message[: maximum_reason_length - 1].rstrip() + "…"
+            )
+            occurrence = f" ({count}×)" if count > 1 else ""
+            summarized.append(f"Grund{occurrence}: {compact}")
+            displayed_occurrences += count
+        omitted_unique = max(0, len(counts) - len(summarized))
+        omitted_occurrences = max(0, len(messages) - displayed_occurrences)
+        if omitted_unique:
+            summarized.append(
+                f"Weitere {omitted_unique} unterschiedliche Gründe "
+                f"({omitted_occurrences} Meldungen) sind im Protokoll gebündelt."
+            )
+        return tuple(summarized)
 
     @staticmethod
     def _maximum_value_assessment(

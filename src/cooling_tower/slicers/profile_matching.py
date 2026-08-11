@@ -269,6 +269,11 @@ class ProfileMatchingService:
         adapter: SlicerAdapter,
         *,
         force_inventory: bool = False,
+        selected_machine: str | ProfileSelectionReference | None = None,
+        selected_profile_ids: Mapping[
+            str, str | ProfileSelectionReference
+        ] | None = None,
+        include_all_profiles: bool = False,
     ) -> ProfileCatalog:
         """Load selectable profiles without requiring or modifying a source.
 
@@ -283,22 +288,150 @@ class ProfileMatchingService:
             force=force_inventory,
         )
         resolved = ProfileInheritanceResolver(inventory, adapter).resolve_all()
+        all_machine_options = self._selectable_options(
+            resolved,
+            (ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL),
+        )
+        all_process_options = self._selectable_options(
+            resolved,
+            (ProfileRole.PROCESS,),
+        )
+        all_filament_options = self._selectable_options(
+            resolved,
+            (ProfileRole.FILAMENT,),
+        )
+        requested_selections = dict(selected_profile_ids or {})
+        requested_machine = selected_machine or requested_selections.get(
+            "machine"
+        )
+        if requested_machine is None and all_machine_options:
+            first_machine = all_machine_options[0]
+            requested_machine = ProfileSelectionReference(
+                first_machine.profile_id,
+                first_machine.path,
+            )
+        if requested_machine is not None:
+            requested_selections["machine"] = requested_machine
+        selected_ids = _resolve_selected_profile_ids(
+            requested_selections,
+            machine_options=all_machine_options,
+            process_options=all_process_options,
+            filament_options=all_filament_options,
+        )
+        selected_machine_path = selected_ids.get("machine")
+        machine_record = next(
+            (
+                item
+                for item in all_machine_options
+                if selected_machine_path is not None
+                and _paths_refer_to_same_file(
+                    item.path,
+                    Path(selected_machine_path),
+                )
+            ),
+            None,
+        )
+        machine_resolved = next(
+            (
+                item
+                for item in resolved
+                if machine_record is not None
+                and item.record.path == machine_record.path
+                and item.record.profile_id.casefold()
+                == machine_record.profile_id.casefold()
+            ),
+            None,
+        )
+        filter_context = ProfileFilterContext(
+            source="manual",
+            machine_ids=(machine_record.profile_id,) if machine_record else (),
+            printer_model=(
+                str(machine_resolved.effective_values.get("printer_model", ""))
+                or None
+                if machine_resolved is not None
+                else None
+            ),
+            nozzle_diameters_mm=(
+                _profile_nozzle_diameters(machine_resolved)
+                if machine_resolved is not None
+                else ()
+            ),
+        )
+        (
+            machine_options,
+            process_options,
+            filament_options,
+            profiles_filtered,
+            filter_summary,
+        ) = self._filter_profile_options(
+            resolved,
+            filter_context,
+            include_all_profiles=include_all_profiles,
+            all_options=(
+                all_machine_options,
+                all_process_options,
+                all_filament_options,
+            ),
+        )
+
+        def selected_record(
+            role: str,
+            options: Sequence[ProfileRecord],
+        ) -> ProfileRecord | None:
+            selected_path = selected_ids.get(role)
+            if selected_path is None:
+                return None
+            return next(
+                (
+                    item
+                    for item in options
+                    if _paths_refer_to_same_file(
+                        item.path,
+                        Path(selected_path),
+                    )
+                ),
+                None,
+            )
+
+        selected_process_record = selected_record(
+            "process", process_options
+        )
+        selected_filament_record = selected_record(
+            "filament", filament_options
+        )
         return ProfileCatalog(
             execution_slicer=installation,
             inventory_fingerprint=inventory.fingerprint_sha256,
-            machine_options=self._selectable_options(
-                resolved,
-                (ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL),
-            ),
-            process_options=self._selectable_options(
-                resolved,
-                (ProfileRole.PROCESS,),
-            ),
-            filament_options=self._selectable_options(
-                resolved,
-                (ProfileRole.FILAMENT,),
-            ),
+            machine_options=machine_options,
+            process_options=process_options,
+            filament_options=filament_options,
             rejected_profile_count=sum(not item.valid for item in resolved),
+            profiles_filtered=profiles_filtered,
+            profile_filter_summary=filter_summary,
+            selected_machine=(
+                ProfileSelectionReference(
+                    machine_record.profile_id,
+                    machine_record.path,
+                )
+                if machine_record is not None
+                else None
+            ),
+            selected_process=(
+                ProfileSelectionReference(
+                    selected_process_record.profile_id,
+                    selected_process_record.path,
+                )
+                if selected_process_record is not None
+                else None
+            ),
+            selected_filament=(
+                ProfileSelectionReference(
+                    selected_filament_record.profile_id,
+                    selected_filament_record.path,
+                )
+                if selected_filament_record is not None
+                else None
+            ),
         )
 
     def match(
@@ -1252,6 +1385,8 @@ class ProfileMatchingService:
         )
 
         def role_is_visible(item: ResolvedProfile) -> bool:
+            if include_all_profiles:
+                return True
             if item.record.source.casefold() == "user":
                 return True
             return bool(machines) and cls._profile_matches_machine_context(
@@ -1303,7 +1438,7 @@ class ProfileMatchingService:
         }.get(context.source, context.source)
         identity = cls._filter_context_label(context)
         mode = (
-            "alle Maschinenprofile; System-Presets weiterhin druckerbezogen"
+            "alle Profile (Druckerfilter ausgesetzt)"
             if include_all_profiles
             else "aktive Maschinenprofile"
         )

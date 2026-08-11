@@ -6,9 +6,10 @@ from html import escape
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFontMetrics, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QFontMetrics, QKeyEvent, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -98,6 +99,10 @@ class SectionCard(QFrame):
         self._summary_details: tuple[str, ...] = ()
         self._summary_html: str | None = None
         self._compact_summary_rows: tuple[tuple[str, str], ...] = ()
+        self._split_summary_columns: tuple[
+            tuple[tuple[str, str], ...],
+            tuple[tuple[str, str], ...],
+        ] = ((), ())
 
         self.setObjectName("sectionCard")
         self.setProperty("collapsible", collapsible)
@@ -159,6 +164,9 @@ class SectionCard(QFrame):
             QSizePolicy.Policy.Maximum,
             QSizePolicy.Policy.Preferred,
         )
+        self.status_icon.setFixedHeight(
+            max(18, self.title_label.sizeHint().height())
+        )
         left_layout.addWidget(
             self.title_label,
             0,
@@ -203,6 +211,48 @@ class SectionCard(QFrame):
         )
         self.summary_note_label.hide()
         self.header_layout.addWidget(self.summary_note_label)
+
+        self.split_summary_widget = QWidget(self.header)
+        self.split_summary_widget.setObjectName("sectionCardSplitSummary")
+        self.split_summary_layout = QGridLayout(self.split_summary_widget)
+        self.split_summary_layout.setContentsMargins(0, 0, 0, 0)
+        self.split_summary_layout.setHorizontalSpacing(24)
+        self.split_summary_layout.setColumnStretch(0, 1)
+        self.split_summary_layout.setColumnStretch(1, 1)
+        self.split_summary_left = QLabel(self.split_summary_widget)
+        self.split_summary_left.setObjectName("sectionCardSplitSummaryLeft")
+        self.split_summary_right = QLabel(self.split_summary_widget)
+        self.split_summary_right.setObjectName("sectionCardSplitSummaryRight")
+        for label, alignment in (
+            (
+                self.split_summary_left,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+            (
+                self.split_summary_right,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        ):
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setAlignment(alignment)
+            label.setSizePolicy(
+                QSizePolicy.Policy.Maximum,
+                QSizePolicy.Policy.Preferred,
+            )
+        self.split_summary_layout.addWidget(
+            self.split_summary_left,
+            0,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.split_summary_layout.addWidget(
+            self.split_summary_right,
+            0,
+            1,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.split_summary_widget.hide()
+        self.header_layout.insertWidget(2, self.split_summary_widget, 1)
 
         self.badge_label = QLabel("", self.header)
         self.badge_label.setObjectName("sectionCardBadge")
@@ -251,6 +301,10 @@ class SectionCard(QFrame):
 
     def title(self) -> str:
         return self._base_title
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_split_summary_priority()
 
     def setTitle(self, title: str) -> None:  # noqa: N802 - Qt compatibility
         self._base_title = title
@@ -406,6 +460,165 @@ class SectionCard(QFrame):
             self._summary_html = None
         self._render_summary()
 
+    def set_split_summary_columns(
+        self,
+        left_rows: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+        right_rows: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+    ) -> None:
+        """Show two independent fact columns in a completed card header."""
+
+        left = tuple(
+            (str(key).strip(), str(value).strip())
+            for key, value in left_rows
+            if str(key).strip()
+        )
+        right = tuple(
+            (str(key).strip(), str(value).strip())
+            for key, value in right_rows
+            if str(key).strip()
+        )
+        self._split_summary_columns = (left, right)
+        visible = bool(left or right)
+        self.split_summary_left.setText(self._summary_table_html(left))
+        self.split_summary_right.setText(self._summary_table_html(right))
+        self.split_summary_widget.setVisible(visible)
+        self.summary_label.setVisible(not visible)
+        self.summary_note_label.setVisible(
+            not visible and bool(self._summary_note)
+        )
+        accessible = (
+            *(f"{key}: {value}" for key, value in left),
+            *(f"{key}: {value}" for key, value in right),
+        )
+        self.split_summary_widget.setAccessibleDescription(
+            "; ".join(accessible)
+        )
+        self._sync_split_summary_priority()
+        if visible:
+            self.header.setMinimumHeight(METRICS.card_header_height_px)
+            self.header.setMaximumHeight(16777215)
+            self.header_layout.invalidate()
+            self.header_layout.activate()
+            self.header.setMinimumHeight(
+                max(
+                    METRICS.card_header_height_px,
+                    self.header_layout.sizeHint().height(),
+                )
+            )
+        elif not hasattr(self, "summary_key_label"):
+            self.header.setFixedHeight(METRICS.card_header_height_px)
+        self.header.updateGeometry()
+        self.updateGeometry()
+
+    @staticmethod
+    def _summary_table_html(rows: tuple[tuple[str, str], ...]) -> str:
+        body = "".join(
+            "<tr>"
+            f'<td align="right"><b>{escape(key)}:</b>&nbsp;</td>'
+            f'<td align="left">{escape(value)}</td>'
+            "</tr>"
+            for key, value in rows
+        )
+        return (
+            '<table align="right" cellspacing="0" cellpadding="0">'
+            f"{body}</table>"
+        )
+
+    def _render_split_summary_for_width(
+        self,
+        right_rows: tuple[tuple[str, str], ...],
+        available_width: int,
+    ) -> None:
+        """Elide only long filenames while preserving their extension."""
+
+        normal_metrics = QFontMetrics(self.split_summary_right.font())
+        bold_font = self.split_summary_right.font()
+        bold_font.setBold(True)
+        bold_metrics = QFontMetrics(bold_font)
+        key_width = max(
+            (bold_metrics.horizontalAdvance(f"{key}:") for key, _ in right_rows),
+            default=0,
+        )
+        value_width = max(24, available_width - key_width - 14)
+        rendered: list[tuple[str, str]] = []
+        elided_filename = ""
+        for key, value in right_rows:
+            if key.casefold() == "dateiname":
+                displayed = self._elide_filename(
+                    value,
+                    value_width,
+                    normal_metrics,
+                )
+                if displayed != value:
+                    elided_filename = value
+                rendered.append((key, displayed))
+            else:
+                rendered.append((key, value))
+        self.split_summary_right.setToolTip(elided_filename)
+        self.split_summary_right.setText(
+            self._summary_table_html(tuple(rendered))
+        )
+
+    @staticmethod
+    def _elide_filename(
+        filename: str,
+        available_width: int,
+        metrics: QFontMetrics,
+    ) -> str:
+        if metrics.horizontalAdvance(filename) <= available_width:
+            return filename
+        separator = filename.rfind(".")
+        suffix = filename[separator:] if separator > 0 else ""
+        stem = filename[:separator] if suffix else filename
+        marker = "..."
+        low = 0
+        high = len(stem)
+        while low < high:
+            midpoint = (low + high + 1) // 2
+            candidate = f"{stem[:midpoint]}{marker}{suffix}"
+            if metrics.horizontalAdvance(candidate) <= available_width:
+                low = midpoint
+            else:
+                high = midpoint - 1
+        return f"{stem[:low].rstrip()}{marker}{suffix}"
+
+    def _sync_split_summary_priority(self) -> None:
+        """Drop the lower-priority file column before slicer facts truncate."""
+
+        if not hasattr(self, "toggle_button"):
+            return
+        left_rows, right_rows = self._split_summary_columns
+        if not (left_rows or right_rows):
+            return
+        margins = self.header_layout.contentsMargins()
+        occupied = (
+            margins.left()
+            + margins.right()
+            + self.header_left.sizeHint().width()
+            + METRICS.card_header_summary_gap_px
+            + self.header_layout.spacing() * 4
+        )
+        for widget in (
+            self.badge_label,
+            self.toggle_button,
+            self.summary_note_label,
+        ):
+            if not widget.isHidden():
+                occupied += widget.sizeHint().width()
+        available = max(0, self.header.width() - occupied)
+        self._render_split_summary_for_width(right_rows, available)
+        self.split_summary_right.setMaximumWidth(max(0, available))
+        required = self.split_summary_right.sizeHint().width()
+        if left_rows:
+            required += (
+                self.split_summary_left.sizeHint().width()
+                + self.split_summary_layout.horizontalSpacing()
+            )
+        show_file_column = bool(left_rows) and available >= required
+        self.split_summary_left.setVisible(show_file_column)
+        self.split_summary_layout.setColumnStretch(0, 1)
+        self.split_summary_layout.setColumnStretch(1, 0)
+
     def _render_summary(self) -> None:
         lines = (self._summary, *self._summary_details)
         if (
@@ -429,7 +642,9 @@ class SectionCard(QFrame):
         # The zero-minimum stretch slot keeps the chevron at the far right even
         # when there is no summary, while still yielding all spare space to a
         # long right-aligned summary.
-        self.summary_label.setVisible(True)
+        self.summary_label.setVisible(
+            not bool(self._split_summary_columns[0] or self._split_summary_columns[1])
+        )
         self.summary_label.updateGeometry()
         if hasattr(self, "summary_key_label"):
             self.header.setMinimumHeight(METRICS.card_header_height_px)
@@ -524,6 +739,11 @@ class SectionCard(QFrame):
         self.setProperty("state", self._state.value)
         self.status_icon.setProperty("state", self._state.value)
         self.status_icon.setText(_STATE_ICONS[self._state] if icon is None else icon)
+        # Status glyphs (especially the error X) share the title's actual line
+        # height instead of inheriting a visually smaller QLabel box.
+        self.status_icon.setFixedHeight(
+            max(18, self.title_label.sizeHint().height())
+        )
         self.status_icon.setVisible(bool(self.status_icon.text()))
         self._repolish(self)
         self._repolish(self.status_icon)

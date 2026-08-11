@@ -138,8 +138,20 @@ class StlValidationGuiTests(unittest.TestCase):
             )
             self.assertFalse(window.stl_validation_details_toggle.isHidden())
             self.assertIn("Offene Kanten: 161", window.stl_validation_details.toPlainText())
-            self.assertTrue(window.drop_zone.prompt_label.isVisibleTo(window.drop_zone))
-            self.assertTrue(window.drop_zone.info_widget.isHidden())
+            self.assertIs(
+                window.stl_validation_message.parent(),
+                window.source_group.content_widget,
+            )
+            self.assertTrue(window.gcode_import_guide_row.isHidden())
+            self.assertEqual(
+                window.drop_zone.prompt_label.text(),
+                window.drop_zone.REPLACEMENT_PROMPT,
+            )
+            self.assertEqual(
+                window.drop_zone.prompt_label.isHidden(),
+                False,
+            )
+            self.assertFalse(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.gcode_progress_bar.isHidden())
             self.assertEqual(
                 window.gcode_progress_status_label.text(),
@@ -155,7 +167,7 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.reload_button.isEnabled())
             self.assertTrue(window.drop_zone.remove_button.isEnabled())
             self.assertIn(
-                "bisherige Datei wird ersetzt und direkt neu geprüft",
+                "Die bisherige Datei wird dadurch ersetzt",
                 window.drop_zone.prompt_label.text(),
             )
             reload_column = window.drop_zone.actions_layout.getItemPosition(
@@ -201,6 +213,8 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertEqual(window.drop_zone.reload_button.text(), "STL neu einlesen")
             self.assertEqual(window.drop_zone.remove_button.text(), "STL entfernen")
             self.assertEqual(len(result.warning_issues), 1)
+            self.assertTrue(window.drop_zone.property("completed"))
+            self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertFalse(window.stl_validation_message.isHidden())
             self.assertEqual(
                 window.stl_validation_message.property("severity"),
@@ -221,6 +235,34 @@ class StlValidationGuiTests(unittest.TestCase):
             )
             self.assertTrue(window.source_group.summary_note_label.isVisibleTo(window))
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_fully_valid_stl_shows_green_confirmation_below_file_facts(self) -> None:
+        source = self.fixture_root / "known_valid_tetrahedron_ascii.stl"
+        window = self.window()
+        try:
+            self.assertTrue(window.drop_zone.set_file(source))
+            self.wait_for_stl_result(window)
+
+            self.assertFalse(window.stl_validation_message.isHidden())
+            self.assertEqual(
+                window.stl_validation_message.property("severity"),
+                "success",
+            )
+            self.assertIn(
+                "für die weitere Verarbeitung geeignet",
+                window.stl_validation_message.text(),
+            )
+            self.assertIs(
+                window.stl_validation_message.parent(),
+                window.source_group.content_widget,
+            )
+            self.assertTrue(window.drop_zone.property("completed"))
+            self.assertTrue(window.drop_zone.prompt_label.isHidden())
+            self.assertTrue(window.gcode_import_guide_row.isHidden())
         finally:
             window.close()
             window.deleteLater()
@@ -287,7 +329,10 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIsNot(window.stl_validation_result, first_result)
             self.assertIs(window.workflow.stage, WorkflowStage.SOURCE_INVALID)
             self.assertEqual(window.drop_zone.selected_path, source.resolve())
-            self.assertFalse(window.drop_zone.prompt_label.isHidden())
+            self.assertEqual(
+                window.drop_zone.prompt_label.isHidden(),
+                False,
+            )
             self.assertFalse(window.drop_zone.remove_button.isHidden())
         finally:
             window.close()
@@ -328,6 +373,7 @@ class StlValidationGuiTests(unittest.TestCase):
             )
             self.assertTrue(window.stl_validation_message.isHidden())
             self.assertTrue(window.stl_validation_details_toggle.isHidden())
+            self.assertFalse(window.gcode_import_guide_row.isHidden())
             self.assertEqual(window.source_group.summary_label.text(), "")
             self.assertEqual(window.source_group.summary_note_label.text(), "")
             self.assertTrue(window.source_group.isChecked())
@@ -358,8 +404,15 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.set_file(source))
             self.wait_for_stage(window, WorkflowStage.SOURCE_INVALID)
             self.assertIsNone(window.stl_validation_result)
-            self.assertTrue(window.drop_zone.prompt_label.isVisibleTo(window.drop_zone))
-            self.assertTrue(window.drop_zone.info_widget.isHidden())
+            self.assertEqual(
+                window.drop_zone.prompt_label.text(),
+                window.drop_zone.REPLACEMENT_PROMPT,
+            )
+            self.assertEqual(
+                window.drop_zone.prompt_label.isHidden(),
+                False,
+            )
+            self.assertFalse(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.gcode_progress_bar.isHidden())
             self.assertEqual(
                 window.gcode_progress_status_label.text(),

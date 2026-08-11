@@ -153,6 +153,27 @@ QLabel#previewQualityLabel[state="building"] {
     border-left-color: #4e7d9f;
 }
 
+QPushButton#previewQualityDetailsToggle {
+    color: #647487;
+    background: transparent;
+    border: none;
+    padding: 3px 7px;
+    text-align: left;
+    font-size: 9.2pt;
+}
+QPushButton#previewQualityDetailsToggle:hover {
+    color: #315d80;
+    background: #f2f6f9;
+}
+QLabel#previewQualityDetailsLabel {
+    color: #566779;
+    background: #f7f9fb;
+    border: 1px solid #d7e0e8;
+    border-radius: 5px;
+    padding: 7px 9px;
+    font-size: 9.1pt;
+}
+
 /* ---------- Karten und aufklappbare Bereiche ---------- */
 QFrame#sectionCard {
     background: #ffffff;
@@ -205,6 +226,20 @@ QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] {
     border-left: 4px solid #6f52c9;
 }
 
+/* Hovering an outer dropdown changes only its surface colour. */
+QFrame#sectionCard[outerDropdown="true"][collapsible="true"][bodyHover="true"]:hover {
+    background: #f7fbfe;
+}
+QFrame#sectionCard[outerDropdown="true"][collapsible="true"][bodyHover="true"][state="success"]:hover {
+    background: #f2faf5;
+}
+QFrame#sectionCard[outerDropdown="true"][collapsible="true"][bodyHover="true"][state="warning"]:hover {
+    background: #fffbf2;
+}
+QFrame#sectionCard[outerDropdown="true"][collapsible="true"][bodyHover="true"][state="error"]:hover {
+    background: #fff8f7;
+}
+
 QFrame#sectionCardHeader,
 QFrame#sectionCardBody,
 QWidget#sectionCardHeaderLeft {
@@ -246,7 +281,6 @@ QFrame#sectionCardHeader:focus {
 
 QFrame#sectionCard[collapsible="true"] QFrame#sectionCardHeader:hover {
     background: #f1f6fb;
-    border-radius: 8px;
 }
 
 /* Äußerste Dropdowns behalten gegenüber dem allgemeinen Header-Hover ihre
@@ -295,9 +329,16 @@ QLabel#sectionCardTitleNote {
 QLabel#sectionCardTitleNote[severity="warning"] { color: #8a4b08; }
 
 QLabel#sectionCardSummary,
-QLabel#sectionCardSummaryKey {
+QLabel#sectionCardSummaryKey,
+QLabel#sectionCardSplitSummaryLeft,
+QLabel#sectionCardSplitSummaryRight {
     color: #526274;
     font-size: 9.5pt;
+}
+
+QWidget#sectionCardSplitSummary {
+    background: transparent;
+    border: none;
 }
 
 QLabel#sectionCardSummaryNote {
@@ -392,7 +433,6 @@ QGroupBox#collapsibleGroup::indicator {
 }
 
 QGroupBox#collapsibleGroup:hover {
-    border-color: #9fb4c8;
     background: #fbfdff;
 }
 
@@ -905,7 +945,7 @@ QFrame#gcodeDropZone {
     border-radius: 10px;
     /* 180 px Inhaltsminimum + Rahmen ergeben dieselben 184 px wie die
        frühere leere Darstellung mit den inzwischen ausgeblendeten Zeilen. */
-    min-height: 180px;
+    min-height: 256px;
 }
 
 QFrame#gcodeDropZone[dragActive="true"] {
@@ -916,7 +956,19 @@ QFrame#gcodeDropZone[dragActive="true"] {
 QFrame#gcodeDropZone[loaded="true"] {
     min-height: 96px;
     background: #fbfdff;
-    border: 1px solid #bfd2e2;
+    border: 2px dashed #65a6d9;
+}
+
+QFrame#gcodeDropZone[completed="true"] {
+    background: #f0faf4;
+    border-color: #66ac86;
+}
+
+QFrame#gcodeDropZone QLabel[replacementHint="true"] {
+    color: #6f7d89;
+    font-style: italic;
+    font-size: 9.3pt;
+    padding: 3px 0 5px 0;
 }
 
 QLabel#stlValidationMessage[severity="error"] {
@@ -931,6 +983,13 @@ QLabel#stlValidationMessage[severity="warning"] {
     border: 1px solid #e7c875;
     border-radius: 6px;
     color: #76520b;
+}
+
+QLabel#stlValidationMessage[severity="success"] {
+    background: #edf8f2;
+    border: 1px solid #92c9ad;
+    border-radius: 6px;
+    color: #145c3c;
 }
 
 QLabel#gcodeInfoCaption {
@@ -992,6 +1051,25 @@ QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox, QSpinBox {
 
 QLineEdit, QTextEdit, QComboBox { padding: 4px 8px; }
 
+QComboBox[important="true"] {
+    color: #155f98;
+    background: #edf6fd;
+    border-color: #9fc7e5;
+    font-weight: 600;
+}
+
+QComboBox[important="true"]:hover,
+QComboBox[important="true"][hovered="true"] {
+    color: #0f568f;
+    background: #e3f1fb;
+}
+
+QComboBox[important="true"]:focus {
+    color: #0f568f;
+    background: #e3f1fb;
+    border-color: #70a9d2;
+}
+
 QDoubleSpinBox, QSpinBox {
     /* The spin controls already reserve their own 24 px arrow column.
        Only the uniform 44 px unit overlay plus a 4 px gap is needed here. */
@@ -1008,7 +1086,12 @@ QLabel#numericEditorUnit {
 }
 
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    background: transparent;
     border: none;
+    border-left: 1px solid #b8c5d1;
+    margin: 1px 1px 1px 0;
     width: 28px;
 }
 
@@ -1018,17 +1101,48 @@ QComboBox::down-arrow {
     height: 7px;
 }
 
-QLineEdit:hover, QTextEdit:hover, QComboBox:hover,
+QLineEdit:hover, QTextEdit:hover,
 QDoubleSpinBox:hover, QSpinBox:hover {
     background: #fbfdff;
     border-color: #7f9bb2;
 }
 
-QComboBox:hover::drop-down {
+QComboBox:hover,
+QComboBox[hovered="true"] {
+    background: #fbfdff;
+}
+
+QComboBox:hover::drop-down,
+QComboBox[hovered="true"]::drop-down {
     background: #eaf1f7;
-    border-left: 1px solid #b8c5d1;
     border-top-right-radius: 5px;
     border-bottom-right-radius: 5px;
+}
+
+QComboBox QAbstractItemView {
+    color: #21384f;
+    background: #ffffff;
+    border: 1px solid #9fb5c7;
+    border-radius: 6px;
+    outline: 0;
+    selection-color: #123f63;
+    selection-background-color: #e5f1fa;
+}
+
+QComboBox QAbstractItemView:hover {
+    background: #fbfdff;
+}
+
+QComboBox QAbstractItemView::item {
+    background: #ffffff;
+    border: none;
+    padding: 5px 8px;
+}
+
+QComboBox QAbstractItemView::item:hover,
+QComboBox QAbstractItemView::item:selected {
+    color: #123f63;
+    background: #e5f1fa;
 }
 
 QDoubleSpinBox::up-button, QSpinBox::up-button {
@@ -1111,6 +1225,21 @@ QComboBox[warning="true"][invalid="true"]:focus {
     background: #fff4f3;
 }
 
+/* The Windows Qt style does not reliably repaint QComboBox:hover.  The
+   WheelSafeComboBox therefore exposes an explicit state; keeping this final
+   rule after the generic input states makes the visible feedback deterministic. */
+QComboBox[important="true"][hovered="true"] {
+    color: #0b4f82;
+    background: #d8ebf8;
+}
+
+QComboBox[important="true"][hovered="true"]::drop-down {
+    background: #c7e1f2;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    margin: 1px 1px 1px 0;
+}
+
 /* ---------- Schaltflächen ---------- */
 QPushButton {
     background: #f5f8fb;
@@ -1124,6 +1253,28 @@ QPushButton {
 QPushButton:hover { background: #eaf1f7; border-color: #92a9bd; }
 QPushButton:pressed { background: #dde8f1; }
 QPushButton:disabled { color: #8995a0; background: #edf0f2; border-color: #d8dee3; }
+
+QPushButton#sourcePrimaryActionButton,
+QPushButton#profileConfirmButton {
+    color: #155f98;
+    background: #eaf4fb;
+    border-color: #9fc7e5;
+    font-weight: 650;
+}
+
+QPushButton#sourcePrimaryActionButton:hover,
+QPushButton#profileConfirmButton:hover {
+    color: #0f568f;
+    background: #dceefa;
+    border-color: #70a9d2;
+}
+
+QPushButton#sourcePrimaryActionButton:disabled,
+QPushButton#profileConfirmButton:disabled {
+    color: #7994aa;
+    background: #edf2f5;
+    border-color: #d3dde5;
+}
 
 QPushButton#headerResetButton {
     min-height: 30px;

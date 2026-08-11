@@ -654,7 +654,7 @@ class Phase15ProfileTests(unittest.TestCase):
         self.assertFalse(window.profile_confirm_button.isHidden())
         self.assertEqual(
             window.profile_confirm_button.text(),
-            "Einstellungen bestätigen",
+            "Slicer und Profile bestätigen",
         )
         self.assertIs(
             window.workflow.stage,
@@ -667,7 +667,7 @@ class Phase15ProfileTests(unittest.TestCase):
             window.machine_profile_combo.currentData(),
             str(result.selected.machine.path),
         )
-        self.assertIn("STL-Optimierung", window.profile_status_label.text())
+        self.assertTrue(window.profile_status_label.isHidden())
         self.assertTrue(window.show_all_profiles_checkbox.isEnabled())
         self.assertIn("G-Code", window.profile_filter_label.text())
         requests: list[dict[str, object]] = []
@@ -812,7 +812,7 @@ class Phase15ProfileTests(unittest.TestCase):
                 "nozzle_diameter": ["0.6"],
             },
         )
-        self._write_profile(
+        other_process = self._write_profile(
             "process",
             "Other Quality",
             {
@@ -875,7 +875,7 @@ class Phase15ProfileTests(unittest.TestCase):
                 ),
             },
         )
-        self._write_profile(
+        other_filament = self._write_profile(
             "filament",
             "Other PLA",
             {
@@ -1007,24 +1007,20 @@ class Phase15ProfileTests(unittest.TestCase):
             self.adapter,
             include_all_profiles=True,
         )
-        self.assertTrue(unfiltered.profiles_filtered)
+        self.assertFalse(unfiltered.profiles_filtered)
+        self.assertEqual(
+            unfiltered.visible_option_counts,
+            unfiltered.unfiltered_option_counts,
+        )
         self.assertIn("Other M5 0.6 nozzle", {
             item.profile_id for item in unfiltered.machine_options
         })
-        self.assertNotIn("Other Quality", {
+        self.assertIn("Other Quality", {
             item.profile_id for item in unfiltered.process_options
         })
-        self.assertNotIn("Other PLA", {
+        self.assertIn("Other PLA", {
             item.profile_id for item in unfiltered.filament_options
         })
-        self.assertNotIn(
-            "Foreign fallback PLA @Other M5 0.6 nozzle",
-            {item.profile_id for item in unfiltered.filament_options},
-        )
-        self.assertNotIn(
-            "Orphan fallback PLA @Unavailable M9 0.4 nozzle",
-            {item.profile_id for item in unfiltered.filament_options},
-        )
         self.assertIn("User process for another printer", {
             item.profile_id for item in unfiltered.process_options
         })
@@ -1037,7 +1033,7 @@ class Phase15ProfileTests(unittest.TestCase):
             self.installation,
             self.adapter,
             selected_profile_ids={"machine": str(other_machine)},
-            include_all_profiles=True,
+            include_all_profiles=False,
         )
         self.assertIn("Other Quality", {
             item.profile_id for item in manual_other_machine.process_options
@@ -1074,6 +1070,44 @@ class Phase15ProfileTests(unittest.TestCase):
         })
         self.assertIn("User filament for another printer", {
             item.profile_id for item in manual_other_machine.filament_options
+        })
+
+        # The override must expose all profiles even before any valid source
+        # exists, while preserving the explicitly selected combination.
+        source_independent = service.catalog(
+            self.installation,
+            self.adapter,
+            selected_machine=str(other_machine),
+            selected_profile_ids={
+                "machine": str(other_machine),
+                "process": str(other_process),
+                "filament": str(other_filament),
+            },
+            include_all_profiles=True,
+        )
+        self.assertEqual(
+            source_independent.selected_machine.profile_id,
+            "Other M5 0.6 nozzle",
+        )
+        self.assertEqual(
+            source_independent.selected_process.profile_id,
+            "Other Quality",
+        )
+        self.assertEqual(
+            source_independent.selected_filament.profile_id,
+            "Other PLA",
+        )
+        self.assertIn("Other Quality", {
+            item.profile_id for item in source_independent.process_options
+        })
+        self.assertIn("Other PLA", {
+            item.profile_id for item in source_independent.filament_options
+        })
+        self.assertIn("Quality 0.2", {
+            item.profile_id for item in source_independent.process_options
+        })
+        self.assertIn("Example PLA", {
+            item.profile_id for item in source_independent.filament_options
         })
 
     def test_saved_slicer_printer_is_used_only_without_gcode_identity(self) -> None:
@@ -1176,7 +1210,7 @@ class Phase15ProfileTests(unittest.TestCase):
             self.installation,
             self.adapter,
             selected_profile_ids={"machine": str(aliased_second_machine)},
-            include_all_profiles=True,
+            include_all_profiles=False,
         )
 
         self.assertEqual(result.selected.machine.path, second_machine.resolve())

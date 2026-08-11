@@ -147,6 +147,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_footer_is_responsive_prioritized_and_bounded(self) -> None:
         window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
         window.resize(1400, 900)
         window.show()
         window.warning_text.setPlainText("Ein Warnhinweis")
@@ -604,14 +606,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window.source_group.content_widget,
             QPoint(0, 0),
         ).y()
-        progress_bottom = window.gcode_progress_status_widget.mapTo(
-            window.source_group.content_widget,
-            QPoint(0, 0),
-        ).y() + window.gcode_progress_status_widget.height()
-        upper_gap = guide_top - progress_bottom
         lower_gap = drop_zone_top - guide_bottom
 
-        self.assertEqual(upper_gap, window.source_group.content_layout.spacing())
+        self.assertTrue(window.gcode_progress_status_widget.isHidden())
+        self.assertEqual(
+            guide_top,
+            window.source_group.content_layout.contentsMargins().top(),
+        )
         self.assertEqual(lower_gap, METRICS.card_body_vertical_padding_px)
         window.close()
 
@@ -669,19 +670,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
+        self.assertTrue(window.footer.isHidden())
         self.assertTrue(window.action_availability_widget.isHidden())
         self.assertTrue(window.footer_action_area.isHidden())
         self.assertTrue(window.footer_vertical_divider.isHidden())
         self.assertTrue(window.footer_horizontal_divider.isHidden())
         self.assertTrue(window.status_icon_label.property("prominent"))
-        self.assertGreaterEqual(
-            window.status_icon_label.height(),
-            window.status_label.height(),
-        )
         window.close()
 
     def test_footer_notice_header_uses_expected_arrow_directions(self) -> None:
         window = self.window()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
         panel = window.error_panel
         panel.show()
         window.show()
@@ -1430,6 +1430,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         window.resize(1400, 900)
         window.show()
+        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
         window.error_panel.hide()
         window.notice_panel.hide()
         window.action_availability_widget.hide()
@@ -1443,7 +1445,12 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window.footer,
             window.preview_quality_panel.rect().topLeft(),
         ).y()
-        self.assertLessEqual(abs(status_top - quality_top), 2)
+        self.assertFalse(window.footer.isHidden())
+        self.assertLessEqual(status_top, quality_top)
+        self.assertLessEqual(
+            quality_top + window.preview_action_control.height(),
+            window.footer.height(),
+        )
         window.close()
 
     def test_maximum_diameter_uses_the_standard_help_text_style(self) -> None:

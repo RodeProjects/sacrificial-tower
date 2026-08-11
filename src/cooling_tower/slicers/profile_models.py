@@ -141,6 +141,11 @@ class ProfileCatalog:
     process_options: tuple[ProfileRecord, ...]
     filament_options: tuple[ProfileRecord, ...]
     rejected_profile_count: int = 0
+    profiles_filtered: bool = False
+    profile_filter_summary: str = ""
+    selected_machine: ProfileSelectionReference | None = None
+    selected_process: ProfileSelectionReference | None = None
+    selected_filament: ProfileSelectionReference | None = None
 
     @property
     def complete(self) -> bool:

@@ -359,7 +359,9 @@ class WorkflowController(QObject):
         self._set_source_prompt_icon(False)
         self.source_card.set_summary(summary)
         self.source_card.setCheckable(self.workflow_card is None)
-        self.source_card.set_state(SectionState.SUCCESS)
+        self.source_card.set_state(
+            SectionState.SUCCESS if analysis_complete else SectionState.ACTIVE
+        )
         self._set_stage(WorkflowStage.DISCOVERING_SLICER)
 
         if self.workflow_card is not None:

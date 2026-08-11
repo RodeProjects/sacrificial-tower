@@ -741,12 +741,13 @@ class StlProfileMatchingTests(unittest.TestCase):
             )
             self.assertIn(
                 "Düse: 0.4 mm",
-                window.profile_effective_summary_label.text(),
+                window.profile_diagnostics.toPlainText(),
             )
             self.assertIn(
                 "Layerhöhe: 0.2 mm",
-                window.profile_effective_summary_label.text(),
+                window.profile_diagnostics.toPlainText(),
             )
+            self.assertTrue(window.profile_effective_summary_label.isHidden())
             deadline = time.monotonic() + 10
             while (
                 window.source_preslice_result is None

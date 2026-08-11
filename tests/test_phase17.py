@@ -972,6 +972,29 @@ class Phase17Tests(unittest.TestCase):
         )
         dialog.close()
 
+    def test_42_preview_quality_failures_are_bounded_and_deduplicated(self) -> None:
+        repeated = tuple(
+            SimpleNamespace(message="Die benötigte Layertime ist nicht erreichbar.")
+            for _index in range(80)
+        )
+        additional = tuple(
+            SimpleNamespace(message=f"Zusätzlicher Grund {index}")
+            for index in range(5)
+        )
+
+        lines = PreviewDialog._summarized_failures(repeated + additional)
+
+        self.assertLessEqual(len(lines), 4)
+        self.assertEqual(
+            sum("Die benötigte Layertime" in line for line in lines),
+            1,
+        )
+        self.assertIn("(80×)", lines[0])
+        self.assertIn("Weitere", lines[-1])
+        dialog = PreviewDialog()
+        self.assertLessEqual(dialog.quality_label.maximumHeight(), 260)
+        dialog.close()
+
     def test_36_mouse_wheel_does_not_change_values_or_closed_dropdowns(self) -> None:
         window = self.window()
         window.target_time_spin.setValue(11.0)
@@ -1008,6 +1031,13 @@ class Phase17Tests(unittest.TestCase):
         self.app.processEvents()
         self.assertGreater(scrollbar.value(), before_scroll)
         self.assertEqual(combo.currentIndex(), 0)
+        combo.hidePopup()
+        combo.setCurrentIndex(combo.count() - 1)
+        combo.showPopup()
+        QTest.qWait(10)
+        self.app.processEvents()
+        self.assertEqual(scrollbar.value(), scrollbar.minimum())
+        self.assertEqual(combo.currentIndex(), combo.count() - 1)
         combo.hidePopup()
         combo.close()
         window.close()
@@ -1173,12 +1203,19 @@ class Phase17Tests(unittest.TestCase):
         summary = dialog.quality_label.text()
         self.assertIn("Exakt nicht bestätigt", summary)
         self.assertIn("Durchläufe: 5 von maximal 5", summary)
-        self.assertIn("0.420 s > 0.150 s", summary)
-        self.assertIn("0.310 s > 0.150 s", summary)
-        self.assertIn("0.060 mm > 0.030 mm", summary)
-        self.assertIn("0.900 s > 0.750 s", summary)
+        self.assertNotIn("Messwerte des letzten Durchlaufs", summary)
         self.assertIn("Ergebnisse blieben instabil", summary)
         self.assertEqual(dialog.quality_label.property("state"), "error")
+        self.assertFalse(dialog.quality_details_toggle.isHidden())
+        self.assertFalse(dialog.quality_details_toggle.isChecked())
+        self.assertTrue(dialog.quality_details_label.isHidden())
+        details = dialog.quality_details_label.text()
+        self.assertIn("0.420 s > 0.150 s", details)
+        self.assertIn("0.310 s > 0.150 s", details)
+        self.assertIn("0.060 mm > 0.030 mm", details)
+        self.assertIn("0.900 s > 0.750 s", details)
+        dialog.quality_details_toggle.click()
+        self.assertFalse(dialog.quality_details_label.isHidden())
 
         stable_iteration = SimpleNamespace(
             maximum_remaining_deficit_s=0.05,
@@ -1208,14 +1245,22 @@ class Phase17Tests(unittest.TestCase):
         refreshed = dialog.quality_label.text()
         self.assertIn("Exakt bestätigt", refreshed)
         self.assertIn("Durchläufe: 2 von maximal 5", refreshed)
-        self.assertIn("0.040 s ≤ 0.150 s", refreshed)
+        self.assertNotIn("0.040 s ≤ 0.150 s", refreshed)
         self.assertNotIn("0.310 s", refreshed)
         self.assertNotIn("Ergebnisse blieben instabil", refreshed)
         self.assertEqual(dialog.quality_label.property("state"), "success")
+        self.assertIn(
+            "0.040 s ≤ 0.150 s",
+            dialog.quality_details_label.text(),
+        )
+        self.assertNotIn("0.310 s", dialog.quality_details_label.text())
+        self.assertFalse(dialog.quality_details_toggle.isChecked())
+        self.assertTrue(dialog.quality_details_label.isHidden())
 
         dialog.set_building("Neue Vorschau wird erstellt")
         self.assertIn("wird für die neue Vorschau aktualisiert", dialog.quality_label.text())
         self.assertNotIn("Exakt bestätigt", dialog.quality_label.text())
+        self.assertTrue(dialog.quality_details_toggle.isHidden())
         dialog.close()
 
 

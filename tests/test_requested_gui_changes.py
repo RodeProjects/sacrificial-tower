@@ -321,7 +321,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.machine_profile_combo.setCurrentIndex(2)
         self.assertEqual(requests, [])
         self.assertTrue(window.profile_confirm_button.isEnabled())
-        self.assertIn("erneut bestätigt", window.profile_status_label.text())
+        self.assertTrue(window.profile_status_label.isHidden())
         window.filament_profile_combo.setCurrentIndex(2)
         self.assertEqual(requests, [])
         window.close()
@@ -1062,6 +1062,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
             extra_error.y(),
         )
 
+        window.workflow.analysis_succeeded("test.gcode")
+        window.workflow.slicer_succeeded("Testslicer")
         window.error_panel.set_expanded(True)
         extra_error.set_expanded(True)
         for _ in range(8):

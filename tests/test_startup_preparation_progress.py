@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -26,6 +27,7 @@ from cooling_tower.slicers import (
     ProfileCatalogConfirmation,
     ProfileKind,
     ProfileRecord,
+    ProfileSelectionReference,
     SlicerCapability,
     SlicerDiscoveryResult,
     SlicerDiscoverySource,
@@ -41,6 +43,10 @@ class StartupSlicerService:
         self.adapter = object()
         self.discovery_calls = 0
         self.remembered_profiles: list[tuple[str, str, str]] = []
+        self.profile_selections: dict[
+            str, ProfileSelectionReference
+        ] = {}
+        self.remembered_identity_keys: list[str] = []
 
     def discover_installations(self, _source_slicer, *, force=False):
         self.discovery_calls += 1
@@ -52,8 +58,9 @@ class StartupSlicerService:
     def remember_selection(self, _identity_key) -> None:
         return None
 
-    def remembered_profile_selections(self, _identity_key):
-        return {}
+    def remembered_profile_selections(self, identity_key):
+        self.remembered_identity_keys.append(identity_key)
+        return dict(self.profile_selections)
 
     def remember_profile_selection(
         self,
@@ -64,6 +71,10 @@ class StartupSlicerService:
         self.remembered_profiles.append(
             (identity_key, role, str(profile.path))
         )
+        self.profile_selections[role] = ProfileSelectionReference(
+            profile.profile_id,
+            profile.path,
+        )
 
 
 class StartupProfileService:
@@ -71,11 +82,28 @@ class StartupProfileService:
         self.result = catalog
         self.catalog_calls = 0
 
-    def catalog(self, installation, _adapter, *, force_inventory=False):
+    def catalog(
+        self,
+        installation,
+        _adapter,
+        *,
+        force_inventory=False,
+        selected_machine=None,
+        selected_profile_ids=None,
+        include_all_profiles=False,
+    ):
         self.catalog_calls += 1
         if installation.identity_key != self.result.execution_slicer.identity_key:
             raise ValueError("unexpected installation")
-        return self.result
+        selections = dict(selected_profile_ids or {})
+        if selected_machine is not None:
+            selections["machine"] = selected_machine
+        return replace(
+            self.result,
+            selected_machine=selections.get("machine"),
+            selected_process=selections.get("process"),
+            selected_filament=selections.get("filament"),
+        )
 
 
 class StartupPreparationProgressTests(unittest.TestCase):
@@ -205,6 +233,10 @@ class StartupPreparationProgressTests(unittest.TestCase):
             self.assertIsNone(window.profile_catalog_confirmation)
             self.assertEqual(window.preparation_progress_bar.value(), 33)
             self.assertTrue(window.profile_confirm_button.isEnabled())
+            self.assertEqual(
+                slicer_service.profile_selections["filament"].profile_id,
+                self.records["filament"].profile_id,
+            )
 
             self.assertEqual(
                 {
@@ -213,6 +245,67 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 },
                 original_profile_bytes,
             )
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_startup_preselects_last_confirmed_profiles_for_same_slicer(self) -> None:
+        discovery = SlicerDiscoveryResult(
+            installations=(self.installation,),
+            recommended_key=self.installation.identity_key,
+            gui_state=SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
+            message="Slicer gefunden",
+        )
+        slicer_service = StartupSlicerService(discovery)
+        slicer_service.profile_selections = {
+            role: ProfileSelectionReference(record.profile_id, record.path)
+            for role, record in (
+                ("machine", self.records["machine"]),
+                ("process", self.records["process"]),
+                ("filament", self.records["filament_alt"]),
+            )
+        }
+        profile_service = StartupProfileService(self.catalog)
+        window = MainWindow(
+            user_settings_path=self.root / "restart-settings.json",
+            slicer_service=slicer_service,
+            profile_service=profile_service,
+            enable_update_check=False,
+            enable_startup_slicer_discovery=True,
+        )
+        try:
+            self._wait_until(
+                lambda: window.profile_catalog is not None
+                and not window.background_job_manager.has_active(
+                    JobKind.PROFILE_MATCH
+                )
+            )
+
+            self.assertEqual(
+                window._profile_combo_reference(
+                    window.machine_profile_combo
+                ).profile_id,
+                self.records["machine"].profile_id,
+            )
+            self.assertEqual(
+                window._profile_combo_reference(
+                    window.process_profile_combo
+                ).profile_id,
+                self.records["process"].profile_id,
+            )
+            self.assertEqual(
+                window._profile_combo_reference(
+                    window.filament_profile_combo
+                ).profile_id,
+                self.records["filament_alt"].profile_id,
+            )
+            self.assertIn(
+                self.installation.identity_key,
+                slicer_service.remembered_identity_keys,
+            )
+            self.assertTrue(window.profile_confirm_button.isEnabled())
+            self.assertIsNone(window.profile_catalog_confirmation)
         finally:
             window.close()
             window.deleteLater()

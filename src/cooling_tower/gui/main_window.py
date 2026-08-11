@@ -1045,6 +1045,7 @@ class MainWindow(QMainWindow):
         self.preparation_group = workflow_group
         workflow_group.setProperty("role", "preparation")
         workflow_group.setProperty("outerDropdown", True)
+        workflow_group.setProperty("bodyHover", True)
         workflow_group.content_layout.setContentsMargins(0, 0, 0, 0)
 
         source_group = SectionCard(
@@ -1056,6 +1057,7 @@ class MainWindow(QMainWindow):
         source_group.setProperty("role", "gcodeSource")
         source_group.setProperty("subsection", "left")
         source_layout = source_group.content_layout
+        source_layout.setAlignment(Qt.AlignmentFlag(0))
 
         # Local progress is transient: the persistent state is represented by
         # the shared prerequisite overview above both columns.
@@ -1089,6 +1091,10 @@ class MainWindow(QMainWindow):
         )
         gcode_progress_status.addWidget(self.gcode_progress_status_label, 1)
         source_layout.addWidget(self.gcode_progress_status_widget)
+        # The drop zone already exposes the durable source state in its
+        # dedicated "Status" fact row. Keep this compatibility widget for
+        # existing status updates, but do not render the duplicate summary.
+        self.gcode_progress_status_widget.hide()
 
         self.gcode_import_guide_row = QWidget()
         self.gcode_import_guide_row.setObjectName("gcodeImportGuideRow")
@@ -1149,7 +1155,10 @@ class MainWindow(QMainWindow):
         # severity, including future colour variants.
         self.stl_validation_message.setContentsMargins(10, 8, 10, 8)
         self.stl_validation_message.hide()
-        source_layout.addWidget(self.stl_validation_message)
+        source_layout.insertWidget(
+            source_layout.indexOf(self.drop_zone) + 1,
+            self.stl_validation_message,
+        )
         self.stl_validation_details_toggle = QPushButton(
             "Technische Details anzeigen ▸"
         )
@@ -1174,6 +1183,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._refresh_preparation_section_layout),
             )
         )
+        source_layout.addStretch(1)
         source_layout.addWidget(self.stl_validation_details_toggle)
         source_layout.addWidget(self.stl_validation_details)
 
@@ -1234,6 +1244,7 @@ class MainWindow(QMainWindow):
         slicer_group.setProperty("role", "slicer")
         slicer_group.setProperty("subsection", "right")
         slicer_layout = slicer_group.content_layout
+        slicer_layout.setAlignment(Qt.AlignmentFlag(0))
 
         # Search progress always forms the first block in the Slicer card, but
         # remains hidden whenever no background calculation is active.
@@ -1317,6 +1328,7 @@ class MainWindow(QMainWindow):
         slicer_selectors_layout.setSpacing(6)
         self.slicer_combo = WheelSafeComboBox()
         self.slicer_combo.setObjectName("slicerSelection")
+        self.slicer_combo.setProperty("important", True)
         self.slicer_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
@@ -1358,6 +1370,7 @@ class MainWindow(QMainWindow):
             self.process_profile_combo,
             self.filament_profile_combo,
         ):
+            combo.setProperty("important", True)
             combo.setEnabled(False)
             combo.setFixedHeight(METRICS.form_control_height_px)
             combo.setSizePolicy(
@@ -1388,9 +1401,8 @@ class MainWindow(QMainWindow):
             "showAllProfilesCheckBox"
         )
         self.show_all_profiles_checkbox.setToolTip(
-            "Zeigt alle Maschinenprofile des gewählten Slicers. User-Presets "
-            "bleiben generell sichtbar; System-Presets für Filament und "
-            "Prozess bleiben auf das gewählte Maschinenprofil begrenzt."
+            "Zeigt alle Maschinen-, Filament- und Prozessprofile des "
+            "gewählten Slicers und setzt den Druckerfilter vorübergehend aus."
         )
         self.show_all_profiles_checkbox.setEnabled(False)
         slicer_selectors_layout.addWidget(self.show_all_profiles_checkbox)
@@ -1419,13 +1431,16 @@ class MainWindow(QMainWindow):
         self.profile_status_label.setObjectName("profileStatusLabel")
         self.profile_status_label.setWordWrap(True)
         self.profile_status_label.setProperty("state", "pending")
+        self.profile_status_label.hide()
         self.profile_effective_summary_label = QLabel()
         self.profile_effective_summary_label.setObjectName(
             "profileEffectiveSummaryLabel"
         )
         self.profile_effective_summary_label.setWordWrap(True)
         self.profile_effective_summary_label.hide()
-        self.profile_confirm_button = QPushButton("Profilzuordnung bestätigen")
+        self.profile_confirm_button = QPushButton(
+            "Slicer und Profile bestätigen"
+        )
         self.profile_confirm_button.setObjectName("profileConfirmButton")
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
@@ -1474,6 +1489,7 @@ class MainWindow(QMainWindow):
         self.slicer_analysis_details_toggle.toggled.connect(
             self._toggle_slicer_analysis_details
         )
+        slicer_layout.addStretch(1)
         slicer_layout.addWidget(self.slicer_analysis_details_toggle)
         slicer_layout.addWidget(self.slicer_analysis_details)
         self._slicer_width_combos = (
@@ -1614,6 +1630,7 @@ class MainWindow(QMainWindow):
         self.timing_group = timing_group
         timing_group.setProperty("role", "timing")
         timing_group.setProperty("outerDropdown", True)
+        timing_group.setProperty("bodyHover", False)
         timing_layout = timing_group.content_layout
         self.target_time_spin = self._double_spin(
             0.01,
@@ -2015,6 +2032,7 @@ class MainWindow(QMainWindow):
         self.prediction_frame.setProperty("role", "prediction")
         self.prediction_frame.setProperty("cardTone", "preview")
         self.prediction_frame.setProperty("outerDropdown", True)
+        self.prediction_frame.setProperty("bodyHover", False)
         prediction_layout = self.prediction_frame.content_layout
         self.prediction_method_label = QLabel("Noch nicht verfügbar")
         self.prediction_method_label.setObjectName("predictionMethodBadge")
@@ -2188,6 +2206,7 @@ class MainWindow(QMainWindow):
         )
         self.geometry_settings_group.setProperty("role", "geometrySettings")
         self.geometry_settings_group.setProperty("outerDropdown", True)
+        self.geometry_settings_group.setProperty("bodyHover", True)
         self.geometry_settings_group.content_layout.setContentsMargins(
             0, 0, 0, 0
         )
@@ -2692,6 +2711,8 @@ class MainWindow(QMainWindow):
         """Show fixed footer actions only after both prerequisites succeeded."""
 
         actions_visible = stage_value == WorkflowStage.READY.value
+        if hasattr(self, "footer"):
+            self.footer.setVisible(actions_visible)
         self._set_setting_feedback_enabled(actions_visible)
         for widget in (
             self.open_output_button,
@@ -3998,6 +4019,9 @@ class MainWindow(QMainWindow):
         self._reset_profile_filter_controls()
         if preserve_catalog and self.profile_catalog is not None:
             self._populate_profile_combos(self.profile_catalog)
+            self.show_all_profiles_checkbox.setEnabled(
+                bool(self.profile_catalog.machine_options)
+            )
         else:
             self.profile_catalog = None
             self.profile_catalog_confirmation = None
@@ -4013,23 +4037,15 @@ class MainWindow(QMainWindow):
             finally:
                 self._populating_profile_combos = False
         self._refresh_slicer_header_profiles()
-        self.profile_status_label.setText(message)
-        self.profile_status_label.setProperty("state", state)
-        self._refresh_widget_style(self.profile_status_label)
+        self._set_profile_notice(
+            message if state == "error" else None,
+            state=state,
+        )
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
         if preserve_catalog and self.profile_catalog is not None:
             catalog_confirmed = self._catalog_selection_is_confirmed()
-            self.profile_status_label.setText(
-                "Slicer und Profile sind bestätigt; die Auswahl wird nach "
-                "der Dateianalyse automatisch abgeglichen."
-                if catalog_confirmed
-                else "Profile sind geladen. Bitte Slicer- und Profilauswahl "
-                "bestätigen."
-            )
-            self.profile_status_label.setProperty(
-                "state", "available" if catalog_confirmed else "pending"
-            )
+            self._set_profile_notice()
             self.profile_confirm_button.setText(
                 "Slicer und Profile bestätigen"
             )
@@ -4057,10 +4073,29 @@ class MainWindow(QMainWindow):
             "gefiltert."
         )
 
+    def _set_profile_notice(
+        self,
+        message: str | None = None,
+        *,
+        state: str = "pending",
+    ) -> None:
+        """Show only actionable or exceptional profile information."""
+
+        text = (message or "").strip()
+        self.profile_status_label.setText(text)
+        self.profile_status_label.setProperty("state", state)
+        self.profile_status_label.setVisible(bool(text))
+        self._refresh_widget_style(self.profile_status_label)
+
     def start_profile_catalog_loading(
         self,
         *,
         force_inventory: bool = False,
+        selected_machine: str | ProfileSelectionReference | None = None,
+        selected_profile_ids: dict[
+            str, str | ProfileSelectionReference
+        ] | None = None,
+        include_all_profiles: bool | None = None,
     ) -> None:
         """Load the selected slicer's profiles without requiring a source."""
 
@@ -4080,18 +4115,45 @@ class MainWindow(QMainWindow):
             self._pending_profile_match = {
                 "catalog_only": True,
                 "force_inventory": bool(force_inventory),
+                "selected_machine": selected_machine,
+                "selected_profile_ids": dict(selected_profile_ids or {}),
+                "include_all_profiles": include_all_profiles,
             }
             return
+        restored_profile_ids = dict(selected_profile_ids or {})
+        if selected_machine is None:
+            selected_machine = self._profile_combo_reference(
+                self.machine_profile_combo
+            )
+        if selected_machine is None and not restored_profile_ids:
+            remembered = getattr(
+                self.slicer_service,
+                "remembered_profile_selections",
+                None,
+            )
+            if callable(remembered):
+                try:
+                    restored_profile_ids = dict(
+                        remembered(installation.identity_key)
+                    )
+                except (OSError, TypeError, ValueError, RuntimeError):
+                    restored_profile_ids = {}
+        if selected_machine is None:
+            selected_machine = restored_profile_ids.get("machine")
+        show_all_profiles = (
+            self.show_all_profiles_checkbox.isChecked()
+            if include_all_profiles is None
+            else bool(include_all_profiles)
+        )
         try:
             adapter = self.slicer_service.adapter_for(installation)
         except (AttributeError, KeyError, ValueError):
             self.profile_catalog = None
             self.profile_catalog_confirmation = None
-            self.profile_status_label.setText(
-                "Für den ausgewählten Slicer ist kein Profiladapter verfügbar."
+            self._set_profile_notice(
+                "Für den ausgewählten Slicer ist kein Profiladapter verfügbar.",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
             self._set_slicer_progress(
                 100,
                 "Profiladapter nicht verfügbar",
@@ -4116,12 +4178,7 @@ class MainWindow(QMainWindow):
             icon="⌛",
             state="running",
         )
-        self.profile_status_label.setText(
-            "Profile werden unabhängig von einer Quelldatei sicher und "
-            "nur lesend inventarisiert …"
-        )
-        self.profile_status_label.setProperty("state", "analyzing")
-        self._refresh_widget_style(self.profile_status_label)
+        self._set_profile_notice()
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
         self._update_preparation_requirements()
@@ -4132,6 +4189,9 @@ class MainWindow(QMainWindow):
             installation,
             adapter,
             force_inventory=force_inventory,
+            selected_machine=selected_machine,
+            selected_profile_ids=restored_profile_ids,
+            include_all_profiles=show_all_profiles,
         )
         self.slicer_refresh_button.setEnabled(False)
         self.slicer_manual_button.setEnabled(False)
@@ -4165,11 +4225,15 @@ class MainWindow(QMainWindow):
         ):
             self.profile_catalog_confirmation = None
         self._populate_profile_combos(catalog)
+        self.show_all_profiles_checkbox.setEnabled(bool(catalog.machine_options))
         self.profile_filter_label.setText(
-            "Profilkatalog\n"
-            f"{len(catalog.machine_options)} Maschinen-, "
-            f"{len(catalog.filament_options)} Filament- und "
-            f"{len(catalog.process_options)} Prozessprofile geladen."
+            catalog.profile_filter_summary
+            or (
+                "Profilkatalog\n"
+                f"{len(catalog.machine_options)} Maschinen-, "
+                f"{len(catalog.filament_options)} Filament- und "
+                f"{len(catalog.process_options)} Prozessprofile geladen."
+            )
         )
         self.profile_filter_label.setProperty(
             "state", "available" if catalog.complete else "error"
@@ -4177,38 +4241,29 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.profile_filter_label)
         if not catalog.complete:
             self.profile_catalog_confirmation = None
-            self.profile_status_label.setText(
+            self._set_profile_notice(
                 "Der Profilkatalog ist unvollständig. Für die Bestätigung "
-                "wird je ein Maschinen-, Filament- und Prozessprofil benötigt."
+                "wird je ein Maschinen-, Filament- und Prozessprofil benötigt.",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
             self.profile_confirm_button.setEnabled(False)
             self.profile_confirm_button.hide()
             self.workflow.required_slicer_unavailable(
                 "Slicer-Profile sind unvollständig"
             )
         elif self._catalog_selection_is_confirmed():
-            self.profile_status_label.setText(
-                "Slicer und Profile sind bestätigt. Die Auswahl wird nach "
-                "der Dateianalyse automatisch abgeglichen."
-            )
-            self.profile_status_label.setProperty("state", "available")
+            self._set_profile_notice()
             self.profile_confirm_button.setEnabled(False)
             self.profile_confirm_button.hide()
             self.workflow.slicer_succeeded(installation.display_name)
         else:
-            self.profile_status_label.setText(
-                "Profile wurden geladen. Bitte die vorausgewählte Slicer- "
-                "und Profilkombination bestätigen."
-            )
-            self.profile_status_label.setProperty("state", "pending")
+            self._set_profile_notice()
             self.profile_confirm_button.setText(
                 "Slicer und Profile bestätigen"
             )
             self.profile_confirm_button.setEnabled(True)
             self.profile_confirm_button.show()
             self.workflow.wait_for_profile_confirmation()
-        self._refresh_widget_style(self.profile_status_label)
         self._set_slicer_progress(
             100,
             "Slicer und Profile geladen",
@@ -4233,12 +4288,11 @@ class MainWindow(QMainWindow):
             return
         self.profile_catalog = None
         self.profile_catalog_confirmation = None
-        self.profile_status_label.setText(
+        self._set_profile_notice(
             "Slicer-Profile konnten nicht geladen werden: "
-            f"{german_user_message(message)}"
+            f"{german_user_message(message)}",
+            state="error",
         )
-        self.profile_status_label.setProperty("state", "error")
-        self._refresh_widget_style(self.profile_status_label)
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
         self._set_slicer_progress(
@@ -4300,11 +4354,10 @@ class MainWindow(QMainWindow):
             isinstance(value, ProfileSelectionReference)
             for value in selections.values()
         ):
-            self.profile_status_label.setText(
-                "Bitte je ein Maschinen-, Filament- und Prozessprofil auswählen."
+            self._set_profile_notice(
+                "Bitte je ein Maschinen-, Filament- und Prozessprofil auswählen.",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
             return False
         try:
             confirmation = ProfileCatalogConfirmation.from_catalog(
@@ -4317,21 +4370,16 @@ class MainWindow(QMainWindow):
                 filament_profile_id=selections["filament"].profile_id,
             )
         except (OSError, TypeError, ValueError) as error:
-            self.profile_status_label.setText(german_user_message(str(error)))
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
+            self._set_profile_notice(
+                german_user_message(str(error)), state="error"
+            )
             return False
         self.profile_catalog_confirmation = confirmation
         for role, selected_identifier in selections.items():
             self._remember_profile_selection(role, selected_identifier)
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
-        self.profile_status_label.setText(
-            "Slicer und Profile sind bestätigt. Die dateispezifische "
-            "Kompatibilität wird nach der Analyse automatisch geprüft."
-        )
-        self.profile_status_label.setProperty("state", "available")
-        self._refresh_widget_style(self.profile_status_label)
+        self._set_profile_notice()
         installation = self.selected_slicer_installation
         if installation is not None and self.current_source_path is None:
             self.workflow.slicer_succeeded(installation.display_name)
@@ -4427,12 +4475,7 @@ class MainWindow(QMainWindow):
                 "include_all_profiles": show_all_profiles,
             }
             if not stale_check_only:
-                self.profile_status_label.setText(
-                    "Die aktuelle Profilprüfung wird beendet; die neueste "
-                    "Auswahl folgt anschließend …"
-                )
-                self.profile_status_label.setProperty("state", "analyzing")
-                self._refresh_widget_style(self.profile_status_label)
+                self._set_profile_notice()
             return
         try:
             adapter = self.slicer_service.adapter_for(installation)
@@ -4464,11 +4507,7 @@ class MainWindow(QMainWindow):
                 icon="⌛",
                 state="running",
             )
-            self.profile_status_label.setText(
-                "Profile werden inventarisiert, aufgelöst und geprüft …"
-            )
-            self.profile_status_label.setProperty("state", "analyzing")
-            self._refresh_widget_style(self.profile_status_label)
+            self._set_profile_notice()
             self.profile_confirm_button.setEnabled(False)
 
         worker = ProfileMatchingWorker(
@@ -4563,48 +4602,49 @@ class MainWindow(QMainWindow):
             or "Profilfilter\nFür diese Profilprüfung liegen keine "
             "Filterangaben vor."
         )
-        state_names = {
-            ProfileMatchState.RECONSTRUCTED: "availableRecommended",
-            ProfileMatchState.MATCHED: "available",
-            ProfileMatchState.COMPATIBLE: "manual",
-            ProfileMatchState.AMBIGUOUS: "manual",
-            ProfileMatchState.UNAVAILABLE: "error",
-        }
-        mode_text = (
-            " Slicerbasierte STL-Optimierung; Pre-Slice nach Bestätigung verfügbar."
-            if result.can_use_stl_mode
-            else (
-                " Für diese STL steht kein sicherer Pre-Slice zur Verfügung."
-                if result.source_kind is SourceKind.STL
-                else " Analytischer STL-Fallback wird verwendet."
+        selected = result.selected
+        if result.state in {
+            ProfileMatchState.AMBIGUOUS,
+            ProfileMatchState.UNAVAILABLE,
+        }:
+            profile_message = german_user_message(result.message)
+            if (
+                result.source_kind is SourceKind.STL
+                and not result.can_use_stl_mode
+                and "Pre-Slice" not in profile_message
+            ):
+                profile_message += (
+                    " Für diese STL steht kein sicherer Pre-Slice zur Verfügung."
+                )
+            self._set_profile_notice(
+                profile_message,
+                state=(
+                    "error"
+                    if result.state is ProfileMatchState.UNAVAILABLE
+                    else "manual"
+                ),
             )
-        )
-        profile_message = (
-            "Effektive G-Code-Konfiguration wurde rekonstruiert und validiert."
-            if result.state is ProfileMatchState.RECONSTRUCTED
-            else german_user_message(result.message)
-        )
-        self.profile_status_label.setText(profile_message + mode_text)
-        self.profile_status_label.setProperty(
-            "state", state_names[result.state]
-        )
-        self._refresh_widget_style(self.profile_status_label)
+        else:
+            self._set_profile_notice()
         self.profile_confirm_button.setText(
-            "Einstellungen bestätigen und Modell analysieren"
-            if result.source_kind is SourceKind.STL
-            else "Einstellungen bestätigen"
+            "Slicer und Profile bestätigen"
         )
         self.profile_confirm_button.setVisible(result.requires_confirmation)
         self.profile_confirm_button.setEnabled(result.requires_confirmation)
         self.profile_origin_label.setText(self._profile_origin_text(result))
         self.profile_origin_label.show()
-        selected = result.selected
+        self.profile_effective_summary_label.clear()
+        self.profile_effective_summary_label.hide()
         if selected is not None:
             values = selected.effective_profile.effective_values
 
             def first_value(*keys: str) -> object | None:
                 value = next(
-                    (values[key] for key in keys if values.get(key) not in (None, "")),
+                    (
+                        values[key]
+                        for key in keys
+                        if values.get(key) not in (None, "")
+                    ),
                     None,
                 )
                 if isinstance(value, (list, tuple)) and len(value) == 1:
@@ -4613,19 +4653,16 @@ class MainWindow(QMainWindow):
 
             nozzle = first_value("nozzle_diameter", "machine_nozzle_size")
             layer_height = first_value("layer_height")
-            self.profile_effective_summary_label.setText(
-                "Bestätigungswerte · Düse: "
-                f"{nozzle if nozzle is not None else 'nicht angegeben'} mm · "
-                "Layerhöhe: "
-                f"{layer_height if layer_height is not None else 'nicht angegeben'} mm"
-            )
-            self.profile_effective_summary_label.show()
             validation_labels = {
                 "invalid": "ungültig",
                 "structurally_valid": "strukturell gültig",
                 "probe_validated": "durch Probelauf validiert",
             }
             diagnostics = [
+                "Bestätigungswerte · Düse: "
+                f"{nozzle if nozzle is not None else 'nicht angegeben'} mm · "
+                "Layerhöhe: "
+                f"{layer_height if layer_height is not None else 'nicht angegeben'} mm",
                 "Validierung: "
                 + validation_labels.get(
                     selected.validation_state.value,
@@ -4643,8 +4680,6 @@ class MainWindow(QMainWindow):
             )
             self.profile_diagnostics.setVisible(bool(diagnostics))
         else:
-            self.profile_effective_summary_label.clear()
-            self.profile_effective_summary_label.hide()
             self.profile_diagnostics.clear()
             self.profile_diagnostics.hide()
         self._invalidate_preview("Die wirksame Profilzuordnung wurde geändert.")
@@ -4719,10 +4754,43 @@ class MainWindow(QMainWindow):
         selected = (
             result.selected if isinstance(result, ProfileMatchResult) else None
         )
+        def catalog_record(
+            records,
+            reference: ProfileSelectionReference | None,
+        ):
+            if reference is None:
+                return None
+            return next(
+                (
+                    record
+                    for record in records
+                    if record.profile_id.casefold()
+                    == reference.profile_id.casefold()
+                    and (
+                        reference.path is None
+                        or record.path == reference.path
+                    )
+                ),
+                None,
+            )
+
+        catalog_machine = None
+        catalog_process = None
+        catalog_filament = None
+        if isinstance(result, ProfileCatalog):
+            catalog_machine = catalog_record(
+                result.machine_options, result.selected_machine
+            )
+            catalog_process = catalog_record(
+                result.process_options, result.selected_process
+            )
+            catalog_filament = catalog_record(
+                result.filament_options, result.selected_filament
+            )
         selected_records = (
-            selected.machine if selected is not None else None,
-            selected.process if selected is not None else None,
-            selected.filament if selected is not None else None,
+            selected.machine if selected is not None else catalog_machine,
+            selected.process if selected is not None else catalog_process,
+            selected.filament if selected is not None else catalog_filament,
         )
         previous_selections = (
             self.machine_profile_combo.currentData(),
@@ -4906,22 +4974,22 @@ class MainWindow(QMainWindow):
             for role, value in selections.items()
             if isinstance(value, ProfileSelectionReference)
         }
-        self._remember_profile_selection(
-            _changed_role,
-            selected_profile_ids.get(_changed_role),
-        )
         self.profile_confirm_button.setText("Slicer und Profile bestätigen")
         self.profile_confirm_button.setVisible(len(selected_profile_ids) == 3)
         self.profile_confirm_button.setEnabled(len(selected_profile_ids) == 3)
-        self.profile_status_label.setText(
-            "Die Slicer- und Profilauswahl wurde geändert und muss erneut "
-            "bestätigt werden."
-        )
-        self.profile_status_label.setProperty("state", "pending")
-        self._refresh_widget_style(self.profile_status_label)
+        self._set_profile_notice()
         self._update_preparation_requirements()
         if self._profile_matching_context() is None:
             self.workflow.wait_for_profile_confirmation()
+            if _changed_role == "machine":
+                machine = selected_profile_ids.get("machine")
+                if machine is not None:
+                    self.start_profile_catalog_loading(
+                        selected_machine=machine,
+                        include_all_profiles=(
+                            self.show_all_profiles_checkbox.isChecked()
+                        ),
+                    )
             return
         if _changed_role == "machine":
             machine = selected_profile_ids.get("machine")
@@ -4949,7 +5017,7 @@ class MainWindow(QMainWindow):
         role: str,
         selected_identifier: str | ProfileSelectionReference | None,
     ) -> None:
-        """Persist only a real combo-box choice, never an automatic proposal."""
+        """Persist one validated member of a successfully confirmed bundle."""
 
         installation = self.selected_slicer_installation
         result = self.profile_match_result or self.profile_catalog
@@ -5010,10 +5078,7 @@ class MainWindow(QMainWindow):
             return
 
     def _on_show_all_profiles_toggled(self, checked: bool) -> None:
-        if (
-            self._profile_matching_context() is None
-            or self.selected_slicer_installation is None
-        ):
+        if self.selected_slicer_installation is None:
             return
         self.profile_filter_label.setText(
             "Profilfilter\nAlle Maschinenprofile werden geladen …"
@@ -5032,6 +5097,15 @@ class MainWindow(QMainWindow):
                 # Expanding or collapsing the machine catalogue must not undo
                 # a machine the user selected manually just before the toggle.
                 selected_profile_ids = {"machine": machine}
+        if self._profile_matching_context() is None:
+            machine = self._profile_combo_reference(
+                self.machine_profile_combo
+            )
+            self.start_profile_catalog_loading(
+                selected_machine=machine,
+                include_all_profiles=checked,
+            )
+            return
         if selected_profile_ids is None:
             self.start_profile_matching(include_all_profiles=checked)
         else:
@@ -5057,24 +5131,11 @@ class MainWindow(QMainWindow):
         if self.source_artifact is not None and not self.source_artifact.matches_current_file(
             verify_content=True
         ):
-            self.profile_status_label.setText(
-                "Die Quelldatei wurde geändert. Bitte die Datei erneut prüfen."
+            self._set_profile_notice(
+                "Die Quelldatei wurde geändert. Bitte die Datei erneut prüfen.",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
             return
-        for role, combo in (
-            ("machine", self.machine_profile_combo),
-            ("process", self.process_profile_combo),
-            ("filament", self.filament_profile_combo),
-        ):
-            selected_identifier = combo.currentData()
-            self._remember_profile_selection(
-                role,
-                selected_identifier
-                if isinstance(selected_identifier, str)
-                else None,
-            )
         try:
             confirmation = (
                 ProfileConfirmation.from_result(result, self.source_artifact)
@@ -5083,14 +5144,22 @@ class MainWindow(QMainWindow):
             )
             confirmed = self.profile_service.confirm(result)
         except (OSError, ValueError, SlicerProcessError) as error:
-            self.profile_status_label.setText(
+            self._set_profile_notice(
                 "Profilzuordnung konnte nicht gespeichert werden: "
-                f"{german_user_message(error)}"
+                f"{german_user_message(error)}",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
             return
         self.profile_match_result = confirmed
+        for role, combo in (
+            ("machine", self.machine_profile_combo),
+            ("process", self.process_profile_combo),
+            ("filament", self.filament_profile_combo),
+        ):
+            self._remember_profile_selection(
+                role,
+                self._profile_combo_reference(combo),
+            )
         self.confirmed_profile_context = confirmation
         if self.prepared_analysis_source is not None:
             self.prepared_analysis_source = replace(
@@ -5103,11 +5172,7 @@ class MainWindow(QMainWindow):
         self._refresh_slicer_header_profiles()
         self.profile_confirm_button.setEnabled(False)
         self.profile_confirm_button.hide()
-        self.profile_status_label.setText(
-            german_user_message(confirmed.message)
-        )
-        self.profile_status_label.setProperty("state", "available")
-        self._refresh_widget_style(self.profile_status_label)
+        self._set_profile_notice()
         self.profile_origin_label.setText(self._profile_origin_text(confirmed))
         self.profile_origin_label.show()
         self._invalidate_preview("Die Profilzuordnung wurde bestätigt.")
@@ -5145,12 +5210,11 @@ class MainWindow(QMainWindow):
             or not profile_match.user_confirmed
             or confirmation is None
         ):
-            self.profile_status_label.setText(
+            self._set_profile_notice(
                 "Der Pre-Slice benötigt eine gültige STL und vollständig "
-                "bestätigte Profile."
+                "bestätigte Profile.",
+                state="error",
             )
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
             return
         try:
             adapter = self.slicer_service.adapter_for(
@@ -5406,13 +5470,11 @@ class MainWindow(QMainWindow):
             )
             self.confirmed_profile_context = None
             self.profile_confirm_button.setText(
-                "Einstellungen bestätigen und Modell analysieren"
+                "Slicer und Profile bestätigen"
             )
             self.profile_confirm_button.setEnabled(True)
             self.profile_confirm_button.show()
-            self.profile_status_label.setText(message)
-            self.profile_status_label.setProperty("state", "error")
-            self._refresh_widget_style(self.profile_status_label)
+            self._set_profile_notice(message, state="error")
             self.workflow.begin_profile_matching()
             self.workflow.wait_for_profile_confirmation()
 
@@ -5469,12 +5531,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._profile_request_id:
             return
-        self.profile_status_label.setText(
+        self._set_profile_notice(
             "Profilzuordnung konnte nicht geprüft werden: "
-            f"{german_user_message(message)}"
+            f"{german_user_message(message)}",
+            state="error",
         )
-        self.profile_status_label.setProperty("state", "error")
-        self._refresh_widget_style(self.profile_status_label)
         self.profile_origin_label.hide()
         self.profile_diagnostics.hide()
         self._set_slicer_progress(
@@ -5531,7 +5592,16 @@ class MainWindow(QMainWindow):
                         lambda: self.start_profile_catalog_loading(
                             force_inventory=bool(
                                 pending.get("force_inventory", False)
-                            )
+                            ),
+                            selected_machine=pending.get(
+                                "selected_machine"
+                            ),
+                            selected_profile_ids=dict(
+                                pending.get("selected_profile_ids", {}) or {}
+                            ),
+                            include_all_profiles=pending.get(
+                                "include_all_profiles"
+                            ),
                         ),
                     )
                 else:
@@ -6096,6 +6166,10 @@ class MainWindow(QMainWindow):
             text,
             state,
         )
+        # The same state is already visible in the drop-zone fact table.
+        # Asynchronous paths still update these labels for compatibility, so
+        # enforce the presentation rule centrally.
+        self.gcode_progress_status_widget.hide()
 
     def _finish_source_progress(self, *, completed: bool) -> None:
         self.gcode_progress_bar.setRange(0, 100)
@@ -6107,6 +6181,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "preparation_progress_bar"):
             return
         source_selected = self.current_source_path is not None
+        guide_visible = not source_selected
+        if (not self.gcode_import_guide_row.isHidden()) != guide_visible:
+            self.gcode_import_guide_row.setVisible(guide_visible)
+            QTimer.singleShot(0, self._refresh_preparation_section_layout)
         source_analyzed = bool(
             self.analysis_snapshot is not None
             and not self._analysis_failed
@@ -6177,6 +6255,34 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.preparation_progress_bar)
         self.preparation_requirements.setAccessibleDescription(
             f"{fulfilled} von {len(requirements)} Voraussetzungen erfüllt"
+        )
+
+        self._refresh_preparation_header_summary(percent == 100)
+
+    def _refresh_preparation_header_summary(self, complete: bool) -> None:
+        """Show the completed file and profile overview in one fact column."""
+
+        if not complete:
+            self.workflow_group.set_split_summary_columns((), ())
+            return
+        installation = self.selected_slicer_installation
+        source_path = self.current_source_path
+        if installation is None or source_path is None:
+            self.workflow_group.set_split_summary_columns((), ())
+            return
+
+        def selected_text(combo: QComboBox) -> str:
+            return combo.currentText().strip() or "Nicht ausgewählt"
+
+        self.workflow_group.set_split_summary_columns(
+            (),
+            (
+                ("Dateiname", source_path.name),
+                ("Slicer", installation.display_name),
+                ("Maschinenprofil", selected_text(self.machine_profile_combo)),
+                ("Filamentprofil", selected_text(self.filament_profile_combo)),
+                ("Prozessprofil", selected_text(self.process_profile_combo)),
+            ),
         )
 
     def _set_slicer_progress(
@@ -7017,6 +7123,10 @@ class MainWindow(QMainWindow):
         self._workflow_error_message = None
         self.drop_zone.set_status("STL-Prüfung abgeschlossen")
         self.drop_zone.set_analysis_state("ready")
+        # A safely accepted source is already complete from the file-input
+        # perspective.  Later profile-bound analysis remains visible in the
+        # shared workflow prerequisites without withholding this green cue.
+        self.drop_zone.set_completed(True)
         self._set_gcode_progress_status(
             "STL-Geometrie ist manifold (vollständig geschlossen)",
             icon="✓",
@@ -7032,6 +7142,16 @@ class MainWindow(QMainWindow):
                 "einen belastbaren G-Code erzeugt."
             )
             self.stl_validation_message.setProperty("severity", "warning")
+            self._refresh_widget_style(self.stl_validation_message)
+            self.stl_validation_message.show()
+            self.stl_validation_details.setPlainText(result.technical_summary)
+            self.stl_validation_details_toggle.show()
+        else:
+            self.stl_validation_message.setText(
+                "Die STL ist manifold (vollständig geschlossen), geometrisch "
+                "konsistent und für die weitere Verarbeitung geeignet."
+            )
+            self.stl_validation_message.setProperty("severity", "success")
             self._refresh_widget_style(self.stl_validation_message)
             self.stl_validation_message.show()
             self.stl_validation_details.setPlainText(result.technical_summary)

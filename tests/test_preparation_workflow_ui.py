@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,7 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -42,6 +43,82 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             user_settings_path=self.root / "settings.json",
             enable_update_check=False,
         )
+
+    def test_completed_header_uses_one_column_with_filename_first(self) -> None:
+        window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        window.current_source_path = self.root / "modell.stl"
+        installation = SimpleNamespace(
+            display_name="Test Slicer",
+            identity_key="test-slicer",
+        )
+        window.slicer_discovery_result = SimpleNamespace(
+            installations=(installation,)
+        )
+        window._populating_slicer_combo = True
+        window.slicer_combo.clear()
+        window.slicer_combo.addItem(
+            installation.display_name,
+            installation.identity_key,
+        )
+        window._populating_slicer_combo = False
+        window._populating_profile_combos = True
+        for combo, text in (
+            (window.machine_profile_combo, "Drucker A"),
+            (window.filament_profile_combo, "PLA"),
+            (window.process_profile_combo, "Qualität"),
+        ):
+            combo.clear()
+            combo.addItem(text)
+        window._populating_profile_combos = False
+
+        window._refresh_preparation_header_summary(True)
+        self.app.processEvents()
+
+        left = window.workflow_group.split_summary_left
+        right = window.workflow_group.split_summary_right
+        self.assertNotIn("Dateiname", left.text())
+        self.assertNotIn("Dateityp", left.text())
+        self.assertTrue(left.isHidden())
+        summary = right.text()
+        expected_order = (
+            "Dateiname",
+            "modell.stl",
+            "Slicer",
+            "Test Slicer",
+            "Maschinenprofil",
+            "Filamentprofil",
+            "Prozessprofil",
+        )
+        positions = [summary.index(value) for value in expected_order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("Dateityp", summary)
+
+        self.assertLessEqual(right.width(), right.sizeHint().width() + 1)
+        self.assertLessEqual(
+            abs(
+                right.geometry().right()
+                - window.workflow_group.split_summary_widget.rect().right()
+            ),
+            1,
+        )
+
+        long_name = (
+            "DiesIstEinBeispiel_FürEinenLangenDateinamen_"
+            "UndDieserKönnteNochVielLängerSein.stl"
+        )
+        window.current_source_path = self.root / long_name
+        window.resize(720, 900)
+        window._refresh_preparation_header_summary(True)
+        QTest.qWait(30)
+        self.app.processEvents()
+        narrow_summary = right.text()
+        self.assertIn("...", narrow_summary)
+        self.assertIn(".stl", narrow_summary)
+        self.assertNotIn(long_name, narrow_summary)
+        self.assertEqual(right.toolTip(), long_name)
+        window.close()
 
     def test_wide_and_narrow_preparation_layout_keep_required_order(self) -> None:
         window = self.window()
@@ -90,6 +167,13 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             window.source_group.header.height(),
             window.slicer_group.header.height(),
         )
+        window.source_group.set_state(SectionState.ERROR)
+        self.app.processEvents()
+        self.assertEqual(
+            window.source_group.status_icon.height(),
+            max(18, window.source_group.title_label.sizeHint().height()),
+        )
+        window.source_group.set_state(SectionState.ACTIVE)
         source_progress_y = window.gcode_progress_bar.mapTo(
             window.workflow_group,
             QPoint(0, 0),
@@ -107,6 +191,45 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.preparation_split
             ),
         )
+        window.workflow_group.set_split_summary_columns(
+            (("Dateiname", "modell.stl"), ("Dateityp", "Binär-STL")),
+            (
+                ("Slicer", "Test Slicer"),
+                ("Maschinenprofil", "Drucker A"),
+                ("Filamentprofil", "PLA"),
+                ("Prozessprofil", "Qualität"),
+            ),
+        )
+        self.app.processEvents()
+        self.assertFalse(window.workflow_group.split_summary_widget.isHidden())
+        self.assertIn("modell.stl", window.workflow_group.split_summary_left.text())
+        self.assertIn("Drucker A", window.workflow_group.split_summary_right.text())
+        self.assertTrue(
+            window.workflow_group.split_summary_left.alignment()
+            & Qt.AlignmentFlag.AlignRight
+        )
+        self.assertIn(
+            'td align="right"',
+            window.workflow_group.split_summary_left.text(),
+        )
+        self.assertIn(
+            'td align="left"',
+            window.workflow_group.split_summary_right.text(),
+        )
+        self.assertGreater(
+            window.workflow_group.header.height(),
+            window.source_group.header.height(),
+        )
+        window.resize(720, 900)
+        QTest.qWait(50)
+        self.app.processEvents()
+        self.assertTrue(window.workflow_group.split_summary_left.isHidden())
+        self.assertFalse(window.workflow_group.split_summary_right.isHidden())
+        window.resize(1400, 900)
+        QTest.qWait(50)
+        self.app.processEvents()
+        self.assertFalse(window.workflow_group.split_summary_left.isHidden())
+        window.workflow_group.set_split_summary_columns((), ())
         requirements = window.preparation_requirements
         self.assertTrue(requirements.is_two_column())
         self.assertEqual(requirements.grid.count(), 2)
@@ -264,6 +387,33 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         self.assertIn(
             "ausblenden",
             window.slicer_analysis_details_toggle.accessibleName(),
+        )
+        window.close()
+
+    def test_detail_disclosures_stay_at_the_bottom_of_both_columns(self) -> None:
+        window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        window.stl_validation_details_toggle.show()
+        window._refresh_preparation_section_layout()
+        QTest.qWait(30)
+        self.app.processEvents()
+
+        for group, toggle in (
+            (window.source_group, window.stl_validation_details_toggle),
+            (window.slicer_group, window.slicer_analysis_details_toggle),
+        ):
+            bottom_gap = (
+                group.content_widget.rect().bottom()
+                - toggle.geometry().bottom()
+            )
+            self.assertLessEqual(
+                bottom_gap,
+                group.content_layout.contentsMargins().bottom() + 1,
+            )
+        self.assertEqual(
+            window.stl_validation_details_toggle.mapTo(window, QPoint(0, 0)).y(),
+            window.slicer_analysis_details_toggle.mapTo(window, QPoint(0, 0)).y(),
         )
         window.close()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import traceback
 from typing import Mapping
 
@@ -37,6 +38,11 @@ class ProfileCatalogWorker(CancelableWorker):
         adapter: SlicerAdapter,
         *,
         force_inventory: bool = False,
+        selected_machine: str | ProfileSelectionReference | None = None,
+        selected_profile_ids: Mapping[
+            str, str | ProfileSelectionReference
+        ] | None = None,
+        include_all_profiles: bool = False,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -44,6 +50,9 @@ class ProfileCatalogWorker(CancelableWorker):
         self.installation = installation
         self.adapter = adapter
         self.force_inventory = force_inventory
+        self.selected_machine = selected_machine
+        self.selected_profile_ids = dict(selected_profile_ids or {})
+        self.include_all_profiles = include_all_profiles
 
     @Slot()
     def run(self) -> None:
@@ -56,10 +65,26 @@ class ProfileCatalogWorker(CancelableWorker):
             try:
                 if self.cancellation_requested():
                     return
-                catalog: ProfileCatalog = self.service.catalog(
+                catalog_method = self.service.catalog
+                parameters = inspect.signature(catalog_method).parameters
+                optional_filter_arguments = {}
+                if "selected_machine" in parameters:
+                    optional_filter_arguments["selected_machine"] = (
+                        self.selected_machine
+                    )
+                if "selected_profile_ids" in parameters:
+                    optional_filter_arguments["selected_profile_ids"] = (
+                        self.selected_profile_ids
+                    )
+                if "include_all_profiles" in parameters:
+                    optional_filter_arguments["include_all_profiles"] = (
+                        self.include_all_profiles
+                    )
+                catalog: ProfileCatalog = catalog_method(
                     self.installation,
                     self.adapter,
                     force_inventory=self.force_inventory,
+                    **optional_filter_arguments,
                 )
                 if self.cancellation_requested():
                     return

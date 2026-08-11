@@ -135,6 +135,16 @@ class UxImprovementTests(unittest.TestCase):
         drop_zone.show()
         self.app.processEvents()
         empty_height = drop_zone.height()
+        prompt_top = drop_zone.prompt_label.mapTo(drop_zone, QPoint(0, 0)).y()
+        actions_top = drop_zone.actions_widget.mapTo(
+            drop_zone, QPoint(0, 0)
+        ).y()
+        actions_bottom = actions_top + drop_zone.actions_widget.height()
+        bottom_gap = drop_zone.height() - actions_bottom
+        prompt_bottom = prompt_top + drop_zone.prompt_label.height()
+        self.assertGreaterEqual(empty_height, 260)
+        self.assertLessEqual(abs(prompt_top - bottom_gap), 2)
+        self.assertGreaterEqual(actions_top - prompt_bottom, 18)
         self.assertTrue(drop_zone.info_widget.isHidden())
         self.assertFalse(drop_zone.prompt_label.isHidden())
         self.assertTrue(drop_zone.reload_button.isHidden())
@@ -184,12 +194,38 @@ class UxImprovementTests(unittest.TestCase):
             "Layerzeiten werden berechnet …",
         )
         self.assertEqual(window.gcode_progress_icon_label.text(), "⏳")
-        self.assertGreater(
-            window.gcode_progress_status_widget.mapTo(window, QPoint(0, 0)).y(),
-            window.gcode_progress_bar.mapTo(window, QPoint(0, 0)).y(),
-        )
+        self.assertTrue(window.gcode_progress_status_widget.isHidden())
         self.assertIn(
             "QProgressBar#gcodeAnalysisProgressBar::chunk",
+            window.styleSheet(),
+        )
+        self.assertIs(
+            window.stl_validation_message.parent(),
+            window.source_group.content_widget,
+        )
+        self.assertIs(
+            window.stl_validation_details_toggle.parent(),
+            window.source_group.content_widget,
+        )
+        source_layout = window.source_group.content_layout
+        self.assertLess(
+            source_layout.indexOf(window.drop_zone),
+            source_layout.indexOf(window.stl_validation_message),
+        )
+        self.assertLess(
+            source_layout.indexOf(window.stl_validation_message),
+            source_layout.indexOf(window.stl_validation_details_toggle),
+        )
+        self.assertLess(
+            source_layout.indexOf(window.stl_validation_details_toggle),
+            source_layout.indexOf(window.stl_validation_details),
+        )
+        self.assertTrue(window.slicer_combo.property("important"))
+        self.assertTrue(window.machine_profile_combo.property("important"))
+        self.assertTrue(window.filament_profile_combo.property("important"))
+        self.assertTrue(window.process_profile_combo.property("important"))
+        self.assertIn(
+            'QFrame#gcodeDropZone[loaded="true"]',
             window.styleSheet(),
         )
         window.close()
@@ -212,7 +248,7 @@ class UxImprovementTests(unittest.TestCase):
         drop_zone.set_analysis_state("rejected")
         self.app.processEvents()
         self.assertFalse(drop_zone.prompt_label.isHidden())
-        self.assertTrue(drop_zone.info_widget.isHidden())
+        self.assertFalse(drop_zone.info_widget.isHidden())
         self.assertFalse(drop_zone.browse_button.isHidden())
         self.assertFalse(drop_zone.reload_button.isHidden())
         self.assertFalse(drop_zone.remove_button.isHidden())
@@ -232,6 +268,7 @@ class UxImprovementTests(unittest.TestCase):
 
         drop_zone.set_analysis_state("ready")
         self.app.processEvents()
+        self.assertTrue(drop_zone.property("completed"))
         self.assertFalse(drop_zone.info_widget.isHidden())
         self.assertFalse(drop_zone.browse_button.isHidden())
         self.assertFalse(drop_zone.reload_button.isHidden())

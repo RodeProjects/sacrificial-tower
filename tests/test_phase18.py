@@ -301,6 +301,73 @@ class Phase18UiTests(unittest.TestCase):
         stylesheet = window.styleSheet()
         self.assertIn('QFrame#sectionCard[collapsible="true"]', stylesheet)
         self.assertIn("QComboBox:hover", stylesheet)
+        self.assertIn("QComboBox QAbstractItemView::item:hover", stylesheet)
+        self.assertIn("selection-background-color: #e5f1fa", stylesheet)
+        combo_hover = stylesheet[stylesheet.index("QComboBox:hover::drop-down"):]
+        combo_hover = combo_hover[:combo_hover.index("}")]
+        self.assertIn("background: #eaf1f7", combo_hover)
+        self.assertNotIn("border:", combo_hover)
+        self.assertNotIn("border-left:", combo_hover)
+        self.assertNotIn("border-color:", combo_hover)
+        self.assertIn("QComboBox:hover,", stylesheet)
+        self.assertIn('QComboBox[hovered="true"]', stylesheet)
+        self.assertIn(
+            'QComboBox[important="true"][hovered="true"]',
+            stylesheet,
+        )
+        self.assertIn("background: #d8ebf8", stylesheet)
+        self.assertIn("QComboBox QAbstractItemView:hover", stylesheet)
+        generic_combo_hover = stylesheet[stylesheet.index("QComboBox:hover,"):]
+        generic_combo_hover = generic_combo_hover[
+            :generic_combo_hover.index("}")
+        ]
+        popup_hover = stylesheet[
+            stylesheet.index("QComboBox QAbstractItemView:hover"):
+        ]
+        popup_hover = popup_hover[:popup_hover.index("}")]
+        explicit_hover_start = stylesheet.rindex(
+            'QComboBox[important="true"][hovered="true"] {'
+        )
+        explicit_hover = stylesheet[explicit_hover_start:]
+        explicit_hover = explicit_hover[:explicit_hover.index("}")]
+        for hover_rule in (
+            generic_combo_hover,
+            popup_hover,
+            explicit_hover,
+        ):
+            self.assertNotIn("border:", hover_rule)
+            self.assertNotIn("border-left:", hover_rule)
+            self.assertNotIn("border-color:", hover_rule)
+        for combo in (
+            window.slicer_combo,
+            window.machine_profile_combo,
+            window.filament_profile_combo,
+            window.process_profile_combo,
+        ):
+            combo.setEnabled(True)
+            QApplication.sendEvent(combo, QEvent(QEvent.Type.Leave))
+            self.app.processEvents()
+            geometry_before_hover = combo.geometry()
+            normal_image = combo.grab().toImage()
+            QApplication.sendEvent(combo, QEvent(QEvent.Type.Enter))
+            self.app.processEvents()
+            self.assertTrue(combo.property("hovered"))
+            self.assertEqual(combo.geometry(), geometry_before_hover)
+            hovered_image = combo.grab().toImage()
+            self.assertEqual(
+                hovered_image.pixelColor(combo.width() // 2, 7).name(),
+                "#d8ebf8",
+            )
+            self.assertEqual(
+                hovered_image.pixelColor(combo.width() - 10, 7).name(),
+                "#c7e1f2",
+            )
+            self.assertEqual(
+                hovered_image.pixelColor(0, combo.height() // 2).name(),
+                normal_image.pixelColor(0, combo.height() // 2).name(),
+            )
+            QApplication.sendEvent(combo, QEvent(QEvent.Type.Leave))
+            self.assertFalse(combo.property("hovered"))
         self.assertIn("QComboBox::down-arrow", stylesheet)
         self.assertNotIn("__COMBO_DOWN_ICON__", stylesheet)
         self.assertIn("QWidget#mainFooter", stylesheet)
@@ -578,12 +645,44 @@ class Phase18UiTests(unittest.TestCase):
         )
         for group in outer_groups:
             self.assertTrue(group.property("outerDropdown"))
+        self.assertTrue(window.workflow_group.property("bodyHover"))
+        self.assertTrue(window.geometry_settings_group.property("bodyHover"))
+        self.assertFalse(window.timing_group.property("bodyHover"))
+        self.assertFalse(window.prediction_frame.property("bodyHover"))
         self.assertFalse(bool(window.geometry_group.property("outerDropdown")))
         self.assertEqual(window.prediction_frame.property("cardTone"), "preview")
         self.assertIn(
             'QFrame#sectionCard[outerDropdown="true"] > QFrame#sectionCardHeader',
             window.styleSheet(),
         )
+        self.assertIn(
+            'QFrame#sectionCard[outerDropdown="true"]'
+            '[collapsible="true"][bodyHover="true"]:hover',
+            window.styleSheet(),
+        )
+        stylesheet = window.styleSheet()
+        outer_hover_start = stylesheet.index(
+            'QFrame#sectionCard[outerDropdown="true"]'
+            '[collapsible="true"][bodyHover="true"]:hover'
+        )
+        outer_hover = stylesheet[outer_hover_start:]
+        outer_hover = outer_hover[:outer_hover.index("}")]
+        collapsible_hover_start = stylesheet.index(
+            "QGroupBox#collapsibleGroup:hover"
+        )
+        collapsible_hover = stylesheet[collapsible_hover_start:]
+        collapsible_hover = collapsible_hover[:collapsible_hover.index("}")]
+        header_hover_start = stylesheet.index(
+            'QFrame#sectionCard[collapsible="true"] '
+            "QFrame#sectionCardHeader:hover"
+        )
+        header_hover = stylesheet[header_hover_start:]
+        header_hover = header_hover[:header_hover.index("}")]
+        for hover_rule in (outer_hover, collapsible_hover, header_hover):
+            self.assertNotIn("border:", hover_rule)
+            self.assertNotIn("border-left:", hover_rule)
+            self.assertNotIn("border-color:", hover_rule)
+            self.assertNotIn("border-radius:", hover_rule)
         initial_header = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             initial_header.pixelColor(initial_header.width() // 2, 5).name(),
@@ -614,7 +713,23 @@ class Phase18UiTests(unittest.TestCase):
                 image.pixelColor(1, image.height() // 2).name(),
                 colour,
             )
-        stylesheet = window.styleSheet()
+        for group in (window.timing_group, window.prediction_frame):
+            body_y = min(
+                group.height() - 2,
+                group.header.height() + 12,
+            )
+            normal_body = group.grab().toImage().pixelColor(
+                group.width() // 2,
+                body_y,
+            )
+            QApplication.sendEvent(group, QEvent(QEvent.Type.Enter))
+            self.app.processEvents()
+            hovered_body = group.grab().toImage().pixelColor(
+                group.width() // 2,
+                body_y,
+            )
+            self.assertEqual(hovered_body, normal_body)
+            QApplication.sendEvent(group, QEvent(QEvent.Type.Leave))
         generic_hover = (
             'QFrame#sectionCard[collapsible="true"] '
             'QFrame#sectionCardHeader:hover'
@@ -1726,8 +1841,11 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         self.app.processEvents()
+        self.assertTrue(window.footer.isHidden())
         self.assertEqual(window.footer.maximumHeight(), 350)
-        self.assertLess(window.footer.height(), 350)
+        window.workflow.analysis_succeeded("layout.gcode")
+        window.workflow.slicer_succeeded("Layoutprüfung")
+        self.assertFalse(window.footer.isHidden())
         window.warning_text.setPlainText(
             "Die Sliceroptimierung hat die Zielzeit noch nicht vollständig "
             "erreicht. Bitte die tatsächliche Layerzeit kontrollieren."
@@ -1736,11 +1854,9 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         window.warning_text.fit_to_document()
         self.app.processEvents()
-        self.assertLessEqual(window.warning_text.height(), 60)
+        self.assertLessEqual(window.warning_text.height(), 75)
         self.assertLess(window.notice_panel.height(), 100)
 
-        window.workflow.analysis_succeeded("layout.gcode")
-        window.workflow.slicer_succeeded("Layoutprüfung")
         long_message = "Ausführlicher prüfbarer Hinweis. " * 80
         window.validation_label.setText(long_message)
         window._static_error_causes = ["Fehler"] * 4

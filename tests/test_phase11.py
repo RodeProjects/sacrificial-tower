@@ -406,11 +406,17 @@ class GuiCase(unittest.TestCase):
         self.window.show()
         self.app.processEvents()
 
-        self.assertTrue(self.window.settings_load_notice_panel.isVisible())
+        self.assertTrue(self.window.footer.isHidden())
+        self.assertFalse(self.window.settings_load_notice_panel.isHidden())
         self.assertIn(
             "nicht überschrieben",
             self.window.settings_load_notice_label.text(),
         )
+        self.window.workflow.analysis_succeeded("future-settings.gcode")
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.app.processEvents()
+        self.assertFalse(self.window.footer.isHidden())
+        self.assertTrue(self.window.settings_load_notice_panel.isVisible())
         self.window.close()
         self.app.processEvents()
         self.assertEqual(protected_path.read_bytes(), original)
