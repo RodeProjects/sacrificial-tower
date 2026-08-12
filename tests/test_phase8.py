@@ -250,31 +250,30 @@ class ReferenceEndToEndTests(unittest.TestCase):
                 float(row["time_deficit_s"]) + 1e-6,
             )
 
-    def test_reference_stl_is_independently_recognized_as_hollow_volume(self) -> None:
+    def test_reference_stl_is_independently_recognized_as_solid_volume(self) -> None:
         # STL stores independent triangle vertices; normal slicer/import
         # processing merges coincident coordinates before topology checks.
         mesh = trimesh.load_mesh(self.result.stl_path, process=True)
         self.assertTrue(mesh.is_watertight)
         self.assertTrue(mesh.is_winding_consistent)
         self.assertTrue(mesh.is_volume)
-        self.assertEqual(mesh.euler_number, 0)
+        self.assertEqual(mesh.euler_number, 2)
         self.assertAlmostEqual(mesh.bounds[0][2], 0.0, places=5)
         self.assertAlmostEqual(
             mesh.bounds[1][2],
             self.result.assessment.tower_end_z_mm,
             places=3,
         )
-        self.assertGreater(self.result.profile[0].inner_radius_mm, 0.0)
+        self.assertEqual(self.result.profile[0].inner_radius_mm, 0.0)
         self.assertTrue(
             all(
-                layer.outer_radius_mm
-                > layer.inner_radius_mm
-                >= self.result.settings.minimum_inner_radius_mm
+                layer.outer_diameter_mm
+                >= self.result.settings.minimum_outer_diameter_mm
                 for layer in self.result.profile
             )
         )
 
-    def test_slicer_like_cross_sections_have_two_closed_contours(self) -> None:
+    def test_slicer_like_cross_sections_have_one_closed_contour(self) -> None:
         mesh = trimesh.load_mesh(self.result.stl_path, process=True)
         for z in (0.1, 1.0, 4.0, 40.0, 80.0, 120.0, 160.0):
             lines = trimesh.intersections.mesh_plane(
@@ -310,7 +309,7 @@ class ReferenceEndToEndTests(unittest.TestCase):
             with self.subTest(z=z):
                 self.assertTrue(lines.size)
                 self.assertEqual(set(degrees.values()), {2})
-                self.assertEqual(component_count, 2)
+                self.assertEqual(component_count, 1)
 
     def test_reference_run_contains_every_required_artifact(self) -> None:
         paths = (
@@ -498,8 +497,7 @@ class ReportingAndLaunchTests(unittest.TestCase):
             self.assertGreater(report.maximum_time_deficit_s, 0.0)
             for label in (
                 "G-Code-Datei", "Erkannte Layer", "Layer unter Zielzeit",
-                "Maximales Zeitdefizit", "Außenradius min/max",
-                "Wandstärke min/max", "Maximale Wandbahnanzahl",
+                "Maximales Zeitdefizit", "Außendurchmesser min/max",
                 "Nicht vollständig lösbare Layer", "STL", "Laufordner",
             ):
                 self.assertIn(label, text)

@@ -174,14 +174,9 @@ class OutputService:
             "time_deficit_s",
             "required_path_mm",
             "available_path_mm",
-            "outer_radius_raw_mm",
-            "outer_radius_spline_mm",
-            "outer_radius_mm",
-            "inner_radius_spline_mm",
-            "inner_radius_mm",
-            "wall_thickness_mm",
-            "wall_path_estimate",
-            "wall_path_count",
+            "outer_diameter_raw_mm",
+            "outer_diameter_spline_mm",
+            "outer_diameter_mm",
             "expansion_angle_deg",
             "contraction_angle_deg",
             "estimated_added_time_s",
@@ -208,26 +203,15 @@ class OutputService:
                         "available_path_mm": _format_float(
                             layer.available_path_mm
                         ),
-                        "outer_radius_raw_mm": _format_float(
-                            layer.raw_outer_radius_mm
+                        "outer_diameter_raw_mm": _format_float(
+                            layer.raw_outer_diameter_mm
                         ),
-                        "outer_radius_spline_mm": _format_float(
-                            layer.outer_radius_mm
+                        "outer_diameter_spline_mm": _format_float(
+                            layer.outer_diameter_mm
                         ),
-                        "outer_radius_mm": _format_float(
-                            layer.outer_radius_mm
+                        "outer_diameter_mm": _format_float(
+                            layer.outer_diameter_mm
                         ),
-                        "inner_radius_spline_mm": _format_float(
-                            layer.inner_radius_mm
-                        ),
-                        "inner_radius_mm": _format_float(
-                            layer.inner_radius_mm
-                        ),
-                        "wall_thickness_mm": _format_float(
-                            layer.wall_thickness_mm
-                        ),
-                        "wall_path_estimate": layer.wall_path_count,
-                        "wall_path_count": layer.wall_path_count,
                         "expansion_angle_deg": _format_float(
                             layer.expansion_angle_deg
                         ),

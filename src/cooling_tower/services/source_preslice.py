@@ -10,6 +10,7 @@ from threading import Event
 import tempfile
 import time
 
+from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.models import (
     GCodeOrigin,
@@ -33,9 +34,13 @@ from cooling_tower.slicers import (
     fingerprint_profile_paths,
     profile_paths_fingerprint,
     protect_profile_paths,
+    assert_profile_copies_are_isolated,
 )
 from cooling_tower.slicers.profile_models import stable_json_fingerprint
 from cooling_tower.slicers.profile_matching import metadata_values
+from cooling_tower.slicers.orca_profile_compatibility import (
+    temporary_orca_machine_identity,
+)
 from cooling_tower.services.analysis_service import (
     AnalysisCancelled,
     GCodeAnalysisService,
@@ -43,7 +48,7 @@ from cooling_tower.services.analysis_service import (
 from cooling_tower.services.stl_validation import StlValidationResult
 
 
-PRESLICE_ADAPTER_VERSION = 2
+PRESLICE_ADAPTER_VERSION = 3
 _WORKSPACE_PREFIX = "cooling_tower_source_preslice_"
 _WORKSPACE_MARKER = ".cooling_tower_preslice_workspace"
 
@@ -144,6 +149,9 @@ class SourcePreSliceService:
                 self.cache.assert_safe_location(
                     self._slicer_roots(profile_match),
                     source_parent=source.original_path.parent,
+                    # Both model types normalize their paths at construction.
+                    # Repeating Windows realpath calls here can delay cancel.
+                    trusted_resolved_paths=True,
                 )
         except (OSError, ValueError, SlicerProcessError) as error:
             raise SourcePreSliceError(str(error)) from error
@@ -171,19 +179,40 @@ class SourcePreSliceService:
                     "Die STL wurde nach ihrer Validierung verändert."
                 )
             notify(20, "Modell wird geslict", True)
-            request = SliceRequest(
-                model_path=source.original_path,
-                profile=selected.effective_profile,
-                output_directory=output_directory,
-                timeout_s=self.timeout_s,
-                diagnostics_root=self.diagnostics_root,
-                retain_failure_diagnostics=True,
-                temporary_overrides={},
-                purpose="source_preslice",
-                cancellation_event=cancelled,
-            )
             try:
-                with protect_profile_paths(selected.source_paths):
+                with protect_profile_paths(
+                    selected.source_paths,
+                    expected_initial_fingerprint=(
+                        confirmation.profile_sources_fingerprint
+                    ),
+                ):
+                    timing_profile, timing_overrides = build_calibration_profile(
+                        selected.effective_profile,
+                        workspace / "timing_profile",
+                        simulate_full_tower_infill=False,
+                        resolved_profiles=selected.resolved_profiles,
+                    )
+                    if selected.effective_profile.installation.adapter_id in {
+                        "anycubic_slicer_next",
+                        "orca_slicer",
+                        "bambu_studio",
+                    }:
+                        assert_profile_copies_are_isolated(
+                            selected.effective_profile,
+                            timing_profile,
+                            workspace / "timing_profile",
+                        )
+                    request = SliceRequest(
+                        model_path=source.original_path,
+                        profile=timing_profile,
+                        output_directory=output_directory,
+                        timeout_s=self.timeout_s,
+                        diagnostics_root=self.diagnostics_root,
+                        retain_failure_diagnostics=True,
+                        temporary_overrides=timing_overrides,
+                        purpose="source_preslice",
+                        cancellation_event=cancelled,
+                    )
                     slice_result = adapter.slice_model(request)
             except SlicerProcessError as error:
                 if cancelled.is_set():
@@ -407,12 +436,9 @@ class SourcePreSliceService:
     def _slicer_roots(
         profile_match: ProfileMatchResult,
     ) -> tuple[Path, ...]:
-        return tuple(
-            path.expanduser().resolve()
-            for path in (
-                profile_match.execution_slicer.executable_path.parent,
-                *profile_match.execution_slicer.profile_roots,
-            )
+        return (
+            profile_match.execution_slicer.executable_path.parent,
+            *profile_match.execution_slicer.profile_roots,
         )
 
     def _restore_cached(
@@ -528,7 +554,7 @@ class SourcePreSliceService:
                 f"Das {label} darf weder in einem Slicer-Verzeichnis noch "
                 "neben der Benutzer-STL liegen."
             )
-        original_parent = source_parent.expanduser().resolve()
+        original_parent = source_parent
         if candidate == original_parent or candidate.parent == original_parent:
             raise SourcePreSliceError(
                 f"Das {label} darf nicht direkt neben der Benutzer-STL liegen."
@@ -634,18 +660,13 @@ class SourcePreSliceService:
         selected = profile_match.selected
         assert selected is not None
         values = metadata_values(snapshot.metadata)
-        expected_ids = {
-            "printer_settings_id": selected.machine.profile_id if selected.machine else None,
-            "print_settings_id": selected.process.profile_id if selected.process else None,
-            "filament_settings_id": (
-                selected.filament.profile_id if selected.filament else None
-            ),
-        }
+        expected_ids = _expected_generated_profile_ids(profile_match)
         for key, expected in expected_ids.items():
             actual = _text_values(values.get(key))
-            if expected and actual and expected.casefold() not in {
-                item.casefold() for item in actual
-            }:
+            actual_normalized = {item.casefold() for item in actual}
+            if expected and actual and not any(
+                item.casefold() in actual_normalized for item in expected
+            ):
                 raise SourcePreSliceError(
                     f"Die G-Code-Metadaten für {key} widersprechen der Bestätigung."
                 )
@@ -661,6 +682,63 @@ class SourcePreSliceService:
                 raise SourcePreSliceError(
                     f"Der erzeugte G-Code widerspricht beim Wert {key} der Bestätigung."
                 )
+
+
+def _expected_generated_profile_ids(
+    profile_match: ProfileMatchResult,
+) -> dict[str, tuple[str, ...]]:
+    selected = profile_match.selected
+    assert selected is not None
+
+    def record_ids(record: object | None) -> tuple[str, ...]:
+        if record is None:
+            return ()
+        return tuple(
+            dict.fromkeys(
+                value.strip()
+                for value in (
+                    str(getattr(record, "profile_id", "")),
+                    str(getattr(record, "name", "")),
+                )
+                if value.strip()
+            )
+        )
+
+    machine_ids = record_ids(selected.machine)
+    if (
+        selected.machine is not None
+        and profile_match.execution_slicer.adapter_id
+        in {"anycubic_slicer_next", "orca_slicer", "bambu_studio"}
+    ):
+        resolved_by_path = {
+            item.record.path: item
+            for item in selected.resolved_profiles
+            if item.valid and item.effective_values
+        }
+        machine_resolved = resolved_by_path.get(selected.machine.path)
+        dependent_values = tuple(
+            resolved_by_path[record.path].effective_values
+            for record in (
+                *((selected.process,) if selected.process is not None else ()),
+                *selected.effective_profile.filaments,
+            )
+            if record.path in resolved_by_path
+        )
+        generated_machine_id = temporary_orca_machine_identity(
+            selected.machine,
+            machine_resolved.chain if machine_resolved is not None else (),
+            dependent_values,
+        )
+        if generated_machine_id:
+            machine_ids = tuple(
+                dict.fromkeys((*machine_ids, generated_machine_id))
+            )
+
+    return {
+        "printer_settings_id": machine_ids,
+        "print_settings_id": record_ids(selected.process),
+        "filament_settings_id": record_ids(selected.filament),
+    }
 
 
 def build_preslice_cache_key(

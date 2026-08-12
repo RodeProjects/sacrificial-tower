@@ -312,7 +312,7 @@ class HollowMeshAndOutputTests(unittest.TestCase):
         self.assertLess(normal[0] * center[0] + normal[1] * center[1], 0.0)
         self.assertFalse(any(abs(x) < 1e-12 and abs(y) < 1e-12 for x, y, z in mesh.vertices))
 
-    def test_profile_csv_contains_hollow_geometry_columns(self) -> None:
+    def test_profile_csv_contains_solid_geometry_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = RunPaths.for_directory(temporary_directory)
             paths.profiles_directory.mkdir(parents=True)
@@ -322,8 +322,9 @@ class HollowMeshAndOutputTests(unittest.TestCase):
             with paths.profile_path.open(encoding="utf-8-sig", newline="") as handle:
                 rows = list(csv.DictReader(handle, delimiter=";"))
             self.assertEqual(len(rows), 2)
-            self.assertTrue(all(float(row["inner_radius_mm"]) > 0 for row in rows))
-            self.assertTrue(all(int(row["wall_path_count"]) >= 2 for row in rows))
+            self.assertTrue(all(float(row["outer_diameter_mm"]) > 0 for row in rows))
+            self.assertNotIn("inner_radius_mm", rows[0])
+            self.assertNotIn("wall_path_count", rows[0])
 
 
 if __name__ == "__main__":

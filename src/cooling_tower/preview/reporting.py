@@ -26,7 +26,7 @@ _STATE_LABELS = {
 }
 
 _FAILURE_LABELS = {
-    "maximum_radius": "Der eingestellte maximale Turmradius wurde erreicht.",
+    "maximum_radius": "Der eingestellte größte Turmdurchmesser wurde erreicht.",
     "maximum_wall_thickness": "Die eingestellte maximale Wandstärke wurde erreicht.",
     "transition_angle": "Die eingestellten Übergangswinkel lassen die benötigte Form nicht zu.",
     "no_bed_space": "Auf dem Druckbett wurde kein sicherer Platz für den Turm gefunden.",
@@ -334,6 +334,9 @@ def _source_provenance(request: PreviewRequest) -> dict[str, Any]:
                 "cache_key": preslice.cache_key,
                 "cache_hit": preslice.cache_hit,
                 "adapter_version": preslice.adapter_version,
+                "cooling_slowdown_disabled_for_timing": (
+                    preslice.adapter_version >= 3
+                ),
             }
             if preslice is not None
             else None

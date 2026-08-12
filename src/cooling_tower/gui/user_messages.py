@@ -13,29 +13,20 @@ _EXACT_TRANSLATIONS = {
     "The safety factor must be at least 1.0.": (
         "Der Sicherheitsfaktor muss mindestens 1,0 betragen."
     ),
-    "Minimum outer radius must be greater than zero.": (
-        "Der Mindest-Außenradius muss größer als 0 sein."
+    "Minimum outer diameter must be greater than zero.": (
+        "Der kleinste Außendurchmesser muss größer als 0 sein."
     ),
     "The minimum radius must be greater than zero.": (
         "Der Mindestradius muss größer als 0 sein."
     ),
-    "Maximum outer radius must be greater than or equal to minimum outer radius.": (
-        "Der maximale Außenradius muss mindestens dem Mindest-Außenradius entsprechen."
+    "Maximum outer diameter must be greater than or equal to minimum outer diameter.": (
+        "Der größte Außendurchmesser muss mindestens dem kleinsten Außendurchmesser entsprechen."
     ),
     "The maximum radius must be greater than or equal to the minimum radius.": (
         "Der Maximalradius muss mindestens dem Mindestradius entsprechen."
     ),
-    "Minimum inner radius must be greater than zero.": (
-        "Der Mindest-Hohlraumradius muss größer als 0 sein."
-    ),
     "Base height must not be negative.": (
         "Die Standfußhöhe darf nicht negativ sein."
-    ),
-    "Maximum wall change must be greater than zero.": (
-        "Die maximale Wandstärkenänderung muss größer als 0 sein."
-    ),
-    "Maximum outer radius cannot contain the minimum wall and minimum inner radius.": (
-        "Der maximale Außenradius ist für Mindestwandstärke und Mindest-Hohlraumradius zu klein."
     ),
     "The local time-factor window must be greater than zero.": (
         "Das lokale Referenzfenster muss größer als 0 sein."
@@ -45,6 +36,9 @@ _EXACT_TRANSLATIONS = {
     ),
     "Automatic base width must be a boolean value.": (
         "Die automatische Standfußbreite besitzt einen ungültigen Schaltzustand."
+    ),
+    "Full tower infill simulation must be a boolean value.": (
+        "Die Simulation der vollständigen Turmfüllung besitzt einen ungültigen Schaltzustand."
     ),
     "Maximum expansion angle must be greater than zero and at most 70 degrees.": (
         "Der Aufweitungswinkel muss größer als 0° und darf höchstens 70° sein."

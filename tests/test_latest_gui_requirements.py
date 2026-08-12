@@ -274,17 +274,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
-        window._last_changed_setting_name = "minimum_outer_radius_mm"
+        window._last_changed_setting_name = "minimum_outer_diameter_mm"
         window.validate_form()
 
         relationship_errors = [
             message
             for message in window._static_error_causes
-            if "Größter Außenradius" in message
-            and "Kleinster Außenradius" in message
+            if "Größter Außendurchmesser" in message
+            and "Kleinster Außendurchmesser" in message
         ]
         self.assertEqual(len(relationship_errors), 1)
-        minimum_setting = window._setting_widgets["minimum_outer_radius_mm"]
+        minimum_setting = window._setting_widgets["minimum_outer_diameter_mm"]
         self.assertTrue(minimum_setting.editor.property("invalid"))
 
         minimum_setting.editor.setFocus()
@@ -723,7 +723,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             ).y()
             return range_top - editor_bottom - 1
 
-        reference_gap = range_gap("maximum_wall_thickness_mm")
+        reference_gap = range_gap("maximum_outer_diameter_mm")
         self.assertEqual(range_gap("maximum_expansion_angle_deg"), reference_gap)
         self.assertEqual(range_gap("maximum_contraction_angle_deg"), reference_gap)
         window.close()
@@ -762,7 +762,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 setting.setting_name,
             )
         self.assertGreater(
-            window._setting_widgets["minimum_outer_radius_mm"].label.width(),
+            window._setting_widgets["minimum_outer_diameter_mm"].label.width(),
             320,
         )
         window.close()
@@ -771,7 +771,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         window.workflow.analysis_succeeded("referenz.gcode")
         window.workflow.slicer_succeeded("Testslicer")
-        setting = window._setting_widgets["maximum_outer_radius_mm"]
+        setting = window._setting_widgets["maximum_outer_diameter_mm"]
         setting.set_error(
             "Erste kurze Fehlermeldung.\nZweite kurze Fehlermeldung."
         )
@@ -787,7 +787,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_unchanged_inline_error_skips_redundant_repolishing(self) -> None:
         window = self.window()
-        setting = window._setting_widgets["maximum_outer_radius_mm"]
+        setting = window._setting_widgets["maximum_outer_diameter_mm"]
         setting.set_error("Unveränderte Testmeldung")
 
         with (
@@ -855,8 +855,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
-        window.minimum_wall_spin.setValue(5.0)
-        window.maximum_wall_spin.setValue(4.0)
+        window.local_window_spin.setValue(4)
         window.validate_form()
 
         lines = window.validation_label.text().splitlines()
@@ -866,17 +865,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertGreaterEqual(len(headings), 2)
         self.assertGreaterEqual(len(bullets), 2)
         self.assertNotIn(";", window.validation_label.text())
-        wall_setting = window._setting_widgets[
-            "maximum_wall_thickness_mm"
+        diameter_setting = window._setting_widgets[
+            "maximum_outer_diameter_mm"
         ]
-        self.assertFalse(wall_setting.message_container.isHidden())
+        self.assertFalse(diameter_setting.message_container.isHidden())
         self.assertIn(
             "Muss mindestens so groß sein",
-            wall_setting.message_label.text(),
+            diameter_setting.message_label.text(),
         )
         self.assertNotIn(
-            "Maximale Wandstärke",
-            wall_setting.message_label.text(),
+            "Größter Außendurchmesser",
+            diameter_setting.message_label.text(),
         )
         window.close()
 
@@ -895,18 +894,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 required_value=89.0,
             ),
             FeasibilityIssue(
-                code="MAXIMUM_WALL_THICKNESS_REACHED",
-                message="Maximum wall thickness reached.",
+                code="BASE_WIDTH_TOO_SMALL",
+                message="Base width is too small.",
                 affected_layer_index=11,
-                related_setting_names=("maximum_wall_thickness_mm",),
-                required_value=5.0,
+                related_setting_names=("manual_base_width_mm",),
+                required_value=45.0,
             ),
             FeasibilityIssue(
-                code="MAXIMUM_OUTER_RADIUS_REACHED",
-                message="Maximum outer radius reached.",
+                code="MAXIMUM_OUTER_DIAMETER_REACHED",
+                message="Maximum outer diameter reached.",
                 affected_layer_index=12,
-                related_setting_names=("maximum_outer_radius_mm",),
-                required_value=22.0,
+                related_setting_names=("maximum_outer_diameter_mm",),
+                required_value=44.0,
             ),
         )
         window._on_feasibility_succeeded(
@@ -923,8 +922,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             [
                 "Gewünschte Mindest-Layerzeit: 111,00 s",
                 "• Maximaler Aufweitungswinkel reicht nicht aus.",
-                "• Eingestellte größte Wandstärke von 4,20 mm reicht nicht aus.",
-                "• Eingestellter größter Außenradius von 20,00 mm reicht nicht aus.",
+                "• Standfußbreite reicht nicht aus.",
+                "• Eingestellter größter Außendurchmesser von 40,00 mm reicht nicht aus.",
             ],
         )
         self.assertNotIn(";", window.validation_label.text())
@@ -950,9 +949,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
     def test_capacity_path_length_is_not_presented_as_a_required_radius(self) -> None:
         window = self.window()
         issue = FeasibilityIssue(
-            code="MAXIMUM_OUTER_RADIUS_REACHED",
-            message="Maximum outer radius reached.",
-            related_setting_names=("maximum_outer_radius_mm",),
+            code="MAXIMUM_OUTER_DIAMETER_REACHED",
+            message="Maximum outer diameter reached.",
+            related_setting_names=("maximum_outer_diameter_mm",),
             required_value=5789.65,
             achievable_value=180.0,
         )
@@ -963,7 +962,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertFalse(
             any("5789" in solution for solution in group["solutions"])
         )
-        self.assertIn("Außenradius erhöhen", group["solutions"][0])
+        self.assertIn("Außendurchmesser erhöhen", group["solutions"][0])
         window.close()
 
     def test_error_cards_keep_normal_background_and_footer_keeps_error_tone(self) -> None:
@@ -1081,7 +1080,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         self.assertFalse(
             window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].message_label.text()
         )
 
@@ -1111,17 +1110,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             message="Expansion angle is too small.",
             related_setting_names=("maximum_expansion_angle_deg",),
         )
-        wall_issue = FeasibilityIssue(
-            code="MAXIMUM_WALL_THICKNESS_REACHED",
-            message="Maximum wall thickness reached.",
-            related_setting_names=("maximum_wall_thickness_mm",),
+        diameter_issue = FeasibilityIssue(
+            code="MAXIMUM_OUTER_DIAMETER_REACHED",
+            message="Maximum outer diameter reached.",
+            related_setting_names=("maximum_outer_diameter_mm",),
         )
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
             ProfileFeasibilityAssessment(
                 tower_required=True,
                 feasible=False,
-                issues=(expansion_issue, wall_issue),
+                issues=(expansion_issue, diameter_issue),
             ),
         )
         self.assertEqual(len(window._feasibility_issue_summaries), 2)
@@ -1134,18 +1133,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             ProfileFeasibilityAssessment(
                 tower_required=True,
                 feasible=False,
-                issues=(wall_issue,),
+                issues=(diameter_issue,),
             ),
         )
         self.assertEqual(
             window._feasibility_issue_summaries,
             [
-                "Eingestellte größte Wandstärke von 4,20 mm reicht "
+                "Eingestellter größter Außendurchmesser von 40,00 mm reicht "
                 "nicht aus."
             ],
         )
         self.assertIn(
-            "größte Wandstärke",
+            "größter Außendurchmesser",
             window._setting_widgets[
                 "target_layer_time_s"
             ].message_label.text(),
@@ -1153,8 +1152,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
         self.assertFalse(window.preview_button.isEnabled())
 
-        window.maximum_wall_spin.setValue(
-            window.maximum_wall_spin.value() + 0.1
+        window.maximum_outer_spin.setValue(
+            window.maximum_outer_spin.value() + 1.0
         )
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
@@ -1176,22 +1175,22 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.analysis_succeeded("referenz.gcode")
         window.workflow.slicer_succeeded("Testslicer")
         issue = FeasibilityIssue(
-            code="MAXIMUM_OUTER_RADIUS_REACHED",
-            message="Maximum outer radius reached.",
-            related_setting_names=("maximum_outer_radius_mm",),
-            required_value=22.0,
+            code="MAXIMUM_OUTER_DIAMETER_REACHED",
+            message="Maximum outer diameter reached.",
+            related_setting_names=("maximum_outer_diameter_mm",),
+            required_value=44.0,
         )
         issue_key = (
             issue.code,
             tuple(sorted(issue.related_setting_names)),
         )
         window._feasibility_issue_targets[issue_key] = (
-            "maximum_outer_radius_mm"
+            "maximum_outer_diameter_mm"
         )
         window._feasibility_request_source = (
             window._feasibility_request_id,
-            "maximum_outer_radius_mm",
-            "maximum_outer_radius_mm",
+            "maximum_outer_diameter_mm",
+            "maximum_outer_diameter_mm",
         )
 
         window._on_feasibility_succeeded(
@@ -1205,16 +1204,16 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
         self.assertFalse(
             window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].message_label.text()
         )
         target_message = window._setting_widgets[
             "target_layer_time_s"
         ].message_label.text()
-        self.assertIn("größter Außenradius", target_message)
-        self.assertIn("20,00 mm", target_message)
-        self.assertIn("Max. 500,000 mm", window._setting_widgets[
-            "maximum_outer_radius_mm"
+        self.assertIn("größter Außendurchmesser", target_message)
+        self.assertIn("40,00 mm", target_message)
+        self.assertIn("Max. 1000,000 mm", window._setting_widgets[
+            "maximum_outer_diameter_mm"
         ].range_label.text())
         window.close()
 
@@ -1224,9 +1223,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
-            code="MAXIMUM_OUTER_RADIUS_REACHED",
-            message="Maximum outer radius reached.",
-            related_setting_names=("maximum_outer_radius_mm",),
+            code="MAXIMUM_OUTER_DIAMETER_REACHED",
+            message="Maximum outer diameter reached.",
+            related_setting_names=("maximum_outer_diameter_mm",),
         )
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
@@ -1257,36 +1256,36 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 related_setting_names=("maximum_expansion_angle_deg",),
             ),
             FeasibilityIssue(
-                code="MAXIMUM_WALL_THICKNESS_REACHED",
-                message="Maximum wall thickness reached.",
-                related_setting_names=("maximum_wall_thickness_mm",),
+                code="BASE_WIDTH_TOO_SMALL",
+                message="Base width is too small.",
+                related_setting_names=("manual_base_width_mm",),
             ),
             FeasibilityIssue(
-                code="MAXIMUM_OUTER_RADIUS_REACHED",
-                message="Maximum outer radius reached.",
-                related_setting_names=("maximum_outer_radius_mm",),
+                code="MAXIMUM_OUTER_DIAMETER_REACHED",
+                message="Maximum outer diameter reached.",
+                related_setting_names=("maximum_outer_diameter_mm",),
             ),
         )
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
             ProfileFeasibilityAssessment(True, False, issues),
         )
-        self.assertIn("20,00 mm", window.validation_label.text())
+        self.assertIn("40,00 mm", window.validation_label.text())
 
-        window.maximum_outer_spin.setValue(520.0)
+        window.maximum_outer_spin.setValue(1001.0)
         self.app.processEvents()
 
         target_message = window._setting_widgets[
             "target_layer_time_s"
         ].message_label.text()
         self.assertIn("Aufweitungswinkel", target_message)
-        self.assertIn("größte Wandstärke", target_message)
-        self.assertNotIn("Außenradius", target_message)
-        self.assertNotIn("20,00 mm", window.validation_label.text())
+        self.assertIn("Standfußbreite", target_message)
+        self.assertNotIn("Außendurchmesser", target_message)
+        self.assertNotIn("40,00 mm", window.validation_label.text())
         self.assertIn(
-            "Überschreitet den Maximalwert 500,000 mm",
+            "Überschreitet den Maximalwert 1000,000 mm",
             window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].message_label.text(),
         )
         self.assertEqual(len(window._feasibility_issues), 2)
@@ -1299,9 +1298,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.maximum_outer_spin.setValue(500.0)
         issue = FeasibilityIssue(
-            code="MAXIMUM_OUTER_RADIUS_REACHED",
-            message="Maximum outer radius reached.",
-            related_setting_names=("maximum_outer_radius_mm",),
+            code="MAXIMUM_OUTER_DIAMETER_REACHED",
+            message="Maximum outer diameter reached.",
+            related_setting_names=("maximum_outer_diameter_mm",),
         )
 
         window._on_feasibility_succeeded(
@@ -1310,7 +1309,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
 
         self.assertIn("500,00 mm", window.validation_label.text())
-        self.assertNotIn("20,00 mm", window.validation_label.text())
+        self.assertNotIn("40,00 mm", window.validation_label.text())
         window.close()
 
     def test_tower_need_message_is_above_the_prediction_footnote(self) -> None:
@@ -1453,9 +1452,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         window.close()
 
-    def test_maximum_diameter_uses_the_standard_help_text_style(self) -> None:
+    def test_full_infill_hint_uses_the_calculated_text_style(self) -> None:
         window = self.window()
-        self.assertEqual(window.maximum_diameter_label.objectName(), "helpText")
+        self.assertEqual(window.full_infill_hint.objectName(), "calculatedHint")
         window.close()
 
     def test_non_export_validation_does_not_write_a_gui_error_log(self) -> None:
@@ -1477,11 +1476,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
         for setting in window._setting_widgets.values():
             self.assertNotIn("Min.", setting.range_label.text())
-        wall_change = window._setting_widgets[
-            "maximum_wall_change_per_mm_z"
+        maximum_diameter = window._setting_widgets[
+            "maximum_outer_diameter_mm"
         ]
-        self.assertEqual(wall_change.unit_label.text(), "mm/mm")
-        self.assertEqual(wall_change.range_label.text(), "Max. 100,00")
+        self.assertEqual(maximum_diameter.unit_label.text(), "mm")
+        self.assertEqual(
+            maximum_diameter.range_label.text(), "Max. 1000,000 mm"
+        )
         self.assertEqual(
             window._setting_widgets[
                 "local_reference_window"

@@ -6,7 +6,9 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -232,9 +234,9 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(CalibrationConfig(maximum_iterations=0).maximum_iterations, 0)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=-1)
-        self.assertEqual(CalibrationConfig(maximum_iterations=10).maximum_iterations, 10)
+        self.assertEqual(CalibrationConfig(maximum_iterations=8).maximum_iterations, 8)
         with self.assertRaises(ValueError):
-            CalibrationConfig(maximum_iterations=11)
+            CalibrationConfig(maximum_iterations=9)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_runtime_s=float("inf"))
         with self.assertRaises(ValueError):
@@ -460,6 +462,115 @@ class Phase16Tests(unittest.TestCase):
             for old, new in zip(profile.layers, adjusted.layers, strict=True)
         ))
 
+    def test_07a_profile_adjuster_inverts_realized_solid_area(self) -> None:
+        profile = self._radius_profile()
+        first = replace(
+            profile.layers[0],
+            calculated_radius_mm=15.0,
+            radius_mm=15.0,
+            safety_adjusted_path_mm=15.0 * 2.0 * 3.141592653589793,
+        )
+        profile = replace(
+            profile,
+            layers=(first, *profile.layers[1:]),
+        )
+        source_time = self.snapshot.layers[0].total_time_s
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            self.snapshot.layers,
+            {1: 40.0},
+            target_time_s=source_time + 10.0,
+            realized_outer_radii_mm={1: 20.0},
+            config=CalibrationConfig(),
+        )
+        # 20 mm * sqrt(10 s / 40 s) = 10 mm.  A circumference-
+        # proportional controller would incorrectly collapse to 5 mm.
+        self.assertAlmostEqual(adjusted.layers[0].radius_mm, 10.0, places=6)
+
+    def test_07b_transition_width_is_not_promoted_to_local_demand(self) -> None:
+        profile = self._radius_profile()
+        first = replace(
+            profile.layers[0],
+            calculated_radius_mm=profile.config.minimum_radius_mm,
+            radius_mm=profile.config.minimum_radius_mm,
+        )
+        profile = replace(
+            profile,
+            layers=(first, *profile.layers[1:]),
+        )
+        source_time = self.snapshot.layers[0].total_time_s
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            self.snapshot.layers,
+            {1: 40.0},
+            target_time_s=source_time + 10.0,
+            realized_outer_radii_mm={1: 20.0},
+            config=CalibrationConfig(),
+        )
+        self.assertEqual(
+            adjusted.layers[0].radius_mm,
+            profile.config.minimum_radius_mm,
+        )
+
+    def test_07c_candidate_score_penalizes_avoidable_tower_time(self) -> None:
+        convergence = SimpleNamespace(
+            deficient_layer_count=0,
+            maximum_remaining_deficit_s=0.0,
+            total_remaining_deficit_s=0.0,
+        )
+        profile = SimpleNamespace(
+            layers=(SimpleNamespace(outer_radius_mm=10.0),),
+        )
+        source_layers = (
+            SimpleNamespace(index=1, total_time_s=5.0),
+        )
+        precise = CalibrationService._candidate_score(
+            convergence,
+            profile,
+            source_layers=source_layers,
+            added_times_s={1: 10.1},
+            target_time_s=15.0,
+        )
+        wasteful = CalibrationService._candidate_score(
+            convergence,
+            profile,
+            source_layers=source_layers,
+            added_times_s={1: 25.0},
+            target_time_s=15.0,
+        )
+        self.assertLess(precise, wasteful)
+
+    def test_07d_candidate_score_accepts_sub_tolerance_shortfall_for_savings(self) -> None:
+        profile = SimpleNamespace(
+            layers=(SimpleNamespace(outer_radius_mm=10.0),),
+        )
+        source_layers = (
+            SimpleNamespace(index=1, total_time_s=5.0),
+        )
+        exact_but_wasteful = CalibrationService._candidate_score(
+            SimpleNamespace(
+                deficient_layer_count=0,
+                maximum_remaining_deficit_s=0.0,
+                total_remaining_deficit_s=0.0,
+            ),
+            profile,
+            source_layers=source_layers,
+            added_times_s={1: 20.0},
+            target_time_s=15.0,
+        )
+        efficient_within_tolerance = CalibrationService._candidate_score(
+            SimpleNamespace(
+                deficient_layer_count=0,
+                maximum_remaining_deficit_s=0.08,
+                total_remaining_deficit_s=0.0,
+            ),
+            profile,
+            source_layers=source_layers,
+            added_times_s={1: 9.92},
+            target_time_s=15.0,
+        )
+        self.assertLess(efficient_within_tolerance, exact_but_wasteful)
+
     def test_08_convergence_requires_time_and_profile_stability(self) -> None:
         enough = {layer.index: 20.0 for layer in self.snapshot.layers}
         result = evaluate_convergence(
@@ -594,7 +705,7 @@ class Phase16Tests(unittest.TestCase):
         combined = GCodeAnalysisService().analyze(output)
         self.assertGreater(combined.minimum_layer_time_s, self.snapshot.minimum_layer_time_s)
 
-    def test_20_stl_calibration_exports_only_converged_candidate(self) -> None:
+    def test_20_stl_calibration_uses_all_selected_passes_before_export(self) -> None:
         output = self.root / "calibrated_stl"
         source_hash = hashlib.sha256(self.source.read_bytes()).digest()
         adapter = FakeAdapter(tower_gcode(path_size=1.0, feed=60))
@@ -610,8 +721,8 @@ class Phase16Tests(unittest.TestCase):
         self.assertTrue(result.stl_path.is_file())
         self.assertIsNone(result.gcode_path)
         self.assertTrue(result.report_path.is_file())
-        self.assertEqual(len(adapter.requests), 2)
-        self.assertEqual(len(result.iterations), 2)
+        self.assertEqual(len(adapter.requests), 3)
+        self.assertEqual(len(result.iterations), 3)
         self.assertIsNone(
             result.iterations[0].maximum_slicer_result_change_s
         )
@@ -626,7 +737,7 @@ class Phase16Tests(unittest.TestCase):
         self.assertIn("zeitprognose", warnings.casefold())
         self.assertNotIn("The calibrated STL", warnings)
 
-    def test_adaptive_rounds_continue_only_for_noticeable_slicer_changes(self) -> None:
+    def test_selected_pass_count_is_honoured_after_result_stabilises(self) -> None:
         adapter = SequencedAdapter(
             [
                 tower_gcode(path_size=1.0, feed=60),
@@ -644,7 +755,7 @@ class Phase16Tests(unittest.TestCase):
         )
 
         self.assertTrue(result.success, result.failures)
-        self.assertEqual(len(adapter.requests), 3)
+        self.assertEqual(len(adapter.requests), 5)
         self.assertGreater(
             result.iterations[1].maximum_slicer_result_change_s,
             CalibrationConfig().time_tolerance_s,
@@ -686,7 +797,7 @@ class Phase16Tests(unittest.TestCase):
         )
         self.assertIn("instabil", result.failures[-1].message)
 
-    def test_single_round_fast_mode_remains_supported(self) -> None:
+    def test_single_selected_pass_remains_supported(self) -> None:
         adapter = FakeAdapter(tower_gcode(path_size=1.0, feed=60))
         result = CalibrationService().calibrate(
             self.snapshot,
@@ -764,9 +875,10 @@ class Phase16Tests(unittest.TestCase):
             self.snapshot, GenerationSettings(target_layer_time_s=50.0),
             adapter=FakeAdapter(tower_gcode(path_size=0.01, feed=6000)),
             profile=self.profile, output_directory=output,
-            config=CalibrationConfig(maximum_iterations=2, repeated_result_limit=2),
+            config=CalibrationConfig(maximum_iterations=4, repeated_result_limit=1),
         )
         self.assertFalse(result.success)
+        self.assertEqual(len(result.iterations), 4)
         self.assertFalse(output.exists())
         self.assertTrue(result.failures)
 

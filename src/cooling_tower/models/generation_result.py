@@ -18,8 +18,7 @@ class GenerationResult:
 
     layer_count: int
     layers_below_target: int
-    maximum_outer_radius_mm: float
-    maximum_wall_thickness_mm: float
+    maximum_outer_diameter_mm: float
     warnings: list[str] = field(default_factory=list)
 
     summary_path: Path | None = None
@@ -35,3 +34,15 @@ class GenerationResult:
     gcode_path: Path | None = None
     calibration_report_path: Path | None = None
     calibration: Any = None
+
+    @property
+    def maximum_outer_radius_mm(self) -> float:
+        """Transitional calculation API; user-facing reports use diameter."""
+
+        return self.maximum_outer_diameter_mm / 2.0
+
+    @property
+    def maximum_wall_thickness_mm(self) -> float:
+        """Removed hollow-profile statistic retained for old API readers."""
+
+        return 0.0

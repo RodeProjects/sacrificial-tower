@@ -159,13 +159,11 @@ class SettingsAndValidationTests(GuiTestCase):
         self.window.apply_settings(expected)
         self.assertEqual(self.window.collect_settings(), expected)
 
-    def test_wall_path_count_and_effective_values_update_live(self) -> None:
-        self.window.minimum_wall_spin.setValue(0.8)
-        self.window.maximum_wall_spin.setValue(4.2)
-        self.window.path_width_spin.setValue(0.42)
-        text = self.window.wall_paths_label.text()
-        self.assertIn("2 Bahnen = 0.84 mm", text)
-        self.assertIn("10 Bahnen = 4.20 mm", text)
+    def test_full_infill_simulation_hint_updates_live(self) -> None:
+        self.window.full_infill_checkbox.setChecked(True)
+        text = self.window.full_infill_hint.text()
+        self.assertIn("100 % Fülldichte", text)
+        self.assertIn("im Slicer", text)
 
     def test_invalid_values_disable_generation_and_mark_fields(self) -> None:
         self._select_file()
@@ -176,8 +174,8 @@ class SettingsAndValidationTests(GuiTestCase):
         self.assertFalse(self.window.preview_button.isEnabled())
         self.assertFalse(self.window.minimum_outer_spin.property("invalid"))
         self.assertTrue(self.window.maximum_outer_spin.property("invalid"))
-        self.assertIn("Kleinster Außenradius", self.window.validation_label.text())
-        self.assertIn("Größter Außenradius", self.window.validation_label.text())
+        self.assertIn("Kleinster Außendurchmesser", self.window.validation_label.text())
+        self.assertIn("Größter Außendurchmesser", self.window.validation_label.text())
 
     def test_user_settings_are_persisted_and_restored(self) -> None:
         path = self.root / "user_settings.json"
@@ -197,10 +195,10 @@ class SettingsAndValidationTests(GuiTestCase):
 
     def test_defaults_can_be_restored(self) -> None:
         self.window.target_time_spin.setValue(99.0)
-        self.window.path_width_spin.setValue(0.45)
+        self.window.full_infill_checkbox.setChecked(True)
         self.window.reset_defaults()
         self.assertAlmostEqual(self.window.target_time_spin.value(), 11.0)
-        self.assertAlmostEqual(self.window.path_width_spin.value(), 0.42)
+        self.assertFalse(self.window.full_infill_checkbox.isChecked())
 
 
 class SharedServiceTests(GuiTestCase):
@@ -208,19 +206,14 @@ class SharedServiceTests(GuiTestCase):
         configured = GenerationSettings(
             target_layer_time_s=5.0,
             safety_factor=1.0,
-            minimum_outer_radius_mm=2.0,
-            maximum_outer_radius_mm=20.0,
-            minimum_wall_thickness_mm=0.8,
-            maximum_wall_thickness_mm=2.1,
-            wall_path_width_mm=0.42,
-            minimum_inner_radius_mm=1.0,
+            minimum_outer_diameter_mm=4.0,
+            maximum_outer_diameter_mm=40.0,
             minimum_base_radius_mm=3.0,
             base_height_mm=0.2,
             base_margin_mm=1.0,
             base_height_factor=0.0,
             minimum_radius_height_factor=0.0,
             maximum_radius_change_per_mm_z=2.0,
-            maximum_wall_change_per_mm_z=0.42,
             local_reference_window=3,
             mesh_segments=8,
         )
@@ -236,19 +229,14 @@ class SharedServiceTests(GuiTestCase):
             "--gcode", str(self.gcode),
             "--target-time", "5",
             "--safety-factor", "1",
-            "--minimum-radius", "2",
-            "--maximum-radius", "20",
-            "--minimum-wall", "0.8",
-            "--maximum-wall", "2.1",
-            "--wall-path-width", "0.42",
-            "--minimum-inner-radius", "1",
+            "--minimum-diameter", "4",
+            "--maximum-diameter", "40",
             "--minimum-base-radius", "3",
             "--base-height", "0.2",
             "--base-margin", "1",
             "--base-height-factor", "0",
             "--minimum-radius-height-factor", "0",
             "--maximum-radius-change", "2",
-            "--maximum-wall-change", "0.42",
             "--local-window", "3",
             "--mesh-segments", "8",
             "--output-root", str(cli_output),

@@ -47,12 +47,8 @@ from cooling_tower.services.reporting_service import (
 DEFAULT_PREVIEW_COUNT = 10
 DEFAULT_CSV_PATH = Path("output/layer_analysis.csv")
 DEFAULT_SAFETY_FACTOR = 1.10
-DEFAULT_MINIMUM_RADIUS_MM = 5.0
-DEFAULT_MAXIMUM_RADIUS_MM = 40.0
-DEFAULT_MINIMUM_WALL_THICKNESS_MM = 0.80
-DEFAULT_MAXIMUM_WALL_THICKNESS_MM = 4.20
-DEFAULT_WALL_PATH_WIDTH_MM = 0.42
-DEFAULT_MINIMUM_INNER_RADIUS_MM = 2.0
+DEFAULT_MINIMUM_DIAMETER_MM = 10.0
+DEFAULT_MAXIMUM_DIAMETER_MM = 40.0
 DEFAULT_LOCAL_TIME_FACTOR_WINDOW = 5
 DEFAULT_MINIMUM_RADIUS_HEIGHT_FACTOR = 0.04
 DEFAULT_MINIMUM_BASE_RADIUS_MM = 10.0
@@ -63,7 +59,6 @@ DEFAULT_MANUAL_BASE_WIDTH_MM = 20.0
 DEFAULT_EXPANSION_ANGLE_DEG = 50.0
 DEFAULT_CONTRACTION_ANGLE_DEG = 50.0
 DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z = 0.35
-DEFAULT_MAXIMUM_WALL_CHANGE_PER_MM_Z = 0.42
 DEFAULT_MESH_SEGMENTS = 32
 FLOAT_EPSILON = 1e-12
 
@@ -119,62 +114,32 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--minimum-radius",
+        "--minimum-diameter",
         type=float,
-        default=DEFAULT_MINIMUM_RADIUS_MM,
+        default=DEFAULT_MINIMUM_DIAMETER_MM,
         help=(
-            "Minimum tower radius in millimeters. "
-            f"Default: {DEFAULT_MINIMUM_RADIUS_MM}"
+            "Minimum tower outer diameter in millimeters. "
+            f"Default: {DEFAULT_MINIMUM_DIAMETER_MM}"
         ),
     )
 
     parser.add_argument(
-        "--maximum-radius",
+        "--maximum-diameter",
         type=float,
-        default=DEFAULT_MAXIMUM_RADIUS_MM,
+        default=DEFAULT_MAXIMUM_DIAMETER_MM,
         help=(
-            "Maximum tower radius in millimeters. "
-            f"Default: {DEFAULT_MAXIMUM_RADIUS_MM}"
+            "Maximum tower outer diameter in millimeters. "
+            f"Default: {DEFAULT_MAXIMUM_DIAMETER_MM}"
         ),
     )
 
     parser.add_argument(
-        "--minimum-wall",
-        type=float,
-        default=DEFAULT_MINIMUM_WALL_THICKNESS_MM,
+        "--simulate-full-tower-infill",
+        action="store_true",
         help=(
-            "Minimum wall thickness in millimeters. "
-            f"Default: {DEFAULT_MINIMUM_WALL_THICKNESS_MM}"
-        ),
-    )
-
-    parser.add_argument(
-        "--maximum-wall",
-        type=float,
-        default=DEFAULT_MAXIMUM_WALL_THICKNESS_MM,
-        help=(
-            "Maximum wall thickness in millimeters. "
-            f"Default: {DEFAULT_MAXIMUM_WALL_THICKNESS_MM}"
-        ),
-    )
-
-    parser.add_argument(
-        "--wall-path-width",
-        type=float,
-        default=DEFAULT_WALL_PATH_WIDTH_MM,
-        help=(
-            "Effective slicer wall-line width in millimeters. "
-            f"Default: {DEFAULT_WALL_PATH_WIDTH_MM}"
-        ),
-    )
-
-    parser.add_argument(
-        "--minimum-inner-radius",
-        type=float,
-        default=DEFAULT_MINIMUM_INNER_RADIUS_MM,
-        help=(
-            "Minimum preserved hollow radius in millimeters. "
-            f"Default: {DEFAULT_MINIMUM_INNER_RADIUS_MM}"
+            "Simulate 100 percent tower infill in isolated calibration slices. "
+            "The exported STL still requires a matching object-specific "
+            "slicer setting."
         ),
     )
 
@@ -277,16 +242,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Maximum allowed radius change per millimeter Z. "
             f"Default: {DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z}"
-        ),
-    )
-
-    parser.add_argument(
-        "--maximum-wall-change",
-        type=float,
-        default=DEFAULT_MAXIMUM_WALL_CHANGE_PER_MM_Z,
-        help=(
-            "Maximum wall-thickness change per millimeter Z. "
-            f"Default: {DEFAULT_MAXIMUM_WALL_CHANGE_PER_MM_Z}"
         ),
     )
 
@@ -1351,12 +1306,11 @@ def main() -> int:
             settings = GenerationSettings(
                 target_layer_time_s=arguments.target_time,
                 safety_factor=arguments.safety_factor,
-                minimum_outer_radius_mm=arguments.minimum_radius,
-                maximum_outer_radius_mm=arguments.maximum_radius,
-                minimum_wall_thickness_mm=arguments.minimum_wall,
-                maximum_wall_thickness_mm=arguments.maximum_wall,
-                wall_path_width_mm=arguments.wall_path_width,
-                minimum_inner_radius_mm=arguments.minimum_inner_radius,
+                minimum_outer_diameter_mm=arguments.minimum_diameter,
+                maximum_outer_diameter_mm=arguments.maximum_diameter,
+                simulate_full_tower_infill=(
+                    arguments.simulate_full_tower_infill
+                ),
                 minimum_base_radius_mm=arguments.minimum_base_radius,
                 base_height_mm=arguments.base_height,
                 base_margin_mm=arguments.base_margin,
@@ -1377,9 +1331,6 @@ def main() -> int:
                 ),
                 maximum_expansion_angle_deg=arguments.expansion_angle,
                 maximum_contraction_angle_deg=arguments.contraction_angle,
-                maximum_wall_change_per_mm_z=(
-                    arguments.maximum_wall_change
-                ),
                 local_reference_window=arguments.local_window,
                 mesh_segments=arguments.mesh_segments,
             )
@@ -1436,8 +1387,8 @@ def main() -> int:
             profile_config = TowerProfileConfig(
                 target_layer_time_s=arguments.target_time,
                 safety_factor=arguments.safety_factor,
-                minimum_radius_mm=arguments.minimum_radius,
-                maximum_radius_mm=arguments.maximum_radius,
+                minimum_radius_mm=arguments.minimum_diameter / 2.0,
+                maximum_radius_mm=arguments.maximum_diameter / 2.0,
                 local_time_factor_window=arguments.local_window,
             )
             validate_profile_config(profile_config)

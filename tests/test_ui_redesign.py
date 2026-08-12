@@ -54,22 +54,17 @@ class UiRedesignTests(unittest.TestCase):
         self.assertTrue(window.progress_bar.isHidden())
         window.close()
 
-    def test_02_stl_and_preview_quality_explanations_are_compact(self) -> None:
+    def test_02_stl_and_preview_iteration_explanations_are_compact(self) -> None:
         window = self.window()
         self.assertEqual(
             window.stl_mode_description.text(),
             "STL-Dateien bleiben allgemein anpassbar.",
         )
         self.assertFalse(hasattr(window, "preview_quality_label"))
-        self.assertEqual(
-            tuple(
-                window.preview_quality_buttons[key].text()
-                for key in ("fast", "balanced", "exact")
-            ),
-            ("Schnell", "Mittel", "Exakt"),
-        )
-        for button in window.preview_quality_buttons.values():
-            self.assertTrue(button.toolTip())
+        self.assertEqual(window.preview_faster_label.text(), "Schneller")
+        self.assertEqual(window.preview_precise_label.text(), "Präziser")
+        self.assertEqual(window.preview_iteration_count_label.text(), "3 Durchläufe")
+        self.assertTrue(window.preview_iteration_slider.toolTip())
         self.assertIn("endgültige Layerzeit", window.layer_time_check_hint.text())
         window.close()
 
@@ -116,8 +111,8 @@ class UiRedesignTests(unittest.TestCase):
         self.assertEqual(
             window.validation_label.text().splitlines(),
             [
-                "Kleinster Außenradius: 0,000 mm",
-                "• Liegt unter dem Mindestwert 0,001 mm.",
+                "Kleinster Außendurchmesser: 0,000 mm",
+                "• Liegt unter dem Mindestwert 0,002 mm.",
             ],
         )
         window.close()

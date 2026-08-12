@@ -1,49 +1,190 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, Mapping
 
 
-@dataclass(frozen=True, slots=True)
+_UNSET = object()
+_LEGACY_HOLLOW_DEFAULTS: Mapping[str, float] = {
+    "minimum_wall_thickness_mm": 0.80,
+    "maximum_wall_thickness_mm": 4.20,
+    "wall_path_width_mm": 0.42,
+    "minimum_inner_radius_mm": 2.0,
+    "maximum_wall_change_per_mm_z": 0.42,
+}
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class GenerationSettings:
-    """All settings shared by command-line and graphical front ends."""
+    """User-facing tower-generation settings.
 
-    target_layer_time_s: float = 11.0
-    safety_factor: float = 1.10
+    Diameter is the persisted and displayed width contract.  Read-only radius
+    properties remain as a calculation convenience so geometry code cannot
+    accidentally expose radius values to users again.
 
-    minimum_outer_radius_mm: float = 5.0
-    maximum_outer_radius_mm: float = 20.0
+    Private hollow-geometry values are accepted only as a transitional Python
+    API for old in-process callers.  They are deliberately absent from
+    :meth:`to_dict`, the GUI, CLI and persisted settings schema.
+    """
 
-    minimum_wall_thickness_mm: float = 0.80
-    maximum_wall_thickness_mm: float = 4.20
-    wall_path_width_mm: float = 0.42
-    minimum_inner_radius_mm: float = 2.0
+    target_layer_time_s: float
+    safety_factor: float
 
-    minimum_base_radius_mm: float = 10.0
-    base_height_mm: float = 4.0
-    base_margin_mm: float = 2.0
-    base_height_factor: float = 0.05
-    automatic_base_width: bool = True
-    manual_base_width_mm: float = 20.0
+    minimum_outer_diameter_mm: float
+    maximum_outer_diameter_mm: float
+    simulate_full_tower_infill: bool
 
-    minimum_radius_height_factor: float = 0.04
-    maximum_radius_change_per_mm_z: float = 0.35
-    maximum_expansion_angle_deg: float = 50.0
-    maximum_contraction_angle_deg: float = 50.0
-    maximum_wall_change_per_mm_z: float = 0.42
+    minimum_base_radius_mm: float
+    base_height_mm: float
+    base_margin_mm: float
+    base_height_factor: float
+    automatic_base_width: bool
+    manual_base_width_mm: float
 
-    local_reference_window: int = 5
-    mesh_segments: int = 32
+    minimum_radius_height_factor: float
+    maximum_radius_change_per_mm_z: float
+    maximum_expansion_angle_deg: float
+    maximum_contraction_angle_deg: float
+
+    local_reference_window: int
+    mesh_segments: int
+
+    _legacy_minimum_wall_thickness_mm: float = field(
+        repr=False, compare=False
+    )
+    _legacy_maximum_wall_thickness_mm: float = field(
+        repr=False, compare=False
+    )
+    _legacy_wall_path_width_mm: float = field(
+        repr=False, compare=False
+    )
+    _legacy_minimum_inner_radius_mm: float = field(
+        repr=False, compare=False
+    )
+    _legacy_maximum_wall_change_per_mm_z: float = field(
+        repr=False, compare=False
+    )
+
+    def __init__(
+        self,
+        target_layer_time_s: float = 11.0,
+        safety_factor: float = 1.10,
+        minimum_outer_diameter_mm: float | object = _UNSET,
+        maximum_outer_diameter_mm: float | object = _UNSET,
+        simulate_full_tower_infill: bool = False,
+        minimum_base_radius_mm: float = 10.0,
+        base_height_mm: float = 4.0,
+        base_margin_mm: float = 2.0,
+        base_height_factor: float = 0.05,
+        automatic_base_width: bool = True,
+        manual_base_width_mm: float = 20.0,
+        minimum_radius_height_factor: float = 0.04,
+        maximum_radius_change_per_mm_z: float = 0.35,
+        maximum_expansion_angle_deg: float = 50.0,
+        maximum_contraction_angle_deg: float = 50.0,
+        local_reference_window: int = 5,
+        mesh_segments: int = 32,
+        **legacy: Any,
+    ) -> None:
+        legacy_minimum_radius = legacy.pop("minimum_outer_radius_mm", _UNSET)
+        legacy_maximum_radius = legacy.pop("maximum_outer_radius_mm", _UNSET)
+        if legacy_minimum_radius is not _UNSET:
+            minimum_outer_diameter_mm = 2.0 * float(legacy_minimum_radius)
+        elif minimum_outer_diameter_mm is _UNSET:
+            minimum_outer_diameter_mm = (
+                10.0
+            )
+        if legacy_maximum_radius is not _UNSET:
+            maximum_outer_diameter_mm = 2.0 * float(legacy_maximum_radius)
+        elif maximum_outer_diameter_mm is _UNSET:
+            maximum_outer_diameter_mm = (
+                40.0
+            )
+
+        hollow_values: dict[str, float] = {}
+        for name, default in _LEGACY_HOLLOW_DEFAULTS.items():
+            carried = legacy.pop(f"_legacy_{name}", default)
+            hollow_values[name] = float(legacy.pop(name, carried))
+        if legacy:
+            unknown = ", ".join(sorted(legacy))
+            raise TypeError(f"Unknown generation setting(s): {unknown}")
+
+        public_values = {
+            "target_layer_time_s": target_layer_time_s,
+            "safety_factor": safety_factor,
+            "minimum_outer_diameter_mm": minimum_outer_diameter_mm,
+            "maximum_outer_diameter_mm": maximum_outer_diameter_mm,
+            "simulate_full_tower_infill": simulate_full_tower_infill,
+            "minimum_base_radius_mm": minimum_base_radius_mm,
+            "base_height_mm": base_height_mm,
+            "base_margin_mm": base_margin_mm,
+            "base_height_factor": base_height_factor,
+            "automatic_base_width": automatic_base_width,
+            "manual_base_width_mm": manual_base_width_mm,
+            "minimum_radius_height_factor": minimum_radius_height_factor,
+            "maximum_radius_change_per_mm_z": maximum_radius_change_per_mm_z,
+            "maximum_expansion_angle_deg": maximum_expansion_angle_deg,
+            "maximum_contraction_angle_deg": maximum_contraction_angle_deg,
+            "local_reference_window": local_reference_window,
+            "mesh_segments": mesh_segments,
+        }
+        for name, value in public_values.items():
+            object.__setattr__(self, name, value)
+        for name, value in hollow_values.items():
+            object.__setattr__(self, f"_legacy_{name}", value)
+
+    @property
+    def minimum_outer_radius_mm(self) -> float:
+        return float(self.minimum_outer_diameter_mm) / 2.0
+
+    @property
+    def maximum_outer_radius_mm(self) -> float:
+        return float(self.maximum_outer_diameter_mm) / 2.0
+
+    # Transitional read-only properties keep historical hollow-profile unit
+    # tests importable while all active workflows use the solid profile.
+    @property
+    def minimum_wall_thickness_mm(self) -> float:
+        return self._legacy_minimum_wall_thickness_mm
+
+    @property
+    def maximum_wall_thickness_mm(self) -> float:
+        return self._legacy_maximum_wall_thickness_mm
+
+    @property
+    def wall_path_width_mm(self) -> float:
+        return self._legacy_wall_path_width_mm
+
+    @property
+    def minimum_inner_radius_mm(self) -> float:
+        return self._legacy_minimum_inner_radius_mm
+
+    @property
+    def maximum_wall_change_per_mm_z(self) -> float:
+        return self._legacy_maximum_wall_change_per_mm_z
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            item.name: getattr(self, item.name)
+            for item in fields(self)
+            if not item.name.startswith("_legacy_")
+        }
 
     @classmethod
     def from_mapping(
         cls,
         values: Mapping[str, Any],
     ) -> "GenerationSettings":
-        allowed = {field.name for field in fields(cls)}
+        public = {
+            item.name
+            for item in fields(cls)
+            if not item.name.startswith("_legacy_")
+        }
+        allowed = public | {
+            "minimum_outer_radius_mm",
+            "maximum_outer_radius_mm",
+            *_LEGACY_HOLLOW_DEFAULTS,
+        }
         unknown = sorted(set(values) - allowed)
         if unknown:
             raise ValueError(

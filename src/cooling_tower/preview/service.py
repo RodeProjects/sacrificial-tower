@@ -44,10 +44,10 @@ from cooling_tower.services.tower_need_service import (
     assess_tower_need,
     layers_for_tower,
 )
-from cooling_tower.tower.hollow_profile import build_hollow_tower_profile
+from cooling_tower.tower.solid_profile import build_solid_tower_profile
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
-    generate_hollow_tower_mesh,
+    generate_solid_tower_mesh,
     write_binary_stl,
 )
 from cooling_tower.tower.profile import (
@@ -391,13 +391,13 @@ class PreviewService:
                         local_time_factor_window=request.settings.local_reference_window,
                     ),
                 )
-                profile = build_hollow_tower_profile(
+                profile = build_solid_tower_profile(
                     radius,
                     request.settings,
                     tower_end_z_mm=assessment.tower_end_z_mm,
                     object_height_mm=request.snapshot.maximum_print_z_mm,
                 )
-                mesh = generate_hollow_tower_mesh(
+                mesh = generate_solid_tower_mesh(
                     profile,
                     TowerMeshConfig(request.settings.mesh_segments),
                 )

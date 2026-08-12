@@ -119,14 +119,32 @@ def protect_profile_sources(profile: EffectiveProfile) -> Iterator[None]:
 
 
 @contextmanager
-def protect_profile_paths(paths: Iterable[Path]) -> Iterator[None]:
+def protect_profile_paths(
+    paths: Iterable[Path],
+    *,
+    expected_initial_fingerprint: str | None = None,
+) -> Iterator[None]:
     """Guard selected presets and every inherited source as one unit."""
 
-    fingerprints = fingerprint_profile_paths(paths)
+    retained_paths = tuple(paths)
+    fingerprints = (
+        None
+        if expected_initial_fingerprint is not None
+        else fingerprint_profile_paths(retained_paths)
+    )
     try:
         yield
     finally:
-        assert_profile_sources_unchanged(fingerprints)
+        if fingerprints is not None:
+            assert_profile_sources_unchanged(fingerprints)
+        elif (
+            profile_paths_fingerprint(retained_paths)
+            != expected_initial_fingerprint
+        ):
+            raise SlicerSourceMutationError(
+                "Kritischer Sicherheitsabbruch: Mindestens ein originales "
+                "Slicer-Profil wurde waehrend des Vorgangs veraendert."
+            )
 
 
 def assert_profile_copies_are_isolated(

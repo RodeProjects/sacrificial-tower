@@ -24,12 +24,23 @@ COOLING_OVERRIDE_KEYS: Mapping[str, object] = {
     "fan_cooling_layer_time": 0,
 }
 
+FULL_INFILL_OVERRIDE_BY_ADAPTER: Mapping[str, tuple[str, object]] = {
+    "anycubic_slicer_next": ("sparse_infill_density", "100%"),
+    "orca_slicer": ("sparse_infill_density", "100%"),
+    "bambu_studio": ("sparse_infill_density", "100%"),
+    "prusa_slicer": ("fill_density", "100%"),
+    "cura": ("infill_sparse_density", 100),
+}
+
 
 def build_calibration_profile(
     profile: EffectiveProfile,
     working_directory: Path,
+    *,
+    simulate_full_tower_infill: bool = False,
+    resolved_profiles: Sequence[ResolvedProfile] | None = None,
 ) -> tuple[EffectiveProfile, Mapping[str, object]]:
-    """Create a disposable effective profile with cooling slowdown disabled."""
+    """Create a disposable effective profile for isolated tower test slices."""
 
     values = dict(profile.effective_values)
     orca_family = profile.installation.adapter_id in {
@@ -59,12 +70,39 @@ def build_calibration_profile(
             values[key] = replacement
             applied[key] = replacement
 
+    cooling_applied = dict(applied)
+    if simulate_full_tower_infill:
+        override = FULL_INFILL_OVERRIDE_BY_ADAPTER.get(
+            profile.installation.adapter_id
+        )
+        if override is None:
+            raise ValueError(
+                "Für diesen Slicer ist keine sichere temporäre "
+                "100-%-Füllungsüberschreibung definiert."
+            )
+        key, replacement = override
+        serialized = _profile_override_value(
+            replacement,
+            values.get(key),
+            orca_family=orca_family,
+        )
+        values[key] = serialized
+        applied[key] = serialized
+
     if orca_family:
         working_directory.mkdir(parents=True, exist_ok=True)
-        resolved_profiles = _resolve_orca_role_profiles(profile)
+        resolved_by_path = (
+            {
+                item.record.path: item
+                for item in resolved_profiles
+                if item.valid and item.effective_values
+            }
+            if resolved_profiles is not None
+            else _resolve_orca_role_profiles(profile)
+        )
         resolved_values = {
             path: dict(resolved.effective_values)
-            for path, resolved in resolved_profiles.items()
+            for path, resolved in resolved_by_path.items()
         }
         machine_values = (
             resolved_values.get(profile.machine.path)
@@ -79,7 +117,7 @@ def build_calibration_profile(
             )
         )
         machine_resolved = (
-            resolved_profiles.get(profile.machine.path)
+            resolved_by_path.get(profile.machine.path)
             if profile.machine is not None
             else None
         )
@@ -105,7 +143,7 @@ def build_calibration_profile(
             profile.process,
             working_directory / "process_01.json",
             overrides=applied,
-            include_missing_overrides=False,
+            include_missing_overrides=True,
             resolved_values=(
                 resolved_values.get(profile.process.path)
                 if profile.process is not None
@@ -117,7 +155,7 @@ def build_calibration_profile(
             _materialize_orca_profile_copy(
                 record,
                 working_directory / f"filament_{index:02d}.json",
-                overrides=applied,
+                overrides=cooling_applied,
                 include_missing_overrides=True,
                 resolved_values=resolved_values.get(record.path),
                 compatible_machine_identity=machine_identity,

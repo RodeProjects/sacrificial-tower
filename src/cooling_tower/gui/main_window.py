@@ -20,7 +20,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -38,6 +37,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QTextEdit,
     QToolButton,
@@ -161,26 +161,26 @@ from cooling_tower.runtime_paths import (
     resolve_user_data_root,
 )
 from cooling_tower.support_report import SupportReportService
-from cooling_tower.tower.hollow_profile import (
+from cooling_tower.tower.solid_profile import (
     MAXIMUM_EXPANSION_ANGLE_DEG,
-    validate_hollow_settings,
+    validate_solid_settings,
 )
 from cooling_tower.tower.base_calculator import (
     BASE_WIDTH_PER_OBJECT_HEIGHT,
     MINIMUM_BASE_WIDTH_MM,
 )
-from cooling_tower.tower.wall_calculator import calculate_wall_path_bounds
 
 
-PREVIEW_QUALITY_ITERATIONS = {
+LEGACY_PREVIEW_QUALITY_ITERATIONS = {
     "fast": 1,
     "balanced": 3,
     "exact": 5,
 }
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-DEFAULT_PREVIEW_QUALITY = "balanced"
-EXPORT_SLICER_ITERATIONS = 5
+MINIMUM_PREVIEW_ITERATIONS = 1
+MAXIMUM_PREVIEW_ITERATIONS = 8
+DEFAULT_PREVIEW_ITERATIONS = 3
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 120.0
@@ -234,17 +234,12 @@ LICENSE_STATUS_DEFINITIONS = {
 SETTING_UNITS = {
     "target_layer_time_s": "s",
     "safety_factor": "",
-    "minimum_outer_radius_mm": "mm",
-    "maximum_outer_radius_mm": "mm",
-    "minimum_wall_thickness_mm": "mm",
-    "maximum_wall_thickness_mm": "mm",
-    "wall_path_width_mm": "mm",
-    "minimum_inner_radius_mm": "mm",
+    "minimum_outer_diameter_mm": "mm",
+    "maximum_outer_diameter_mm": "mm",
     "manual_base_width_mm": "mm",
     "base_height_mm": "mm",
     "maximum_expansion_angle_deg": "°",
     "maximum_contraction_angle_deg": "°",
-    "maximum_wall_change_per_mm_z": "mm/mm",
     "mesh_segments": "Segm.",
     "local_reference_window": "Layer",
 }
@@ -1669,63 +1664,45 @@ class MainWindow(QMainWindow):
         self.geometry_group = geometry_group
         geometry_layout = geometry_group.content_layout
         self.geometry_fields_layout = geometry_layout
-        self.minimum_outer_spin = self._double_spin(0.001, 500.0, 3, 0.5, "minimumOuterRadius")
-        self.maximum_outer_spin = self._double_spin(0.001, 500.0, 3, 0.5, "maximumOuterRadius")
-        self.minimum_wall_spin = self._double_spin(0.001, 100.0, 3, 0.1, "minimumWall")
-        self.maximum_wall_spin = self._double_spin(0.001, 100.0, 3, 0.1, "maximumWall")
-        self.path_width_spin = self._double_spin(0.001, 10.0, 3, 0.01, "wallPathWidth")
-        self.minimum_inner_spin = self._double_spin(0.001, 500.0, 3, 0.5, "minimumInnerRadius")
-        self.maximum_diameter_label = QLabel()
-        self.maximum_diameter_label.setObjectName("helpText")
-        self.maximum_diameter_label.setWordWrap(True)
-        self.wall_paths_label = QLabel()
-        self.wall_paths_label.setObjectName("calculatedHint")
-        self.wall_paths_label.setWordWrap(True)
+        self.minimum_outer_spin = self._double_spin(
+            0.002, 1000.0, 3, 1.0, "minimumOuterDiameter"
+        )
+        self.maximum_outer_spin = self._double_spin(
+            0.002, 1000.0, 3, 1.0, "maximumOuterDiameter"
+        )
         self._add_numeric_setting(
             geometry_layout,
-            "minimum_outer_radius_mm",
-            "Kleinster Außenradius",
+            "minimum_outer_diameter_mm",
+            "Kleinster Außendurchmesser",
             self.minimum_outer_spin,
         )
         self._add_numeric_setting(
             geometry_layout,
-            "maximum_outer_radius_mm",
-            "Größter Außenradius",
+            "maximum_outer_diameter_mm",
+            "Größter Außendurchmesser",
             self.maximum_outer_spin,
         )
-        geometry_layout.addWidget(self.maximum_diameter_label)
-        self._add_numeric_setting(
-            geometry_layout,
-            "minimum_wall_thickness_mm",
-            "Minimale Wandstärke",
-            self.minimum_wall_spin,
+        self.full_infill_checkbox = QCheckBox(
+            "100 % Turmfüllung simulieren"
         )
-        self._add_numeric_setting(
-            geometry_layout,
-            "maximum_wall_thickness_mm",
-            "Maximale Wandstärke",
-            self.maximum_wall_spin,
+        self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
+        self.full_infill_checkbox.setToolTip(
+            "Verwendet ausschließlich für die Testslices eine temporäre "
+            "Prozessprofilkopie mit 100 % Fülldichte."
         )
-        self._add_numeric_setting(
-            geometry_layout,
-            "wall_path_width_mm",
-            "Linienbreite der Wand",
-            self.path_width_spin,
-        )
-        self._add_numeric_setting(
-            geometry_layout,
-            "minimum_inner_radius_mm",
-            "Minimaler Hohlraumradius",
-            self.minimum_inner_spin,
-        )
-        geometry_layout.addWidget(self.wall_paths_label)
+        geometry_layout.addWidget(self.full_infill_checkbox)
         geometry_hint = QLabel(
-            "Für eine 0,4-mm-Düse hier die tatsächlich im Slicer verwendete "
-            "Linienbreite eintragen."
+            "Der Turm ist ein geschlossener Vollkörper. Seine tatsächliche "
+            "Füllung folgt dem ausgewählten Prozessprofil und wird in den "
+            "Testslices einschließlich Wänden und Infill mitgemessen."
         )
         geometry_hint.setWordWrap(True)
         geometry_hint.setObjectName("helpText")
         geometry_layout.addWidget(geometry_hint)
+        self.full_infill_hint = QLabel()
+        self.full_infill_hint.setWordWrap(True)
+        self.full_infill_hint.setObjectName("calculatedHint")
+        geometry_layout.addWidget(self.full_infill_hint)
         geometry_group.refresh_collapsed_state()
         self.content_layout.addWidget(geometry_group)
 
@@ -1824,7 +1801,6 @@ class MainWindow(QMainWindow):
         self.maximum_contraction_angle_spin = self._double_spin(
             1.0, 85.0, 1, 1.0, "maximumContractionAngle"
         )
-        self.maximum_wall_change_spin = self._double_spin(0.0, 100.0, 4, 0.05, "maximumWallChange")
         stability_fields_layout.addWidget(automatic_row)
         manual_base_setting = self._add_numeric_setting(
             stability_fields_layout,
@@ -1865,12 +1841,6 @@ class MainWindow(QMainWindow):
             "maximum_contraction_angle_deg",
             "Maximaler Verjüngungswinkel zur Vertikalen",
             self.maximum_contraction_angle_spin,
-        )
-        self._add_numeric_setting(
-            overhang_layout,
-            "maximum_wall_change_per_mm_z",
-            "Max. Wandstärkenänderung",
-            self.maximum_wall_change_spin,
         )
         overhang_group.refresh_collapsed_state()
         self.content_layout.addWidget(overhang_group)
@@ -2444,73 +2414,63 @@ class MainWindow(QMainWindow):
         self.preview_quality_panel = QWidget()
         self.preview_quality_panel.setObjectName("previewQualityPanel")
         self.preview_quality_panel.setAccessibleName(
-            "Vorschauqualität auswählen"
+            "Anzahl der Slicer-Durchläufe auswählen"
         )
-        preview_quality_layout = QHBoxLayout(self.preview_quality_panel)
-        preview_quality_layout.setContentsMargins(0, 0, 0, 0)
+        preview_quality_layout = QVBoxLayout(self.preview_quality_panel)
+        preview_quality_layout.setContentsMargins(2, 0, 2, 3)
         preview_quality_layout.setSpacing(0)
-        self.preview_quality_selector = QFrame()
-        self.preview_quality_selector.setObjectName("previewQualitySelector")
-        quality_buttons_layout = QHBoxLayout(self.preview_quality_selector)
-        quality_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        quality_buttons_layout.setSpacing(0)
-        self.preview_quality_group = QButtonGroup(self)
-        self.preview_quality_group.setExclusive(True)
-        self.preview_quality_buttons: dict[str, QToolButton] = {}
-        quality_options = (
-            (
-                "fast",
-                "Schnell",
-                "1 Slicer-Durchlauf – kürzeste Wartezeit, "
-                "geringste Genauigkeit.",
-            ),
-            (
-                "balanced",
-                "Mittel",
-                "Mindestens 2, höchstens 3 Slicer-Durchläufe – beendet die "
-                "Prüfung als guten Kompromiss vorzeitig, sobald die Ergebnisse "
-                "praktisch stabil sind.",
-            ),
-            (
-                "exact",
-                "Exakt",
-                "Mindestens 2, höchstens 5 Slicer-Durchläufe – höchste "
-                "Genauigkeit durch weitere Prüfungen bei merklichen "
-                "Unterschieden bis zur Stabilität.",
-            ),
+        self.preview_iteration_count_label = QLabel()
+        self.preview_iteration_count_label.setObjectName(
+            "previewIterationCountLabel"
         )
-        for index, (quality, label, description) in enumerate(quality_options):
-            button = QToolButton()
-            button.setObjectName("previewQualityButton")
-            button.setText(label)
-            button.setCheckable(True)
-            button.setToolTip(f"{label}: {description}")
-            button.setAccessibleName(
-                f"Vorschauqualität {label}: {description}"
-            )
-            button.setProperty("quality", quality)
-            button.setProperty(
-                "segment",
-                "first"
-                if index == 0
-                else "last"
-                if index == len(quality_options) - 1
-                else "middle",
-            )
-            button.setSizePolicy(
-                QSizePolicy.Policy.Ignored,
-                QSizePolicy.Policy.Fixed,
-            )
-            button.setFixedHeight(24)
-            self.preview_quality_group.addButton(button)
-            self.preview_quality_buttons[quality] = button
-            quality_buttons_layout.addWidget(button, 1)
-        self.preview_quality_buttons[DEFAULT_PREVIEW_QUALITY].setChecked(True)
-        self.preview_quality_group.buttonToggled.connect(
-            self._on_preview_quality_toggled
+        self.preview_iteration_count_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
         )
-        preview_quality_layout.addWidget(self.preview_quality_selector, 1)
-        self.preview_quality_panel.setFixedHeight(24)
+        self.preview_iteration_slider = QSlider(Qt.Orientation.Horizontal)
+        self.preview_iteration_slider.setObjectName("previewIterationSlider")
+        self.preview_iteration_slider.setRange(
+            MINIMUM_PREVIEW_ITERATIONS,
+            MAXIMUM_PREVIEW_ITERATIONS,
+        )
+        self.preview_iteration_slider.setSingleStep(1)
+        self.preview_iteration_slider.setPageStep(1)
+        self.preview_iteration_slider.setTickInterval(1)
+        self.preview_iteration_slider.setTickPosition(
+            QSlider.TickPosition.TicksBelow
+        )
+        self.preview_iteration_slider.setValue(DEFAULT_PREVIEW_ITERATIONS)
+        self.preview_iteration_slider.setToolTip(
+            "Legt fest, wie viele aufeinanderfolgende Slicer-Durchläufe für "
+            "Vorschau und Export ausgeführt werden. Mehr Durchläufe erlauben "
+            "eine genauere Annäherung, benötigen aber mehr Zeit. Bei einem "
+            "technischen Fehler wird die Prüfung sicher abgebrochen."
+        )
+        self.preview_iteration_slider.setAccessibleName(
+            "Slicer-Durchläufe für Vorschau und Export"
+        )
+        endpoint_row = QWidget()
+        endpoint_layout = QHBoxLayout(endpoint_row)
+        endpoint_layout.setContentsMargins(0, 0, 0, 0)
+        endpoint_layout.setSpacing(0)
+        self.preview_faster_label = QLabel("Schneller")
+        self.preview_faster_label.setObjectName("previewIterationEndpoint")
+        self.preview_precise_label = QLabel("Präziser")
+        self.preview_precise_label.setObjectName("previewIterationEndpoint")
+        self.preview_precise_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        endpoint_layout.addWidget(self.preview_faster_label)
+        endpoint_layout.addStretch(1)
+        endpoint_layout.addSpacing(6)
+        endpoint_layout.addWidget(self.preview_iteration_count_label)
+        endpoint_layout.addSpacing(6)
+        endpoint_layout.addStretch(1)
+        endpoint_layout.addWidget(self.preview_precise_label)
+        preview_quality_layout.addWidget(self.preview_iteration_slider)
+        preview_quality_layout.addWidget(endpoint_row)
+        self.preview_iteration_slider.valueChanged.connect(
+            self._on_preview_iterations_changed
+        )
+        self._update_preview_iteration_label()
+        self.preview_quality_panel.setFixedHeight(48)
 
         self.preview_action_control = QFrame()
         self.preview_action_control.setObjectName("previewActionControl")
@@ -2676,6 +2636,9 @@ class MainWindow(QMainWindow):
         self.automatic_base_checkbox.stateChanged.connect(
             self._on_base_mode_changed
         )
+        self.full_infill_checkbox.toggled.connect(
+            self._on_full_infill_changed
+        )
         self.output_root_reset_button.clicked.connect(
             self._reset_output_root
         )
@@ -2721,7 +2684,6 @@ class MainWindow(QMainWindow):
             self.reset_button,
             self.preview_action_control,
             self.preview_button,
-            *self.preview_quality_buttons.values(),
             self.export_button,
         ):
             widget.setVisible(actions_visible)
@@ -2800,9 +2762,6 @@ class MainWindow(QMainWindow):
         info_text: str | None = None,
         default_value: int | float | None = None,
     ) -> NumericSettingWidget:
-        if setting_name == "maximum_wall_change_per_mm_z":
-            editor.setProperty("rangeLabelDecimals", 2)
-            editor.setProperty("rangeLabelHideUnit", True)
         default_provider = (
             (lambda value=default_value: value)
             if default_value is not None
@@ -3339,20 +3298,28 @@ class MainWindow(QMainWindow):
             self._additional_options_dialog.close()
 
     def _restore_phase17_ui_state(self, ui_state: dict[str, object]) -> None:
-        quality = str(ui_state.get("preview_quality", "")).casefold()
-        if quality not in PREVIEW_QUALITY_ITERATIONS:
+        try:
+            iterations = int(ui_state.get("preview_iterations", 0))
+        except (TypeError, ValueError):
+            iterations = 0
+        if not (
+            MINIMUM_PREVIEW_ITERATIONS
+            <= iterations
+            <= MAXIMUM_PREVIEW_ITERATIONS
+        ):
+            quality = str(ui_state.get("preview_quality", "")).casefold()
+            iterations = LEGACY_PREVIEW_QUALITY_ITERATIONS.get(quality, 0)
+        if not iterations:
             try:
-                legacy_iterations = int(ui_state.get("slicer_iterations", 2))
+                iterations = int(
+                    ui_state.get(
+                        "slicer_iterations",
+                        DEFAULT_PREVIEW_ITERATIONS,
+                    )
+                )
             except (TypeError, ValueError):
-                legacy_iterations = 2
-            quality = (
-                "fast"
-                if legacy_iterations <= 1
-                else "balanced"
-                if legacy_iterations < 5
-                else "exact"
-            )
-        self._set_preview_quality(quality, invalidate=False)
+                iterations = DEFAULT_PREVIEW_ITERATIONS
+        self._set_preview_iterations(iterations, invalidate=False)
         self._pending_preview_camera_state = ui_state.get("preview_camera")
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.apply_camera_state(
@@ -3372,61 +3339,54 @@ class MainWindow(QMainWindow):
     def _calibration_config(self) -> CalibrationConfig:
         return CalibrationConfig(
             mode=CalibrationMode.STL,
-            maximum_iterations=PREVIEW_QUALITY_ITERATIONS[
-                self.preview_quality
-            ],
+            maximum_iterations=self.preview_iterations,
         )
 
     @property
-    def preview_quality(self) -> str:
-        checked = self.preview_quality_group.checkedButton()
-        if checked is None:
-            return DEFAULT_PREVIEW_QUALITY
-        quality = str(checked.property("quality")).casefold()
-        return (
-            quality
-            if quality in PREVIEW_QUALITY_ITERATIONS
-            else DEFAULT_PREVIEW_QUALITY
-        )
+    def preview_iterations(self) -> int:
+        return int(self.preview_iteration_slider.value())
 
-    def _set_preview_quality(
+    def _set_preview_iterations(
         self,
-        quality: str,
+        iterations: int,
         *,
         invalidate: bool,
     ) -> None:
-        normalized = quality.casefold()
-        if normalized not in PREVIEW_QUALITY_ITERATIONS:
-            normalized = DEFAULT_PREVIEW_QUALITY
-        changed = normalized != self.preview_quality
-        self.preview_quality_group.blockSignals(True)
+        normalized = min(
+            MAXIMUM_PREVIEW_ITERATIONS,
+            max(MINIMUM_PREVIEW_ITERATIONS, int(iterations)),
+        )
+        changed = normalized != self.preview_iterations
+        self.preview_iteration_slider.blockSignals(True)
         try:
-            self.preview_quality_buttons[normalized].setChecked(True)
+            self.preview_iteration_slider.setValue(normalized)
         finally:
-            self.preview_quality_group.blockSignals(False)
+            self.preview_iteration_slider.blockSignals(False)
+        self._update_preview_iteration_label()
         if changed and invalidate:
-            self._on_preview_quality_changed()
+            self._on_preview_iterations_changed(normalized)
 
-    def _on_preview_quality_toggled(
-        self,
-        _button: QToolButton,
-        checked: bool,
-    ) -> None:
-        if checked and not self._loading_phase17_state:
-            self._on_preview_quality_changed()
+    def _update_preview_iteration_label(self) -> None:
+        iterations = self.preview_iterations
+        noun = "Durchlauf" if iterations == 1 else "Durchläufe"
+        self.preview_iteration_count_label.setText(f"{iterations} {noun}")
+        self.preview_iteration_slider.setAccessibleDescription(
+            f"Aktuell sind {iterations} Slicer-{noun} eingestellt."
+        )
 
-    def _on_preview_quality_changed(self) -> None:
+    def _on_preview_iterations_changed(self, _value: int) -> None:
+        self._update_preview_iteration_label()
+        if self._loading_phase17_state:
+            return
         self._invalidate_preview(
-            "Die Vorschauqualität wurde geändert.",
-            preserve_slicer_prediction=True,
+            "Die Anzahl der Slicer-Durchläufe wurde geändert.",
         )
         self._update_section_summaries()
 
-    @staticmethod
-    def _export_calibration_config() -> CalibrationConfig:
+    def _export_calibration_config(self) -> CalibrationConfig:
         return CalibrationConfig(
             mode=CalibrationMode.STL,
-            maximum_iterations=EXPORT_SLICER_ITERATIONS,
+            maximum_iterations=self.preview_iterations,
         )
 
     def _profile_origin_text(self, result: ProfileMatchResult) -> str:
@@ -4062,6 +4022,7 @@ class MainWindow(QMainWindow):
             self.profile_diagnostics.hide()
         self._refresh_stl_availability()
         self._update_preparation_requirements()
+        self.update_wall_path_preview()
 
     def _reset_profile_filter_controls(self) -> None:
         self.show_all_profiles_checkbox.setEnabled(False)
@@ -4716,6 +4677,7 @@ class MainWindow(QMainWindow):
             )
         self._refresh_stl_availability()
         self._update_preparation_requirements()
+        self.update_wall_path_preview()
 
     def _profile_result_matches_catalog_confirmation(
         self,
@@ -6478,7 +6440,7 @@ class MainWindow(QMainWindow):
         self._refresh_ready_grid_layout()
 
     def start_slicer_prediction(self) -> None:
-        """Run a one-off slicer estimate with exactly five iterations."""
+        """Run a slicer estimate with the selected number of passes."""
 
         if not self._slicer_prediction_can_start():
             self._slicer_prediction_status = (
@@ -6486,13 +6448,9 @@ class MainWindow(QMainWindow):
             )
             self._refresh_prediction_advice("Analytische Schätzung")
             return
-        fixed_config = replace(
-            self._calibration_config(),
-            maximum_iterations=5,
-        )
         try:
             request = self._current_preview_request(
-                calibration_config=fixed_config,
+                calibration_config=self._calibration_config(),
             )
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self._slicer_prediction_status = german_user_message(error)
@@ -6503,7 +6461,8 @@ class MainWindow(QMainWindow):
         request_id = self._slicer_prediction_request_id
         self._slicer_prediction_estimate_s = None
         self._slicer_prediction_status = (
-            "Slicer-gestützte Schätzung mit fest fünf Durchläufen wird erstellt …"
+            "Slicer-gestützte Schätzung mit "
+            f"{self.preview_iterations} Durchläufen wird erstellt …"
         )
         worker = PreviewWorker(request_id, request, self.preview_service)
         worker.progress.connect(self._on_slicer_prediction_progress)
@@ -6916,6 +6875,23 @@ class MainWindow(QMainWindow):
         self.profile_feasibility = None
         self._invalidate_preview("Die Standfußberechnung wurde geändert.")
         self._update_automatic_base_width_preview()
+        self._refresh_tower_assessment()
+        self._update_section_summaries()
+        self.validate_form()
+        self._schedule_feasibility_validation()
+
+    def _on_full_infill_changed(self, _checked: bool) -> None:
+        if self._closing:
+            return
+        self._last_changed_setting_name = "simulate_full_tower_infill"
+        self._pending_reset_setting_name = None
+        self._feasibility_request_id += 1
+        self._cancel_feasibility_jobs()
+        self.profile_feasibility = None
+        self._invalidate_preview(
+            "Die simulierte Turmfüllung wurde geändert."
+        )
+        self.update_wall_path_preview()
         self._refresh_tower_assessment()
         self._update_section_summaries()
         self.validate_form()
@@ -7736,6 +7712,13 @@ class MainWindow(QMainWindow):
                 else "deaktiviert"
             )
             return f"Automatische Standfußbreite: {state}"
+        if setting_name == "simulate_full_tower_infill":
+            state = (
+                "aktiviert"
+                if self.full_infill_checkbox.isChecked()
+                else "deaktiviert"
+            )
+            return f"100 % Turmfüllung simulieren: {state}"
         setting = self._setting_widgets.get(setting_name)
         if setting is None:
             return setting_name.replace("_", " ")
@@ -7767,18 +7750,11 @@ class MainWindow(QMainWindow):
             {
                 "target_layer_time_s": ("Ziel-Layerzeit",),
                 "safety_factor": ("Sicherheitsfaktor",),
-                "minimum_outer_radius_mm": ("Mindest-Außenradius",),
-                "maximum_outer_radius_mm": ("Maximaler Außenradius",),
-                "minimum_wall_thickness_mm": ("Mindestwandstärke",),
-                "maximum_wall_thickness_mm": ("Maximalwandstärke",),
-                "wall_path_width_mm": ("Bahnbreite",),
-                "minimum_inner_radius_mm": ("Mindest-Innenradius",),
+                "minimum_outer_diameter_mm": ("Kleinster Außendurchmesser",),
+                "maximum_outer_diameter_mm": ("Größter Außendurchmesser",),
                 "manual_base_width_mm": ("Manuelle Standfußbreite",),
                 "maximum_expansion_angle_deg": ("Aufweitungswinkel",),
                 "maximum_contraction_angle_deg": ("Verjüngungswinkel",),
-                "maximum_wall_change_per_mm_z": (
-                    "Maximale Wandstärkenänderung",
-                ),
                 "local_reference_window": ("Lokales Zeitfenster",),
                 "output_root": ("Exportordner",),
             }.get(setting_name, ())
@@ -7803,43 +7779,27 @@ class MainWindow(QMainWindow):
                 "Maximaler Aufweitungswinkel reicht nicht aus"
             ),
             "BASE_WIDTH_TOO_SMALL": "Standfußbreite reicht nicht aus",
-            "MAXIMUM_OUTER_RADIUS_REACHED": (
-                "Eingestellter größter Außenradius von "
+            "MAXIMUM_OUTER_DIAMETER_REACHED": (
+                "Eingestellter größter Außendurchmesser von "
                 f"{_de_number(self.maximum_outer_spin.value())} mm reicht "
                 "nicht aus"
             ),
-            "MAXIMUM_WALL_THICKNESS_REACHED": (
-                "Eingestellte größte Wandstärke von "
-                f"{_de_number(self.maximum_wall_spin.value())} mm reicht "
-                "nicht aus"
-            ),
-            "MINIMUM_INNER_RADIUS_REACHED": "Mindest-Hohlraumradius erreicht",
         }
         remedies = {
             "EXPANSION_ANGLE_TOO_SMALL": (
                 "Den maximalen Aufweitungswinkel erhöhen.",
                 "Die Ziel-Layerzeit verringern.",
-                "Den maximalen Außenradius oder die zulässige Wandstärke erhöhen.",
+                "Den größten Außendurchmesser erhöhen.",
             ),
             "BASE_WIDTH_TOO_SMALL": (
                 "Die automatische Standfußbreite aktivieren.",
                 "Die manuelle Standfußbreite vergrößern.",
                 "Die Ziel-Layerzeit verringern.",
             ),
-            "MAXIMUM_OUTER_RADIUS_REACHED": (
-                "Den maximalen Außenradius erhöhen.",
+            "MAXIMUM_OUTER_DIAMETER_REACHED": (
+                "Den größten Außendurchmesser erhöhen.",
                 "Die Ziel-Layerzeit verringern.",
-                "Eine größere maximal zulässige Wandstärke verwenden.",
-            ),
-            "MAXIMUM_WALL_THICKNESS_REACHED": (
-                "Die Maximalwandstärke erhöhen.",
-                "Die Ziel-Layerzeit verringern.",
-                "Den maximalen Außenradius erhöhen.",
-            ),
-            "MINIMUM_INNER_RADIUS_REACHED": (
-                "Den Mindest-Hohlraumradius verkleinern.",
-                "Die Ziel-Layerzeit verringern.",
-                "Den maximalen Außenradius oder die Maximalwandstärke erhöhen.",
+                "Optional 100 % Turmfüllung simulieren.",
             ),
         }
         result: list[dict[str, object]] = []
@@ -7860,10 +7820,7 @@ class MainWindow(QMainWindow):
                 for item in members
                 if item.required_value is not None
             ]
-            # Capacity issues expose a required extrusion-path length, not a
-            # required radius, wall thickness, or inner radius.  Only these
-            # two issue types carry a value in the same unit and meaning as
-            # the setting for which we can give an exact recommendation.
+            # Angle and base issues carry directly actionable setting units.
             exact_setting_requirements = (
                 required
                 if code in {
@@ -7948,18 +7905,10 @@ class MainWindow(QMainWindow):
             return "Die zuletzt geänderte Ziel-Layerzeit verringern."
         if trigger == "safety_factor":
             return "Den Sicherheitsfaktor verringern, jedoch nicht unter 1,0."
-        if trigger == "minimum_outer_radius_mm":
-            return "Den Mindest-Außenradius auf den Standardwert zurücksetzen."
-        if trigger == "maximum_outer_radius_mm":
-            return "Den zuletzt geänderten maximalen Außenradius erhöhen."
-        if trigger == "minimum_wall_thickness_mm":
-            return "Die zuletzt geänderte Mindestwandstärke verringern."
-        if trigger == "maximum_wall_thickness_mm":
-            return "Die zuletzt geänderte Maximalwandstärke erhöhen."
-        if trigger == "wall_path_width_mm":
-            return "Die zuletzt geänderte Bahnbreite verringern."
-        if trigger == "minimum_inner_radius_mm":
-            return "Den zuletzt geänderten Mindest-Hohlraumradius verkleinern."
+        if trigger == "minimum_outer_diameter_mm":
+            return "Den kleinsten Außendurchmesser auf den Standardwert zurücksetzen."
+        if trigger == "maximum_outer_diameter_mm":
+            return "Den zuletzt geänderten größten Außendurchmesser erhöhen."
         if trigger == "automatic_base_width":
             return "Die automatische Standfußbreite wieder aktivieren."
         if trigger == "manual_base_width_mm":
@@ -7982,8 +7931,6 @@ class MainWindow(QMainWindow):
             )
         if trigger == "maximum_contraction_angle_deg":
             return "Den zuletzt geänderten Verjüngungswinkel erhöhen."
-        if trigger == "maximum_wall_change_per_mm_z":
-            return "Die zuletzt geänderte Wandstärkenänderung erhöhen."
         return None
 
     def _clear_feasibility_issues(self) -> None:
@@ -8422,12 +8369,11 @@ class MainWindow(QMainWindow):
         return GenerationSettings(
             target_layer_time_s=self.target_time_spin.value(),
             safety_factor=self.safety_factor_spin.value(),
-            minimum_outer_radius_mm=self.minimum_outer_spin.value(),
-            maximum_outer_radius_mm=self.maximum_outer_spin.value(),
-            minimum_wall_thickness_mm=self.minimum_wall_spin.value(),
-            maximum_wall_thickness_mm=self.maximum_wall_spin.value(),
-            wall_path_width_mm=self.path_width_spin.value(),
-            minimum_inner_radius_mm=self.minimum_inner_spin.value(),
+            minimum_outer_diameter_mm=self.minimum_outer_spin.value(),
+            maximum_outer_diameter_mm=self.maximum_outer_spin.value(),
+            simulate_full_tower_infill=(
+                self.full_infill_checkbox.isChecked()
+            ),
             minimum_base_radius_mm=self.minimum_base_spin.value(),
             base_height_mm=self.base_height_spin.value(),
             base_margin_mm=self.base_margin_spin.value(),
@@ -8446,9 +8392,6 @@ class MainWindow(QMainWindow):
             maximum_contraction_angle_deg=(
                 self.maximum_contraction_angle_spin.value()
             ),
-            maximum_wall_change_per_mm_z=(
-                self.maximum_wall_change_spin.value()
-            ),
             local_reference_window=self.local_window_spin.value(),
             mesh_segments=self.mesh_segments_spin.value(),
         )
@@ -8457,12 +8400,8 @@ class MainWindow(QMainWindow):
         values = (
             (self.target_time_spin, settings.target_layer_time_s),
             (self.safety_factor_spin, settings.safety_factor),
-            (self.minimum_outer_spin, settings.minimum_outer_radius_mm),
-            (self.maximum_outer_spin, settings.maximum_outer_radius_mm),
-            (self.minimum_wall_spin, settings.minimum_wall_thickness_mm),
-            (self.maximum_wall_spin, settings.maximum_wall_thickness_mm),
-            (self.path_width_spin, settings.wall_path_width_mm),
-            (self.minimum_inner_spin, settings.minimum_inner_radius_mm),
+            (self.minimum_outer_spin, settings.minimum_outer_diameter_mm),
+            (self.maximum_outer_spin, settings.maximum_outer_diameter_mm),
             (self.minimum_base_spin, settings.minimum_base_radius_mm),
             (self.manual_base_width_spin, settings.manual_base_width_mm),
             (self.base_height_spin, settings.base_height_mm),
@@ -8484,10 +8423,6 @@ class MainWindow(QMainWindow):
                 self.maximum_contraction_angle_spin,
                 settings.maximum_contraction_angle_deg,
             ),
-            (
-                self.maximum_wall_change_spin,
-                settings.maximum_wall_change_per_mm_z,
-            ),
             (self.local_window_spin, settings.local_reference_window),
             (self.mesh_segments_spin, settings.mesh_segments),
         )
@@ -8502,6 +8437,11 @@ class MainWindow(QMainWindow):
             settings.automatic_base_width
         )
         self.automatic_base_checkbox.blockSignals(False)
+        self.full_infill_checkbox.blockSignals(True)
+        self.full_infill_checkbox.setChecked(
+            settings.simulate_full_tower_infill
+        )
+        self.full_infill_checkbox.blockSignals(False)
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
         )
@@ -8527,30 +8467,56 @@ class MainWindow(QMainWindow):
         self.maximum_expansion_angle_setting.set_warning(warning)
 
     def update_wall_path_preview(self) -> None:
-        width = self.path_width_spin.value()
-        diameter = f"{2 * self.maximum_outer_spin.value():.2f}".replace(
-            ".", ","
-        )
-        self.maximum_diameter_label.setText(
-            f"Maximaler Außendurchmesser: {diameter} mm. "
-            "Erst ab diesem Durchmesser wird zusätzlicher Zeitbedarf durch "
-            "größere Wandstärke ausgeglichen"
-        )
-        try:
-            bounds = calculate_wall_path_bounds(
-                self.minimum_wall_spin.value(),
-                self.maximum_wall_spin.value(),
-                width,
+        if self.full_infill_checkbox.isChecked():
+            self.full_infill_hint.setText(
+                "Testslices verwenden eine temporäre Prozessprofilkopie mit "
+                "100 % Fülldichte. Für die exportierte STL anschließend auch "
+                "im Slicer objektspezifisch 100 % Fülldichte einstellen."
             )
-        except ValueError:
-            self.wall_paths_label.setText("Wandbahnanzahl derzeit nicht berechenbar")
-            return
-        self.wall_paths_label.setText(
-            f"Minimum: {bounds.minimum_path_count} Bahnen = "
-            f"{bounds.effective_minimum_thickness_mm:.2f} mm  ·  "
-            f"Maximum: {bounds.maximum_path_count} Bahnen = "
-            f"{bounds.effective_maximum_thickness_mm:.2f} mm"
-        )
+        else:
+            density = None
+            pattern = None
+            selected = (
+                self.profile_match_result.selected
+                if self.profile_match_result is not None
+                else None
+            )
+            if selected is not None:
+                values = selected.effective_profile.effective_values
+                density = next(
+                    (
+                        values[key]
+                        for key in (
+                            "sparse_infill_density",
+                            "fill_density",
+                            "infill_sparse_density",
+                        )
+                        if values.get(key) not in (None, "")
+                    ),
+                    None,
+                )
+                pattern = next(
+                    (
+                        values[key]
+                        for key in (
+                            "sparse_infill_pattern",
+                            "fill_pattern",
+                            "infill_pattern",
+                        )
+                        if values.get(key) not in (None, "")
+                    ),
+                    None,
+                )
+            details = []
+            if density is not None:
+                details.append(f"Fülldichte {density}")
+            if pattern is not None:
+                details.append(f"Füllmuster {pattern}")
+            suffix = f" ({' · '.join(details)})" if details else ""
+            self.full_infill_hint.setText(
+                "Testslices verwenden die globale Füllung des ausgewählten "
+                f"Prozessprofils{suffix}."
+            )
         self._update_section_summaries()
 
     def _update_section_summaries(self) -> None:
@@ -8563,10 +8529,9 @@ class MainWindow(QMainWindow):
             f"Sicherheitsfaktor {_de_number(self.safety_factor_spin.value())}"
         )
         self.geometry_group.set_summary(
-            f"Außenradius {_de_number(self.minimum_outer_spin.value())}–"
+            f"Außendurchmesser {_de_number(self.minimum_outer_spin.value())}–"
             f"{_de_number(self.maximum_outer_spin.value())} mm · "
-            f"Wand {_de_number(self.minimum_wall_spin.value())}–"
-            f"{_de_number(self.maximum_wall_spin.value())} mm"
+            f"{'100 % Füllung simuliert' if self.full_infill_checkbox.isChecked() else 'Profilfüllung'}"
         )
         base_mode = (
             "Standfuß automatisch"
@@ -8583,7 +8548,7 @@ class MainWindow(QMainWindow):
             f"{_de_number(self.maximum_contraction_angle_spin.value(), 1)}°"
         )
         self.geometry_settings_group.set_summary(
-            f"Radius {_de_number(self.minimum_outer_spin.value())}–"
+            f"Durchmesser {_de_number(self.minimum_outer_spin.value())}–"
             f"{_de_number(self.maximum_outer_spin.value())} mm · {base_mode} · "
             f"{self.mesh_segments_spin.value()} Segmente"
         )
@@ -8769,78 +8734,33 @@ class MainWindow(QMainWindow):
                 ),
             )
         if (
-            "minimum_outer_radius_mm" not in range_invalid_names
-            and settings.minimum_outer_radius_mm <= 0.0
+            "minimum_outer_diameter_mm" not in range_invalid_names
+            and settings.minimum_outer_diameter_mm <= 0.0
         ):
             add_error(
-                ("minimum_outer_radius_mm",),
-                "Mindest-Außenradius muss größer als 0 sein.",
+                ("minimum_outer_diameter_mm",),
+                "Kleinster Außendurchmesser muss größer als 0 sein.",
                 (
-                    "Einen Mindest-Außenradius größer als 0 mm eingeben.",
+                    "Einen kleinsten Außendurchmesser größer als 0 mm eingeben.",
                     "Den Standardwert wiederherstellen.",
                 ),
             )
-        if settings.minimum_outer_radius_mm > settings.maximum_outer_radius_mm:
+        if (
+            settings.minimum_outer_diameter_mm
+            > settings.maximum_outer_diameter_mm
+        ):
             add_error(
-                ("minimum_outer_radius_mm", "maximum_outer_radius_mm"),
-                f"{self._setting_value_description('maximum_outer_radius_mm')} "
+                (
+                    "minimum_outer_diameter_mm",
+                    "maximum_outer_diameter_mm",
+                ),
+                f"{self._setting_value_description('maximum_outer_diameter_mm')} "
                 "muss mindestens so groß sein wie "
-                f"{self._setting_value_description('minimum_outer_radius_mm')}.",
+                f"{self._setting_value_description('minimum_outer_diameter_mm')}.",
                 (
-                    "Den Mindest-Außenradius verkleinern.",
-                    "Den maximalen Außenradius vergrößern.",
+                    "Den kleinsten Außendurchmesser verkleinern.",
+                    "Den größten Außendurchmesser vergrößern.",
                     "Den zuletzt geänderten Wert zurücksetzen.",
-                ),
-            )
-        if (
-            "minimum_wall_thickness_mm" not in range_invalid_names
-            and settings.minimum_wall_thickness_mm <= 0.0
-        ):
-            add_error(
-                ("minimum_wall_thickness_mm",),
-                "Mindestwandstärke muss größer als 0 sein.",
-                (
-                    "Eine Mindestwandstärke größer als 0 mm eingeben.",
-                    "Den Standardwert wiederherstellen.",
-                ),
-            )
-        if settings.maximum_wall_thickness_mm < settings.minimum_wall_thickness_mm:
-            add_error(
-                (
-                    "minimum_wall_thickness_mm",
-                    "maximum_wall_thickness_mm",
-                ),
-                f"{self._setting_value_description('maximum_wall_thickness_mm')} "
-                "muss mindestens so groß sein wie "
-                f"{self._setting_value_description('minimum_wall_thickness_mm')}.",
-                (
-                    "Die Maximalwandstärke erhöhen.",
-                    "Die Mindestwandstärke verringern.",
-                    "Den zuletzt geänderten Wert zurücksetzen.",
-                ),
-            )
-        if (
-            "wall_path_width_mm" not in range_invalid_names
-            and settings.wall_path_width_mm <= 0
-        ):
-            add_error(
-                ("wall_path_width_mm",),
-                "Bahnbreite muss größer als 0 sein.",
-                (
-                    "Die im Slicer verwendete positive Linienbreite eintragen.",
-                    "Den Standardwert wiederherstellen.",
-                ),
-            )
-        if (
-            "minimum_inner_radius_mm" not in range_invalid_names
-            and settings.minimum_inner_radius_mm <= 0
-        ):
-            add_error(
-                ("minimum_inner_radius_mm",),
-                "Mindest-Innenradius muss größer als 0 sein.",
-                (
-                    "Einen Mindest-Hohlraumradius größer als 0 mm eingeben.",
-                    "Den Standardwert wiederherstellen.",
                 ),
             )
         if (
@@ -8889,18 +8809,6 @@ class MainWindow(QMainWindow):
                 ),
             )
         if (
-            "maximum_wall_change_per_mm_z" not in range_invalid_names
-            and settings.maximum_wall_change_per_mm_z <= 0.0
-        ):
-            add_error(
-                ("maximum_wall_change_per_mm_z",),
-                "Maximale Wandstärkenänderung muss größer als 0 sein.",
-                (
-                    "Eine Wandstärkenänderung größer als 0 eingeben.",
-                    "Den Standardwert wiederherstellen.",
-                ),
-            )
-        if (
             "local_reference_window" not in range_invalid_names
             and settings.local_reference_window % 2 == 0
         ):
@@ -8923,45 +8831,12 @@ class MainWindow(QMainWindow):
             and not static_causes
         ):
             try:
-                validate_hollow_settings(settings)
+                validate_solid_settings(settings)
             except ValueError as error:
                 raw_text = str(error)
                 translated = german_user_message(raw_text)
                 if _validation_issue_key(translated) not in issue_keys:
-                    if "Maximum outer radius cannot contain" in raw_text:
-                        text = (
-                            f"{self._setting_value_description('maximum_outer_radius_mm')} "
-                            "ist für "
-                            f"{self._setting_value_description('minimum_wall_thickness_mm')} "
-                            "und "
-                            f"{self._setting_value_description('minimum_inner_radius_mm')} "
-                            "zu klein."
-                        )
-                        add_error(
-                            (
-                                "maximum_outer_radius_mm",
-                                "minimum_inner_radius_mm",
-                                "minimum_wall_thickness_mm",
-                            ),
-                            text,
-                        )
-                    elif "wall thickness" in raw_text.lower():
-                        text = (
-                            f"{self._setting_value_description('maximum_wall_thickness_mm')} "
-                            "kann mit "
-                            f"{self._setting_value_description('wall_path_width_mm')} "
-                            "nicht alle erforderlichen Wandbahnen aufnehmen."
-                        )
-                        add_error(
-                            (
-                                "minimum_wall_thickness_mm",
-                                "maximum_wall_thickness_mm",
-                                "wall_path_width_mm",
-                            ),
-                            text,
-                        )
-                    else:
-                        add_general_error(translated)
+                    add_general_error(translated)
         if not self.output_root_edit.text().strip():
             add_error(
                 ("output_root",),
@@ -9139,18 +9014,13 @@ class MainWindow(QMainWindow):
             (
                 self.geometry_settings_group,
                 {
-                    "minimum_outer_radius_mm",
-                    "maximum_outer_radius_mm",
-                    "minimum_wall_thickness_mm",
-                    "maximum_wall_thickness_mm",
-                    "wall_path_width_mm",
-                    "minimum_inner_radius_mm",
+                    "minimum_outer_diameter_mm",
+                    "maximum_outer_diameter_mm",
                     "automatic_base_width",
                     "manual_base_width_mm",
                     "base_height_mm",
                     "maximum_expansion_angle_deg",
                     "maximum_contraction_angle_deg",
-                    "maximum_wall_change_per_mm_z",
                     "mesh_segments",
                     "local_reference_window",
                 },
@@ -9567,7 +9437,8 @@ class MainWindow(QMainWindow):
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(False)
         self._set_main_status(
-            "Exakter Kühlturm wird mit fünf Slicer-Durchläufen erzeugt und exportiert …"
+            "Kühlturm wird mit "
+            f"{self.preview_iterations} Slicer-Durchläufen erzeugt und exportiert …"
             if export_preview is None
             else "Aktuelle Vorschau wird exportiert …",
             icon="⏳",
@@ -9920,7 +9791,7 @@ class MainWindow(QMainWindow):
     def _has_non_default_settings(self) -> bool:
         if self.collect_settings() != self.settings_store.load_defaults():
             return True
-        if self.preview_quality != DEFAULT_PREVIEW_QUALITY:
+        if self.preview_iterations != DEFAULT_PREVIEW_ITERATIONS:
             return True
         try:
             selected_output = Path(
@@ -9957,8 +9828,8 @@ class MainWindow(QMainWindow):
 
     def reset_defaults(self) -> None:
         self.apply_settings(self.settings_store.load_defaults())
-        self._set_preview_quality(
-            DEFAULT_PREVIEW_QUALITY,
+        self._set_preview_iterations(
+            DEFAULT_PREVIEW_ITERATIONS,
             invalidate=False,
         )
         self.output_root_edit.setText(
@@ -9986,7 +9857,7 @@ class MainWindow(QMainWindow):
                 window_height=window_geometry.height(),
                 window_x=window_position.x(),
                 window_y=window_position.y(),
-                preview_quality=self.preview_quality,
+                preview_iterations=self.preview_iterations,
                 preview_camera=(
                     self._preview_dialog.canvas.camera_state()
                     if self._preview_dialog is not None

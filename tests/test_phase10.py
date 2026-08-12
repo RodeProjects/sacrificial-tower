@@ -487,8 +487,8 @@ class Phase10OutputAndMeshTests(unittest.TestCase):
         for field in (
             "layer_time_s",
             "time_deficit_s",
-            "outer_radius_raw_mm",
-            "outer_radius_spline_mm",
+            "outer_diameter_raw_mm",
+            "outer_diameter_spline_mm",
             "expansion_angle_deg",
             "contraction_angle_deg",
             "estimated_added_time_s",

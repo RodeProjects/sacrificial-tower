@@ -352,7 +352,7 @@ class PreviewDialog(QDialog):
             return (
                 "Qualitätsprüfung\n"
                 "— Keine slicerbasierte Kalibrierung durchgeführt; eine "
-                "Genauigkeitsstufe wurde nicht bestätigt.",
+                "wiederholte Messung wurde nicht durchgeführt.",
                 "neutral",
             )
 
@@ -362,40 +362,31 @@ class PreviewDialog(QDialog):
         )
         iterations = tuple(getattr(calibration, "iterations", ()) or ())
         completed = len(iterations)
-        if configured >= 5:
-            quality_name = "Exakt"
-        elif configured >= 3:
-            quality_name = "Mittel"
-        elif configured == 1:
-            quality_name = "Schnell"
-        else:
-            quality_name = "Slicerprüfung"
-
         calibrated = bool(getattr(result, "calibrated", False))
         slicer_optimized = bool(getattr(result, "slicer_optimized", False))
         if calibrated and configured == 1:
             headline = (
-                "✓ Schnell abgeschlossen – ein einzelner Durchlauf bestätigt "
-                "keine Wiederholungsstabilität"
+                "✓ Ein Durchlauf abgeschlossen – eine Wiederholungsstabilität "
+                "kann damit nicht geprüft werden"
             )
             state = "success"
         elif calibrated:
-            headline = f"✓ {quality_name} bestätigt"
+            headline = f"✓ Ergebnis nach {completed} Durchläufen bestätigt"
             state = "success"
         elif slicer_optimized:
             headline = (
-                f"⚠ {quality_name} nicht bestätigt – bester gemessener "
+                "⚠ Ergebnis noch nicht bestätigt – bester gemessener "
                 "Zwischenstand wird angezeigt"
             )
             state = "warning"
         else:
-            headline = f"✕ {quality_name} nicht bestätigt"
+            headline = "✕ Slicerprüfung nicht erfolgreich abgeschlossen"
             state = "error"
 
         lines = [
             "Qualitätsprüfung",
             headline,
-            f"Durchläufe: {completed} von maximal {configured}",
+            f"Ausgeführt: {completed} von {configured} eingestellten Durchläufen",
         ]
         time_tolerance = float(
             getattr(result, "calibration_time_tolerance_s", 0.15)

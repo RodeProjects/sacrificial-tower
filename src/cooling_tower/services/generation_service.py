@@ -16,13 +16,13 @@ from cooling_tower.services.tower_need_service import (
     assess_tower_need,
     layers_for_tower,
 )
-from cooling_tower.tower.hollow_profile import (
-    build_hollow_tower_profile,
-    validate_hollow_settings,
+from cooling_tower.tower.solid_profile import (
+    build_solid_tower_profile,
+    validate_solid_settings,
 )
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
-    generate_hollow_tower_mesh,
+    generate_solid_tower_mesh,
     validate_mesh_config,
     write_binary_stl,
 )
@@ -163,7 +163,7 @@ class GenerationService:
             layers=tower_layers,
             config=profile_config,
         )
-        hollow_profile = build_hollow_tower_profile(
+        solid_profile = build_solid_tower_profile(
             phase2_profile=radius_profile,
             settings=settings,
             tower_end_z_mm=assessment.tower_end_z_mm,
@@ -171,7 +171,7 @@ class GenerationService:
         )
         notify(60, "Verkürztes Turmprofil wird berechnet")
 
-        mesh = generate_hollow_tower_mesh(hollow_profile, mesh_config)
+        mesh = generate_solid_tower_mesh(solid_profile, mesh_config)
         export = write_binary_stl(mesh, paths.stl_path)
         notify(80, "STL und Berichte werden gespeichert")
 
@@ -190,11 +190,11 @@ class GenerationService:
         )
         self.output_service.write_tower_profile(
             paths,
-            hollow_profile.layers,
+            solid_profile.layers,
         )
 
-        profile_layers = hollow_profile.layers
-        warnings = list(hollow_profile.warnings)
+        profile_layers = solid_profile.layers
+        warnings = list(solid_profile.warnings)
         unresolved_layer_count = sum(
             not layer.target_reached for layer in profile_layers
         )
@@ -224,8 +224,7 @@ class GenerationService:
             "maximum_time_deficit_s": (
                 assessment.maximum_time_deficit_s
             ),
-            "base_outer_radius_mm": hollow_profile.base_outer_radius_mm,
-            "base_width_mm": 2.0 * hollow_profile.base_outer_radius_mm,
+            "base_width_mm": 2.0 * solid_profile.base_outer_radius_mm,
             "automatic_base_width": settings.automatic_base_width,
             "maximum_expansion_angle_deg": (
                 settings.maximum_expansion_angle_deg
@@ -234,27 +233,20 @@ class GenerationService:
                 settings.maximum_contraction_angle_deg
             ),
             "spline_support_point_count": (
-                hollow_profile.support_point_count
+                solid_profile.support_point_count
             ),
-            "spline_mesh_ring_count": len(hollow_profile.points),
+            "spline_mesh_ring_count": len(solid_profile.points),
             "maximum_spline_error_mm": (
-                hollow_profile.maximum_spline_error_mm
+                solid_profile.maximum_spline_error_mm
             ),
-            "minimum_outer_radius_mm": min(
-                point.outer_radius_mm for point in hollow_profile.points
+            "minimum_outer_diameter_mm": min(
+                point.outer_diameter_mm for point in solid_profile.points
             ),
-            "maximum_outer_radius_mm": max(
-                point.outer_radius_mm for point in hollow_profile.points
+            "maximum_outer_diameter_mm": max(
+                point.outer_diameter_mm for point in solid_profile.points
             ),
-            "maximum_wall_thickness_mm": max(
-                point.wall_thickness_mm for point in hollow_profile.points
-            ),
-            "minimum_wall_thickness_mm": min(
-                point.wall_thickness_mm for point in hollow_profile.points
-            ),
-            "maximum_wall_path_count": max(
-                point.wall_path_count for point in hollow_profile.points
-            ),
+            "solid_geometry": True,
+            "simulate_full_tower_infill": settings.simulate_full_tower_infill,
             "unresolved_layer_count": unresolved_layer_count,
             "gcode_metadata": {
                 "schema_version": snapshot.metadata.schema_version,
@@ -276,7 +268,7 @@ class GenerationService:
                     "required_value": issue.required_value,
                     "achievable_value": issue.achievable_value,
                 }
-                for issue in hollow_profile.feasibility_issues
+                for issue in solid_profile.feasibility_issues
             ],
             "mesh": {
                 "vertices": export.validation.vertex_count,
@@ -329,10 +321,7 @@ class GenerationService:
             metadata_path=paths.metadata_path.resolve(),
             layer_count=snapshot.layer_count,
             layers_below_target=assessment.deficit_layer_count,
-            maximum_outer_radius_mm=summary["maximum_outer_radius_mm"],
-            maximum_wall_thickness_mm=summary[
-                "maximum_wall_thickness_mm"
-            ],
+            maximum_outer_diameter_mm=summary["maximum_outer_diameter_mm"],
             warnings=warnings,
             analysis=snapshot.analysis,
             profile=tuple(profile_layers),
@@ -341,7 +330,7 @@ class GenerationService:
             settings=settings,
             assessment=assessment,
             analysis_snapshot=snapshot,
-            feasibility_issues=hollow_profile.feasibility_issues,
+            feasibility_issues=solid_profile.feasibility_issues,
         )
 
     @staticmethod
@@ -359,6 +348,6 @@ class GenerationService:
             segment_count=settings.mesh_segments
         )
         validate_profile_config(profile_config)
-        validate_hollow_settings(settings)
+        validate_solid_settings(settings)
         validate_mesh_config(mesh_config)
         return profile_config, mesh_config

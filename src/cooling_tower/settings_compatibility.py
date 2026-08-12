@@ -5,9 +5,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from cooling_tower.tower.wall_calculator import calculate_wall_path_bounds
-
-
 _MISSING = object()
 
 
@@ -86,28 +83,16 @@ SETTING_COMPATIBILITY_RULES = (
         "safety_factor", "dimensionless-factor-v1", "float", minimum=1.0, maximum=10.0
     ),
     _generation_rule(
-        "minimum_outer_radius_mm", "outer-radius-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=500.0,
+        "minimum_outer_diameter_mm", "outer-diameter-mm-v1", "float",
+        group="generation.solid-geometry-v1", minimum=0.002, maximum=1000.0,
     ),
     _generation_rule(
-        "maximum_outer_radius_mm", "outer-radius-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=500.0,
+        "maximum_outer_diameter_mm", "outer-diameter-mm-v1", "float",
+        group="generation.solid-geometry-v1", minimum=0.002, maximum=1000.0,
     ),
     _generation_rule(
-        "minimum_wall_thickness_mm", "wall-thickness-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=100.0,
-    ),
-    _generation_rule(
-        "maximum_wall_thickness_mm", "wall-thickness-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=100.0,
-    ),
-    _generation_rule(
-        "wall_path_width_mm", "wall-path-width-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=10.0,
-    ),
-    _generation_rule(
-        "minimum_inner_radius_mm", "inner-radius-mm-v1", "float",
-        group="generation.hollow-geometry-v1", minimum=0.001, maximum=500.0,
+        "simulate_full_tower_infill", "full-tower-infill-simulation-v1", "bool",
+        group="generation.solid-geometry-v1",
     ),
     _generation_rule(
         "minimum_base_radius_mm", "base-radius-mm-v1", "float",
@@ -150,10 +135,6 @@ SETTING_COMPATIBILITY_RULES = (
         minimum=1.0, maximum=85.0,
     ),
     _generation_rule(
-        "maximum_wall_change_per_mm_z", "wall-change-per-mm-z-v1", "float",
-        minimum=0.0001, maximum=100.0,
-    ),
-    _generation_rule(
         "local_reference_window", "layer-window-count-v1", "int", minimum=1, maximum=999
     ),
     _generation_rule(
@@ -171,8 +152,9 @@ SETTING_COMPATIBILITY_RULES = (
         "window.height", minimum=100, maximum=100_000,
     ),
     SettingCompatibilityRule(
-        "preview_quality", "preview-quality-preset-v1", ("preview_quality",), "choice",
-        "preview_quality", choices=frozenset({"fast", "balanced", "exact"}),
+        "preview_iterations", "preview-slicer-pass-count-v1",
+        ("preview_iterations",), "int", "preview_iterations",
+        minimum=1, maximum=8,
     ),
     SettingCompatibilityRule(
         "preview_camera.yaw_deg", "camera-yaw-degrees-v1", ("preview_camera", "yaw_deg"),
@@ -242,26 +224,16 @@ def _set_value(payload: dict[str, Any], path: tuple[str, ...], value: object) ->
 
 
 def _group_is_valid(group: str, payload: Mapping[str, Any]) -> bool:
-    if group == "generation.hollow-geometry-v1":
+    if group == "generation.solid-geometry-v1":
         generation = payload.get("generation")
         if not isinstance(generation, Mapping):
             return False
         try:
-            minimum_outer = float(generation["minimum_outer_radius_mm"])
-            maximum_outer = float(generation["maximum_outer_radius_mm"])
-            minimum_inner = float(generation["minimum_inner_radius_mm"])
-            bounds = calculate_wall_path_bounds(
-                float(generation["minimum_wall_thickness_mm"]),
-                float(generation["maximum_wall_thickness_mm"]),
-                float(generation["wall_path_width_mm"]),
-            )
+            minimum_outer = float(generation["minimum_outer_diameter_mm"])
+            maximum_outer = float(generation["maximum_outer_diameter_mm"])
         except (KeyError, TypeError, ValueError):
             return False
-        return (
-            minimum_outer <= maximum_outer
-            and maximum_outer
-            >= minimum_inner + bounds.effective_minimum_thickness_mm
-        )
+        return 0.0 < minimum_outer <= maximum_outer
     if group == "generation.base-v1":
         generation = payload.get("generation")
         if not isinstance(generation, Mapping):

@@ -12,10 +12,10 @@ from cooling_tower.services.tower_need_service import (
     assess_tower_need,
     layers_for_tower,
 )
-from cooling_tower.tower.hollow_profile import (
+from cooling_tower.tower.solid_profile import (
     ProfileFeasibilityError,
-    build_hollow_tower_profile,
-    validate_hollow_settings,
+    build_solid_tower_profile,
+    validate_solid_settings,
 )
 from cooling_tower.tower.profile import (
     TowerProfileConfig,
@@ -48,7 +48,7 @@ def assess_profile_feasibility(
         local_time_factor_window=settings.local_reference_window,
     )
     validate_profile_config(profile_config)
-    validate_hollow_settings(settings)
+    validate_solid_settings(settings)
     current_assessment = assessment or assess_tower_need(snapshot, settings)
     if not current_assessment.tower_required:
         return ProfileFeasibilityAssessment(
@@ -63,7 +63,7 @@ def assess_profile_feasibility(
     if cancelled():
         raise FeasibilityCancelled()
     try:
-        hollow_profile = build_hollow_tower_profile(
+        solid_profile = build_solid_tower_profile(
             radius_profile,
             settings,
             tower_end_z_mm=current_assessment.tower_end_z_mm,
@@ -80,13 +80,13 @@ def assess_profile_feasibility(
         raise FeasibilityCancelled()
     estimate_available = all(
         layer.estimated_added_time_s is not None
-        for layer in hollow_profile.layers
+        for layer in solid_profile.layers
     )
     combined_layer_times = (
         tuple(
             float(layer.layer_time_s)
             + float(layer.estimated_added_time_s)
-            for layer in hollow_profile.layers
+            for layer in solid_profile.layers
         )
         if estimate_available
         else ()
@@ -101,11 +101,11 @@ def assess_profile_feasibility(
     )
     return ProfileFeasibilityAssessment(
         tower_required=True,
-        feasible=not hollow_profile.feasibility_issues,
-        issues=hollow_profile.feasibility_issues,
-        checked_layer_count=len(hollow_profile.layers),
-        support_point_count=hollow_profile.support_point_count,
-        mesh_ring_count=len(hollow_profile.points),
+        feasible=not solid_profile.feasibility_issues,
+        issues=solid_profile.feasibility_issues,
+        checked_layer_count=len(solid_profile.layers),
+        support_point_count=solid_profile.support_point_count,
+        mesh_ring_count=len(solid_profile.points),
         estimated_minimum_combined_layer_time_s=estimated_minimum,
         estimated_maximum_shortfall_s=estimated_shortfall,
     )

@@ -53,7 +53,7 @@ class CalibrationConfig:
     profile_change_tolerance_mm: float = 0.03
     maximum_path_growth_factor: float = 2.0
     minimum_path_growth_mm: float = 0.5
-    material_reduction_factor: float = 0.35
+    material_reduction_factor: float = 1.0
     repeated_result_limit: int = 2
     object_clearance_mm: float = 5.0
     bed_edge_clearance_mm: float = 3.0
@@ -63,9 +63,9 @@ class CalibrationConfig:
     timeout_per_slice_s: float = 300.0
 
     def __post_init__(self) -> None:
-        if not 0 <= self.maximum_iterations <= 10:
+        if not 0 <= self.maximum_iterations <= 8:
             raise ValueError(
-                "maximum_iterations muss zwischen null und zehn liegen"
+                "maximum_iterations muss zwischen null und acht liegen"
             )
         if self.repeated_result_limit < 1:
             raise ValueError("repeated_result_limit must be at least one")

@@ -47,10 +47,10 @@ from cooling_tower.slicers import (
     assert_profile_copies_are_isolated,
     protect_profile_sources,
 )
-from cooling_tower.tower.hollow_profile import build_hollow_tower_profile
+from cooling_tower.tower.solid_profile import build_solid_tower_profile
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
-    generate_hollow_tower_mesh,
+    generate_solid_tower_mesh,
     write_binary_stl,
 )
 from cooling_tower.tower.profile import TowerProfileConfig, build_tower_radius_profile
@@ -185,8 +185,8 @@ class CalibrationService:
         best_stl: Path | None = None
         best_gcode: Path | None = None
         best_iteration_number: int | None = None
-        best_score: tuple[int, float, float, float] | None = None
-        baseline_score: tuple[int, float, float, float] | None = None
+        best_score: tuple[int, float, float, float, float, float] | None = None
+        baseline_score: tuple[int, float, float, float, float, float] | None = None
         previous_added_times_s: dict[int, float] | None = None
         minimum_iteration_count = (
             1 if config.maximum_iterations == 1 else 2
@@ -208,7 +208,11 @@ class CalibrationService:
         ):
             work_root = Path(temporary)
             calibration_profile, overrides = build_calibration_profile(
-                profile, work_root / "profile"
+                profile,
+                work_root / "profile",
+                simulate_full_tower_infill=(
+                    settings.simulate_full_tower_infill
+                ),
             )
             if profile.installation.adapter_id in {
                 "anycubic_slicer_next",
@@ -221,7 +225,7 @@ class CalibrationService:
                     work_root / "profile",
                 )
             warnings.append(
-                "Für die Kalibrierung temporär angepasste Kühlwerte: "
+                "Für die Kalibrierung temporär angepasste Prozesswerte: "
                 + ", ".join(f"{key}={value}" for key, value in sorted(overrides.items()))
             )
             for number in range(1, config.maximum_iterations + 1):
@@ -250,15 +254,15 @@ class CalibrationService:
                     calibration_round=number,
                     calibration_round_count=config.maximum_iterations,
                 )
-                hollow = build_hollow_tower_profile(
+                solid = build_solid_tower_profile(
                     radius_profile,
                     settings,
                     tower_end_z_mm=assessment.tower_end_z_mm,
                     object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
                 )
-                final_profile = hollow
-                if hollow.feasibility_issues:
-                    for issue in hollow.feasibility_issues:
+                final_profile = solid
+                if solid.feasibility_issues:
+                    for issue in solid.feasibility_issues:
                         failures.append(
                             CalibrationFailure(
                                 self._failure_code_for_issue(issue.code),
@@ -270,8 +274,8 @@ class CalibrationService:
                 iteration_root = work_root / f"iteration_{number:02d}"
                 iteration_root.mkdir()
                 candidate_stl = iteration_root / "candidate.stl"
-                mesh = generate_hollow_tower_mesh(
-                    hollow, TowerMeshConfig(settings.mesh_segments)
+                mesh = generate_solid_tower_mesh(
+                    solid, TowerMeshConfig(settings.mesh_segments)
                 )
                 export = write_binary_stl(mesh, candidate_stl)
                 if not export.validation.is_valid:
@@ -287,7 +291,7 @@ class CalibrationService:
                         "konsistent ausgerichtet.",
                     ))
                     break
-                signature = self._profile_signature(hollow)
+                signature = self._profile_signature(solid)
                 repeated_signatures[signature] = repeated_signatures.get(signature, 0) + 1
                 notify(
                     round((number - 0.5) / config.maximum_iterations * 90),
@@ -413,7 +417,8 @@ class CalibrationService:
                 )
                 minimum_iterations_reached = number >= minimum_iteration_count
                 if minimum_iteration_count == 1:
-                    # "Schnell" deliberately accepts its single measurement.
+                    # A single requested pass deliberately accepts its only
+                    # measurement without claiming repetition stability.
                     slicer_result_stable = minimum_iterations_reached
                 else:
                     slicer_result_stable = bool(
@@ -463,28 +468,35 @@ class CalibrationService:
                     and evaluation.maximum_metadata_difference_s
                     > config.slicer_metadata_tolerance_s
                 )
-                candidate_score = self._candidate_score(convergence, hollow)
+                candidate_score = self._candidate_score(
+                    convergence,
+                    solid,
+                    source_layers=source_layers,
+                    added_times_s=evaluation.added_time_by_layer,
+                    target_time_s=settings.target_layer_time_s,
+                )
                 if baseline_score is None:
                     baseline_score = candidate_score
                 if not metadata_conflict and (
                     best_score is None or candidate_score < best_score
                 ):
                     best_score = candidate_score
-                    best_profile = hollow
+                    best_profile = solid
                     best_stl = candidate_stl
                     best_gcode = combined_path
                     best_iteration_number = number
                 if (
                     convergence.converged
                     and slicer_result_stable
+                    and number >= config.maximum_iterations
                     and not metadata_conflict
-                    and not hollow.feasibility_issues
+                    and not solid.feasibility_issues
                 ):
                     result = self._export_candidate(
                         state=CalibrationState.CONVERGED,
                         config=config,
                         iterations=iterations,
-                        profile=hollow,
+                        profile=solid,
                         candidate_stl=candidate_stl,
                         candidate_gcode=combined_path,
                         placement=placement,
@@ -513,27 +525,94 @@ class CalibrationService:
                     convergence.deficient_layer_count > 0
                     and repeated_signatures[signature]
                     > config.repeated_result_limit
+                    and number >= config.maximum_iterations
                 ):
-                    failures.append(CalibrationFailure(
-                        CalibrationFailureCode.STALLED,
-                        "Wiederholt identische Kandidaten können die verbleibende "
-                        "Zeitabweichung nicht ausgleichen.",
-                    ))
+                    deficient_layers = {
+                        layer_index
+                        for layer_index, deficit in (
+                            convergence.remaining_deficits_s.items()
+                        )
+                        if deficit > config.time_tolerance_s
+                    }
+                    maximum_limited = next(
+                        (
+                            layer
+                            for layer in solid.layers
+                            if layer.index in deficient_layers
+                            and math.isclose(
+                                layer.outer_diameter_mm,
+                                settings.maximum_outer_diameter_mm,
+                                abs_tol=1e-6,
+                            )
+                        ),
+                        None,
+                    )
+                    if maximum_limited is not None:
+                        failures.append(CalibrationFailure(
+                            CalibrationFailureCode.MAXIMUM_RADIUS,
+                            "Der größte Außendurchmesser reicht auch unter "
+                            "Einbeziehung der tatsächlichen Wände und Füllung "
+                            "nicht für die Ziel-Layerzeit aus.",
+                            maximum_limited.index,
+                            ("maximum_outer_diameter_mm",),
+                        ))
+                    else:
+                        angle_limited = next(
+                            (
+                                issue
+                                for issue in solid.analytical_limitations
+                                if issue.code == "EXPANSION_ANGLE_TOO_SMALL"
+                                and (
+                                    issue.affected_layer_index is None
+                                    or issue.affected_layer_index
+                                    in deficient_layers
+                                )
+                            ),
+                            None,
+                        )
+                        if angle_limited is not None:
+                            failures.append(CalibrationFailure(
+                                CalibrationFailureCode.TRANSITION_ANGLE,
+                                "Der Aufweitungswinkel verhindert, dass der "
+                                "Turm an den betroffenen Layern rechtzeitig "
+                                "breit genug wird.",
+                                angle_limited.affected_layer_index,
+                                ("maximum_expansion_angle_deg",),
+                            ))
+                        else:
+                            failures.append(CalibrationFailure(
+                                CalibrationFailureCode.STALLED,
+                                "Wiederholt identische Kandidaten können die "
+                                "verbleibende Zeitabweichung nicht ausgleichen.",
+                            ))
                     break
                 if convergence.deficient_layer_count == 0:
-                    # Verify an unchanged candidate once more.  Material
-                    # reduction belongs after a proven stable timing result;
-                    # reducing here would reintroduce the just-closed deficit.
-                    maximum_profile_change = 0.0
+                    # A solid body can gain substantial time from process-
+                    # profile walls and infill. Feed that measured surplus
+                    # back into the diameter demand before accepting a wider
+                    # candidate than necessary.
+                    radius_profile, maximum_profile_change = adjust_radius_profile(
+                        radius_profile,
+                        source_layers,
+                        evaluation.added_time_by_layer,
+                        target_time_s=settings.target_layer_time_s,
+                        realized_outer_radii_mm={
+                            layer.index: layer.outer_radius_mm
+                            for layer in solid.layers
+                        },
+                        config=config,
+                    )
                     continue
                 radius_profile, maximum_profile_change = adjust_radius_profile(
                     radius_profile,
                     source_layers,
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
-                    minimum_wall_path_count=hollow.wall_bounds.minimum_path_count,
-                    wall_path_width_mm=settings.wall_path_width_mm,
-                    config=replace(config, material_reduction_factor=0.0),
+                    realized_outer_radii_mm={
+                        layer.index: layer.outer_radius_mm
+                        for layer in solid.layers
+                    },
+                    config=config,
                 )
             if not failures:
                 last_iteration = iterations[-1] if iterations else None
@@ -648,21 +727,47 @@ class CalibrationService:
     def _candidate_score(
         convergence: object,
         profile: object,
-    ) -> tuple[int, float, float, float]:
-        """Rank timing first and material only as a deterministic tie-breaker."""
+        *,
+        source_layers: tuple[object, ...],
+        added_times_s: dict[int, float],
+        target_time_s: float,
+    ) -> tuple[int, float, float, float, float, float]:
+        """Rank target compliance, tower-time excess, then material."""
 
         material = sum(
             max(
                 0.0,
-                float(layer.outer_radius_mm) ** 2
-                - float(layer.inner_radius_mm) ** 2,
+                float(layer.outer_radius_mm) ** 2,
             )
             for layer in getattr(profile, "layers")
         )
+        required_by_index = {
+            int(getattr(layer, "index")): max(
+                0.0,
+                target_time_s - float(getattr(layer, "total_time_s")),
+            )
+            for layer in source_layers
+        }
+        avoidable_excesses = tuple(
+            max(
+                0.0,
+                float(added_times_s.get(index, 0.0)) - required_added,
+            )
+            for index, required_added in required_by_index.items()
+        )
+        deficient_layer_count = int(
+            getattr(convergence, "deficient_layer_count")
+        )
         return (
-            int(getattr(convergence, "deficient_layer_count")),
-            float(getattr(convergence, "maximum_remaining_deficit_s")),
+            deficient_layer_count,
+            (
+                float(getattr(convergence, "maximum_remaining_deficit_s"))
+                if deficient_layer_count > 0
+                else 0.0
+            ),
             float(getattr(convergence, "total_remaining_deficit_s")),
+            sum(avoidable_excesses),
+            max(avoidable_excesses, default=0.0),
             material,
         )
 
@@ -759,7 +864,7 @@ class CalibrationService:
     def _profile_signature(profile: object) -> str:
         points = getattr(profile, "points")
         payload = "|".join(
-            f"{point.z_mm:.5f},{point.outer_radius_mm:.5f},{point.wall_thickness_mm:.5f}"
+            f"{point.z_mm:.5f},{point.outer_radius_mm:.5f}"
             for point in points
         )
         return hashlib.sha256(payload.encode("ascii")).hexdigest()
@@ -788,9 +893,7 @@ class CalibrationService:
         folded = code.casefold()
         if "angle" in folded:
             return CalibrationFailureCode.TRANSITION_ANGLE
-        if "wall" in folded:
-            return CalibrationFailureCode.MAXIMUM_WALL_THICKNESS
-        if "radius" in folded:
+        if "diameter" in folded or "radius" in folded:
             return CalibrationFailureCode.MAXIMUM_RADIUS
         return CalibrationFailureCode.GEOMETRY_INVALID
 

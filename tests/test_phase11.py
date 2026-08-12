@@ -247,7 +247,10 @@ class SettingsSchemaTests(unittest.TestCase):
         settings, state = self.store.load()
 
         self.assertEqual(settings.target_layer_time_s, 73.0)
-        self.assertEqual(state["settings_schema_version"], 5)
+        self.assertEqual(
+            state["settings_schema_version"],
+            SETTINGS_SCHEMA_VERSION,
+        )
         self.assertEqual(state["window"], {"width": 840, "height": 680})
         self.assertIsNotNone(self.store.last_migration_backup)
         self.assertEqual(self.store.last_migration_backup.read_bytes(), original)
@@ -275,7 +278,8 @@ class SettingsSchemaTests(unittest.TestCase):
 
         self.assertEqual(settings.minimum_outer_radius_mm, 7.5)
         self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
-        self.assertEqual(state["preview_quality"], "exact")
+        self.assertEqual(state["preview_iterations"], 5)
+        self.assertNotIn("preview_quality", state)
         self.assertNotIn("output_mode", state)
         self.assertIsNotNone(self.store.last_migration_backup)
         self.assertEqual(
@@ -459,7 +463,7 @@ class NumericSettingWidgetTests(GuiCase):
             self.window.geometry_settings_group,
         ):
             group.setChecked(True)
-        self.assertEqual(len(self.window._setting_widgets), 15)
+        self.assertEqual(len(self.window._setting_widgets), 10)
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
             self.assertIn("Standardwert", setting.reset_button.toolTip())
@@ -472,7 +476,7 @@ class NumericSettingWidgetTests(GuiCase):
         )
         self.assertFalse(
             self.window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].reset_button.isEnabled()
         )
 
@@ -723,13 +727,12 @@ class LiveValidationTests(GuiCase):
         self.assertTrue(self.window.profile_feasibility.feasible)
         self.assertTrue(self.window.preview_button.isEnabled())
 
-    def test_impossible_profile_marks_only_the_changed_trigger_red(self) -> None:
+    def test_analytical_limit_keeps_infill_aware_test_slice_available(self) -> None:
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
         self.window.base_height_spin.setValue(0.0)
         self.window.maximum_outer_spin.setValue(500.0)
-        self.window.maximum_wall_spin.setValue(100.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
         self.wait_until(
@@ -741,37 +744,30 @@ class LiveValidationTests(GuiCase):
         self.window.validate_form()
         target = self.window._setting_widgets["target_layer_time_s"]
         expansion = self.window._setting_widgets["maximum_expansion_angle_deg"]
-        self.assertFalse(self.window.profile_feasibility.feasible)
-        self.assertTrue(bool(target.editor.property("invalid")))
+        self.assertTrue(self.window.profile_feasibility.feasible)
+        self.assertFalse(bool(target.editor.property("invalid")))
         self.assertFalse(bool(expansion.editor.property("invalid")))
-        self.assertNotIn("Mögliche Lösungen", target.message_label.text())
-        self.assertNotIn("Betroffen", target.message_label.text())
+        self.assertFalse(target.message_label.text())
         self.assertNotIn("Layer", self.window.tower_need_label.text())
-        self.assertIn("Layer", self.window.validation_label.text())
-        self.assertTrue(target.message_label.text().strip())
-        self.assertIn(
-            "Ziel-Layerzeit",
-            self.window._feasibility_solution_items[0],
-        )
-        self.assertFalse(self.window.preview_button.isEnabled())
+        self.assertFalse(self.window.validation_label.text())
+        self.assertTrue(self.window.preview_button.isEnabled())
 
-    def test_correcting_values_removes_dynamic_error(self) -> None:
+    def test_correcting_analytical_limit_remains_error_free(self) -> None:
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
         self.window.base_height_spin.setValue(0.0)
         self.window.maximum_outer_spin.setValue(500.0)
-        self.window.maximum_wall_spin.setValue(100.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
         self.wait_until(
             lambda: self.window.profile_feasibility is not None
-            and not self.window.profile_feasibility.feasible
+            and self.window.profile_feasibility.feasible
         )
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.validate_form()
         setting = self.window._setting_widgets["target_layer_time_s"]
-        self.assertTrue(bool(setting.editor.property("invalid")))
+        self.assertFalse(bool(setting.editor.property("invalid")))
         self.window.target_time_spin.setValue(2.0)
         self.wait_until(
             lambda: self.window.profile_feasibility is not None
@@ -788,8 +784,8 @@ class LiveValidationTests(GuiCase):
             message="Grenze nicht erreichbar.",
             affected_layer_index=4,
             related_setting_names=(
-                "maximum_outer_radius_mm",
-                "maximum_wall_thickness_mm",
+                "maximum_outer_diameter_mm",
+                "maximum_expansion_angle_deg",
             ),
             required_value=8,
             achievable_value=6,
@@ -805,8 +801,8 @@ class LiveValidationTests(GuiCase):
         self.assertNotIn("Betroffen", target.message_label.text())
         self.assertTrue(target.message_label.text().strip())
         for name in (
-            "maximum_outer_radius_mm",
-            "maximum_wall_thickness_mm",
+            "maximum_outer_diameter_mm",
+            "maximum_expansion_angle_deg",
         ):
             widget = self.window._setting_widgets[name]
             self.assertFalse(bool(widget.editor.property("invalid")))
@@ -820,11 +816,11 @@ class LiveValidationTests(GuiCase):
         self.assertTrue(bool(self.window.maximum_outer_spin.property("invalid")))
         self.assertTrue(
             self.window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].message_label.text()
         )
-        self.assertIn("Kleinster Außenradius", self.window.validation_label.text())
-        self.assertIn("Größter Außenradius", self.window.validation_label.text())
+        self.assertIn("Kleinster Außendurchmesser", self.window.validation_label.text())
+        self.assertIn("Größter Außendurchmesser", self.window.validation_label.text())
         self.assertFalse(self.window.preview_button.isEnabled())
 
     def test_incomplete_numeric_text_is_safe_and_inline(self) -> None:

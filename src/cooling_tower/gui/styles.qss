@@ -1445,8 +1445,8 @@ QWidget#previewQualityPanel {
     border: none;
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 48px;
+    max-height: 48px;
 }
 
 QFrame#previewActionControl QPushButton#previewButton {
@@ -1471,42 +1471,52 @@ QFrame#previewActionControl QPushButton#previewButton:disabled {
     background: #eeeaf8;
 }
 
-QFrame#previewQualitySelector {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-}
-
-QToolButton#previewQualityButton {
-    background: #faf9ff;
-    border: none;
-    border-right: 1px solid #d8cff7;
-    color: #435269;
-    min-width: 24px;
-    min-height: 0;
-    max-height: 24px;
-    padding: 0 1px;
-    font-size: 8pt;
-    font-weight: 600;
-}
-
-QToolButton#previewQualityButton[segment="first"] {
-    border-top-left-radius: 6px;
-}
-
-QToolButton#previewQualityButton[segment="last"] {
-    border-right: none;
-    border-top-right-radius: 6px;
-}
-
-QToolButton#previewQualityButton:hover {
-    color: #513b91;
-    background: #eeeafd;
-}
-
-QToolButton#previewQualityButton:checked {
+QLabel#previewIterationCountLabel {
     color: #31245b;
-    background: #a996dc;
+    font-size: 7.5pt;
+    font-weight: 700;
+    min-height: 12px;
+    max-height: 12px;
+}
+
+QLabel#previewIterationEndpoint {
+    color: #6d6680;
+    font-size: 7pt;
+    min-height: 12px;
+    max-height: 12px;
+}
+
+QSlider#previewIterationSlider {
+    min-height: 29px;
+    max-height: 29px;
+}
+
+QSlider#previewIterationSlider::groove:horizontal {
+    background: #d8cff7;
+    height: 4px;
+    border-radius: 2px;
+}
+
+QSlider#previewIterationSlider::sub-page:horizontal {
+    background: #8069c6;
+    border-radius: 2px;
+}
+
+QSlider#previewIterationSlider::handle:horizontal {
+    background: #ffffff;
+    border: 2px solid #6f55bb;
+    width: 13px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+
+QSlider#previewIterationSlider::handle:horizontal:hover {
+    background: #eeeafd;
+    border-color: #513b91;
+}
+
+QSlider#previewIterationSlider:disabled {
+    color: #8b83a4;
 }
 
 QPushButton#settingResetButton {

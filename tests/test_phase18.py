@@ -53,7 +53,7 @@ from cooling_tower.slicers import (
     SlicerInstallation,
     SlicerSupportLevel,
 )
-from cooling_tower.tower.hollow_profile import validate_hollow_settings
+from cooling_tower.tower.solid_profile import validate_solid_settings
 
 
 class Phase18UiTests(unittest.TestCase):
@@ -1695,9 +1695,7 @@ class Phase18UiTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
-        window.minimum_wall_spin.setValue(5.0)
-        window.maximum_wall_spin.setValue(4.0)
-        window._last_changed_setting_name = "maximum_wall_thickness_mm"
+        window._last_changed_setting_name = "maximum_outer_diameter_mm"
         window.validate_form()
         self.assertTrue(window.validation_label.text().strip())
         self.assertNotIn("Mögliche Lösungen", window.validation_label.text())
@@ -1722,7 +1720,7 @@ class Phase18UiTests(unittest.TestCase):
             maximum_expansion_angle_deg=70.1,
         )
         with self.assertRaisesRegex(ValueError, "at most 70 degrees"):
-            validate_hollow_settings(invalid)
+            validate_solid_settings(invalid)
 
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
@@ -1888,7 +1886,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
         window.close()
 
-    def test_one_off_slicer_prediction_always_uses_five_iterations(self) -> None:
+    def test_one_off_slicer_prediction_uses_selected_iterations(self) -> None:
         class FakePreviewService:
             def __init__(self) -> None:
                 self.iterations: list[int] = []
@@ -1906,7 +1904,7 @@ class Phase18UiTests(unittest.TestCase):
             user_settings_path=self.root / "settings.json",
             preview_service=service,
         )
-        window.preview_quality_buttons["balanced"].click()
+        window.preview_iteration_slider.setValue(8)
         installation = SlicerInstallation(
             adapter_id="test",
             product_name="Testslicer",
@@ -1956,8 +1954,8 @@ class Phase18UiTests(unittest.TestCase):
             ):
                 break
             QTest.qWait(10)
-        self.assertEqual(service.iterations, [5])
-        self.assertEqual(window.preview_quality, "balanced")
+        self.assertEqual(service.iterations, [8])
+        self.assertEqual(window.preview_iterations, 8)
         self.assertEqual(
             window.prediction_method_label.text(),
             "Slicer-gestützte Annäherung",

@@ -21,17 +21,34 @@ from cooling_tower.settings_compatibility import (
 
 
 _GENERATION_FIELD_NAMES = {
-    field.name for field in fields(GenerationSettings)
+    field.name
+    for field in fields(GenerationSettings)
+    if not field.name.startswith("_legacy_")
 }
 _LEGACY_ALIASES = {
-    "minimum_radius_mm": "minimum_outer_radius_mm",
-    "maximum_radius_mm": "maximum_outer_radius_mm",
     "expansion_angle_deg": "maximum_expansion_angle_deg",
     "contraction_angle_deg": "maximum_contraction_angle_deg",
     "base_width_mm": "manual_base_width_mm",
 }
+_LEGACY_RADIUS_NAMES = {
+    "minimum_radius_mm": "minimum_outer_diameter_mm",
+    "minimum_outer_radius_mm": "minimum_outer_diameter_mm",
+    "maximum_radius_mm": "maximum_outer_diameter_mm",
+    "maximum_outer_radius_mm": "maximum_outer_diameter_mm",
+}
+_OBSOLETE_HOLLOW_FIELDS = {
+    "minimum_wall_thickness_mm",
+    "maximum_wall_thickness_mm",
+    "wall_path_width_mm",
+    "minimum_inner_radius_mm",
+    "maximum_wall_change_per_mm_z",
+}
 _GENERATION_DEFAULTS = GenerationSettings().to_dict()
 _PREVIEW_QUALITIES = {"fast", "balanced", "exact"}
+_LEGACY_PREVIEW_ITERATIONS = {"fast": 1, "balanced": 3, "exact": 5}
+_DEFAULT_PREVIEW_ITERATIONS = 3
+_MINIMUM_PREVIEW_ITERATIONS = 1
+_MAXIMUM_PREVIEW_ITERATIONS = 8
 _WINDOW_SIZE_KEYS = {"width", "height"}
 _WINDOW_POSITION_KEYS = {"x", "y"}
 _CAMERA_KEYS = {"yaw_deg", "pitch_deg", "zoom", "pan_x", "pan_y"}
@@ -46,6 +63,17 @@ def _generation_values(values: object) -> dict[str, Any]:
     for legacy_name, current_name in _LEGACY_ALIASES.items():
         if current_name not in migrated and legacy_name in migrated:
             migrated[current_name] = migrated[legacy_name]
+
+    for legacy_name, diameter_name in _LEGACY_RADIUS_NAMES.items():
+        if diameter_name in migrated or legacy_name not in migrated:
+            continue
+        value = migrated[legacy_name]
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        ):
+            migrated[diameter_name] = 2.0 * float(value)
 
     normalized: dict[str, Any] = {}
     for name in _GENERATION_FIELD_NAMES:
@@ -74,7 +102,12 @@ def _nest_legacy_generation(payload: dict[str, Any]) -> dict[str, Any]:
     generation = (
         dict(raw_generation) if isinstance(raw_generation, Mapping) else {}
     )
-    legacy_generation_names = _GENERATION_FIELD_NAMES | set(_LEGACY_ALIASES)
+    legacy_generation_names = (
+        _GENERATION_FIELD_NAMES
+        | set(_LEGACY_ALIASES)
+        | set(_LEGACY_RADIUS_NAMES)
+        | _OBSOLETE_HOLLOW_FIELDS
+    )
     for name in legacy_generation_names:
         if name in migrated and name not in generation:
             generation[name] = migrated[name]
@@ -135,6 +168,54 @@ def _migrate_settings_4_to_5(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(payload)
 
 
+def _migrate_settings_5_to_6(payload: dict[str, Any]) -> dict[str, Any]:
+    """Use user-facing diameters and discard obsolete hollow controls."""
+
+    migrated = _nest_legacy_generation(payload)
+    migrated["generation"] = _generation_values(migrated["generation"])
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_6_to_7(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replace named preview presets with an explicit slicer-pass count."""
+
+    migrated = dict(payload)
+    try:
+        iterations = int(migrated.get("preview_iterations", 0))
+    except (TypeError, ValueError):
+        iterations = 0
+    if not _MINIMUM_PREVIEW_ITERATIONS <= iterations <= _MAXIMUM_PREVIEW_ITERATIONS:
+        quality = str(migrated.get("preview_quality", "")).casefold()
+        iterations = _LEGACY_PREVIEW_ITERATIONS.get(
+            quality,
+            _DEFAULT_PREVIEW_ITERATIONS,
+        )
+    migrated["preview_iterations"] = iterations
+    migrated.pop("preview_quality", None)
+    migrated.pop("slicer_iterations", None)
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_7_to_8(payload: dict[str, Any]) -> dict[str, Any]:
+    """Limit persisted slicer-pass counts to the new eight-pass maximum."""
+
+    migrated = dict(payload)
+    try:
+        iterations = int(
+            migrated.get("preview_iterations", _DEFAULT_PREVIEW_ITERATIONS)
+        )
+    except (TypeError, ValueError):
+        iterations = _DEFAULT_PREVIEW_ITERATIONS
+    migrated["preview_iterations"] = min(
+        _MAXIMUM_PREVIEW_ITERATIONS,
+        max(_MINIMUM_PREVIEW_ITERATIONS, iterations),
+    )
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -167,10 +248,17 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if window:
         normalized["window"] = window
 
-    quality = str(nested.get("preview_quality", "")).casefold()
-    normalized["preview_quality"] = (
-        quality if quality in _PREVIEW_QUALITIES else "balanced"
-    )
+    try:
+        iterations = int(nested.get("preview_iterations", 0))
+    except (TypeError, ValueError):
+        iterations = 0
+    if not _MINIMUM_PREVIEW_ITERATIONS <= iterations <= _MAXIMUM_PREVIEW_ITERATIONS:
+        quality = str(nested.get("preview_quality", "")).casefold()
+        iterations = _LEGACY_PREVIEW_ITERATIONS.get(
+            quality,
+            _DEFAULT_PREVIEW_ITERATIONS,
+        )
+    normalized["preview_iterations"] = iterations
 
     raw_camera = nested.get("preview_camera")
     camera: dict[str, float] = {}
@@ -206,6 +294,9 @@ _USER_SETTINGS_MIGRATIONS = {
     2: _migrate_settings_2_to_3,
     3: _migrate_settings_3_to_4,
     4: _migrate_settings_4_to_5,
+    5: _migrate_settings_5_to_6,
+    6: _migrate_settings_6_to_7,
+    7: _migrate_settings_7_to_8,
 }
 
 
@@ -311,7 +402,7 @@ class UserSettingsStore:
         window_height: int,
         window_x: int | None = None,
         window_y: int | None = None,
-        preview_quality: str = "balanced",
+        preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -322,7 +413,7 @@ class UserSettingsStore:
             window_height=window_height,
             window_x=window_x,
             window_y=window_y,
-            preview_quality=preview_quality,
+            preview_iterations=preview_iterations,
             preview_camera=preview_camera,
             expanded_sections=expanded_sections,
         )
@@ -343,7 +434,7 @@ class UserSettingsStore:
         window_height: int,
         window_x: int | None = None,
         window_y: int | None = None,
-        preview_quality: str = "balanced",
+        preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -357,7 +448,7 @@ class UserSettingsStore:
                 window_height=window_height,
                 window_x=window_x,
                 window_y=window_y,
-                preview_quality=preview_quality,
+                preview_iterations=preview_iterations,
                 preview_camera=preview_camera,
                 expanded_sections=expanded_sections,
             )
@@ -374,7 +465,7 @@ class UserSettingsStore:
         window_height: int,
         window_x: int | None,
         window_y: int | None,
-        preview_quality: str,
+        preview_iterations: int,
         preview_camera: Mapping[str, Any] | None,
         expanded_sections: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
@@ -389,10 +480,9 @@ class UserSettingsStore:
             "generation": generation.to_dict(),
             "output_root": output_root,
             "window": window,
-            "preview_quality": (
-                preview_quality
-                if preview_quality in {"fast", "balanced", "exact"}
-                else "balanced"
+            "preview_iterations": min(
+                _MAXIMUM_PREVIEW_ITERATIONS,
+                max(_MINIMUM_PREVIEW_ITERATIONS, int(preview_iterations)),
             ),
             "preview_camera": dict(preview_camera or {}),
             "expanded_sections": {
@@ -407,7 +497,7 @@ class UserSettingsStore:
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
             "generation": defaults.to_dict(),
             "output_root": str(self.load_default_output_root()),
-            "preview_quality": "balanced",
+            "preview_iterations": _DEFAULT_PREVIEW_ITERATIONS,
             "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
         }
 

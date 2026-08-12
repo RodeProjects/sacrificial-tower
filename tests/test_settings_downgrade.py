@@ -33,7 +33,7 @@ def current_payload(**generation_changes: object) -> dict[str, object]:
         "settings_schema_version": SETTINGS_SCHEMA_VERSION,
         "generation": generation,
         "output_root": "output",
-        "preview_quality": "balanced",
+        "preview_iterations": 3,
         "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
     }
 
@@ -152,30 +152,30 @@ class CompatibilityRuleTests(unittest.TestCase):
         result = merge_compatible_setting_changes(
             current_payload(),
             {
-                "generation.minimum_outer_radius_mm": {
-                    "token": "outer-radius-mm-v1",
+                "generation.minimum_outer_diameter_mm": {
+                    "token": "outer-diameter-mm-v1",
                     "value": 40.0,
                 },
-                "generation.maximum_outer_radius_mm": {
-                    "token": "outer-radius-mm-v1",
+                "generation.maximum_outer_diameter_mm": {
+                    "token": "outer-diameter-mm-v1",
                     "value": 30.0,
                 },
             },
         )
 
         self.assertEqual(
-            result.payload["generation"]["minimum_outer_radius_mm"],
-            GenerationSettings().minimum_outer_radius_mm,
+            result.payload["generation"]["minimum_outer_diameter_mm"],
+            GenerationSettings().minimum_outer_diameter_mm,
         )
         self.assertEqual(
-            result.payload["generation"]["maximum_outer_radius_mm"],
-            GenerationSettings().maximum_outer_radius_mm,
+            result.payload["generation"]["maximum_outer_diameter_mm"],
+            GenerationSettings().maximum_outer_diameter_mm,
         )
         self.assertEqual(
             set(result.rejected_ids),
             {
-                "generation.minimum_outer_radius_mm",
-                "generation.maximum_outer_radius_mm",
+                "generation.minimum_outer_diameter_mm",
+                "generation.maximum_outer_diameter_mm",
             },
         )
 

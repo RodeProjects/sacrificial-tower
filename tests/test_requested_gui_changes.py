@@ -473,7 +473,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             {"project", "session", "temporary"},
         )
 
-    def test_preview_quality_and_expansion_warning_use_fixed_values(self) -> None:
+    def test_preview_iteration_slider_and_expansion_warning_use_fixed_values(self) -> None:
         window = self.window()
         window.show()
         window.workflow.analysis_succeeded("test.gcode")
@@ -482,20 +482,15 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         self.assertFalse(hasattr(window, "slicer_iterations_spin"))
         self.assertNotIn("slicer_iterations", window._setting_widgets)
-        for quality, iterations in (
-            ("fast", 1),
-            ("balanced", 3),
-            ("exact", 5),
-        ):
-            window.preview_quality_buttons[quality].click()
-            self.assertEqual(window.preview_quality, quality)
+        for iterations in (1, 3, 5, 8):
+            window.preview_iteration_slider.setValue(iterations)
             self.assertEqual(
                 window._calibration_config().maximum_iterations,
                 iterations,
             )
         self.assertEqual(
             window._export_calibration_config().maximum_iterations,
-            5,
+            8,
         )
         self.assertTrue(
             window.preview_action_control.isAncestorOf(
@@ -546,12 +541,15 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.preview_action_control.width(),
             176,
         )
-        self.assertEqual(window.preview_quality_panel.height(), 24)
-        self.assertTrue(
-            all(
-                button.height() == 24
-                for button in window.preview_quality_buttons.values()
-            )
+        self.assertEqual(window.preview_quality_panel.height(), 48)
+        self.assertEqual(window.preview_iteration_slider.minimum(), 1)
+        self.assertEqual(window.preview_iteration_slider.maximum(), 8)
+        self.assertEqual(window.preview_iteration_slider.singleStep(), 1)
+        self.assertEqual(window.preview_faster_label.text(), "Schneller")
+        self.assertEqual(window.preview_precise_label.text(), "Präziser")
+        self.assertEqual(
+            window.preview_iteration_count_label.text(),
+            "8 Durchläufe",
         )
         self.assertFalse(hasattr(window, "preview_quality_label"))
         quality_margins = window.preview_quality_panel.layout().contentsMargins()
@@ -562,17 +560,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 quality_margins.right(),
                 quality_margins.bottom(),
             ),
-            (0, 0, 0, 0),
+            (2, 0, 2, 3),
         )
-        for quality, expected_hint in (
-            ("fast", "kürzeste Wartezeit"),
-            ("balanced", "Kompromiss"),
-            ("exact", "höchste Genauigkeit"),
-        ):
-            self.assertIn(
-                expected_hint,
-                window.preview_quality_buttons[quality].toolTip(),
-            )
+        self.assertIn(
+            "Mehr Durchläufe",
+            window.preview_iteration_slider.toolTip(),
+        )
 
         self.assertEqual(
             window.maximum_expansion_angle_spin.property("validationMaximum"),
@@ -713,17 +706,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
         expected_units = {
             "target_layer_time_s": "s",
             "safety_factor": "",
-            "minimum_outer_radius_mm": "mm",
-            "maximum_outer_radius_mm": "mm",
-            "minimum_wall_thickness_mm": "mm",
-            "maximum_wall_thickness_mm": "mm",
-            "wall_path_width_mm": "mm",
-            "minimum_inner_radius_mm": "mm",
+            "minimum_outer_diameter_mm": "mm",
+            "maximum_outer_diameter_mm": "mm",
             "manual_base_width_mm": "mm",
             "base_height_mm": "mm",
             "maximum_expansion_angle_deg": "°",
             "maximum_contraction_angle_deg": "°",
-            "maximum_wall_change_per_mm_z": "mm/mm",
             "mesh_segments": "Segm.",
             "local_reference_window": "Layer",
         }
@@ -749,9 +737,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertGreaterEqual(target.editor.lineEdit().width(), 67)
         self.assertEqual(
             window._setting_widgets[
-                "maximum_wall_change_per_mm_z"
+                "maximum_outer_diameter_mm"
             ].label.text(),
-            "Max. Wandstärkenänderung",
+            "Größter Außendurchmesser",
         )
         window.close()
 
@@ -844,7 +832,6 @@ class RequestedGuiChangesTests(unittest.TestCase):
         for name in (
             "maximum_expansion_angle_deg",
             "maximum_contraction_angle_deg",
-            "maximum_wall_change_per_mm_z",
         ):
             self.assertTrue(
                 window.overhang_group.isAncestorOf(
@@ -981,7 +968,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertGreater(window.geometry_settings_group.height(), height_before)
         self.assertTrue(
             window._setting_widgets[
-                "maximum_outer_radius_mm"
+                "maximum_outer_diameter_mm"
             ].message_label.isVisible()
         )
         self.assertTrue(window.validation_label.text().strip())

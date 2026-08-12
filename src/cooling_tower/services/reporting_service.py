@@ -17,11 +17,8 @@ class GenerationReport:
     layer_count: int
     layers_below_target: int
     maximum_time_deficit_s: float
-    minimum_outer_radius_mm: float
-    maximum_outer_radius_mm: float
-    minimum_wall_thickness_mm: float
-    maximum_wall_thickness_mm: float
-    maximum_wall_path_count: int
+    minimum_outer_diameter_mm: float
+    maximum_outer_diameter_mm: float
     unresolved_layer_count: int
     first_deficit_layer_index: int | None
     last_deficit_layer_index: int | None
@@ -36,9 +33,7 @@ class GenerationReport:
 
 def build_generation_report(result: GenerationResult) -> GenerationReport:
     profile = tuple(result.profile or ())
-    outer = [layer.outer_radius_mm for layer in profile]
-    wall = [layer.wall_thickness_mm for layer in profile]
-    paths = [layer.wall_path_count for layer in profile]
+    outer = [layer.outer_diameter_mm for layer in profile]
     maximum_deficit = 0.0
     if result.analysis is not None and result.settings is not None:
         maximum_deficit = max(
@@ -59,15 +54,10 @@ def build_generation_report(result: GenerationResult) -> GenerationReport:
         layer_count=result.layer_count,
         layers_below_target=result.layers_below_target,
         maximum_time_deficit_s=maximum_deficit,
-        minimum_outer_radius_mm=min(outer, default=0.0),
-        maximum_outer_radius_mm=max(
-            max(outer, default=0.0), result.maximum_outer_radius_mm
+        minimum_outer_diameter_mm=min(outer, default=0.0),
+        maximum_outer_diameter_mm=max(
+            max(outer, default=0.0), result.maximum_outer_diameter_mm
         ),
-        minimum_wall_thickness_mm=min(wall, default=0.0),
-        maximum_wall_thickness_mm=max(
-            max(wall, default=0.0), result.maximum_wall_thickness_mm
-        ),
-        maximum_wall_path_count=max(paths, default=0),
         unresolved_layer_count=sum(
             not layer.target_reached for layer in profile
         ),
@@ -121,13 +111,9 @@ def format_generation_report(result: GenerationResult) -> str:
             f"Erkannte Layer: {report.layer_count}",
             f"Layer unter Zielzeit: {report.layers_below_target}",
             f"Maximales Zeitdefizit: {report.maximum_time_deficit_s:.3f} s",
-            "Außenradius min/max: "
-            f"{report.minimum_outer_radius_mm:.3f} / "
-            f"{report.maximum_outer_radius_mm:.3f} mm",
-            "Wandstärke min/max: "
-            f"{report.minimum_wall_thickness_mm:.3f} / "
-            f"{report.maximum_wall_thickness_mm:.3f} mm",
-            f"Maximale Wandbahnanzahl: {report.maximum_wall_path_count}",
+            "Außendurchmesser min/max: "
+            f"{report.minimum_outer_diameter_mm:.3f} / "
+            f"{report.maximum_outer_diameter_mm:.3f} mm",
             f"Nicht vollständig lösbare Layer: {report.unresolved_layer_count}",
             "Erster/letzter kritischer Layer: "
             f"{report.first_deficit_layer_index or '-'} / "

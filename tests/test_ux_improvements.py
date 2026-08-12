@@ -117,15 +117,14 @@ class UxImprovementTests(unittest.TestCase):
             maximum_object_segments=200,
         )
 
-    def test_01_diameter_hint_uses_the_exact_requested_wording(self) -> None:
+    def test_01_full_infill_hint_explains_simulation_and_manual_step(self) -> None:
         window = self.window()
-        window.maximum_outer_spin.setValue(20.0)
-        window.update_wall_path_preview()
+        window.full_infill_checkbox.setChecked(True)
         self.assertEqual(
-            window.maximum_diameter_label.text(),
-            "Maximaler Außendurchmesser: 40,00 mm. Erst ab diesem "
-            "Durchmesser wird zusätzlicher Zeitbedarf durch größere "
-            "Wandstärke ausgeglichen",
+            window.full_infill_hint.text(),
+            "Testslices verwenden eine temporäre Prozessprofilkopie mit "
+            "100 % Fülldichte. Für die exportierte STL anschließend auch "
+            "im Slicer objektspezifisch 100 % Fülldichte einstellen.",
         )
         window.close()
 

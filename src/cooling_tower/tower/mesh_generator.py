@@ -8,6 +8,7 @@ from pathlib import Path
 
 from cooling_tower.tower.profile import StableTowerProfile
 from cooling_tower.tower.hollow_profile import HollowTowerProfile
+from cooling_tower.tower.solid_profile import SolidTowerProfile
 
 
 Vector3 = tuple[float, float, float]
@@ -233,6 +234,15 @@ def generate_tower_mesh(
         ring_count=ring_count,
         segment_count=segment_count,
     )
+
+
+def generate_solid_tower_mesh(
+    profile: SolidTowerProfile,
+    config: TowerMeshConfig,
+) -> TriangleMesh:
+    """Generate the closed rotational mesh for a cavity-free tower."""
+
+    return generate_tower_mesh(profile, config)  # type: ignore[arg-type]
 
 
 def generate_hollow_tower_mesh(

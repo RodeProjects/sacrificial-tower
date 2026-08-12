@@ -72,16 +72,26 @@ class PreSliceCache:
         forbidden_roots: tuple[Path, ...],
         *,
         source_parent: Path | None = None,
+        trusted_resolved_paths: bool = False,
     ) -> None:
         candidate = self.root
-        forbidden = tuple(Path(path).expanduser().resolve() for path in forbidden_roots)
+        forbidden = tuple(
+            Path(path)
+            if trusted_resolved_paths
+            else Path(path).expanduser().resolve()
+            for path in forbidden_roots
+        )
         if any(candidate == path or candidate.is_relative_to(path) for path in forbidden):
             raise ValueError(
                 "Der Pre-Slice-Cache darf weder in einem Slicer-Verzeichnis "
                 "noch neben der Benutzer-STL liegen."
             )
         if source_parent is not None:
-            original_parent = Path(source_parent).expanduser().resolve()
+            original_parent = (
+                Path(source_parent)
+                if trusted_resolved_paths
+                else Path(source_parent).expanduser().resolve()
+            )
             if candidate == original_parent or candidate.parent == original_parent:
                 raise ValueError(
                     "Der Pre-Slice-Cache darf nicht direkt neben der Benutzer-STL liegen."

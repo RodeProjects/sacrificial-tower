@@ -373,7 +373,9 @@ class ProfileBundleMatch:
             for resolved in self.resolved_profiles
             for record in resolved.chain
         )
-        return tuple(dict.fromkeys(path.resolve() for path in paths))
+        # ProfileRecord normalizes every path when it is constructed. Avoid
+        # repeating Windows realpath calls in cancellable worker operations.
+        return tuple(dict.fromkeys(paths))
 
     def to_report_dict(self) -> dict[str, Any]:
         return {

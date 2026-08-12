@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class TowerLayerProfile:
-    """Final hollow tower geometry and timing result for one layer."""
+    """Final tower geometry and timing result for one layer."""
 
     index: int
     z: float
@@ -27,3 +27,11 @@ class TowerLayerProfile:
     @property
     def effective_wall_thickness_mm(self) -> float:
         return self.wall_thickness_mm
+
+    @property
+    def outer_diameter_mm(self) -> float:
+        return 2.0 * self.outer_radius_mm
+
+    @property
+    def raw_outer_diameter_mm(self) -> float:
+        return 2.0 * self.raw_outer_radius_mm
