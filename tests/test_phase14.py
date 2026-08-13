@@ -1032,7 +1032,7 @@ class Phase14GuiTests(unittest.TestCase):
         self.assertTrue(window.slicer_manual_button.isEnabled())
         window.close()
 
-    def test_gui_marks_detection_only_installation_neutrally(self) -> None:
+    def test_gui_rejects_detection_only_installation_for_required_slicing(self) -> None:
         detected = self.installation(
             "detect",
             "Detected",
@@ -1050,8 +1050,11 @@ class Phase14GuiTests(unittest.TestCase):
         )
         window.start_slicer_discovery()
         self.wait_for_discovery(window)
-        self.assertIn("nur erkannt", window.slicer_combo.currentText())
-        self.assertIn("keine automatische", window.slicer_detail_label.text())
+        self.assertEqual(window.slicer_combo.count(), 0)
+        self.assertIn(
+            "Kein verwendbarer Slicer",
+            window.slicer_progress_status_label.text(),
+        )
         window.close()
 
 

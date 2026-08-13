@@ -30,10 +30,12 @@ from cooling_tower.models import SlicerFamily
 from cooling_tower.preview import OutputMode
 from cooling_tower.slicers.base import classify_profile_source
 from cooling_tower.slicers import (
+    SlicerCapability,
     SlicerDiscoveryResult,
     SlicerDiscoverySource,
     SlicerGuiState,
     SlicerInstallation,
+    SlicerSupportLevel,
 )
 from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
 from cooling_tower.update import UpdateInfo
@@ -54,6 +56,13 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
+
+    def complete_source_step(self, window: MainWindow) -> None:
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
+        )
 
     @staticmethod
     def write_export_folder(
@@ -189,7 +198,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
 
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._set_slicer_header_summary(installation)
         self.app.processEvents()
@@ -203,6 +212,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "(automatisch erkannt)",
         )
         self.assertFalse(window.slicer_group.title_note_label.isHidden())
+        self.assertFalse(
+            window.slicer_group.title_note_label.isVisibleTo(window)
+        )
         self.assertEqual(
             window.slicer_group.title_note_label.palette().color(
                 window.slicer_group.title_note_label.foregroundRole()
@@ -210,13 +222,18 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "#176b45",
         )
         self.assertTrue(window.slicer_group.summary_note_label.isHidden())
-        self.assertEqual(
-            window.slicer_group.header.height(),
-            METRICS.card_header_height_px,
-        )
+        self.assertTrue(window.slicer_group.header.isHidden())
+        self.assertEqual(window.slicer_group.header.height(), 0)
         self.assertEqual(
             window.slicer_group.header.height(),
             window.source_group.header.height(),
+        )
+        self.assertEqual(
+            window.preparation_step_heading_labels[1].text(),
+            "Slicer und Profile festlegen",
+        )
+        self.assertFalse(
+            window.preparation_step_heading_labels[1].isHidden()
         )
         accessible = window.slicer_selector_column.accessibleDescription()
         self.assertIn(f"Slicer: {installation.display_name}", accessible)
@@ -229,7 +246,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         left_layout = window.slicer_group.header_left.layout()
         self.assertTrue(left_layout.alignment() & Qt.AlignmentFlag.AlignLeft)
-        self.assertEqual(window.slicer_group.title_label.text(), "Slicer")
+        self.assertEqual(
+            window.slicer_group.title_label.text(),
+            "Slicer-Einstellungen",
+        )
         self.assertTrue(window.slicer_group.toggle_button.isHidden())
         window.close()
 
@@ -237,7 +257,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(1200, 1000)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
 
@@ -476,7 +496,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
     def test_preview_iteration_slider_and_expansion_warning_use_fixed_values(self) -> None:
         window = self.window()
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
 
@@ -589,18 +609,30 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(1200, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for _ in range(5):
             self.app.processEvents()
 
-        window._refresh_prediction_advice("Analytische Schätzung")
+        with (
+            patch.object(
+                window,
+                "_slicer_prediction_is_offered",
+                return_value=True,
+            ),
+            patch.object(
+                window,
+                "_slicer_prediction_can_start",
+                return_value=True,
+            ),
+        ):
+            window._refresh_prediction_advice("Slicer-gestützte Schätzung")
         for _ in range(3):
             self.app.processEvents()
         self.assertEqual(
             window.prediction_advice_label.text(),
-            "Die analytische Schätzung ist relativ ungenau.\n"
-            "Eine Slicer-gestützte Schätzung wird empfohlen.",
+            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
+            "und den ausgewählten Profilen ermittelt.",
         )
 
         header = window.geometry_calculation_header
@@ -633,7 +665,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(760, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for _ in range(8):
             self.app.processEvents()
@@ -658,7 +690,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(1700, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for _ in range(8):
             self.app.processEvents()
@@ -700,7 +732,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
     def test_numeric_fields_keep_uniform_units_when_focused_and_edited(self) -> None:
         window = self.window()
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
         expected_units = {
@@ -756,7 +788,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertTrue(all(action.isHidden() for action in actions))
 
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         self.assertTrue(all(action.isHidden() for action in actions))
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.assertTrue(all(action.isHidden() for action in actions))
@@ -764,20 +796,20 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertTrue(all(action.isVisible() for action in actions))
         window.close()
 
-    def test_gcode_guide_is_a_two_line_icon_hint_without_a_box(self) -> None:
+    def test_stl_guide_is_an_icon_hint_without_a_box(self) -> None:
         window = self.window()
-        self.assertTrue(
-            window.gcode_import_guide.text().startswith(
-                "Noch kein fertiger G-Code?\n"
-            )
+        self.assertIn("STL-Modell", window.source_guide.text())
+        self.assertEqual(
+            window.source_guide.text(),
+            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
         )
-        self.assertEqual(window.gcode_import_guide_icon.text(), "ℹ")
+        self.assertEqual(window.source_guide_icon.text(), "ℹ")
         self.assertIs(
-            window.gcode_import_guide_icon.parentWidget(),
-            window.gcode_import_guide_row,
+            window.source_guide_icon.parentWidget(),
+            window.source_guide_row,
         )
         self.assertEqual(
-            window.gcode_import_guide_row.layout().contentsMargins().left(),
+            window.source_guide_row.layout().contentsMargins().left(),
             0,
         )
         window.close()
@@ -786,7 +818,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(1300, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
 
@@ -867,7 +899,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(1400, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for _ in range(6):
             self.app.processEvents()
@@ -956,7 +988,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         window.resize(800, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for _ in range(5):
             self.app.processEvents()
@@ -1050,7 +1082,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             extra_error.y(),
         )
 
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.error_panel.set_expanded(True)
         extra_error.set_expanded(True)
@@ -1166,7 +1198,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 version="1.0",
                 executable_path=self.root / f"slicer-{index:02d}.exe",
                 verified=True,
-                capabilities=frozenset(),
+                capabilities=frozenset({SlicerCapability.CLI_SLICE}),
+                support_level=SlicerSupportLevel.FULL,
                 discovery_source=SlicerDiscoverySource.KNOWN_PATH,
                 family=SlicerFamily.OTHER,
             )

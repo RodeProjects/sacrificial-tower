@@ -324,17 +324,16 @@ class Phase13MetadataTests(unittest.TestCase):
 
 class Phase13TimingEvidenceTests(unittest.TestCase):
     def test_timing_sources_are_not_conflated(self) -> None:
-        analytical = LayerTimingState(
+        source = LayerTimingState(
             layer_index=1,
             source_time_s=8.0,
             target_time_s=15.0,
             required_added_time_s=7.0,
-            analytical_tower_time_s=4.0,
         )
-        sliced = replace(analytical, sliced_tower_time_s=5.0)
+        sliced = replace(source, sliced_tower_time_s=5.0)
         final = replace(sliced, final_combined_time_s=14.5)
-        self.assertEqual(analytical.best_evidence_kind, "analytical_tower")
-        self.assertEqual(analytical.best_available_combined_time_s, 12.0)
+        self.assertEqual(source.best_evidence_kind, "source_gcode")
+        self.assertEqual(source.best_available_combined_time_s, 8.0)
         self.assertEqual(sliced.best_evidence_kind, "sliced_tower")
         self.assertEqual(sliced.best_available_combined_time_s, 13.0)
         self.assertEqual(final.best_evidence_kind, "final_combined_gcode")
@@ -349,11 +348,11 @@ class Phase13TimingEvidenceTests(unittest.TestCase):
             (Layer(),),
             target_time_s=15.0,
             safety_factor=1.25,
-            analytical_tower_times_s={4: 3.0},
+            sliced_tower_times_s={4: 3.0},
         )[0]
         self.assertEqual(state.source_time_s, 11.0)
         self.assertEqual(state.required_added_time_s, 5.0)
-        self.assertEqual(state.analytical_tower_time_s, 3.0)
+        self.assertEqual(state.sliced_tower_time_s, 3.0)
         self.assertEqual(state.remaining_deficit_s, 1.0)
 
     def test_capacity_reduction_with_persistent_deficit_is_an_issue(self) -> None:

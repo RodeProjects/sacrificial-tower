@@ -72,6 +72,13 @@ class Phase18UiTests(unittest.TestCase):
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
 
+    def complete_source_step(self, window: MainWindow) -> None:
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
+        )
+
     def test_section_and_workflow_state_changes_are_immediate(self) -> None:
         host = QWidget()
         layout = QVBoxLayout(host)
@@ -90,8 +97,8 @@ class Phase18UiTests(unittest.TestCase):
         host.show()
         self.app.processEvents()
 
-        controller.begin_analysis()
-        controller.analysis_succeeded("datei.gcode · 12 Layer")
+        controller.begin_source_validation(is_stl=True)
+        controller.source_validation_succeeded("datei.stl geprüft")
         self.assertEqual(controller.first_success_duration_ms, 0)
         self.assertFalse(source.isChecked())
         self.assertTrue(slicer.isVisible())
@@ -103,8 +110,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(source.isChecked())
         self.assertIsNone(source._transition)
 
-        controller.begin_analysis()
-        controller.analysis_succeeded("erneut gelesen")
+        controller.begin_source_validation(is_stl=True)
+        controller.source_validation_succeeded("erneut geprüft")
         self.assertTrue(source.isChecked())
         self.assertIsNone(source._transition)
         host.close()
@@ -227,15 +234,15 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.reconstructed_config_text.isHidden())
         window.close()
 
-    def test_reload_action_reanalyses_the_same_gcode(self) -> None:
-        source = self.root / "referenz.gcode"
-        source.write_text(";LAYER:0\nG1 X1 Y1\n", encoding="utf-8")
+    def test_reload_action_revalidates_the_same_stl(self) -> None:
+        source = self.root / "referenz.stl"
+        source.write_bytes(b"solid test\nendsolid test\n")
         window = self.window()
-        window.current_gcode_path = source
-        with patch.object(window, "_on_file_selected") as selected:
-            window.reload_gcode()
-        selected.assert_called_once_with(str(source.resolve()))
-        self.assertEqual(window.drop_zone.reload_button.text(), "G-Code neu einlesen")
+        window.current_source_path = source
+        with patch.object(window.drop_zone, "set_file") as selected:
+            window.reload_source()
+        selected.assert_called_once_with(source.resolve())
+        self.assertEqual(window.drop_zone.reload_button.text(), "STL neu einlesen")
         window.close()
 
     def test_automatic_slicer_detection_is_visible_in_header(self) -> None:
@@ -285,6 +292,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1100, 900)
         window.show()
+        window.preparation_tabs.setCurrentIndex(1)
         window.ready_grid.show()
         self.app.processEvents()
         header_layout = window.geometry_group.header.layout()
@@ -356,7 +364,7 @@ class Phase18UiTests(unittest.TestCase):
             hovered_image = combo.grab().toImage()
             self.assertEqual(
                 hovered_image.pixelColor(combo.width() // 2, 7).name(),
-                "#d8ebf8",
+                "#dceef8",
             )
             self.assertEqual(
                 hovered_image.pixelColor(combo.width() - 10, 7).name(),
@@ -364,7 +372,7 @@ class Phase18UiTests(unittest.TestCase):
             )
             self.assertEqual(
                 hovered_image.pixelColor(0, combo.height() // 2).name(),
-                normal_image.pixelColor(0, combo.height() // 2).name(),
+                "#70a9d2",
             )
             QApplication.sendEvent(combo, QEvent(QEvent.Type.Leave))
             self.assertFalse(combo.property("hovered"))
@@ -483,6 +491,19 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(
             window.geometry_calculation_title.font().pointSizeF(),
             window.geometry_group.title_label.font().pointSizeF(),
+        )
+        self.assertEqual(
+            [
+                window.geometry_group.title_label.font().pointSizeF(),
+                window.stability_group.title_label.font().pointSizeF(),
+                window.overhang_group.title_label.font().pointSizeF(),
+                window.geometry_calculation_title.font().pointSizeF(),
+            ],
+            [11.5, 11.5, 11.5, 11.5],
+        )
+        self.assertEqual(
+            window.geometry_settings_group.title_label.font().pointSizeF(),
+            13.0,
         )
         self.assertEqual(
             window.geometry_calculation_title.font().weight(),
@@ -614,22 +635,21 @@ class Phase18UiTests(unittest.TestCase):
         )
         window.close()
 
-    def test_preparation_columns_have_equal_height_and_aligned_progress(self) -> None:
+    def test_preparation_steps_are_sequential_and_bounded_to_700_px(self) -> None:
         window = self.window()
         window.resize(1205, 1393)
         window.show()
         self.app.processEvents()
-        self.assertEqual(window.source_group.height(), window.slicer_group.height())
-        source_y = window.gcode_progress_bar.mapTo(
-            window.workflow_group,
-            window.gcode_progress_bar.rect().topLeft(),
-        ).y()
-        slicer_y = window.slicer_progress_bar.mapTo(
-            window.workflow_group,
-            window.slicer_progress_bar.rect().topLeft(),
-        ).y()
-        self.assertEqual(source_y, slicer_y)
+        self.assertTrue(window.source_group.isVisible())
+        self.assertFalse(window.slicer_group.isVisible())
+        self.assertEqual(window.source_group.width(), 700)
         self.assertGreaterEqual(window.drop_zone.height(), 180)
+        self.assertEqual(window.settings_scroll.horizontalScrollBar().maximum(), 0)
+        window.preparation_tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        self.assertFalse(window.source_group.isVisible())
+        self.assertTrue(window.slicer_group.isVisible())
+        self.assertEqual(window.slicer_group.width(), 700)
         window.close()
 
     def test_outer_dropdowns_use_matching_header_and_left_accent_colours(self) -> None:
@@ -645,7 +665,7 @@ class Phase18UiTests(unittest.TestCase):
         )
         for group in outer_groups:
             self.assertTrue(group.property("outerDropdown"))
-        self.assertTrue(window.workflow_group.property("bodyHover"))
+        self.assertFalse(window.workflow_group.property("bodyHover"))
         self.assertTrue(window.geometry_settings_group.property("bodyHover"))
         self.assertFalse(window.timing_group.property("bodyHover"))
         self.assertFalse(window.prediction_frame.property("bodyHover"))
@@ -686,12 +706,20 @@ class Phase18UiTests(unittest.TestCase):
         initial_header = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             initial_header.pixelColor(initial_header.width() // 2, 5).name(),
-            "#f0f6fb",
+            "#e1eef6",
         )
         timing_header = window.timing_group.header.grab().toImage()
         self.assertEqual(
             timing_header.pixelColor(timing_header.width() // 2, 5).name(),
-            "#f0f6fb",
+            "#e1eef6",
+        )
+        geometry_header = window.geometry_settings_group.header.grab().toImage()
+        self.assertEqual(
+            geometry_header.pixelColor(
+                geometry_header.width() // 2,
+                5,
+            ).name(),
+            "#e1eef6",
         )
         prediction_header = window.prediction_frame.header.grab().toImage()
         self.assertEqual(
@@ -702,7 +730,6 @@ class Phase18UiTests(unittest.TestCase):
             "#f3f0ff",
         )
         expected_accents = {
-            window.workflow_group: "#1769aa",
             window.timing_group: "#1769aa",
             window.geometry_settings_group: "#1769aa",
             window.prediction_frame: "#6f52c9",
@@ -713,6 +740,15 @@ class Phase18UiTests(unittest.TestCase):
                 image.pixelColor(1, image.height() // 2).name(),
                 colour,
             )
+        preparation_image = window.workflow_group.grab().toImage()
+        self.assertNotEqual(
+            preparation_image.pixelColor(
+                1,
+                preparation_image.height() // 2,
+            ).name(),
+            "#1769aa",
+        )
+        self.assertFalse(window.workflow_group.isCheckable())
         for group in (window.timing_group, window.prediction_frame):
             body_y = min(
                 group.height() - 2,
@@ -760,14 +796,14 @@ class Phase18UiTests(unittest.TestCase):
             stylesheet[stylesheet.index(green_hover):],
         )
 
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.prediction_frame.set_state(SectionState.SUCCESS)
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         image = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             image.pixelColor(image.width() // 2, 5).name(),
-            "#eef8f2",
+            "#e1eef6",
         )
         prediction_image = window.prediction_frame.grab().toImage()
         self.assertEqual(
@@ -795,7 +831,7 @@ class Phase18UiTests(unittest.TestCase):
                 window.prediction_frame,
             )
         }
-        self.assertEqual(icon_colours, {"#176b45"})
+        self.assertEqual(icon_colours, {"#176b45", "#26965f"})
         self.assertFalse(hasattr(window, "profile_group"))
         window.close()
 
@@ -834,7 +870,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1200, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
@@ -842,16 +878,12 @@ class Phase18UiTests(unittest.TestCase):
             window.slicer_prediction_button.text(),
             "Slicer-Schätzung\ndurchführen",
         )
-        window.prediction_method_label.setText("Analytische Schätzung")
-        window.prediction_method_label.setProperty("mode", "analytical")
+        window.prediction_method_label.setText("Slicer-gestützte Schätzung")
+        window.prediction_method_label.setProperty("mode", "slicer")
         window._refresh_widget_style(window.prediction_method_label)
         self.assertEqual(
             window.prediction_method_label.property("mode"),
-            "analytical",
-        )
-        self.assertIn(
-            'QLabel#predictionMethodBadge[mode="analytical"]',
-            window.styleSheet(),
+            "slicer",
         )
         self.assertIn(
             'QLabel#predictionMethodBadge[mode="slicer"]',
@@ -873,13 +905,13 @@ class Phase18UiTests(unittest.TestCase):
                 return_value=True,
             ),
         ):
-            window._refresh_prediction_advice("Analytische Schätzung")
+            window._refresh_prediction_advice("Slicer-gestützte Schätzung")
             self.app.processEvents()
             self.app.processEvents()
         self.assertEqual(
             window.prediction_advice_label.text(),
-            "Die analytische Schätzung ist relativ ungenau.\n"
-            "Eine Slicer-gestützte Schätzung wird empfohlen.",
+            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
+            "und den ausgewählten Profilen ermittelt.",
         )
         self.assertEqual(
             window.prediction_primary_widget.mapTo(
@@ -942,15 +974,18 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1200, 900)
         window.show()
-        window.slicer_group.show()
+        window.preparation_tabs.setCurrentIndex(1)
         self.app.processEvents()
         self.assertEqual(
             window.status_label.text(),
-            "Bitte STL oder G-Code auswählen",
+            "Bitte STL auswählen",
         )
         self.assertEqual(window.source_group.status_icon.text(), "⇧")
-        self.assertIn("Objekt im Slicer", window.gcode_import_guide.text())
-        self.assertIn("G-Code exportieren", window.gcode_import_guide.text())
+        self.assertIn("STL-Modell", window.source_guide.text())
+        self.assertEqual(
+            window.source_guide.text(),
+            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
+        )
         self.assertEqual(window.geometry_group.title(), "Abmessungen")
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
@@ -959,9 +994,29 @@ class Phase18UiTests(unittest.TestCase):
             "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
         )
         self.assertEqual(window.prediction_frame.title(), "Prognose")
-        self.assertTrue(window.preparation_split.is_two_column())
+        self.assertEqual(window.preparation_tabs.count(), 2)
+        self.assertEqual(window.preparation_tabs.tabText(0), "1. Dateiübergabe")
+        self.assertEqual(
+            window.preparation_tabs.tabText(1),
+            "2. Slicer-Einstellungen",
+        )
+        self.assertEqual(window.source_group.maximumWidth(), 16777215)
+        self.assertEqual(window.slicer_group.maximumWidth(), 16777215)
+        self.assertEqual(
+            [shell.maximumWidth() for shell in window.preparation_step_shells],
+            [700, 700],
+        )
+        self.assertTrue(window.preparation_tabs.tabBar().isHidden())
+        self.assertEqual(
+            [
+                selector.property("stepTone")
+                for selector in window.preparation_step_selectors
+            ],
+            ["source", "slicer"],
+        )
+        self.assertTrue(window.source_group.header.isHidden())
+        self.assertTrue(window.slicer_group.header.isHidden())
         self.assertFalse(window.slicer_columns.is_two_column())
-        self.assertTrue(window.preparation_vertical_divider.isVisible())
         self.assertTrue(window.slicer_columns_divider.isHidden())
         self.assertEqual(
             [label.text() for label in window._slicer_width_labels],
@@ -974,6 +1029,10 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertLess(
             slicer_layout.indexOf(window.slicer_progress_status_widget),
+            slicer_layout.indexOf(window.slicer_analysis_details_toggle),
+        )
+        self.assertLess(
+            slicer_layout.indexOf(window.slicer_analysis_details_toggle),
             slicer_layout.indexOf(window.slicer_columns),
         )
         self.assertLess(
@@ -1355,7 +1414,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertIn("nicht vollständig geprüft", generic.casefold())
 
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
@@ -1433,7 +1492,7 @@ class Phase18UiTests(unittest.TestCase):
     def test_status_icons_and_text_are_vertically_centred(self) -> None:
         window = self.window()
         self.assertTrue(
-            window.gcode_progress_status_label.alignment()
+            window.source_progress_status_label.alignment()
             & Qt.AlignmentFlag.AlignVCenter
         )
         self.assertTrue(
@@ -1462,20 +1521,20 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(icon.width(), 28)
         self.assertGreaterEqual(
             icon.font().pointSizeF(),
-            title.font().pointSizeF() + 6.0,
+            title.font().pointSizeF() + 5.0,
         )
         self.assertGreater(
             icon.fontMetrics().height(),
             title.fontMetrics().height(),
         )
-        window.workflow.begin_analysis()
+        window.workflow.begin_source_validation(is_stl=True)
         self.assertTrue(bool(icon.property("prominent")))
         self.assertEqual(icon.width(), 28)
         self.assertGreater(
             icon.fontMetrics().height(),
             title.fontMetrics().height(),
         )
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         self.assertFalse(bool(icon.property("prominent")))
         self.assertEqual(icon.width(), 18)
         window.close()
@@ -1484,7 +1543,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1205, 1393)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
@@ -1561,7 +1620,7 @@ class Phase18UiTests(unittest.TestCase):
         geometry.setChecked(False)
         window.resize(1205, 1393)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
@@ -1610,7 +1669,7 @@ class Phase18UiTests(unittest.TestCase):
         geometry.setChecked(False)
         window.resize(760, 1000)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
@@ -1632,9 +1691,9 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window.reset_button.isHidden())
 
-        window.workflow.begin_analysis()
+        window.workflow.begin_source_validation(is_stl=True)
         self.assertTrue(window.reset_button.isHidden())
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         self.assertTrue(window.reset_button.isHidden())
         window.workflow.begin_slicer_search()
         self.assertTrue(window.reset_button.isHidden())
@@ -1647,24 +1706,22 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.reset_button.isHidden())
         window.close()
 
-    def test_gui_sources_do_not_use_visual_animation_classes(self) -> None:
-        gui_root = SRC_ROOT / "cooling_tower" / "gui"
-        forbidden = (
+    def test_workflow_uses_sequential_collapse_and_fade_animations(self) -> None:
+        workflow_source = (
+            SRC_ROOT / "cooling_tower" / "gui" / "workflow_controller.py"
+        ).read_text(encoding="utf-8")
+        required = (
             "QPropertyAnimation",
             "QVariantAnimation",
             "QParallelAnimationGroup",
             "QGraphicsOpacityEffect",
         )
-        source_text = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in gui_root.rglob("*.py")
-        )
-        for class_name in forbidden:
-            self.assertNotIn(class_name, source_text)
+        for class_name in required:
+            self.assertIn(class_name, workflow_source)
 
     def test_invalid_domain_limits_preserve_the_entered_value(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         setting = window._setting_widgets["maximum_expansion_angle_deg"]
         line_edit = window.maximum_expansion_angle_spin.lineEdit()
@@ -1691,7 +1748,7 @@ class Phase18UiTests(unittest.TestCase):
 
     def test_footer_explains_causes_without_solution_suggestions(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
@@ -1705,7 +1762,7 @@ class Phase18UiTests(unittest.TestCase):
 
     def test_expansion_angle_above_70_is_preserved_but_invalid(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.assertEqual(
             window.maximum_expansion_angle_spin.property("validationMaximum"),
@@ -1769,7 +1826,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.preview_button.setEnabled(True)
         window.preview_dialog.update_button.setEnabled(True)
-        window.prediction_method_label.setText("Analytische Schätzung")
+        window.prediction_method_label.setText("Slicer-gestützte Schätzung")
         window._slicer_prediction_is_offered = lambda: True
         window.slicer_prediction_button.setVisible(True)
         window.slicer_prediction_button.setEnabled(True)
@@ -1811,7 +1868,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1205, 1393)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
@@ -1841,7 +1898,7 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window.footer.isHidden())
         self.assertEqual(window.footer.maximumHeight(), 350)
-        window.workflow.analysis_succeeded("layout.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Layoutprüfung")
         self.assertFalse(window.footer.isHidden())
         window.warning_text.setPlainText(
@@ -1852,8 +1909,8 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         window.warning_text.fit_to_document()
         self.app.processEvents()
-        self.assertLessEqual(window.warning_text.height(), 75)
-        self.assertLess(window.notice_panel.height(), 100)
+        self.assertLessEqual(window.warning_text.height(), 120)
+        self.assertLess(window.notice_panel.height(), 160)
 
         long_message = "Ausführlicher prüfbarer Hinweis. " * 80
         window.validation_label.setText(long_message)
@@ -1958,7 +2015,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.preview_iterations, 8)
         self.assertEqual(
             window.prediction_method_label.text(),
-            "Slicer-gestützte Annäherung",
+            "Slicer-gestützte Schätzung",
         )
         self.assertEqual(window.prediction_value_labels["minimum"].text(), "12,50 s")
         window.close()

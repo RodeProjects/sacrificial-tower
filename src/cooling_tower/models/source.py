@@ -16,21 +16,17 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 class SourceKind(str, Enum):
     """User-supplied source formats accepted by the application."""
 
-    GCODE = "gcode"
     STL = "stl"
 
     @classmethod
     def from_path(cls, path: str | Path) -> "SourceKind":
         suffix = Path(path).suffix.casefold()
-        if suffix == ".gcode":
-            return cls.GCODE
         if suffix == ".stl":
             return cls.STL
-        raise ValueError("Unterstützt werden derzeit STL- und G-Code-Dateien.")
+        raise ValueError("Unterstützt werden derzeit ausschließlich STL-Dateien.")
 
 
 class GCodeOrigin(str, Enum):
-    USER_SUPPLIED = "user_supplied"
     GENERATED_PRESLICE = "generated_preslice"
 
 
@@ -171,11 +167,6 @@ class PreparedAnalysisSource:
         if _SHA256_PATTERN.fullmatch(digest) is None:
             raise ValueError("Der SHA-256-Wert des Analyse-G-Codes ist ungültig.")
         if (
-            self.gcode_origin is GCodeOrigin.USER_SUPPLIED
-            and self.source_artifact.source_kind is not SourceKind.GCODE
-        ):
-            raise ValueError("Nur eine G-Code-Quelle kann direkt analysiert werden.")
-        if (
             self.gcode_origin is GCodeOrigin.GENERATED_PRESLICE
             and self.source_artifact.source_kind is not SourceKind.STL
         ):
@@ -185,11 +176,6 @@ class PreparedAnalysisSource:
             and self.preslice_provenance is None
         ):
             raise ValueError("Bei einem Pre-Slice fehlt die Provenienz.")
-        if (
-            self.gcode_origin is GCodeOrigin.USER_SUPPLIED
-            and self.preslice_provenance is not None
-        ):
-            raise ValueError("Direkter G-Code darf keine Pre-Slice-Provenienz tragen.")
         object.__setattr__(self, "analysis_gcode_path", path)
         object.__setattr__(self, "gcode_sha256", digest)
 

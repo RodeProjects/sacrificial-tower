@@ -233,7 +233,7 @@ class SolidGeometryTests(unittest.TestCase):
         self.assertTrue(validation.is_valid)
         self.assertEqual(len(mesh.vertices), len(profile.points) * 16 + 2)
 
-    def test_analytical_limit_does_not_block_infill_aware_test_slice(self) -> None:
+    def test_initial_geometry_limit_does_not_block_infill_aware_test_slice(self) -> None:
         radius_profile = TowerRadiusProfile(
             config=TowerProfileConfig(10.0, 1.0, 5.0, 20.0, 3),
             global_seconds_per_deposition_mm=0.1,
@@ -247,7 +247,7 @@ class SolidGeometryTests(unittest.TestCase):
             object_height_mm=10.0,
         )
         limitations = {
-            issue.code: issue for issue in profile.analytical_limitations
+            issue.code: issue for issue in profile.initial_geometry_limitations
         }
         self.assertFalse(profile.feasibility_issues)
         self.assertIn("MAXIMUM_OUTER_DIAMETER_REACHED", limitations)

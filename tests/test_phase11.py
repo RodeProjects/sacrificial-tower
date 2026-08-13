@@ -44,8 +44,8 @@ from cooling_tower.models import (
     ProfileFeasibilityAssessment,
 )
 from cooling_tower.services import (
-    AnalysisCancelled,
-    GCodeAnalysisService,
+    StlValidationCancelled,
+    StlValidationService,
     assess_profile_feasibility,
     assess_tower_need,
 )
@@ -393,6 +393,13 @@ class GuiCase(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(predicate(), "Zeitlimit beim Warten auf GUI-Zustand")
 
+    def complete_source_step(self) -> None:
+        self.window.workflow.set_slicer_step_visible(True)
+        self.window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
+        )
+
     def test_future_settings_are_visible_and_survive_window_close(self) -> None:
         self.window.close()
         protected_path = self.root / "future-user.json"
@@ -416,7 +423,7 @@ class GuiCase(unittest.TestCase):
             "nicht überschrieben",
             self.window.settings_load_notice_label.text(),
         )
-        self.window.workflow.analysis_succeeded("future-settings.gcode")
+        self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
         self.assertFalse(self.window.footer.isHidden())
@@ -437,11 +444,7 @@ class GuiCase(unittest.TestCase):
             layer_heights=layer_heights,
         )
         self.window.current_gcode_path = self.source.resolve()
-        self.window._analysis_request_id += 1
-        self.window._on_analysis_succeeded(
-            self.window._analysis_request_id,
-            snapshot,
-        )
+        self.window._adopt_common_analysis_snapshot(snapshot)
 
     @staticmethod
     def spin_subcontrol(editor, control):
@@ -673,7 +676,7 @@ class NumericSettingWidgetTests(GuiCase):
             self.assertGreater(dark_pixels, 0)
 
     def test_keyboard_entry_and_tab_navigation_work(self) -> None:
-        self.window.workflow.analysis_succeeded("tastatur.gcode")
+        self.complete_source_step()
         self.window.workflow.slicer_succeeded("Tastaturtest")
         QTest.qWait(300)
         editor = self.window.target_time_spin
@@ -720,14 +723,14 @@ class LiveValidationTests(GuiCase):
         )
         self.assertIn("40.00 mm", self.window.automatic_base_width_label.text())
 
-    def test_feasible_tower_enables_generation(self) -> None:
+    def test_feasible_tower_still_waits_for_stl_and_slicer(self) -> None:
         self.window.target_time_spin.setValue(2.0)
         self.feed_snapshot((1.0, 1.0, 1.0))
         self.wait_until(lambda: self.window.profile_feasibility is not None)
         self.assertTrue(self.window.profile_feasibility.feasible)
-        self.assertTrue(self.window.preview_button.isEnabled())
+        self.assertFalse(self.window.preview_button.isEnabled())
 
-    def test_analytical_limit_keeps_infill_aware_test_slice_available(self) -> None:
+    def test_geometry_limit_does_not_bypass_required_slicer_context(self) -> None:
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
@@ -750,9 +753,9 @@ class LiveValidationTests(GuiCase):
         self.assertFalse(target.message_label.text())
         self.assertNotIn("Layer", self.window.tower_need_label.text())
         self.assertFalse(self.window.validation_label.text())
-        self.assertTrue(self.window.preview_button.isEnabled())
+        self.assertFalse(self.window.preview_button.isEnabled())
 
-    def test_correcting_analytical_limit_remains_error_free(self) -> None:
+    def test_correcting_geometry_limit_remains_error_free(self) -> None:
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
@@ -777,7 +780,7 @@ class LiveValidationTests(GuiCase):
         self.assertEqual(setting.message_label.text(), "")
 
     def test_related_settings_do_not_replace_the_changed_error_trigger(self) -> None:
-        self.window.workflow.analysis_succeeded("phase11.gcode")
+        self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
@@ -808,7 +811,7 @@ class LiveValidationTests(GuiCase):
             self.assertFalse(bool(widget.editor.property("invalid")))
 
     def test_static_invalid_value_is_inline_and_blocks_profile_check(self) -> None:
-        self.window.workflow.analysis_succeeded("phase11.gcode")
+        self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.minimum_outer_spin.setValue(30)
         self.window.maximum_outer_spin.setValue(10)
@@ -824,7 +827,7 @@ class LiveValidationTests(GuiCase):
         self.assertFalse(self.window.preview_button.isEnabled())
 
     def test_incomplete_numeric_text_is_safe_and_inline(self) -> None:
-        self.window.workflow.analysis_succeeded("phase11.gcode")
+        self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         line_edit = self.window.target_time_spin.lineEdit()
         line_edit.clear()
@@ -860,12 +863,12 @@ class LiveValidationTests(GuiCase):
         self.assertFalse(unexpected.exists())
 
 
-class SlowAnalysisService(GCodeAnalysisService):
-    def analyze(self, path, *, progress_callback=None, cancellation_callback=None):
+class SlowStlValidationService(StlValidationService):
+    def validate(self, path, *, progress_callback=None, cancellation_callback=None):
         cancelled = cancellation_callback or (lambda: False)
         while not cancelled():
             time.sleep(0.005)
-        raise AnalysisCancelled()
+        raise StlValidationCancelled()
 
 
 class StartupLayoutAndLifecycleTests(GuiCase):
@@ -905,7 +908,8 @@ class StartupLayoutAndLifecycleTests(GuiCase):
                 "from cooling_tower.gui import MainWindow",
                 "app=QApplication([])",
                 "win=MainWindow()",
-                "win.workflow.analysis_succeeded('layout.gcode')",
+                "win.workflow.set_slicer_step_visible(True)",
+                "win.workflow.source_validation_succeeded('layout.stl geprüft', analysis_complete=True)",
                 "win.workflow.slicer_succeeded('Layouttest')",
                 "win.show()",
                 "[group.setChecked(True) for group in (win.geometry_group,win.stability_group,win.geometry_settings_group)]",
@@ -968,22 +972,37 @@ class StartupLayoutAndLifecycleTests(GuiCase):
         self.assertEqual(log_path.read_text(encoding="utf-8"), "test traceback")
         dialog.assert_called_once()
 
-    def test_close_cancels_background_analysis_thread(self) -> None:
+    def test_close_cancels_background_stl_validation_thread(self) -> None:
+        stl_source = self.root / "slow.stl"
+        stl_source.write_text(
+            "solid slow\n"
+            "facet normal 0 0 1\n"
+            "outer loop\n"
+            "vertex 0 0 0\n"
+            "vertex 1 0 0\n"
+            "vertex 0 1 0\n"
+            "endloop\n"
+            "endfacet\n"
+            "endsolid slow\n",
+            encoding="utf-8",
+        )
         alternate = MainWindow(
             user_settings_path=self.root / "slow-user.json",
-            analysis_service=SlowAnalysisService(),
+            stl_validation_service=SlowStlValidationService(),
         )
-        alternate.drop_zone.set_file(self.source)
+        alternate.drop_zone.set_file(stl_source)
         deadline = time.monotonic() + 2
         while (
-            not alternate.background_job_manager.has_active(JobKind.ANALYSIS)
+            not alternate.background_job_manager.has_active(
+                JobKind.STL_VALIDATION
+            )
             and time.monotonic() < deadline
         ):
             self.app.processEvents()
         threads = [
             job.thread
             for job in alternate.background_job_manager.active_jobs(
-                JobKind.ANALYSIS
+                JobKind.STL_VALIDATION
             )
             if isinstance(job.thread, QThread)
         ]

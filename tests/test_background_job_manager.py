@@ -22,7 +22,6 @@ from PySide6.QtCore import QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.diagnostics import DiagnosticJournal
-from cooling_tower.gui.analysis_worker import AnalysisWorker
 from cooling_tower.gui.background_jobs import (
     BackgroundJobManager,
     InvalidJobTransition,
@@ -264,7 +263,7 @@ class BackgroundJobManagerTests(unittest.TestCase):
         self,
         request_id: int,
         *,
-        kind: JobKind = JobKind.ANALYSIS,
+        kind: JobKind = JobKind.STL_VALIDATION,
         **kwargs,
     ) -> tuple[str, ManagedTestWorker]:
         worker = ManagedTestWorker(request_id, **kwargs)
@@ -318,7 +317,7 @@ class BackgroundJobManagerTests(unittest.TestCase):
         content = (self.root / "jobs.jsonl").read_text(encoding="utf-8")
         self.assertIn("job_worker_failed", content)
         self.assertIn("expected worker failure", content)
-        self.assertIn('"error_code": "analysis_worker_failed"', content)
+        self.assertIn('"error_code": "stl_validation_worker_failed"', content)
 
     def test_cancel_before_and_after_start_is_idempotent(self) -> None:
         first_id, _first = self.start_worker(1, duration_s=0.2)
@@ -553,7 +552,6 @@ class BackgroundArchitectureTests(unittest.TestCase):
 
     def test_every_productive_worker_has_cancel_and_one_finished_signal(self) -> None:
         workers = (
-            AnalysisWorker,
             FeasibilityWorker,
             ProfileMatchingWorker,
             SlicerDiscoveryWorker,

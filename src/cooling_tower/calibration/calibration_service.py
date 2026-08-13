@@ -118,10 +118,6 @@ class CalibrationService:
             }
             else None
         )
-        integrate_existing_gcode = bool(
-            source_artifact is not None
-            and source_artifact.source_kind is SourceKind.GCODE
-        )
         seed_stl = (
             Path(seed_stl_path).resolve()
             if seed_stl_path is not None else None
@@ -156,32 +152,13 @@ class CalibrationService:
                 CalibrationFailureCode.LAYER_MISMATCH,
                 "Es wurden keine für den Kühlturm relevanten Quell-Layer gefunden.",
             )
-        if config.maximum_iterations == 0:
-            return CalibrationResult(
-                state=CalibrationState.NOT_STARTED,
-                mode=config.mode,
-                iterations=(),
-                profile=None,
-                stl_path=None,
-                gcode_path=None,
-                placement=None,
-                warnings=(
-                    "Die Slicer-Kalibrierung wurde bewusst deaktiviert; es wird "
-                    "der analytisch berechnete Kühlturm verwendet.",
-                ),
-                source_sha256=source_hash,
-                configured_iteration_count=0,
-            )
         if not profile.installation.can_slice:
             return self._failure(
                 config, CalibrationState.UNSUPPORTED, source_hash,
                 CalibrationFailureCode.PROFILE_INCOMPLETE,
                 "Die ausgewählte Slicer-/Profilkombination kann nicht automatisch slicen.",
             )
-        if (
-            config.mode is CalibrationMode.GCODE
-            and joint_source_stl is None
-        ) or integrate_existing_gcode:
+        if config.mode is CalibrationMode.GCODE and joint_source_stl is None:
             support = assess_gcode_support(source)
             if not support.supported:
                 return self._failure(
@@ -227,7 +204,6 @@ class CalibrationService:
         if (
             config.mode is CalibrationMode.GCODE
             or joint_source_stl is not None
-            or integrate_existing_gcode
         ):
             bed_geometry = parse_bed_geometry(profile.effective_values)
             if bed_geometry is None:
@@ -293,7 +269,7 @@ class CalibrationService:
                 "Kühlturm-Kandidaten. Beim Export wird der aktuelle Kandidat "
                 "einmal gemeinsam mit dem Objekt präzisionsgeprüft."
             )
-        elif config.mode is CalibrationMode.GCODE or integrate_existing_gcode:
+        elif config.mode is CalibrationMode.GCODE:
             warnings.append(
                 "Die Quelle ist bereits G-Code und kann nicht gemeinsam neu "
                 "geslicet werden. Der separat geslicte Kühlturm wird deshalb "
@@ -625,7 +601,7 @@ class CalibrationService:
                         combined_path,
                         source_layers,
                     )
-                elif config.mode is CalibrationMode.GCODE or integrate_existing_gcode:
+                elif config.mode is CalibrationMode.GCODE:
                     combined_path = iteration_root / "combined.gcode"
                     try:
                         if placement is None:
@@ -806,7 +782,7 @@ class CalibrationService:
                         source_hash=source_hash,
                         output_directory=Path(output_directory),
                         best_iteration_number=number,
-                        improved_over_analytical=(
+                        improved_over_initial_candidate=(
                             baseline_score is not None
                             and candidate_score < baseline_score
                         ),
@@ -860,7 +836,7 @@ class CalibrationService:
                         angle_limited = next(
                             (
                                 issue
-                                for issue in solid.analytical_limitations
+                                for issue in solid.initial_geometry_limitations
                                 if issue.code == "EXPANSION_ANGLE_TOO_SMALL"
                                 and (
                                     issue.affected_layer_index is None
@@ -987,7 +963,7 @@ class CalibrationService:
                     source_hash=source_hash,
                     output_directory=Path(output_directory),
                     best_iteration_number=best_iteration_number,
-                    improved_over_analytical=improved,
+                    improved_over_initial_candidate=improved,
                 )
         return CalibrationResult(
             state=terminal_state,
@@ -1002,7 +978,7 @@ class CalibrationService:
             source_sha256=source_hash,
             configured_iteration_count=config.maximum_iterations,
             best_iteration_number=best_iteration_number,
-            improved_over_analytical=False,
+            improved_over_initial_candidate=False,
         )
 
     @staticmethod
@@ -1166,7 +1142,7 @@ class CalibrationService:
         source_hash: str,
         output_directory: Path,
         best_iteration_number: int,
-        improved_over_analytical: bool,
+        improved_over_initial_candidate: bool,
     ) -> CalibrationResult:
         output_directory.mkdir(parents=True, exist_ok=True)
         stl_destination = output_directory / "cooling_tower_slicer_evaluated.stl"
@@ -1214,7 +1190,7 @@ class CalibrationService:
             output_sha256=sha256_file(exported),
             configured_iteration_count=config.maximum_iterations,
             best_iteration_number=best_iteration_number,
-            improved_over_analytical=improved_over_analytical,
+            improved_over_initial_candidate=improved_over_initial_candidate,
         )
         report_path = output_directory / "calibration_report.json"
         report_path.write_text(

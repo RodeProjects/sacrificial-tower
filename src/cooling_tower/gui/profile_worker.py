@@ -305,9 +305,6 @@ class ProfileMatchingWorker(CancelableWorker):
                     can_use_stl_mode=bool(
                         getattr(result, "can_use_stl_mode", False)
                     ),
-                    can_use_gcode_mode=bool(
-                        getattr(result, "can_use_gcode_mode", False)
-                    ),
                     profiles_filtered=bool(
                         getattr(result, "profiles_filtered", False)
                     ),

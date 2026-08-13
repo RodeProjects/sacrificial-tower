@@ -43,15 +43,15 @@ class RemainingUiOverhaulTests(unittest.TestCase):
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
 
-    def test_gcode_card_uses_dedicated_rows_and_only_wraps_the_path(self) -> None:
+    def test_source_card_uses_dedicated_rows_and_only_wraps_the_path(self) -> None:
         window = self.window()
         zone = window.drop_zone
         self.assertFalse(zone.status_value_label.wordWrap())
         self.assertFalse(zone.file_name_label.wordWrap())
         self.assertFalse(zone.file_size_label.wordWrap())
         self.assertTrue(zone.file_path_label.wordWrap())
-        self.assertEqual(zone.remove_button.text(), "G-Code entfernen")
-        self.assertEqual(window.gcode_progress_bar.format(), "%p %")
+        self.assertEqual(zone.remove_button.text(), "STL entfernen")
+        self.assertEqual(window.source_progress_bar.format(), "%p %")
         self.assertIn("STL-Dateien bleiben", window.stl_info_button.toolTip())
         window.close()
 
@@ -64,7 +64,11 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         grid = window.ready_grid
         window.resize(1400, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "test.stl geprüft",
+            analysis_complete=True,
+        )
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(600)
         self.app.processEvents()

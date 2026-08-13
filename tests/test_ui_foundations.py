@@ -36,9 +36,9 @@ from cooling_tower.gui.widgets import (
 
 
 EXPECTED_STATE_IDS = {
-    "no_gcode",
-    "gcode_analysis",
-    "gcode_ready",
+    "no_stl",
+    "stl_validation",
+    "stl_ready",
     "slicer_search",
     "slicer_ready",
     "slicer_unavailable",
@@ -177,7 +177,7 @@ class UiFoundationTests(unittest.TestCase):
 
     def test_progressive_workflow_reveals_each_stage_in_order(self) -> None:
         host = QLabel()
-        source = SectionCard("G-Code", collapsible=True)
+        source = SectionCard("Dateiübergabe", collapsible=True)
         slicer = SectionCard("Slicer", collapsible=True)
         first = QLabel("Einstellungen")
         second = QLabel("Ergebnis")
@@ -194,16 +194,16 @@ class UiFoundationTests(unittest.TestCase):
         )
 
         controller.reset()
-        self.assertEqual(controller.stage, WorkflowStage.WAITING_FOR_GCODE)
+        self.assertEqual(controller.stage, WorkflowStage.WAITING_FOR_SOURCE)
         self.assertFalse(source.isHidden())
         self.assertTrue(slicer.isHidden())
         self.assertTrue(first.isHidden())
 
-        controller.begin_analysis()
-        self.assertEqual(source.summary(), "Analyse läuft")
-        controller.analysis_succeeded("datei.gcode · 12 Layer")
+        controller.begin_source_validation(is_stl=True)
+        self.assertEqual(source.summary(), "Quelle wird geprüft")
+        controller.source_validation_succeeded("datei.stl geprüft")
         self.app.processEvents()
-        self.assertEqual(controller.stage, WorkflowStage.GCODE_READY)
+        self.assertEqual(controller.stage, WorkflowStage.DISCOVERING_SLICER)
         self.assertFalse(source.isChecked())
         self.assertFalse(slicer.isHidden())
 
@@ -217,7 +217,7 @@ class UiFoundationTests(unittest.TestCase):
 
     def test_manual_expansion_is_not_overridden_after_auto_completion(self) -> None:
         host = QLabel()
-        source = SectionCard("G-Code", collapsible=True, parent=host)
+        source = SectionCard("Dateiübergabe", collapsible=True, parent=host)
         slicer = SectionCard("Slicer", collapsible=True, parent=host)
         downstream = QLabel("Einstellungen", host)
         controller = WorkflowController(
@@ -228,15 +228,15 @@ class UiFoundationTests(unittest.TestCase):
             duration_ms=0,
         )
         controller.reset()
-        controller.analysis_succeeded("bereit")
+        controller.source_validation_succeeded("STL bereit")
         controller.slicer_succeeded("Slicer")
         slicer.setChecked(True)
         controller.slicer_succeeded("Slicer")
         self.assertTrue(slicer.isChecked())
 
-    def test_missing_slicer_keeps_analytical_workflow_available(self) -> None:
+    def test_missing_required_slicer_blocks_the_workflow(self) -> None:
         host = QLabel()
-        source = SectionCard("G-Code", collapsible=True, parent=host)
+        source = SectionCard("Dateiübergabe", collapsible=True, parent=host)
         slicer = SectionCard("Slicer", collapsible=True, parent=host)
         downstream = QLabel("Einstellungen", host)
         controller = WorkflowController(
@@ -247,12 +247,12 @@ class UiFoundationTests(unittest.TestCase):
             duration_ms=0,
         )
         controller.reset()
-        controller.analysis_succeeded("bereit")
-        controller.slicer_unavailable("Kein Slicer")
-        self.assertEqual(controller.stage, WorkflowStage.DEGRADED)
-        self.assertEqual(slicer.state(), SectionState.WARNING)
+        controller.source_validation_succeeded("STL bereit")
+        controller.required_slicer_unavailable("Kein Slicer")
+        self.assertEqual(controller.stage, WorkflowStage.ERROR)
+        self.assertEqual(slicer.state(), SectionState.ERROR)
         self.assertTrue(slicer.isChecked())
-        self.assertFalse(downstream.isHidden())
+        self.assertTrue(downstream.isHidden())
 
     def test_main_window_starts_with_the_combined_preparation_card(self) -> None:
         settings_path = Path(self.temporary.name) / "settings.json"
@@ -261,7 +261,9 @@ class UiFoundationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window.workflow_group.isVisible())
         self.assertTrue(window.source_group.isVisible())
-        self.assertTrue(window.slicer_group.isVisible())
+        self.assertFalse(window.slicer_group.isVisible())
+        self.assertTrue(window.preparation_tabs.isVisible())
+        self.assertEqual(window.preparation_tabs.currentIndex(), 0)
         self.assertTrue(window.workflow_group.isAncestorOf(window.source_group))
         self.assertTrue(window.workflow_group.isAncestorOf(window.slicer_group))
         self.assertTrue(window.ready_grid.isHidden())

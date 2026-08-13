@@ -24,6 +24,8 @@ class ResponsiveCardGrid(QWidget):
         parent: QWidget | None = None,
         *,
         breakpoint_px: int = METRICS.responsive_breakpoint_px,
+        horizontal_spacing_px: int = METRICS.card_spacing_px,
+        vertical_spacing_px: int = METRICS.card_spacing_px,
     ) -> None:
         super().__init__(parent)
         self.setSizePolicy(
@@ -31,14 +33,16 @@ class ResponsiveCardGrid(QWidget):
             QSizePolicy.Policy.Maximum,
         )
         self._breakpoint_px = breakpoint_px
+        self._horizontal_spacing_px = max(0, int(horizontal_spacing_px))
+        self._vertical_spacing_px = max(0, int(vertical_spacing_px))
         self._entries: list[_GridEntry] = []
         self._two_column: bool | None = None
         self._vertical_separator: QWidget | None = None
         self._stacked_separator: QWidget | None = None
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(METRICS.card_spacing_px)
-        self.grid.setVerticalSpacing(METRICS.card_spacing_px)
+        self.grid.setHorizontalSpacing(self._horizontal_spacing_px)
+        self.grid.setVerticalSpacing(self._vertical_spacing_px)
         self.grid.setColumnStretch(0, 1)
         self.grid.setColumnStretch(1, 1)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -205,7 +209,7 @@ class ResponsiveCardGrid(QWidget):
         separator = self._vertical_separator
         stacked_separator = self._stacked_separator
         if separator is None:
-            self.grid.setHorizontalSpacing(METRICS.card_spacing_px)
+            self.grid.setHorizontalSpacing(self._horizontal_spacing_px)
             self.grid.setColumnStretch(0, 1)
             self.grid.setColumnStretch(1, 1)
             self.grid.setColumnStretch(2, 0)

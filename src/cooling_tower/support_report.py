@@ -108,7 +108,6 @@ _JOURNAL_SAFE_KEYS = frozenset(
         "cancelled",
         "candidate_count",
         "can_slice",
-        "can_use_gcode_mode",
         "can_use_stl_mode",
         "clean_shutdown",
         "completion_info",

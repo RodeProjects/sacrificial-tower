@@ -279,7 +279,7 @@ def run_scenario(
             for batch_start in range(0, 300, 20):
                 for request_id in range(batch_start, batch_start + 20):
                     manager.start_job(
-                        kind=JobKind.ANALYSIS,
+                        kind=JobKind.STL_VALIDATION,
                         request_id=request_id,
                         worker=StressWorker(
                             request_id,
@@ -342,7 +342,7 @@ def run_scenario(
         elif scenario == "parallel_job_kinds":
             for request_id, kind in enumerate(
                 (
-                    JobKind.ANALYSIS,
+                    JobKind.STL_VALIDATION,
                     JobKind.PROFILE_MATCH,
                     JobKind.PREVIEW,
                 ),
@@ -352,7 +352,7 @@ def run_scenario(
             _wait_until(application, lambda: not manager.has_active())
         elif scenario == "worker_exception":
             manager.start_job(
-                kind=JobKind.ANALYSIS,
+                kind=JobKind.STL_VALIDATION,
                 request_id=1,
                 worker=StressWorker(1, fail=True),
             )

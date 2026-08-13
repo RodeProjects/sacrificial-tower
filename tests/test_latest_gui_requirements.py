@@ -96,11 +96,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
 
+    def complete_source_step(self, window: MainWindow) -> None:
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
+        )
+
     def test_wide_geometry_is_remeasured_when_workflow_becomes_visible(self) -> None:
         window = self.window()
         window.resize(1400, 900)
         window.show()
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         QTest.qWait(100)
         self.app.processEvents()
@@ -124,7 +131,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_out_of_range_values_remain_visible_with_priority_feedback(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         setting = window.maximum_expansion_angle_setting
         window.maximum_expansion_angle_spin.setValue(71.0)
@@ -147,7 +154,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_footer_is_responsive_prioritized_and_bounded(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.resize(1400, 900)
         window.show()
@@ -205,7 +212,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         window.target_time_spin.setValue(0.0)
         window.maximum_expansion_angle_spin.setValue(51.0)
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.app.processEvents()
 
@@ -228,7 +235,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_ranges_are_visible_and_layer_time_is_limited_to_120_seconds(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
 
@@ -262,7 +269,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window._feasibility_field_errors = {
             "safety_factor": ["Testhinweis zum Sicherheitsfaktor."]
         }
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.validate_form()
         self.assertNotIn("×", window.validation_label.text())
@@ -270,7 +277,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_equivalent_dependency_errors_are_unique_and_stay_marked(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
@@ -597,18 +604,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        guide_top = window.gcode_import_guide.mapTo(
+        guide_top = window.source_guide.mapTo(
             window.source_group.content_widget,
             QPoint(0, 0),
         ).y()
-        guide_bottom = guide_top + window.gcode_import_guide.height()
+        guide_bottom = guide_top + window.source_guide.height()
         drop_zone_top = window.drop_zone.mapTo(
             window.source_group.content_widget,
             QPoint(0, 0),
         ).y()
         lower_gap = drop_zone_top - guide_bottom
 
-        self.assertTrue(window.gcode_progress_status_widget.isHidden())
+        self.assertTrue(window.source_progress_status_widget.isHidden())
         self.assertEqual(
             guide_top,
             window.source_group.content_layout.contentsMargins().top(),
@@ -680,7 +687,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_footer_notice_header_uses_expected_arrow_directions(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         panel = window.error_panel
         panel.show()
@@ -705,7 +712,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_multiline_angle_fields_keep_the_standard_range_gap(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.resize(1300, 900)
         window.show()
@@ -730,7 +737,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_setting_info_buttons_are_centered_and_labels_use_available_width(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.resize(1500, 900)
         window.show()
@@ -769,7 +776,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_multiple_inline_messages_are_bulleted(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         setting = window._setting_widgets["maximum_outer_diameter_mm"]
         setting.set_error(
@@ -851,7 +858,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_multiple_errors_use_bullets_and_field_specific_inline_text(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
@@ -881,7 +888,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_footer_groups_feasibility_issues_below_the_changed_setting(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.target_time_spin.setValue(111.0)
         window._last_changed_setting_name = "target_layer_time_s"
@@ -1001,7 +1008,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_static_error_survives_an_action_in_another_section(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
@@ -1030,7 +1037,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_feasibility_error_keeps_its_origin_until_resolved(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.target_time_spin.setValue(111.0)
         window._last_changed_setting_name = "target_layer_time_s"
@@ -1102,7 +1109,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_fixing_one_feasibility_error_keeps_unrelated_errors(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._last_changed_setting_name = "target_layer_time_s"
         expansion_issue = FeasibilityIssue(
@@ -1172,7 +1179,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_reset_rehomes_a_persistent_limit_issue_from_the_reset_field(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         issue = FeasibilityIssue(
             code="MAXIMUM_OUTER_DIAMETER_REACHED",
@@ -1219,7 +1226,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_latest_feasibility_result_is_the_only_issue_source(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
@@ -1246,7 +1253,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_changed_dependency_drops_only_its_stale_feasibility_issue(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._last_changed_setting_name = "target_layer_time_s"
         issues = (
@@ -1294,7 +1301,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_recalculated_dependency_notice_uses_its_current_value(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.maximum_outer_spin.setValue(500.0)
         issue = FeasibilityIssue(
@@ -1336,7 +1343,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_failed_feasibility_check_replaces_old_calculated_errors(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
@@ -1369,7 +1376,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_infeasible_result_without_details_still_shows_a_problem(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
 
         window._on_feasibility_succeeded(
@@ -1401,7 +1408,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_fixing_one_static_error_keeps_an_independent_static_error(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.target_time_spin.setValue(121.0)
         window.maximum_expansion_angle_spin.setValue(71.0)
@@ -1429,7 +1436,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         window.resize(1400, 900)
         window.show()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.error_panel.hide()
         window.notice_panel.hide()
@@ -1470,7 +1477,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_range_lines_and_dynamic_layer_limit_are_compact(self) -> None:
         window = self.window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window._update_local_window_layer_limit(891)
 

@@ -192,8 +192,8 @@ def calibration_diagnostics(
         "attempted": attempted,
         "succeeded": bool(preview.calibrated),
         "slicer_optimized": bool(preview.slicer_optimized),
-        "improved_over_analytical": bool(
-            getattr(calibration, "improved_over_analytical", False)
+        "improved_over_initial_candidate": bool(
+            getattr(calibration, "improved_over_initial_candidate", False)
         ),
         "state": state_value,
         "state_explanation": state_explanation,
@@ -312,7 +312,7 @@ def _source_provenance(request: PreviewRequest) -> dict[str, Any]:
         ),
         "analysis_gcode": str(request.source_path),
         "analysis_gcode_origin": (
-            prepared.gcode_origin.value if prepared is not None else "user_supplied"
+            prepared.gcode_origin.value if prepared is not None else "internal"
         ),
         "analysis_gcode_sha256": (
             prepared.gcode_sha256
@@ -379,10 +379,6 @@ def build_technical_report(
         "success_calibrated"
         if preview.calibrated
         else "success_slicer_optimized_partial"
-        if preview.slicer_optimized
-        else "success_analytical_requested"
-        if request.calibration_config.maximum_iterations == 0
-        else "success_with_analytical_fallback"
     )
     target_difference = (
         preview.minimum_verified_layer_time_s
@@ -513,9 +509,6 @@ def build_technical_report(
         },
         "calibration": calibration,
         "diagnostic_guidance": {
-            "fallback_is_valid_export": (
-                not preview.calibrated and not preview.slicer_optimized
-            ),
             "uses_slicer_evaluated_candidate": preview.slicer_optimized,
             "recommended_user_action": (
                 "STL im Slicer laden, gemeinsam mit dem Objekt slicen und die Layerzeitansicht prüfen."
@@ -523,7 +516,8 @@ def build_technical_report(
                 else "Keine zusätzliche Prüfung aufgrund dieses Berichts erforderlich."
             ),
             "support_hint": (
-                "Bei Problemen diesen technischen Bericht zusammen mit dem Quell-G-Code und der exportierten Datei bereitstellen."
+                "Bei Problemen diesen technischen Bericht zusammen mit der "
+                "ursprünglichen STL und der exportierten Datei bereitstellen."
             ),
         },
     }
@@ -559,7 +553,7 @@ def build_user_report(
             if request.prepared_analysis_source is not None
             and request.prepared_analysis_source.gcode_origin.value
             == "generated_preslice"
-            else "vom Benutzer bereitgestellter G-Code"
+            else "interner Analyse-G-Code"
         ),
         "",
     ]
@@ -669,8 +663,8 @@ def build_user_report(
                     "Objekt gemessen und bleibt im 3MF reproduzierbar."
                     if preview.joint_sliced
                     else "der ausgegebene Kühlturm ist laut den gemessenen "
-                    "Slicerzeiten aber besser als die analytische "
-                    "Ausgangsvariante."
+                    "Slicerzeiten besser als der erste geprüfte "
+                    "Ausgangszustand."
                 ),
                 "",
                 "Kalibrierungsergebnis:",
@@ -723,25 +717,13 @@ def build_user_report(
                 "gemeinsamen Slicen von Objekt und Kühlturm.",
             )
         )
-    elif request.calibration_config.maximum_iterations == 0:
-        lines.extend(
-            (
-                "Ergebnis: Analytischer STL-Kühlturm erfolgreich erzeugt.",
-                "Slicer-Durchläufe waren auf 0 eingestellt und wurden daher "
-                "bewusst nicht ausgeführt.",
-                "Eine slicerbasiert bestätigte minimale Layerzeit liegt nicht vor.",
-                "Bitte kontrollieren Sie die tatsächliche Layerzeit im final "
-                "geslicten Projekt.",
-            )
-        )
     else:
         lines.extend(
             (
-                "Ergebnis: Export erfolgreich, aber nicht slicerbasiert bestätigt.",
-                "Es wurde ein analytisch berechneter STL-Kühlturm erzeugt.",
-                "Eine garantierte minimale Layerzeit liegt deshalb nicht vor.",
+                "Ergebnis: Kein belastbares slicerbasiertes Resultat verfügbar.",
+                "Ohne bestätigten Slicerlauf darf kein Export bereitgestellt werden.",
                 "",
-                "Warum wurde nicht kalibriert?",
+                "Warum wurde kein Ergebnis übernommen?",
                 f"- {diagnostics['state_explanation']}",
             )
         )
@@ -759,9 +741,8 @@ def build_user_report(
             (
                 "",
                 "Was sollte ich jetzt tun?",
-                "- STL zusammen mit dem Objekt im Slicer laden und slicen.",
-                "- In der Layerzeitansicht prüfen, ob die gewünschte Zeit erreicht wird.",
-                "- Falls nicht, Einstellungen anpassen und den Kühlturm neu erzeugen.",
+                "- Slicer- und Profilauswahl prüfen.",
+                "- Kühlturm mit einem erfolgreichen Slicerlauf neu erzeugen.",
             )
         )
     user_warnings = list(

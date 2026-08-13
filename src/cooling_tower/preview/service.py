@@ -40,20 +40,6 @@ from cooling_tower.preview.toolpath import (
     PreviewCancelled,
     extract_deposition_toolpaths,
 )
-from cooling_tower.services.tower_need_service import (
-    assess_tower_need,
-    layers_for_tower,
-)
-from cooling_tower.tower.solid_profile import build_solid_tower_profile
-from cooling_tower.tower.mesh_generator import (
-    TowerMeshConfig,
-    generate_solid_tower_mesh,
-    write_binary_stl,
-)
-from cooling_tower.tower.profile import (
-    TowerProfileConfig,
-    build_tower_radius_profile,
-)
 
 
 ProgressCallback = Callable[[int, str], None]
@@ -326,6 +312,17 @@ class PreviewService:
             object_segments = source_data.object_segments
             source_segment_count = source_data.source_segment_count
 
+            if (
+                request.calibration_config.maximum_iterations < 1
+                or request.adapter is None
+                or request.effective_profile is None
+            ):
+                raise PreviewBuildError(
+                    "Für die präzise Kühlturmerzeugung sind ein bestätigter "
+                    "Slicer, vollständige Profile und mindestens ein "
+                    "Slicer-Durchlauf erforderlich."
+                )
+
             profile = None
             calibration = None
             calibrated = False
@@ -334,14 +331,8 @@ class PreviewService:
             warnings: list[str] = []
             artifact: Path | None = None
             placement: TowerPlacement | None = None
-            generation_kind = "analytischer STL-Fallback"
-            if request.calibration_config.maximum_iterations == 0:
-                generation_kind = "analytisch erzeugt (Slicer-Durchläufe deaktiviert)"
-                warnings.append(
-                    "Slicer-Durchläufe wurden auf 0 gesetzt; der Kühlturm wurde "
-                    "ausschließlich analytisch berechnet."
-                )
-            elif request.adapter is not None and request.effective_profile is not None:
+            generation_kind = "slicerbasierte Kalibrierung"
+            if request.adapter is not None and request.effective_profile is not None:
                 notify(25, "Slicer und Profil werden für die Kalibrierung vorbereitet …")
                 calibration = self.calibration_service.calibrate(
                     request.snapshot,
@@ -423,8 +414,7 @@ class PreviewService:
                                 "exportiert wird der einmal gemeinsam geslicte, "
                                 "prüfbare Zwischenstand."
                                 if joint_sliced
-                                else "exportiert wird der gegenüber dem "
-                                "analytischen Ausgang messbar bessere "
+                                else "exportiert wird der messbar beste "
                                 "Slicer-Zwischenstand."
                             )
                         )
@@ -435,42 +425,18 @@ class PreviewService:
                         + detail
                     )
                 else:
-                    warnings.append(
-                        "Slicerbasierte Kalibrierung war nicht erfolgreich; "
-                        "der Export verwendet den analytischen STL-Fallback."
+                    detail = " ".join(
+                        item.message for item in calibration.failures
+                    )
+                    raise PreviewBuildError(
+                        "Die slicerbasierte Kalibrierung lieferte kein "
+                        "verwendbares Ergebnis. " + detail
                     )
 
             if profile is None:
-                if request.output_mode is OutputMode.GCODE:
-                    raise PreviewBuildError(
-                        "G-Code-Ausgabe benötigt eine bestätigte, slicerfähige Profilkombination."
-                    )
-                notify(35, "Analytische Kühlturmgeometrie wird berechnet …")
-                assessment = assess_tower_need(request.snapshot, request.settings)
-                source_layers = layers_for_tower(request.snapshot, assessment)
-                radius = build_tower_radius_profile(
-                    source_layers,
-                    TowerProfileConfig(
-                        target_layer_time_s=request.settings.target_layer_time_s,
-                        safety_factor=request.settings.safety_factor,
-                        minimum_radius_mm=request.settings.minimum_outer_radius_mm,
-                        maximum_radius_mm=request.settings.maximum_outer_radius_mm,
-                        local_time_factor_window=request.settings.local_reference_window,
-                    ),
+                raise PreviewBuildError(
+                    "Der Slicer lieferte kein verwendbares Kühlturmprofil."
                 )
-                profile = build_solid_tower_profile(
-                    radius,
-                    request.settings,
-                    tower_end_z_mm=assessment.tower_end_z_mm,
-                    object_height_mm=request.snapshot.maximum_print_z_mm,
-                )
-                mesh = generate_solid_tower_mesh(
-                    profile,
-                    TowerMeshConfig(request.settings.mesh_segments),
-                )
-                artifact = root / "cooling_tower_analytic.stl"
-                write_binary_stl(mesh, artifact)
-                notify(80, "Analytische Kühlturmgeometrie ist erstellt")
 
             if artifact is None or not artifact.is_file():
                 raise PreviewBuildError("Die Vorschau besitzt keine exportierbare Ausgabedatei.")

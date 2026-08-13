@@ -225,11 +225,7 @@ class PreviewDialog(QDialog):
         self.state_label.setText("✓ Vorschau ist aktuell")
         self.state_label.setProperty("state", "current")
         self._refresh_state_style()
-        calibration = (
-            "Slicer-gestützte Schätzung"
-            if result.calibrated or result.slicer_optimized
-            else "analytischer STL-Fallback"
-        )
+        calibration = "Slicer-gestützte Schätzung"
         bed = result.scene.bed_bounds
         bed_width_mm = bed.maximum_x_mm - bed.minimum_x_mm
         bed_depth_mm = bed.maximum_y_mm - bed.minimum_y_mm

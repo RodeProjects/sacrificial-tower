@@ -102,13 +102,12 @@ class TimingEvidence:
 
 @dataclass(frozen=True, slots=True)
 class LayerTimingState:
-    """Keeps source, predicted, sliced and final timing evidence separate."""
+    """Keeps source, sliced and final timing evidence separate."""
 
     layer_index: int
     source_time_s: float
     target_time_s: float
     required_added_time_s: float
-    analytical_tower_time_s: float | None = None
     sliced_tower_time_s: float | None = None
     final_combined_time_s: float | None = None
 
@@ -117,7 +116,6 @@ class LayerTimingState:
             self.source_time_s,
             self.target_time_s,
             self.required_added_time_s,
-            self.analytical_tower_time_s,
             self.sliced_tower_time_s,
             self.final_combined_time_s,
         )
@@ -135,8 +133,6 @@ class LayerTimingState:
             return self.final_combined_time_s
         if self.sliced_tower_time_s is not None:
             return self.source_time_s + self.sliced_tower_time_s
-        if self.analytical_tower_time_s is not None:
-            return self.source_time_s + self.analytical_tower_time_s
         return self.source_time_s
 
     @property
@@ -145,8 +141,6 @@ class LayerTimingState:
             return "final_combined_gcode"
         if self.sliced_tower_time_s is not None:
             return "sliced_tower"
-        if self.analytical_tower_time_s is not None:
-            return "analytical_tower"
         return "source_gcode"
 
     @property
@@ -174,7 +168,6 @@ def build_layer_timing_states(
     *,
     target_time_s: float,
     safety_factor: float = 1.0,
-    analytical_tower_times_s: Mapping[int, float] | None = None,
     sliced_tower_times_s: Mapping[int, float] | None = None,
     final_combined_times_s: Mapping[int, float] | None = None,
 ) -> tuple[LayerTimingState, ...]:
@@ -182,7 +175,6 @@ def build_layer_timing_states(
         raise ValueError("Target layer time must be finite and non-negative.")
     if not math.isfinite(safety_factor) or safety_factor < 0.0:
         raise ValueError("Safety factor must be finite and non-negative.")
-    analytical = analytical_tower_times_s or {}
     sliced = sliced_tower_times_s or {}
     final = final_combined_times_s or {}
     states: list[LayerTimingState] = []
@@ -198,7 +190,6 @@ def build_layer_timing_states(
                     max(0.0, target_time_s - source_time)
                     * safety_factor
                 ),
-                analytical_tower_time_s=analytical.get(layer_index),
                 sliced_tower_time_s=sliced.get(layer_index),
                 final_combined_time_s=final.get(layer_index),
             )

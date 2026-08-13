@@ -6,10 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,13 +15,10 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from PySide6.QtCore import QMimeData, QPointF, QUrl, Qt
-from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui import MainWindow
-from cooling_tower.gui.widgets import GCodeDropZone
-from cooling_tower.models import GCodeOrigin, GenerationSettings, SourceKind
+from cooling_tower.models import GenerationSettings
 from cooling_tower.services import GenerationService
 
 
@@ -58,83 +53,6 @@ class GuiTestCase(unittest.TestCase):
         self.app.processEvents()
         self.temporary.cleanup()
 
-    def _select_file(self) -> None:
-        self.assertTrue(self.window.drop_zone.set_file(self.gcode))
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            self.app.processEvents()
-            assessment = self.window.tower_assessment
-            if (
-                self.window.analysis_snapshot is not None
-                and assessment is not None
-                and (
-                    not assessment.tower_required
-                    or self.window.profile_feasibility is not None
-                )
-            ):
-                break
-            time.sleep(0.005)
-        self.app.processEvents()
-        self.assertIsNotNone(self.window.analysis_snapshot)
-        if self.window.tower_assessment.tower_required:
-            self.assertIsNotNone(self.window.profile_feasibility)
-
-class GCodeInputTests(GuiTestCase):
-    def test_direct_gcode_enters_shared_prepared_analysis_pipeline(self) -> None:
-        self._select_file()
-        prepared = self.window.prepared_analysis_source
-        self.assertIsNotNone(prepared)
-        assert prepared is not None
-        self.assertIs(prepared.gcode_origin, GCodeOrigin.USER_SUPPLIED)
-        self.assertIs(prepared.source_artifact.source_kind, SourceKind.GCODE)
-        self.assertEqual(prepared.analysis_gcode_path, self.gcode.resolve())
-        self.assertEqual(
-            prepared.gcode_sha256,
-            self.window.analysis_snapshot.content_sha256,
-        )
-        self.assertIsNotNone(self.window.tower_assessment)
-        self.assertIn(
-            "Höhe des analysierten G-Codes",
-            self.window.automatic_base_width_label.text(),
-        )
-
-    def test_gcode_can_be_loaded_with_drop_event(self) -> None:
-        mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(str(self.gcode))])
-        event = QDropEvent(
-            QPointF(10, 10),
-            Qt.DropAction.CopyAction,
-            mime,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        self.window.drop_zone.dropEvent(event)
-        self.assertEqual(self.window.current_gcode_path, self.gcode.resolve())
-        self.assertIn("sample.gcode", self.window.drop_zone.file_name_label.text())
-        self.assertIn("Pfad:", self.window.drop_zone.file_info_label.text())
-
-    def test_gcode_can_be_loaded_with_file_dialog(self) -> None:
-        with patch.object(
-            self.window.drop_zone.browse_button,
-            "click",
-            wraps=self.window.drop_zone.browse_button.click,
-        ), patch(
-            "cooling_tower.gui.widgets.gcode_drop_zone.QFileDialog.getOpenFileName",
-            return_value=(str(self.gcode), "G-Code-Dateien (*.gcode)"),
-        ):
-            self.window.drop_zone.select_file()
-        self.assertEqual(self.window.current_gcode_path, self.gcode.resolve())
-
-    def test_invalid_file_type_is_rejected(self) -> None:
-        invalid = self.root / "model.stl"
-        invalid.write_text("solid", encoding="utf-8")
-        messages: list[str] = []
-        self.window.drop_zone.file_rejected.connect(messages.append)
-        self.assertFalse(self.window.drop_zone.set_file(invalid))
-        self.assertIsNone(self.window.current_gcode_path)
-        self.assertTrue(messages)
-
-
 class SettingsAndValidationTests(GuiTestCase):
     def test_all_generation_settings_are_reachable_and_roundtrip(self) -> None:
         expected = GenerationSettings(
@@ -164,18 +82,6 @@ class SettingsAndValidationTests(GuiTestCase):
         text = self.window.full_infill_hint.text()
         self.assertIn("100 % Fülldichte", text)
         self.assertIn("im Slicer", text)
-
-    def test_invalid_values_disable_generation_and_mark_fields(self) -> None:
-        self._select_file()
-        self.window.workflow.slicer_succeeded("Testslicer")
-        self.assertTrue(self.window.preview_button.isEnabled())
-        self.window.minimum_outer_spin.setValue(50.0)
-        self.window.maximum_outer_spin.setValue(10.0)
-        self.assertFalse(self.window.preview_button.isEnabled())
-        self.assertFalse(self.window.minimum_outer_spin.property("invalid"))
-        self.assertTrue(self.window.maximum_outer_spin.property("invalid"))
-        self.assertIn("Kleinster Außendurchmesser", self.window.validation_label.text())
-        self.assertIn("Größter Außendurchmesser", self.window.validation_label.text())
 
     def test_user_settings_are_persisted_and_restored(self) -> None:
         path = self.root / "user_settings.json"

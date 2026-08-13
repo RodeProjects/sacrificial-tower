@@ -582,6 +582,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             user_settings_path=self.root / "gui-missing-profile.json",
             profile_service=matching,
             enable_update_check=False,
+            enable_startup_slicer_discovery=False,
         )
         try:
             window.source_artifact = self.artifact
@@ -610,6 +611,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             user_data_root=self.root / "appdata-cancel",
             profile_service=matching,
             enable_update_check=False,
+            enable_startup_slicer_discovery=False,
         )
         window.slicer_service = StaticAdapterService(self.adapter)
         discovery = SlicerDiscoveryResult(
@@ -625,6 +627,7 @@ class StlProfileMatchingTests(unittest.TestCase):
                 app.processEvents()
                 QTest.qWait(10)
             self.assertIsNotNone(window.stl_validation_result)
+            window.preparation_tabs.setCurrentIndex(1)
             window._slicer_request_id += 1
             window._on_slicer_discovery_succeeded(
                 window._slicer_request_id,
@@ -683,6 +686,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             user_data_root=self.root / "appdata-confirm",
             profile_service=matching,
             enable_update_check=False,
+            enable_startup_slicer_discovery=False,
         )
         window.slicer_service = StaticAdapterService(self.adapter)
         discovery = SlicerDiscoveryResult(
@@ -698,6 +702,7 @@ class StlProfileMatchingTests(unittest.TestCase):
                 app.processEvents()
                 QTest.qWait(10)
             self.assertIsNotNone(window.stl_validation_result)
+            window.preparation_tabs.setCurrentIndex(1)
             window._slicer_request_id += 1
             window._on_slicer_discovery_succeeded(
                 window._slicer_request_id,
@@ -757,7 +762,13 @@ class StlProfileMatchingTests(unittest.TestCase):
                 QTest.qWait(10)
             self.assertIsNotNone(window.source_preslice_result)
             self.assertIs(window.workflow.stage, WorkflowStage.READY)
-            self.assertEqual(window.preparation_progress_bar.value(), 100)
+            self.assertEqual(
+                [
+                    selector.progress_value
+                    for selector in window.preparation_step_selectors
+                ],
+                [100, 100],
+            )
             self.assertTrue(
                 all(
                     icon.text() == "✓"
@@ -796,7 +807,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             assert result is not None
             workspace = result.workspace_root
             self.assertTrue(workspace.is_dir())
-            window.remove_gcode()
+            window.remove_source()
             deadline = time.monotonic() + 2
             while workspace.exists() and time.monotonic() < deadline:
                 app.processEvents()
@@ -805,7 +816,13 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertIsNone(window.source_preslice_result)
             self.assertIsNone(window.analysis_snapshot)
             self.assertIsNotNone(window.profile_catalog_confirmation)
-            self.assertEqual(window.preparation_progress_bar.value(), 50)
+            self.assertEqual(
+                [
+                    selector.progress_value
+                    for selector in window.preparation_step_selectors
+                ],
+                [0, 75],
+            )
             self.assertTrue(window.ready_grid.isHidden())
         finally:
             window.close()

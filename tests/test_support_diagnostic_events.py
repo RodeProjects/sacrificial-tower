@@ -22,7 +22,6 @@ from cooling_tower.diagnostics import (
     DiagnosticJournal,
     set_current_diagnostic_journal,
 )
-from cooling_tower.gui.analysis_worker import AnalysisWorker
 from cooling_tower.gui.preview_worker import PreviewWorker
 from cooling_tower.gui.profile_worker import ProfileMatchingWorker
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
@@ -101,38 +100,7 @@ class SupportDiagnosticEventTests(unittest.TestCase):
             ["nozzle_mismatch"],
         )
 
-    def test_analysis_and_preview_successes_include_useful_counts(self) -> None:
-        metadata = SimpleNamespace(
-            values=(1, 2),
-            typed_config=(1,),
-            slicer=SimpleNamespace(product_name="Test Slicer", family=None),
-        )
-        snapshot = SimpleNamespace(
-            layer_count=37,
-            file_size_bytes=12345,
-            metadata=metadata,
-            timing_evidence=SimpleNamespace(),
-        )
-
-        class AnalysisService:
-            @staticmethod
-            def analyze(_path, **_kwargs):  # type: ignore[no-untyped-def]
-                return snapshot
-
-        analysis_capture = _DiagnosticCapture()
-        analysis_worker = AnalysisWorker(
-            3,
-            Path("source.gcode"),
-            AnalysisService(),
-        )
-        analysis_worker.set_diagnostic_callback(analysis_capture)
-        analysis_worker.run()
-        analysis_finished = analysis_capture.details("gcode_analysis_finished")
-        self.assertEqual(analysis_finished["outcome"], "success")
-        self.assertEqual(analysis_finished["result_code"], "gcode_analysis_succeeded")
-        self.assertEqual(analysis_finished["layer_count"], 37)
-        self.assertEqual(analysis_finished["metadata_value_count"], 2)
-
+    def test_preview_success_includes_useful_counts(self) -> None:
         failure = SimpleNamespace(code=SimpleNamespace(value="iteration_limit"))
         calibration = SimpleNamespace(
             state=SimpleNamespace(value="limit_reached"),
@@ -183,28 +151,6 @@ class SupportDiagnosticEventTests(unittest.TestCase):
             preview_finished["calibration_failure_codes"],
             ["iteration_limit"],
         )
-
-    def test_failures_receive_stable_codes_without_paths(self) -> None:
-        class FailingAnalysisService:
-            @staticmethod
-            def analyze(_path, **_kwargs):  # type: ignore[no-untyped-def]
-                raise PermissionError("C:\\Private\\customer.gcode")
-
-        capture = _DiagnosticCapture()
-        worker = AnalysisWorker(
-            5,
-            Path("private.gcode"),
-            FailingAnalysisService(),
-        )
-        worker.set_diagnostic_callback(capture)
-        worker.run()
-
-        failure = capture.details("gcode_analysis_failed")
-        self.assertEqual(failure["outcome"], "failed")
-        self.assertEqual(failure["error_code"], "gcode_analysis_access_denied")
-        self.assertEqual(failure["error_type"], "PermissionError")
-        self.assertNotIn("path", json.dumps(failure).casefold())
-        self.assertNotIn("customer", json.dumps(failure).casefold())
 
     def test_new_event_fields_reach_sanitized_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

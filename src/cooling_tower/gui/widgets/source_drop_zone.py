@@ -20,25 +20,21 @@ from cooling_tower.services import SourceRecognitionError, recognize_source
 
 
 class SourceDropZone(QFrame):
-    """Unified drag-and-drop and file-dialog input for one STL or G-code."""
+    """Drag-and-drop and file-dialog input for one STL model."""
 
     EMPTY_MINIMUM_HEIGHT_PX = 260
     LOADED_REPLACEMENT_HINT_MIN_HEIGHT_PX = 330
-    EMPTY_PROMPT = (
-        "STL oder G-Code hier ablegen\n"
-        "oder über den Dialog auswählen"
-    )
+    EMPTY_PROMPT = "STL hier ablegen\noder über den Dialog auswählen"
     REJECTED_PROMPT = (
-        "Andere STL oder G-Code hier ablegen\n"
+        "Andere STL hier ablegen\n"
         "Die bisherige Datei wird ersetzt und direkt neu geprüft"
     )
 
     REPLACEMENT_PROMPT = (
-        "Andere STL oder G-Code hier ablegen.\n"
+        "Andere STL hier ablegen.\n"
         "Die bisherige Datei wird dadurch ersetzt"
     )
 
-    file_selected = Signal(str)
     source_selected = Signal(str, str)
     file_rejected = Signal(str)
     reload_requested = Signal()
@@ -46,7 +42,7 @@ class SourceDropZone(QFrame):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("gcodeDropZone")
+        self.setObjectName("sourceDropZone")
         self.setAcceptDrops(True)
         self.setProperty("dragActive", False)
         self.setProperty("loaded", False)
@@ -74,13 +70,13 @@ class SourceDropZone(QFrame):
         info_layout.setVerticalSpacing(7)
         info_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.status_value_label = QLabel("Keine Datei ausgewählt")
-        self.status_value_label.setObjectName("gcodeStatusValue")
+        self.status_value_label.setObjectName("sourceStatusValue")
         self.file_name_label = QLabel("–")
         self.file_name_label.setObjectName("dropFileName")
         self.file_size_label = QLabel("–")
         self.file_type_label = QLabel("–")
         self.file_path_label = QLabel("–")
-        self.file_path_label.setObjectName("gcodeFilePath")
+        self.file_path_label.setObjectName("sourceFilePath")
         self.file_path_label.setWordWrap(True)
         self.file_path_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -104,11 +100,11 @@ class SourceDropZone(QFrame):
             )
         ):
             caption_label = QLabel(caption)
-            caption_label.setObjectName("gcodeInfoCaption")
+            caption_label.setObjectName("sourceInfoCaption")
             info_layout.addWidget(caption_label, row, 0, Qt.AlignmentFlag.AlignTop)
             info_layout.addWidget(value_label, row, 1)
         self.info_widget = QWidget(self)
-        self.info_widget.setObjectName("gcodeFileInformation")
+        self.info_widget.setObjectName("sourceFileInformation")
         self.info_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Maximum,
@@ -117,7 +113,7 @@ class SourceDropZone(QFrame):
         self.root_layout.addWidget(self.info_widget)
 
         self.notice_widget = QWidget(self)
-        self.notice_widget.setObjectName("gcodeNotices")
+        self.notice_widget.setObjectName("sourceNotices")
         self.notice_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Maximum,
@@ -136,15 +132,15 @@ class SourceDropZone(QFrame):
         # constructed.  Giving them an owner immediately prevents Qt from
         # treating them as temporary top-level windows before the action layout
         # reparents them.
-        self.browse_button = QPushButton("STL oder G-Code auswählen …", self)
+        self.browse_button = QPushButton("STL auswählen …", self)
         self.browse_button.setObjectName("sourcePrimaryActionButton")
         self.browse_button.clicked.connect(self.select_file)
-        self.remove_button = QPushButton("G-Code entfernen", self)
-        self.remove_button.setObjectName("removeGcodeButton")
+        self.remove_button = QPushButton("STL entfernen", self)
+        self.remove_button.setObjectName("removeSourceButton")
         self.remove_button.setEnabled(False)
         self.remove_button.clicked.connect(self.remove_requested)
-        self.reload_button = QPushButton("G-Code neu einlesen", self)
-        self.reload_button.setObjectName("reloadGcodeButton")
+        self.reload_button = QPushButton("STL neu einlesen", self)
+        self.reload_button.setObjectName("reloadSourceButton")
         self.reload_button.setEnabled(False)
         self.reload_button.setToolTip(
             "Die ausgewählte Datei erneut vom Datenträger analysieren"
@@ -156,7 +152,7 @@ class SourceDropZone(QFrame):
         self.actions_layout.setHorizontalSpacing(8)
         self.actions_layout.setVerticalSpacing(6)
         self.actions_widget = QWidget(self)
-        self.actions_widget.setObjectName("gcodeActions")
+        self.actions_widget.setObjectName("sourceActions")
         self.actions_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Maximum,
@@ -165,7 +161,7 @@ class SourceDropZone(QFrame):
         self.root_layout.addWidget(self.actions_widget)
 
         self.details_widget = QWidget(self)
-        self.details_widget.setObjectName("gcodeTechnicalDetails")
+        self.details_widget.setObjectName("sourceTechnicalDetails")
         self.details_layout = QVBoxLayout(self.details_widget)
         self.details_layout.setContentsMargins(0, 0, 0, 0)
         self.details_layout.setSpacing(6)
@@ -192,9 +188,9 @@ class SourceDropZone(QFrame):
     def select_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "STL oder G-Code auswählen",
+            "STL auswählen",
             str(self._selected_path.parent if self._selected_path else Path.home()),
-            "Unterstützte Dateien (*.gcode *.stl);;G-Code (*.gcode);;STL (*.stl)",
+            "STL-Modelldateien (*.stl)",
         )
         if selected:
             self.set_file(selected)
@@ -209,20 +205,12 @@ class SourceDropZone(QFrame):
         self._selected_kind = recognized.source_kind
         self.setProperty("loaded", True)
         size = recognized.size_bytes
-        if recognized.source_kind is SourceKind.STL:
-            self.status_value_label.setText(
-                "STL-Modell erkannt – Geometrie wird geprüft"
-            )
-            self.remove_button.setText("STL entfernen")
-            self.reload_button.setText("STL neu einlesen")
-            self.browse_button.setText("Andere Datei auswählen")
-        else:
-            # The owner immediately replaces this established compatibility
-            # status with its detailed running status.
-            self.status_value_label.setText("Analyse wird vorbereitet")
-            self.remove_button.setText("G-Code entfernen")
-            self.reload_button.setText("G-Code neu einlesen")
-            self.browse_button.setText("Andere Datei auswählen")
+        self.status_value_label.setText(
+            "STL-Modell erkannt – Geometrie wird geprüft"
+        )
+        self.remove_button.setText("STL entfernen")
+        self.reload_button.setText("STL neu einlesen")
+        self.browse_button.setText("Andere STL auswählen")
         self.file_type_label.setText(recognized.format_description)
         self.file_name_label.setText(self._selected_path.name)
         self.file_size_label.setText(_format_size(size))
@@ -233,7 +221,6 @@ class SourceDropZone(QFrame):
         self._apply_display_state("analyzing")
         self.style().unpolish(self)
         self.style().polish(self)
-        self.file_selected.emit(str(self._selected_path))
         self.source_selected.emit(
             str(self._selected_path), recognized.source_kind.value
         )
@@ -286,9 +273,9 @@ class SourceDropZone(QFrame):
         self.file_type_label.setText("–")
         self.file_path_label.setText("–")
         self.file_info_label.clear()
-        self.browse_button.setText("STL oder G-Code auswählen …")
-        self.remove_button.setText("G-Code entfernen")
-        self.reload_button.setText("G-Code neu einlesen")
+        self.browse_button.setText("STL auswählen …")
+        self.remove_button.setText("STL entfernen")
+        self.reload_button.setText("STL neu einlesen")
         self._apply_display_state("empty")
         self.style().unpolish(self)
         self.style().polish(self)
@@ -314,7 +301,7 @@ class SourceDropZone(QFrame):
         path = self._single_supported_url(urls)
         if path is None:
             self.file_rejected.emit(
-                "Bitte genau eine vorhandene STL- oder G-Code-Datei ablegen."
+                "Bitte genau eine vorhandene STL-Datei ablegen."
             )
             event.ignore()
             return
@@ -328,7 +315,7 @@ class SourceDropZone(QFrame):
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.suffix.casefold() in {".gcode", ".stl"} and path.is_file():
+            if path.suffix.casefold() == ".stl" and path.is_file():
                 supported.append(path)
         return supported[0] if len(supported) == 1 and len(urls) == 1 else None
 
@@ -453,7 +440,3 @@ def _format_size(size_bytes: int) -> str:
             return f"{value:.{decimals}f} {unit}"
         value /= 1024.0
     return f"{size_bytes} B"
-
-
-# Public compatibility alias. New code should use SourceDropZone.
-GCodeDropZone = SourceDropZone

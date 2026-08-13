@@ -8,17 +8,37 @@ from html import escape
 from pathlib import Path
 from weakref import ref
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, QTimer, Qt, Slot
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEvent,
+    QEasingCurve,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSequentialAnimationGroup,
+    QSize,
+    QTimer,
+    Qt,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import (
     QCloseEvent,
+    QColor,
     QCursor,
     QFontMetrics,
     QIcon,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
     QPixmap,
     QResizeEvent,
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -26,6 +46,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGraphicsColorizeEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -39,6 +60,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -49,7 +71,6 @@ from cooling_tower.diagnostics import (
     DiagnosticJournal,
     current_diagnostic_journal,
 )
-from cooling_tower.gui.analysis_worker import AnalysisWorker
 from cooling_tower.gui.background_jobs import (
     BackgroundJob,
     BackgroundJobManager,
@@ -96,7 +117,6 @@ from cooling_tower.models import (
     CalibrationConfig,
     CalibrationMode,
     FeasibilityIssue,
-    GCodeOrigin,
     GCodeAnalysisSnapshot,
     PreparedAnalysisSource,
     GenerationSettings,
@@ -563,6 +583,209 @@ class _InternalDialogRevealFilter(QObject):
             dialog.activateWindow()
 
 
+class _PreparationStepSelector(QPushButton):
+    """Step selector that exposes its hover state to the complete card."""
+
+    hover_changed = Signal(bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._progress_value = 0
+        self.progress_label = QLabel("0 %", self)
+        self.progress_label.setObjectName("preparationStepProgressLabel")
+        self.progress_label.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
+        )
+        self.progress_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+
+    def set_progress_value(self, value: int) -> None:
+        """Update the progress painted into the selector background."""
+
+        progress_value = max(0, min(100, int(value)))
+        if progress_value == self._progress_value:
+            return
+        self._progress_value = progress_value
+        self.progress_label.setText(f"{progress_value} %")
+        self.update()
+
+    @property
+    def progress_value(self) -> int:
+        """Return the percentage represented by the selector background."""
+
+        return self._progress_value
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        label_width = 44
+        self.progress_label.setGeometry(
+            max(0, self.width() - label_width - 7),
+            4,
+            label_width,
+            15,
+        )
+        self.progress_label.raise_()
+
+    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        super().paintEvent(event)
+        if self._progress_value <= 0:
+            return
+        # Leave the complete QSS-painted one-pixel frame untouched.  Progress
+        # is clipped slightly farther inside and therefore needs no second,
+        # custom-painted outline.
+        inner_rect = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+        progress_rect = QRectF(inner_rect)
+        progress_rect.setWidth(
+            inner_rect.width() * self._progress_value / 100
+        )
+        hovered = bool(self.property("groupHovered"))
+        progress_gradient = QLinearGradient(
+            progress_rect.topLeft(),
+            progress_rect.bottomLeft(),
+        )
+        progress_gradient.setColorAt(
+            0.0,
+            QColor("#f3faf6" if hovered else "#ffffff"),
+        )
+        progress_gradient.setColorAt(
+            1.0,
+            QColor("#c9e5d3" if hovered else "#dcefe3"),
+        )
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Match the button's rounded upper corners before painting progress.
+        # Without this clip, the custom fill covers the antialiased inner half
+        # of the QSS border and makes its corners appear interrupted.
+        inner_radius = 6.0
+        inner_path = QPainterPath()
+        inner_path.moveTo(inner_rect.left() + inner_radius, inner_rect.top())
+        inner_path.lineTo(inner_rect.right() - inner_radius, inner_rect.top())
+        inner_path.quadTo(
+            inner_rect.right(),
+            inner_rect.top(),
+            inner_rect.right(),
+            inner_rect.top() + inner_radius,
+        )
+        inner_path.lineTo(inner_rect.bottomRight())
+        inner_path.lineTo(inner_rect.bottomLeft())
+        inner_path.lineTo(inner_rect.left(), inner_rect.top() + inner_radius)
+        inner_path.quadTo(
+            inner_rect.left(),
+            inner_rect.top(),
+            inner_rect.left() + inner_radius,
+            inner_rect.top(),
+        )
+        inner_path.closeSubpath()
+        painter.setClipPath(inner_path)
+        painter.fillRect(progress_rect, progress_gradient)
+        painter.end()
+
+    def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.hover_changed.emit(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.hover_changed.emit(False)
+        super().leaveEvent(event)
+
+
+class _PreparationRequirementsPanel(QFrame):
+    """Keyboard-accessible prerequisite area that selects its step."""
+
+    activated = Signal()
+    hover_changed = Signal(bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.hover_changed.emit(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.hover_changed.emit(False)
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self.rect().contains(event.position().toPoint())
+        ):
+            self.activated.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
+            self.activated.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class _PreparationRequirementLabel(QLabel):
+    """Requirement copy with a quiet, continuous missing-state reminder."""
+
+    HINT_COLOR = QColor("#b86f73")
+    TRANSITION_DURATION_MS = 1000
+
+    def __init__(
+        self,
+        text: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self._attention_effect = QGraphicsColorizeEffect(self)
+        self._attention_effect.setColor(self.HINT_COLOR)
+        self._attention_effect.setStrength(0.0)
+        self.setGraphicsEffect(self._attention_effect)
+        self._to_hint = self._strength_transition(0.0, 1.0)
+        self._to_neutral = self._strength_transition(1.0, 0.0)
+        self.attention_animation = QSequentialAnimationGroup(self)
+        self.attention_animation.addAnimation(self._to_hint)
+        self.attention_animation.addAnimation(self._to_neutral)
+        self.attention_animation.setLoopCount(-1)
+        self.set_requirement_complete(False)
+
+    def _strength_transition(
+        self,
+        start: float,
+        end: float,
+    ) -> QPropertyAnimation:
+        animation = QPropertyAnimation(
+            self._attention_effect,
+            b"strength",
+            self,
+        )
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+        animation.setDuration(self.TRANSITION_DURATION_MS)
+        animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        return animation
+
+    def set_requirement_complete(self, complete: bool) -> None:
+        if complete:
+            self.attention_animation.stop()
+            self._attention_effect.setEnabled(False)
+            return
+        if (
+            self.attention_animation.state()
+            is not QAbstractAnimation.State.Running
+        ):
+            self._attention_effect.setStrength(0.0)
+            self._attention_effect.setEnabled(True)
+            self.attention_animation.start()
+
+
 class MainWindow(QMainWindow):
     """Scrollable desktop front end for the shared generation service."""
 
@@ -718,7 +941,6 @@ class MainWindow(QMainWindow):
         self.confirmed_profile_context: ProfileConfirmation | None = None
         self._populating_profile_combos = False
         self.profile_preview_outdated = False
-        self._analysis_request_id = 0
         self._stl_validation_request_id = 0
         self._preslice_request_id = 0
         self._analysis_failed = False
@@ -794,6 +1016,8 @@ class MainWindow(QMainWindow):
             self._start_feasibility_validation
         )
         self._build_ui()
+        for button in self.findChildren(QAbstractButton):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._preview_target_geometry: QRect | None = None
         self._hint_controller = WindowHintController(self)
         self._internal_dialog_reveal_filter = _InternalDialogRevealFilter(self)
@@ -1032,7 +1256,7 @@ class MainWindow(QMainWindow):
 
         workflow_group = SectionCard(
             "Datei und Slicer vorbereiten",
-            collapsible=True,
+            collapsible=False,
             expanded=True,
             state=SectionState.ACTIVE,
         )
@@ -1041,61 +1265,76 @@ class MainWindow(QMainWindow):
         self.preparation_group = workflow_group
         workflow_group.setProperty("role", "preparation")
         workflow_group.setProperty("outerDropdown", True)
-        workflow_group.setProperty("bodyHover", True)
+        # Only the header is interactive.  A hover colour across the complete
+        # expanded preparation surface makes the whole card look clickable and
+        # causes distracting repaints while the user works inside a step.
+        workflow_group.setProperty("bodyHover", False)
+        workflow_group.status_icon.setProperty("headerLead", True)
+        workflow_group.status_icon.setFixedWidth(45)
+        workflow_group.status_icon.setFixedHeight(40)
+        workflow_group.status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        workflow_group.header_layout.setContentsMargins(
+            METRICS.card_header_horizontal_padding_px,
+            6,
+            METRICS.card_header_horizontal_padding_px,
+            6,
+        )
         workflow_group.content_layout.setContentsMargins(0, 0, 0, 0)
+        workflow_group.content_layout.setSpacing(0)
 
         source_group = SectionCard(
-            "STL / G-Code",
+            "Dateiübergabe",
             collapsible=False,
             state=SectionState.ACTIVE,
         )
         self.source_group = source_group
-        source_group.setProperty("role", "gcodeSource")
-        source_group.setProperty("subsection", "left")
+        source_group.setProperty("role", "source")
+        source_group.setProperty("subsection", "fileTransfer")
         source_layout = source_group.content_layout
-        source_layout.setAlignment(Qt.AlignmentFlag(0))
+        source_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        source_layout.setContentsMargins(20, 20, 20, 20)
 
         # Local progress is transient: the persistent state is represented by
         # the shared prerequisite overview above both columns.
-        self.gcode_progress_bar = QProgressBar()
-        self.gcode_progress_bar.setObjectName("gcodeAnalysisProgressBar")
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setValue(0)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setAccessibleName(
-            "Fortschritt der Datei- und G-Code-Analyse"
+        self.source_progress_bar = QProgressBar()
+        self.source_progress_bar.setObjectName("sourceValidationProgressBar")
+        self.source_progress_bar.setRange(0, 100)
+        self.source_progress_bar.setValue(0)
+        self.source_progress_bar.setFormat("%p %")
+        self.source_progress_bar.setAccessibleName(
+            "Fortschritt der STL-Prüfung"
         )
-        source_layout.addWidget(self.gcode_progress_bar)
-        self.gcode_progress_bar.hide()
-        self.gcode_progress_status_widget = QWidget()
-        self.gcode_progress_status_widget.setObjectName("gcodeProgressStatus")
-        gcode_progress_status = QHBoxLayout(
-            self.gcode_progress_status_widget
+        source_layout.addWidget(self.source_progress_bar)
+        self.source_progress_bar.hide()
+        self.source_progress_status_widget = QWidget()
+        self.source_progress_status_widget.setObjectName("sourceProgressStatus")
+        source_progress_status = QHBoxLayout(
+            self.source_progress_status_widget
         )
-        gcode_progress_status.setContentsMargins(0, 0, 0, 0)
-        self.gcode_progress_icon_label = QLabel("○")
-        self.gcode_progress_icon_label.setObjectName("progressStatusIcon")
-        self.gcode_progress_icon_label.setProperty("state", "pending")
-        self.gcode_progress_status_label = QLabel("Datei auswählen")
-        self.gcode_progress_status_label.setObjectName("gcodeProgressStatusLabel")
-        self.gcode_progress_status_label.setWordWrap(True)
-        gcode_progress_status.addWidget(
-            self.gcode_progress_icon_label, 0, Qt.AlignmentFlag.AlignVCenter
+        source_progress_status.setContentsMargins(0, 0, 0, 0)
+        self.source_progress_icon_label = QLabel("○")
+        self.source_progress_icon_label.setObjectName("progressStatusIcon")
+        self.source_progress_icon_label.setProperty("state", "pending")
+        self.source_progress_status_label = QLabel("Datei auswählen")
+        self.source_progress_status_label.setObjectName("sourceProgressStatusLabel")
+        self.source_progress_status_label.setWordWrap(True)
+        source_progress_status.addWidget(
+            self.source_progress_icon_label, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        self.gcode_progress_status_label.setAlignment(
+        self.source_progress_status_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        gcode_progress_status.addWidget(self.gcode_progress_status_label, 1)
-        source_layout.addWidget(self.gcode_progress_status_widget)
+        source_progress_status.addWidget(self.source_progress_status_label, 1)
+        source_layout.addWidget(self.source_progress_status_widget)
         # The drop zone already exposes the durable source state in its
         # dedicated "Status" fact row. Keep this compatibility widget for
         # existing status updates, but do not render the duplicate summary.
-        self.gcode_progress_status_widget.hide()
+        self.source_progress_status_widget.hide()
 
-        self.gcode_import_guide_row = QWidget()
-        self.gcode_import_guide_row.setObjectName("gcodeImportGuideRow")
-        gcode_guide_layout = QHBoxLayout(self.gcode_import_guide_row)
-        gcode_guide_layout.setContentsMargins(
+        self.source_guide_row = QWidget()
+        self.source_guide_row.setObjectName("sourceGuideRow")
+        source_guide_layout = QHBoxLayout(self.source_guide_row)
+        source_guide_layout.setContentsMargins(
             0,
             0,
             0,
@@ -1105,42 +1344,36 @@ class MainWindow(QMainWindow):
                 - source_layout.spacing(),
             ),
         )
-        gcode_guide_layout.setSpacing(8)
-        self.gcode_import_guide_icon = QLabel("ℹ")
-        self.gcode_import_guide_icon.setObjectName("gcodeImportGuideIcon")
-        self.gcode_import_guide_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.gcode_import_guide_icon.setFixedWidth(22)
-        self.gcode_import_guide = QLabel(
-            "Noch kein fertiger G-Code?\n"
-            "Lege die STL direkt ab oder bereite das Objekt im Slicer vor, "
-            "G-Code exportieren und hier ablegen. Profile werden geprüft."
+        source_guide_layout.setSpacing(8)
+        self.source_guide_icon = QLabel("ℹ")
+        self.source_guide_icon.setObjectName("sourceGuideIcon")
+        self.source_guide_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.source_guide_icon.setFixedWidth(22)
+        self.source_guide = QLabel(
+            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden "
+            "soll."
         )
-        self.gcode_import_guide.setObjectName("gcodeImportGuide")
-        self.gcode_import_guide.setWordWrap(True)
-        gcode_guide_layout.addWidget(
-            self.gcode_import_guide_icon,
+        self.source_guide.setObjectName("sourceGuide")
+        self.source_guide.setWordWrap(True)
+        source_guide_layout.addWidget(
+            self.source_guide_icon,
             0,
             Qt.AlignmentFlag.AlignVCenter,
         )
-        gcode_guide_layout.addWidget(self.gcode_import_guide, 1)
-        source_layout.addWidget(self.gcode_import_guide_row)
+        source_guide_layout.addWidget(self.source_guide, 1)
+        source_layout.addWidget(self.source_guide_row)
         # This remains an informational hint only. The drop zone below is the
-        # sole interactive entry point for both supported source types.
+        # sole interactive entry point for the supported STL source.
         self.drop_zone = SourceDropZone()
         self.drop_zone.source_selected.connect(self._on_source_selected)
         self.drop_zone.file_rejected.connect(self._show_input_error)
-        self.drop_zone.reload_requested.connect(self.reload_gcode)
-        self.drop_zone.remove_requested.connect(self.remove_gcode)
+        self.drop_zone.reload_requested.connect(self.reload_source)
+        self.drop_zone.remove_requested.connect(self.remove_source)
         source_layout.addWidget(self.drop_zone)
         self.preslice_cancel_button = QPushButton("Pre-Slice abbrechen")
         self.preslice_cancel_button.setObjectName("presliceCancelButton")
         self.preslice_cancel_button.clicked.connect(self.cancel_source_preslice)
         self.preslice_cancel_button.hide()
-        source_layout.addWidget(
-            self.preslice_cancel_button,
-            0,
-            Qt.AlignmentFlag.AlignRight,
-        )
 
         self.stl_validation_message = QLabel()
         self.stl_validation_message.setObjectName("stlValidationMessage")
@@ -1161,27 +1394,45 @@ class MainWindow(QMainWindow):
         self.stl_validation_details_toggle.setObjectName(
             "stlValidationDetailsToggle"
         )
+        self.stl_validation_details_toggle.setProperty(
+            "compactDisclosure", True
+        )
         self.stl_validation_details_toggle.setCheckable(True)
+        self.stl_validation_details_toggle.setFocusPolicy(
+            Qt.FocusPolicy.NoFocus
+        )
+        self.stl_validation_details_toggle.setMinimumHeight(24)
+        self.stl_validation_details_toggle.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
+        )
         self.stl_validation_details_toggle.hide()
         self.stl_validation_details = QTextEdit()
         self.stl_validation_details.setObjectName("stlValidationDetails")
         self.stl_validation_details.setReadOnly(True)
-        self.stl_validation_details.setMaximumHeight(180)
+        self.stl_validation_details.setFixedHeight(150)
+        self.stl_validation_details.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.stl_validation_details.hide()
         self.stl_validation_details_toggle.toggled.connect(
-            lambda expanded: (
-                self.stl_validation_details_toggle.setText(
-                    "Technische Details ausblenden ▾"
-                    if expanded
-                    else "Technische Details anzeigen ▸"
-                ),
-                self.stl_validation_details.setVisible(expanded),
-                QTimer.singleShot(0, self._refresh_preparation_section_layout),
-            )
+            self._toggle_stl_validation_details
         )
-        source_layout.addStretch(1)
-        source_layout.addWidget(self.stl_validation_details_toggle)
-        source_layout.addWidget(self.stl_validation_details)
+        # Technical diagnostics belong to the file result, but are secondary
+        # information.  Keep the disclosure compact and directly below the
+        # drop zone instead of presenting it as the final call to action.
+        source_details_index = source_layout.indexOf(self.drop_zone) + 1
+        source_layout.insertWidget(
+            source_details_index,
+            self.stl_validation_details_toggle,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+        source_layout.insertWidget(
+            source_details_index + 1,
+            self.stl_validation_details,
+        )
 
         self.reconstructed_config_toggle = QPushButton(
             "Rekonstruierte Konfiguration anzeigen ▸"
@@ -1218,7 +1469,9 @@ class MainWindow(QMainWindow):
         )
         self.stl_mode_description.setObjectName("helpText")
         self.stl_mode_description.setWordWrap(True)
-        self.stl_mode_status = QLabel("Analytischer STL-Fallback ist verfügbar.")
+        self.stl_mode_status = QLabel(
+            "Ein bestätigter Slicer ist für die Verarbeitung erforderlich."
+        )
         self.stl_mode_status.setObjectName("outputModeStatus")
         self.stl_mode_status.setWordWrap(True)
         stl_text = QVBoxLayout()
@@ -1233,14 +1486,15 @@ class MainWindow(QMainWindow):
         self.stl_notice_frame.hide()
 
         slicer_group = SectionCard(
-            "Slicer",
+            "Slicer-Einstellungen",
             collapsible=False,
         )
         self.slicer_group = slicer_group
         slicer_group.setProperty("role", "slicer")
-        slicer_group.setProperty("subsection", "right")
+        slicer_group.setProperty("subsection", "slicerSettings")
         slicer_layout = slicer_group.content_layout
-        slicer_layout.setAlignment(Qt.AlignmentFlag(0))
+        slicer_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        slicer_layout.setContentsMargins(20, 20, 20, 20)
 
         # Search progress always forms the first block in the Slicer card, but
         # remains hidden whenever no background calculation is active.
@@ -1282,6 +1536,11 @@ class MainWindow(QMainWindow):
         slicer_layout.addWidget(self.slicer_progress_bar)
         self.slicer_progress_bar.hide()
         slicer_layout.addWidget(self.slicer_progress_status_widget)
+        slicer_layout.addWidget(
+            self.preslice_cancel_button,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
 
         # Keep the primary controls in one predictable vertical sequence.
         # Supporting evidence is collected in a separate disclosure below.
@@ -1318,9 +1577,9 @@ class MainWindow(QMainWindow):
         slicer_selectors.setObjectName("slicerSelectorColumn")
         slicer_selectors_layout = QVBoxLayout(slicer_selectors)
         self.slicer_selectors_layout = slicer_selectors_layout
-        # A small bottom inset keeps the last combo box clear of the column
-        # edge even with platform styles that paint one pixel beyond its hint.
-        slicer_selectors_layout.setContentsMargins(0, 0, 0, 6)
+        # The outer white card owns all edge spacing.  An additional local
+        # bottom inset made confirmed/hidden-button states appear misaligned.
+        slicer_selectors_layout.setContentsMargins(0, 0, 0, 0)
         slicer_selectors_layout.setSpacing(6)
         self.slicer_combo = WheelSafeComboBox()
         self.slicer_combo.setObjectName("slicerSelection")
@@ -1421,6 +1680,7 @@ class MainWindow(QMainWindow):
         self.slicer_details_divider.setObjectName("slicerHorizontalDivider")
         self.slicer_details_divider.setFixedHeight(1)
         slicer_layout.addWidget(self.slicer_details_divider)
+        self.slicer_details_divider.hide()
         self.profile_status_label = QLabel(
             "Profilzuordnung beginnt nach Quellen- und Slicerauswahl."
         )
@@ -1461,17 +1721,48 @@ class MainWindow(QMainWindow):
         self.slicer_analysis_details_toggle.setObjectName(
             "slicerAnalysisDetailsToggle"
         )
+        self.slicer_analysis_details_toggle.setProperty(
+            "compactDisclosure", True
+        )
         self.slicer_analysis_details_toggle.setCheckable(True)
+        self.slicer_analysis_details_toggle.setFocusPolicy(
+            Qt.FocusPolicy.NoFocus
+        )
+        self.slicer_analysis_details_toggle.setMinimumHeight(24)
+        self.slicer_analysis_details_toggle.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
+        )
         self.slicer_analysis_details_toggle.setAccessibleName(
             "Analyse- und Profildetails einblenden"
         )
-        self.slicer_analysis_details = QFrame()
+        self.slicer_analysis_details = QScrollArea()
         self.slicer_analysis_details.setObjectName("slicerAnalysisDetails")
-        slicer_analysis_details_layout = QVBoxLayout(
-            self.slicer_analysis_details
+        self.slicer_analysis_details.setWidgetResizable(True)
+        self.slicer_analysis_details.setFrameShape(QFrame.Shape.NoFrame)
+        self.slicer_analysis_details.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        slicer_analysis_details_layout.setContentsMargins(0, 0, 0, 0)
-        slicer_analysis_details_layout.setSpacing(6)
+        self.slicer_analysis_details.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.slicer_analysis_details.setFixedHeight(190)
+        self.slicer_analysis_details.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.slicer_analysis_details_content = QWidget()
+        self.slicer_analysis_details_content.setObjectName(
+            "slicerAnalysisDetailsContent"
+        )
+        slicer_analysis_details_layout = QVBoxLayout(
+            self.slicer_analysis_details_content
+        )
+        slicer_analysis_details_layout.setContentsMargins(10, 8, 10, 8)
+        slicer_analysis_details_layout.setSpacing(8)
+        slicer_analysis_details_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop
+        )
         slicer_analysis_details_layout.addWidget(slicer_information)
         slicer_analysis_details_layout.addWidget(self.profile_origin_label)
         slicer_analysis_details_layout.addWidget(self.profile_diagnostics)
@@ -1481,13 +1772,27 @@ class MainWindow(QMainWindow):
             self.reconstructed_config_toggle
         )
         slicer_analysis_details_layout.addWidget(self.reconstructed_config_text)
+        self.slicer_analysis_details.setWidget(
+            self.slicer_analysis_details_content
+        )
         self.slicer_analysis_details.hide()
         self.slicer_analysis_details_toggle.toggled.connect(
             self._toggle_slicer_analysis_details
         )
-        slicer_layout.addStretch(1)
-        slicer_layout.addWidget(self.slicer_analysis_details_toggle)
-        slicer_layout.addWidget(self.slicer_analysis_details)
+        # Supporting analysis data is available near the Slicer status, before
+        # the primary selectors.  It no longer competes visually with the
+        # confirmation button at the end of the form.
+        slicer_details_index = slicer_layout.indexOf(self.slicer_columns)
+        slicer_layout.insertWidget(
+            slicer_details_index,
+            self.slicer_analysis_details_toggle,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+        slicer_layout.insertWidget(
+            slicer_details_index + 1,
+            self.slicer_analysis_details,
+        )
         self._slicer_width_combos = (
             self.slicer_combo,
             self.machine_profile_combo,
@@ -1500,64 +1805,197 @@ class MainWindow(QMainWindow):
             self.process_profile_label,
             self.filament_profile_label,
         )
-        self.preparation_split = ResponsiveCardGrid()
-        self.preparation_split.setObjectName("preparationSplit")
-        self.preparation_vertical_divider = QFrame()
-        self.preparation_vertical_divider.setObjectName(
-            "preparationVerticalDivider"
+        # Both preparation steps retain their established functional cards,
+        # but receive an integrated step introduction instead of another
+        # top-level card header.  The centred shell uses most of the available
+        # width while remaining pleasantly bounded on very wide windows.
+        self.preparation_tabs = QTabWidget()
+        self.preparation_tabs.setObjectName("preparationSteps")
+        # Document mode keeps the page pane flush with the custom navigation
+        # that is inserted below the shared progress bar.
+        self.preparation_tabs.setDocumentMode(True)
+        self.preparation_tabs.setAccessibleName(
+            "Schritte für Dateiübergabe und Slicer-Einstellungen"
         )
-        self.preparation_vertical_divider.setFixedWidth(1)
-        self.preparation_vertical_divider.setSizePolicy(
-            QSizePolicy.Policy.Fixed,
-            QSizePolicy.Policy.Expanding,
-        )
-        self.preparation_horizontal_divider = QFrame()
-        self.preparation_horizontal_divider.setObjectName(
-            "preparationHorizontalDivider"
-        )
-        self.preparation_horizontal_divider.setFixedHeight(1)
-        self.preparation_horizontal_divider.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.preparation_split.set_vertical_separator(
-            self.preparation_vertical_divider
-        )
-        self.preparation_split.set_stacked_separator(
-            self.preparation_horizontal_divider
-        )
-        self.preparation_split.add_pair(source_group, slicer_group)
+        preparation_tab_bar = self.preparation_tabs.tabBar()
+        # The visible navigation is built below the global progress bar so it
+        # can permanently contain each step's prerequisite list.  QTabWidget
+        # remains the page controller, while its native one-line bar is hidden.
+        preparation_tab_bar.hide()
+        self.preparation_tabs.setProperty("stepTone", "source")
+        self.preparation_tab_pages: list[QWidget] = []
+        self.preparation_step_shells: list[QWidget] = []
+        self.preparation_step_heading_labels: list[QLabel] = []
+        self.preparation_step_state_labels: list[QLabel] = []
+        self.preparation_step_left_pills: list[QLabel] = []
+        self.preparation_step_right_pills: list[QLabel] = []
+        self.preparation_step_intro_layouts: list[QGridLayout] = []
+        for step_number, card, title, heading, description, step_tone in (
+            (
+                1,
+                source_group,
+                "1. Dateiübergabe",
+                "STL-Datei übergeben",
+                "Modell auswählen und Geometrie zuverlässig prüfen",
+                "source",
+            ),
+            (
+                2,
+                slicer_group,
+                "2. Slicer-Einstellungen",
+                "Slicer und Profile festlegen",
+                "Erkannten Slicer prüfen und passende Profile bestätigen",
+                "slicer",
+            ),
+        ):
+            page = QWidget()
+            page.setObjectName("preparationStepPage")
+            page.setProperty("stepTone", step_tone)
+            page.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            page_layout = QHBoxLayout(page)
+            page_layout.setContentsMargins(24, 18, 24, 20)
+            page_layout.setSpacing(0)
+
+            step_shell = QWidget()
+            step_shell.setObjectName("preparationStepShell")
+            step_shell.setMaximumWidth(700)
+            step_shell.setProperty("stepTone", step_tone)
+            step_shell.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            step_layout = QVBoxLayout(step_shell)
+            step_layout.setContentsMargins(0, 0, 0, 0)
+            step_layout.setSpacing(12)
+            step_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+            step_intro = QFrame()
+            step_intro.setObjectName("preparationStepIntro")
+            step_intro_layout = QGridLayout(step_intro)
+            step_intro_layout.setContentsMargins(2, 0, 2, 0)
+            step_intro_layout.setHorizontalSpacing(12)
+            step_intro_layout.setVerticalSpacing(0)
+            step_intro_layout.setColumnMinimumWidth(0, 168)
+            step_intro_layout.setColumnStretch(1, 1)
+            step_intro_layout.setColumnMinimumWidth(2, 168)
+            step_eyebrow = QLabel(f"SCHRITT {step_number}")
+            step_eyebrow.setObjectName("preparationStepEyebrow")
+            step_eyebrow.setFixedHeight(26)
+            step_eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            step_copy = QWidget()
+            step_copy.setObjectName("preparationStepCopy")
+            step_copy.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            step_copy_layout = QVBoxLayout(step_copy)
+            step_copy_layout.setContentsMargins(0, 0, 0, 0)
+            step_copy_layout.setSpacing(2)
+            step_heading = QLabel(heading)
+            step_heading.setObjectName("preparationStepHeading")
+            step_heading.setWordWrap(True)
+            step_heading.setAlignment(
+                Qt.AlignmentFlag.AlignHCenter
+                | Qt.AlignmentFlag.AlignVCenter
+            )
+            step_heading.setMinimumWidth(0)
+            step_heading.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            step_description = QLabel(description)
+            step_description.setObjectName("preparationStepDescription")
+            step_description.setWordWrap(True)
+            step_description.setAlignment(
+                Qt.AlignmentFlag.AlignHCenter
+                | Qt.AlignmentFlag.AlignVCenter
+            )
+            step_description.setMinimumWidth(0)
+            step_description.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            step_copy_layout.addWidget(step_heading)
+            step_copy_layout.addWidget(step_description)
+            step_state = QLabel(
+                "Bereit für STL" if step_number == 1 else "Wird vorbereitet"
+            )
+            step_state.setObjectName("preparationStepState")
+            step_state.setProperty("state", "pending")
+            step_state.setFixedHeight(26)
+            step_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            step_intro_layout.addWidget(
+                step_eyebrow,
+                0,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
+            step_intro_layout.addWidget(step_copy, 0, 1)
+            step_intro_layout.addWidget(
+                step_state,
+                0,
+                2,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+            )
+            step_layout.addWidget(step_intro)
+
+            card.setProperty("embeddedStep", True)
+            card.setProperty("stepTone", step_tone)
+            card.header.hide()
+            card.body_divider.hide()
+            card.setMaximumWidth(16777215)
+            card.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
+            step_layout.addWidget(card)
+            page_layout.addStretch(1)
+            page_layout.addWidget(
+                step_shell,
+                16,
+                Qt.AlignmentFlag.AlignTop,
+            )
+            page_layout.addStretch(1)
+            self.preparation_tabs.addTab(page, title)
+            self.preparation_tab_pages.append(page)
+            self.preparation_step_shells.append(step_shell)
+            self.preparation_step_heading_labels.append(step_heading)
+            self.preparation_step_state_labels.append(step_state)
+            self.preparation_step_left_pills.append(step_eyebrow)
+            self.preparation_step_right_pills.append(step_state)
+            self.preparation_step_intro_layouts.append(step_intro_layout)
+        self.preparation_tabs.setCurrentIndex(0)
 
         self.preparation_overview = QWidget()
         self.preparation_overview.setObjectName("preparationOverview")
         preparation_overview_layout = QVBoxLayout(self.preparation_overview)
-        preparation_overview_layout.setContentsMargins(20, 10, 20, 10)
-        preparation_overview_layout.setSpacing(7)
-        self.preparation_progress_bar = QProgressBar()
-        self.preparation_progress_bar.setObjectName("preparationProgressBar")
-        self.preparation_progress_bar.setRange(0, 100)
-        self.preparation_progress_bar.setValue(0)
-        self.preparation_progress_bar.setFormat("%p %")
-        self.preparation_progress_bar.setAccessibleName(
-            "Gesamtfortschritt zum Freischalten der Kühlturm-Einstellungen"
+        preparation_overview_layout.setContentsMargins(16, 14, 16, 14)
+        preparation_overview_layout.setSpacing(0)
+        self.preparation_requirements = ResponsiveCardGrid(
+            breakpoint_px=500,
+            horizontal_spacing_px=12,
+            vertical_spacing_px=12,
         )
-        preparation_overview_layout.addWidget(self.preparation_progress_bar)
-        self.preparation_requirements = ResponsiveCardGrid()
         self.preparation_requirements.setObjectName("preparationRequirements")
-        self.preparation_source_requirements = QWidget()
+        self.preparation_source_requirements = _PreparationRequirementsPanel()
         self.preparation_source_requirements.setObjectName(
             "preparationSourceRequirements"
         )
+        self.preparation_source_requirements.setProperty("active", True)
         self.preparation_source_requirements.setAccessibleName(
-            "Voraussetzungen für STL und G-Code"
+            "Voraussetzungen für die STL-Datei"
         )
         source_requirements_layout = QGridLayout(
             self.preparation_source_requirements
         )
-        self.preparation_slicer_requirements = QWidget()
+        self.preparation_slicer_requirements = _PreparationRequirementsPanel()
         self.preparation_slicer_requirements.setObjectName(
             "preparationSlicerRequirements"
         )
+        self.preparation_slicer_requirements.setProperty("active", False)
         self.preparation_slicer_requirements.setAccessibleName(
             "Voraussetzungen für Slicer und Profile"
         )
@@ -1568,34 +2006,35 @@ class MainWindow(QMainWindow):
             source_requirements_layout,
             slicer_requirements_layout,
         ):
-            requirements_layout.setContentsMargins(0, 0, 0, 0)
+            requirements_layout.setContentsMargins(16, 8, 16, 10)
             requirements_layout.setHorizontalSpacing(8)
             requirements_layout.setVerticalSpacing(3)
+            requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_requirement_rows: dict[str, tuple[QLabel, QLabel]] = {}
         source_requirement_texts = (
-            ("source_selected", "STL oder G-Code ausgewählt"),
-            ("source_analyzed", "G-Code erfolgreich analysiert"),
-            (
-                "profiles_source_validated",
-                "Profile für die aktuelle Datei geprüft",
-            ),
+            ("source_selected", "STL-Datei ausgewählt"),
+            ("source_validated", "STL-Geometrie erfolgreich geprüft"),
         )
         slicer_requirement_texts = (
             ("slicer_detected", "Verwendbarer Slicer erkannt"),
             ("profiles_loaded", "Zugehörige Profile geladen"),
             ("profiles_confirmed", "Slicer- und Profilauswahl bestätigt"),
+            (
+                "model_analyzed",
+                "Modell mit bestätigten Profilen analysiert",
+            ),
         )
         for requirements_layout, requirement_texts in (
             (source_requirements_layout, source_requirement_texts),
             (slicer_requirements_layout, slicer_requirement_texts),
         ):
             for row, (key, text_value) in enumerate(requirement_texts):
-                icon_label = QLabel("✕")
+                icon_label = QLabel("○")
                 icon_label.setObjectName("preparationRequirementIcon")
                 icon_label.setProperty("state", "missing")
                 icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 icon_label.setFixedWidth(18)
-                text_label = QLabel(text_value)
+                text_label = _PreparationRequirementLabel(text_value)
                 text_label.setObjectName("preparationRequirementText")
                 text_label.setWordWrap(True)
                 text_label.setProperty("state", "missing")
@@ -1606,15 +2045,132 @@ class MainWindow(QMainWindow):
                     text_label,
                 )
             requirements_layout.setColumnStretch(1, 1)
+        self.preparation_step_selectors: list[_PreparationStepSelector] = []
+        self.preparation_step_selector_containers: list[QWidget] = []
+        self.preparation_step_selector_icons: list[QLabel] = []
+        self.preparation_step_selector_titles: list[QLabel] = []
+        for index, title, tone, requirements_widget in (
+            (
+                0,
+                "1. Dateiübergabe",
+                "source",
+                self.preparation_source_requirements,
+            ),
+            (
+                1,
+                "2. Slicer-Einstellungen",
+                "slicer",
+                self.preparation_slicer_requirements,
+            ),
+        ):
+            selector_container = QWidget()
+            selector_container.setObjectName(
+                "preparationStepSelectorContainer"
+            )
+            selector_container.setProperty("stepTone", tone)
+            selector_container.setProperty("active", index == 0)
+            selector_container.setProperty("complete", False)
+            selector_container.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
+            selector_container_layout = QVBoxLayout(selector_container)
+            selector_container_layout.setContentsMargins(0, 0, 0, 0)
+            selector_container_layout.setSpacing(0)
+            selector = _PreparationStepSelector()
+            selector.setObjectName("preparationStepSelector")
+            selector.setProperty("stepTone", tone)
+            selector.setProperty("complete", False)
+            selector.setCheckable(True)
+            selector.setAutoExclusive(True)
+            selector.setAccessibleName(title)
+            selector.setToolTip(f"{title} öffnen")
+            selector.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            selector.setFixedHeight(48)
+            selector_layout = QVBoxLayout(selector)
+            selector_layout.setContentsMargins(0, 0, 0, 0)
+            selector_layout.setSpacing(0)
+            selector_title_row = QWidget()
+            selector_title_row.setObjectName("preparationStepSelectorTitleRow")
+            selector_title_layout = QHBoxLayout(selector_title_row)
+            selector_title_layout.setContentsMargins(16, 7, 16, 7)
+            selector_title_layout.setSpacing(6)
+            selector_icon = QLabel("")
+            selector_icon.setObjectName("preparationStepSelectorIcon")
+            selector_icon.setProperty("state", "pending")
+            selector_icon.setFixedWidth(18)
+            selector_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            selector_title = QLabel(title)
+            selector_title.setObjectName("preparationStepSelectorTitle")
+            selector_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            selector_title.setSizePolicy(
+                QSizePolicy.Policy.Maximum,
+                QSizePolicy.Policy.Preferred,
+            )
+            selector_title_layout.addStretch(1)
+            selector_title_layout.addWidget(selector_icon)
+            selector_title_layout.addWidget(selector_title)
+            selector_title_layout.addStretch(1)
+            selector_layout.addWidget(selector_title_row)
+            selector.progress_label.raise_()
+            for passive_widget in (
+                selector_title_row,
+                *selector_title_row.findChildren(QWidget),
+            ):
+                passive_widget.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                    True,
+                )
+            selector.clicked.connect(
+                lambda _checked=False, target=index: (
+                    self.preparation_tabs.setCurrentIndex(target)
+                )
+            )
+            selector.hover_changed.connect(
+                lambda hovered, target=index: (
+                    self._set_preparation_step_hovered(target, hovered)
+                )
+            )
+            requirements_widget.activated.connect(
+                lambda target=index: self.preparation_tabs.setCurrentIndex(
+                    target
+                )
+            )
+            requirements_widget.hover_changed.connect(
+                lambda hovered, target=index: (
+                    self._set_preparation_step_hovered(target, hovered)
+                )
+            )
+            requirements_widget.setAccessibleDescription(
+                f"Öffnet {title}"
+            )
+            for passive_widget in requirements_widget.findChildren(QWidget):
+                passive_widget.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                    True,
+                )
+            selector_container_layout.addWidget(selector)
+            selector_container_layout.addWidget(requirements_widget, 1)
+            self.preparation_step_selectors.append(selector)
+            self.preparation_step_selector_containers.append(
+                selector_container
+            )
+            self.preparation_step_selector_icons.append(selector_icon)
+            self.preparation_step_selector_titles.append(selector_title)
+        self.preparation_step_selectors[0].setChecked(True)
+        self.preparation_step_selectors[0].setProperty("active", True)
+        self.preparation_step_selectors[1].setProperty("active", False)
         self.preparation_requirements.add_pair(
-            self.preparation_source_requirements,
-            self.preparation_slicer_requirements,
-            equal_height=False,
-            stacked_right_first=True,
+            self.preparation_step_selector_containers[0],
+            self.preparation_step_selector_containers[1],
+            equal_height=True,
         )
         preparation_overview_layout.addWidget(self.preparation_requirements)
         workflow_group.content_layout.addWidget(self.preparation_overview)
-        workflow_group.content_layout.addWidget(self.preparation_split)
+        workflow_group.content_layout.addWidget(self.preparation_tabs)
         self.content_layout.addWidget(workflow_group)
 
         timing_group = SectionCard(
@@ -1649,7 +2205,7 @@ class MainWindow(QMainWindow):
             self.safety_factor_spin,
         )
         self.tower_need_label = QLabel(
-            "Bitte zuerst eine STL- oder G-Code-Datei auswählen."
+            "Bitte zuerst eine STL-Datei auswählen."
         )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
@@ -1694,7 +2250,7 @@ class MainWindow(QMainWindow):
             helper_text=(
                 "Kleinster Abstand zwischen den belegten Außenkanten von "
                 "Druckobjekt und Kühlturm; Brim und Support werden über den "
-                "voranalysierten G-Code berücksichtigt."
+                "intern erzeugten und analysierten Slicer-Werkzeugweg berücksichtigt."
             ),
         )
         self.full_infill_checkbox = QCheckBox(
@@ -2233,7 +2789,7 @@ class MainWindow(QMainWindow):
             self.geometry_vertical_divider
         )
 
-        # Nach G-Code und Slicer folgt die eigentliche Arbeitsfläche: bei
+        # Nach Dateiübergabe und Slicer folgt die eigentliche Arbeitsfläche: bei
         # genügend Platz zweispaltig, in schmalen Fenstern sauber gestapelt.
         for card in (
             timing_group,
@@ -2268,7 +2824,7 @@ class MainWindow(QMainWindow):
             self.ready_grid,
             Qt.AlignmentFlag.AlignTop,
         )
-        # A trailing stretch keeps the initial G-Code card at its natural
+        # A trailing stretch keeps the initial file-transfer card at its natural
         # height instead of letting it consume the entire scroll viewport.
         self.content_layout.addStretch(1)
 
@@ -2293,6 +2849,16 @@ class MainWindow(QMainWindow):
             workflow_card=workflow_group,
             downstream_widgets=workflow_widgets,
             parent=self,
+            duration_ms=(
+                0
+                if os.environ.get("QT_QPA_PLATFORM", "").casefold()
+                == "offscreen"
+                else 500
+            ),
+            first_success_duration_ms=1000,
+        )
+        self.preparation_tabs.currentChanged.connect(
+            self._on_preparation_tab_changed
         )
 
         self.preview_button = QPushButton("Vorschau erstellen")
@@ -2340,7 +2906,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p %")
         self.progress_bar.hide()
-        self.status_label = QLabel("Bitte STL oder G-Code auswählen")
+        self.status_label = QLabel("Bitte STL auswählen")
         self.status_label.setObjectName("statusLabel")
         self.status_icon_label = QLabel("⇧")
         self.status_icon_label.setObjectName("progressStatusIcon")
@@ -2379,7 +2945,7 @@ class MainWindow(QMainWindow):
         notice_layout.addWidget(self.warning_text)
         self.notice_panel.hide()
         self.export_availability_label = QLabel(
-            "Export/Vorschau nicht möglich: Bitte zuerst STL oder G-Code auswählen."
+            "Export/Vorschau nicht möglich: Bitte zuerst eine STL auswählen."
         )
         self.export_availability_label.setObjectName(
             "exportAvailabilityLabel"
@@ -2730,8 +3296,83 @@ class MainWindow(QMainWindow):
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
 
+    def _on_preparation_tab_changed(self, index: int) -> None:
+        """Reveal Slicer feedback only when its named step becomes relevant."""
+
+        tones = ("source", "slicer")
+        if 0 <= index < len(tones):
+            self.preparation_tabs.setProperty("stepTone", tones[index])
+            self._refresh_widget_style(self.preparation_tabs)
+        for selector_index, selector in enumerate(
+            getattr(self, "preparation_step_selectors", ())
+        ):
+            active = selector_index == index
+            selector.setChecked(active)
+            selector.setProperty("active", active)
+            self._refresh_widget_style(selector)
+            containers = getattr(
+                self, "preparation_step_selector_containers", ()
+            )
+            if selector_index < len(containers):
+                containers[selector_index].setProperty("active", active)
+                self._refresh_widget_style(containers[selector_index])
+            requirement_widgets = (
+                self.preparation_source_requirements,
+                self.preparation_slicer_requirements,
+            )
+            requirement_widget = requirement_widgets[selector_index]
+            requirement_widget.setProperty("active", active)
+            self._refresh_widget_style(requirement_widget)
+        if not hasattr(self, "workflow"):
+            self._refresh_preparation_section_layout()
+            return
+        if index == 1:
+            self.workflow.set_slicer_step_visible(True)
+        self._refresh_preparation_section_layout()
+
+    def _set_preparation_step_hovered(
+        self,
+        index: int,
+        hovered: bool,
+    ) -> None:
+        """Apply one hover state to the selector and prerequisite panel."""
+
+        selectors = getattr(self, "preparation_step_selectors", ())
+        requirements = (
+            getattr(self, "preparation_source_requirements", None),
+            getattr(self, "preparation_slicer_requirements", None),
+        )
+        if not (0 <= index < len(selectors)):
+            return
+        for widget in (selectors[index], requirements[index]):
+            if isinstance(widget, QWidget):
+                self._set_boolean_style_property(
+                    widget,
+                    "groupHovered",
+                    hovered,
+                )
+        selectors[index].update()
+
+    def _schedule_slicer_step_open(self, request_id: int, source: Path) -> None:
+        """Keep the successful file step green for one second before step 2."""
+
+        delay_ms = max(0, self.workflow.first_success_duration_ms)
+
+        def open_slicer_step() -> None:
+            if (
+                self._closing
+                or request_id != self._stl_validation_request_id
+                or self.current_source_path != source
+                or self.stl_validation_result is None
+                or not self.stl_validation_result.valid
+            ):
+                return
+            self.preparation_tabs.setCurrentIndex(1)
+
+        QTimer.singleShot(delay_ms, open_slicer_step)
+
     def _set_setting_feedback_enabled(self, enabled: bool) -> None:
-        """Gate setting hints until G-code and slicer are both available."""
+        """Gate setting hints until STL analysis and slicer are available."""
 
         for setting in self._setting_widgets.values():
             setting.set_feedback_enabled(enabled)
@@ -3442,11 +4083,33 @@ class MainWindow(QMainWindow):
             and result.execution_slicer.can_slice
         )
         self.stl_mode_status.setText(
-            "Slicer-gestützte Annäherung ist verfügbar."
+            "Slicer-gestützte Verarbeitung ist verfügbar."
             if can_calibrate_stl
-            else "Analytischer STL-Fallback ist verfügbar."
+            else "Ein bestätigter, aufrufbarer Slicer ist erforderlich."
         )
         self._refresh_phase17_actions()
+
+    def _show_confirmed_profiles_analysis_action(self) -> None:
+        """Offer source-bound analysis after profiles were confirmed first."""
+
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or self.stl_validation_result is None
+            or not self.stl_validation_result.valid
+            or self.source_artifact is None
+            or not self._catalog_selection_is_confirmed()
+            or self.profile_match_result is not None
+        ):
+            return
+        self.profile_confirm_button.setText(
+            "Modell bestätigen und mit Profilen analysieren"
+        )
+        self.profile_confirm_button.setEnabled(True)
+        self.profile_confirm_button.show()
+        if self.workflow.can_transition_to(
+            WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION
+        ):
+            self.workflow.wait_for_profile_confirmation()
 
     def _current_preview_request(
         self,
@@ -3455,25 +4118,25 @@ class MainWindow(QMainWindow):
     ) -> PreviewRequest:
         snapshot = self.analysis_snapshot
         if snapshot is None:
-            raise ValueError("G-Code-Analyse ist noch nicht abgeschlossen.")
+            raise ValueError("Die slicerbasierte Modellanalyse ist noch nicht abgeschlossen.")
         result = self.profile_match_result
-        effective_profile = None
-        adapter = None
-        slicer_key = None
-        profile_fingerprint = None
-        may_use_profile = bool(
-            result is not None
-            and result.selected is not None
-            and result.can_use_stl_mode
-        )
-        if may_use_profile and result is not None and result.selected is not None:
-            effective_profile = result.selected.effective_profile
-            adapter = self.slicer_service.adapter_for(result.execution_slicer)
-            slicer_key = result.execution_slicer.identity_key
-            profile_fingerprint = (
-                f"{result.inventory_fingerprint}:{result.selected.bundle_id}:"
-                f"{int(result.user_confirmed)}"
+        if (
+            result is None
+            or result.selected is None
+            or not result.can_use_stl_mode
+            or not result.user_confirmed
+            or not result.execution_slicer.can_slice
+        ):
+            raise ValueError(
+                "Vorschau und Export benötigen einen bestätigten, "
+                "automatisch aufrufbaren Slicer mit vollständigen Profilen."
             )
+        effective_profile = result.selected.effective_profile
+        adapter = self.slicer_service.adapter_for(result.execution_slicer)
+        slicer_key = result.execution_slicer.identity_key
+        profile_fingerprint = (
+            f"{result.inventory_fingerprint}:{result.selected.bundle_id}:1"
+        )
         return PreviewRequest(
             snapshot=snapshot,
             settings=self.collect_settings(),
@@ -3574,20 +4237,12 @@ class MainWindow(QMainWindow):
             return "Die einmalige Slicer-Schätzung wird gerade erstellt."
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             return "Die Vorschau wird gerade erstellt."
-        if self.current_source_path is None and self.current_gcode_path is None:
-            return "Bitte zuerst STL oder G-Code auswählen."
+        if self.current_source_path is None:
+            return "Bitte zuerst eine STL auswählen."
         if self.current_gcode_path is None:
-            return (
-                "Die STL wird noch geprüft, geslict oder analysiert."
-                if self.current_source_kind is SourceKind.STL
-                else "Der G-Code wird noch analysiert."
-            )
+            return "Die STL wird noch geprüft, geslict oder analysiert."
         if self._analysis_failed:
-            return (
-                "Die STL-Vorbereitung oder Analyse ist fehlgeschlagen."
-                if self.current_source_kind is SourceKind.STL
-                else "Die G-Code-Analyse ist fehlgeschlagen."
-            )
+            return "Die STL-Vorbereitung oder Analyse ist fehlgeschlagen."
         if self.analysis_snapshot is None:
             return "Die Quelle wird noch analysiert."
         if not self._phase17_static_valid and not validation_bypassed:
@@ -3738,7 +4393,11 @@ class MainWindow(QMainWindow):
             )
         ):
             return
-        self.start_slicer_discovery()
+        if (
+            self._slicer_service_was_injected
+            or os.environ.get("QT_QPA_PLATFORM", "").casefold() != "offscreen"
+        ):
+            self.start_slicer_discovery()
 
     def select_manual_slicer(self) -> None:
         selected, _filter = QFileDialog.getOpenFileName(
@@ -3766,11 +4425,7 @@ class MainWindow(QMainWindow):
             verified_installations = tuple(
                 installation
                 for installation in result.installations
-                if installation.verified
-                and (
-                    self.current_source_kind is not SourceKind.STL
-                    or installation.can_slice
-                )
+                if installation.verified and installation.can_slice
             )
             for index, installation in enumerate(verified_installations):
                 label = installation.display_name
@@ -3856,14 +4511,9 @@ class MainWindow(QMainWindow):
                 icon="!",
                 state="warning",
             )
-            if self.current_source_kind is SourceKind.STL:
-                self.workflow.required_slicer_unavailable(
-                    "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
-                )
-            else:
-                self.workflow.slicer_unavailable(
-                    "Kein verwendbarer Slicer erkannt"
-                )
+            self.workflow.required_slicer_unavailable(
+                "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
+            )
             self._update_preparation_requirements()
         self._refresh_prediction()
 
@@ -3887,12 +4537,9 @@ class MainWindow(QMainWindow):
             icon="!",
             state="warning",
         )
-        if self.current_source_kind is SourceKind.STL:
-            self.workflow.required_slicer_unavailable(
-                "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
-            )
-        else:
-            self.workflow.slicer_unavailable("Analytischer Betrieb verfügbar")
+        self.workflow.required_slicer_unavailable(
+            "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
+        )
         self.profile_catalog = None
         self.profile_catalog_confirmation = None
         self._update_preparation_requirements()
@@ -4379,20 +5026,14 @@ class MainWindow(QMainWindow):
         return True
 
     def _profile_matching_context(self) -> ProfileMatchingContext | None:
-        if self.current_source_kind is SourceKind.STL:
-            if (
-                self.source_artifact is None
-                or self.stl_validation_result is None
-                or not self.stl_validation_result.valid
-            ):
-                return None
-            return ProfileMatchingContext.from_stl(self.source_artifact)
-        if self.analysis_snapshot is None:
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or self.source_artifact is None
+            or self.stl_validation_result is None
+            or not self.stl_validation_result.valid
+        ):
             return None
-        return ProfileMatchingContext.from_gcode(
-            self.analysis_snapshot,
-            self.source_artifact,
-        )
+        return ProfileMatchingContext.from_stl(self.source_artifact)
 
     def start_profile_matching(
         self,
@@ -4541,24 +5182,6 @@ class MainWindow(QMainWindow):
             or result.execution_slicer.identity_key != installation.identity_key
         ):
             return
-        if (
-            self.source_artifact is not None
-            and result.source_kind is SourceKind.GCODE
-            and result.selected is not None
-        ):
-            # Persisted mappings and reconstructed evidence may preselect the
-            # safest bundle, but each concrete newly loaded source still gets
-            # one explicit visible confirmation in this workflow.
-            result = replace(
-                result,
-                requires_confirmation=True,
-                user_confirmed=False,
-                can_use_gcode_mode=False,
-                message=(
-                    "Zuordnung wurde vorausgewählt; Einstellungen bitte "
-                    "für diese G-Code-Datei bestätigen."
-                ),
-            )
         if (
             result.requires_confirmation
             and self._profile_result_matches_catalog_confirmation(result)
@@ -5117,6 +5740,10 @@ class MainWindow(QMainWindow):
                 return
         if result is None:
             if self._profile_matching_context() is not None:
+                self.profile_confirm_button.setText(
+                    "Modellanalyse wird vorbereitet …"
+                )
+                self.profile_confirm_button.setEnabled(False)
                 self.start_profile_matching()
             return
         if not result.requires_confirmation:
@@ -5226,16 +5853,10 @@ class MainWindow(QMainWindow):
         self._preslice_request_id += 1
         request_id = self._preslice_request_id
         self.workflow.begin_preslice()
-        self.drop_zone.set_status("Modell wird geslict")
-        self.drop_zone.set_analysis_state("analyzing")
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setValue(0)
-        self.gcode_progress_bar.show()
-        self.gcode_progress_status_widget.show()
         self.preslice_cancel_button.setEnabled(True)
         self.preslice_cancel_button.show()
-        self._set_gcode_progress_status(
+        self._set_slicer_progress(
+            0,
             "Slicer wird vorbereitet …",
             icon="⏳",
             state="running",
@@ -5267,7 +5888,7 @@ class MainWindow(QMainWindow):
         if not self.background_job_manager.has_active(JobKind.PRESLICE):
             return
         self.preslice_cancel_button.setEnabled(False)
-        self._set_gcode_progress_status(
+        self._set_source_progress_status(
             "Pre-Slice wird kontrolliert abgebrochen …",
             icon="⏳",
             state="running",
@@ -5286,23 +5907,14 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._preslice_request_id:
             return
-        if busy:
-            self.gcode_progress_bar.setRange(0, 0)
-            self.gcode_progress_bar.setFormat("")
-        else:
-            self.gcode_progress_bar.setRange(0, 100)
-            self.gcode_progress_bar.setFormat("%p %")
-            self.gcode_progress_bar.setValue(max(0, min(100, int(percent))))
-            if percent >= 100:
-                self.gcode_progress_bar.hide()
         if (
             percent >= 70
             and self.workflow.stage is WorkflowStage.PRESLICING_MODEL
         ):
             self.workflow.begin_preslice_analysis()
         rendered = german_user_message(status)
-        self.drop_zone.set_status(rendered)
-        self._set_gcode_progress_status(
+        self._set_slicer_progress(
+            max(0, min(99, int(percent))),
             rendered,
             icon="⏳",
             state="running",
@@ -5342,15 +5954,10 @@ class MainWindow(QMainWindow):
         self.current_gcode_path = result.prepared_source.analysis_gcode_path
         self._analysis_failed = False
         self._workflow_error_message = None
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setValue(100)
-        self._finish_source_progress(completed=True)
         self.preslice_cancel_button.hide()
-        self.drop_zone.set_status("Pre-Slice und Analyse abgeschlossen")
-        self.drop_zone.set_analysis_state("ready")
-        self._set_gcode_progress_status(
-            "Pre-Slice und G-Code-Analyse abgeschlossen",
+        self._set_slicer_progress(
+            100,
+            "Modellanalyse mit Slicer abgeschlossen",
             icon="✓",
             state="success",
         )
@@ -5365,6 +5972,8 @@ class MainWindow(QMainWindow):
             else "Pre-Slice abgeschlossen"
         )
         source_name = artifact.original_path.name
+        self.slicer_group.set_state(SectionState.SUCCESS)
+        self._update_preparation_requirements()
         self.workflow.preslice_succeeded(
             f"{source_name} · automatisch geslict · {snapshot.layer_count} Layer",
             slicer_summary,
@@ -5376,7 +5985,6 @@ class MainWindow(QMainWindow):
             state="success",
         )
         self._refresh_stl_availability()
-        self._update_preparation_requirements()
 
     def _on_source_preslice_failed(
         self,
@@ -5392,27 +6000,19 @@ class MainWindow(QMainWindow):
         self._analysis_failed = True
         rendered = german_user_message(message)
         self._workflow_error_message = rendered
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setValue(0)
-        self._finish_source_progress(completed=False)
         self.preslice_cancel_button.hide()
-        self.drop_zone.set_status("Pre-Slice fehlgeschlagen")
-        # The STL itself remains accepted. Keep all source actions available
-        # even though only the subsequent slicer invocation failed.
-        self.drop_zone.set_analysis_state("preslice_failed")
-        self._set_gcode_progress_status(
-            "Pre-Slice fehlgeschlagen",
+        self._set_slicer_progress(
+            100,
+            "Modellanalyse mit Slicer fehlgeschlagen",
             icon="✕",
             state="error",
         )
-        self.stl_validation_message.setText(
+        self._set_profile_notice(
             "Das Modell konnte mit den bestätigten Einstellungen nicht "
-            f"sicher analysiert werden. {rendered}"
+            f"sicher analysiert werden. {rendered}",
+            state="error",
         )
-        self.stl_validation_message.show()
-        self.stl_validation_details.setPlainText(details)
-        self.stl_validation_details_toggle.show()
+        self.profile_diagnostics.setPlainText(details)
         self.workflow.preslice_failed("Pre-Slice fehlgeschlagen")
         self._set_main_status(
             "Pre-Slice fehlgeschlagen",
@@ -5429,14 +6029,9 @@ class MainWindow(QMainWindow):
         self.current_gcode_path = None
         self.analysis_snapshot = None
         self.prepared_analysis_source = None
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setValue(0)
-        self._finish_source_progress(completed=False)
         self.preslice_cancel_button.hide()
-        self.drop_zone.set_status("Pre-Slice abgebrochen")
-        self.drop_zone.set_analysis_state("ready")
-        self._set_gcode_progress_status(
+        self._set_slicer_progress(
+            0,
             "Pre-Slice wurde abgebrochen",
             icon="○",
             state="pending",
@@ -5540,6 +6135,7 @@ class MainWindow(QMainWindow):
         self.workflow.required_slicer_unavailable(
             "Slicer-Profile konnten nicht geprüft werden"
         )
+        self._show_confirmed_profiles_analysis_action()
 
     @Slot(object)
     def _on_background_job_released(self, job: BackgroundJob) -> None:
@@ -5784,11 +6380,8 @@ class MainWindow(QMainWindow):
         self.slicer_group.content_widget.updateGeometry()
         self.slicer_group.updateGeometry()
         self._update_slicer_combo_widths()
-        if hasattr(self, "preparation_split"):
-            self.preparation_split.refresh_layout()
-            self.preparation_split.grid.invalidate()
-            self.preparation_split.grid.activate()
-            self.preparation_split.updateGeometry()
+        if hasattr(self, "preparation_tabs"):
+            self.preparation_tabs.updateGeometry()
         self._refresh_settings_content_minimum_height()
 
     def _refresh_preparation_section_layout(
@@ -5797,10 +6390,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Synchronise the shared prerequisite card after layout changes."""
 
-        if not hasattr(self, "preparation_split"):
+        if not hasattr(self, "preparation_tabs"):
             return
-        self.preparation_split.setMinimumHeight(0)
-        self.preparation_split.setMaximumHeight(16777215)
+        for index in range(len(self.preparation_step_intro_layouts)):
+            self._balance_preparation_step_intro(index)
         for card in (self.source_group, self.slicer_group):
             card.setMinimumHeight(0)
             card.setMaximumHeight(16777215)
@@ -5824,22 +6417,70 @@ class MainWindow(QMainWindow):
         self.preparation_overview.layout().invalidate()
         self.preparation_overview.layout().activate()
         self.preparation_overview.updateGeometry()
-        self.preparation_split.refresh_layout()
-        if self.preparation_split.is_two_column():
-            self.source_group.content_layout.setContentsMargins(20, 10, 15, 10)
-            self.slicer_group.content_layout.setContentsMargins(15, 10, 20, 10)
-        else:
-            self.source_group.content_layout.setContentsMargins(20, 10, 20, 10)
-            self.slicer_group.content_layout.setContentsMargins(20, 10, 20, 10)
+        # Every view rendered inside either white preparation card uses one
+        # stable inset.  State changes may alter the visible children, but
+        # never the distance between those children and the card outline.
+        self.source_group.content_layout.setContentsMargins(20, 20, 20, 20)
+        self.slicer_group.content_layout.setContentsMargins(20, 20, 20, 20)
         for card in (self.source_group, self.slicer_group):
             card.content_layout.invalidate()
             card.content_layout.activate()
-            card.setMinimumHeight(card.sizeHint().height())
-        self.preparation_split.grid.invalidate()
-        self.preparation_split.grid.activate()
-        required_split_height = self.preparation_split.grid.sizeHint().height()
-        self.preparation_split.setMinimumHeight(max(0, required_split_height))
-        self.preparation_split.updateGeometry()
+            margins = card.content_layout.contentsMargins()
+            available_width = max(
+                1,
+                card.content_widget.width()
+                - margins.left()
+                - margins.right(),
+            )
+            visible_children = [
+                card.content_layout.itemAt(index).widget()
+                for index in range(card.content_layout.count())
+                if (
+                    card.content_layout.itemAt(index).widget() is not None
+                    and not card.content_layout.itemAt(index)
+                    .widget()
+                    .isHidden()
+                )
+            ]
+            child_heights = []
+            for child in visible_children:
+                preferred_height = (
+                    child.heightForWidth(available_width)
+                    if child.hasHeightForWidth()
+                    else child.sizeHint().height()
+                )
+                child_heights.append(
+                    max(
+                        0,
+                        child.minimumHeight(),
+                        child.minimumSizeHint().height(),
+                        preferred_height,
+                    )
+                )
+            body_height = (
+                margins.top()
+                + margins.bottom()
+                + sum(child_heights)
+                + card.content_layout.spacing()
+                * max(0, len(child_heights) - 1)
+            )
+            card.setFixedHeight(body_height + card.frameWidth() * 2)
+        for shell in self.preparation_step_shells:
+            if shell.layout() is not None:
+                shell.layout().invalidate()
+                shell.layout().activate()
+            shell.updateGeometry()
+        page = self.preparation_tabs.currentWidget()
+        if page is not None and page.layout() is not None:
+            page.layout().invalidate()
+            page.layout().activate()
+            page.updateGeometry()
+            tab_height = self.preparation_tabs.tabBar().sizeHint().height()
+            page_height = page.layout().sizeHint().height()
+            self.preparation_tabs.setFixedHeight(
+                max(0, tab_height + page_height + 4)
+            )
+        self.preparation_tabs.updateGeometry()
         self.workflow_group.content_layout.invalidate()
         self.workflow_group.content_layout.activate()
         self.workflow_group.content_widget.updateGeometry()
@@ -5917,8 +6558,7 @@ class MainWindow(QMainWindow):
         state: str = "idle",
     ) -> None:
         prominent = text in {
-            "Bitte G-Code auswählen",
-            "Bitte STL oder G-Code auswählen",
+            "Bitte STL auswählen",
         }
         self.status_icon_label.setProperty("prominent", prominent)
         self.status_icon_label.setMinimumWidth(24 if prominent else 18)
@@ -6145,7 +6785,7 @@ class MainWindow(QMainWindow):
         self.footer_messages_scroll.updateGeometry()
         self.footer.updateGeometry()
 
-    def _set_gcode_progress_status(
+    def _set_source_progress_status(
         self,
         text: str,
         *,
@@ -6153,8 +6793,8 @@ class MainWindow(QMainWindow):
         state: str,
     ) -> None:
         self._set_status_indicator(
-            self.gcode_progress_icon_label,
-            self.gcode_progress_status_label,
+            self.source_progress_icon_label,
+            self.source_progress_status_label,
             icon,
             text,
             state,
@@ -6162,33 +6802,68 @@ class MainWindow(QMainWindow):
         # The same state is already visible in the drop-zone fact table.
         # Asynchronous paths still update these labels for compatibility, so
         # enforce the presentation rule centrally.
-        self.gcode_progress_status_widget.hide()
+        self.source_progress_status_widget.hide()
 
     def _finish_source_progress(self, *, completed: bool) -> None:
-        self.gcode_progress_bar.setRange(0, 100)
-        self.gcode_progress_bar.setFormat("%p %")
-        self.gcode_progress_bar.setValue(100 if completed else 0)
-        self.gcode_progress_bar.hide()
+        self.source_progress_bar.setRange(0, 100)
+        self.source_progress_bar.setFormat("%p %")
+        self.source_progress_bar.setValue(100 if completed else 0)
+        self.source_progress_bar.hide()
+
+    def _set_preparation_step_state(
+        self,
+        index: int,
+        text: str,
+        state: str,
+    ) -> None:
+        """Update the quiet state badge in an embedded step introduction."""
+
+        labels = getattr(self, "preparation_step_state_labels", ())
+        if not 0 <= index < len(labels):
+            return
+        label = labels[index]
+        label.setText(text)
+        label.setProperty("state", state)
+        # Completion is represented permanently in the visible tab selector
+        # and its prerequisite rows.  Avoid adding a third green success badge
+        # to the content introduction itself.
+        label.setVisible(state != "success")
+        self._refresh_widget_style(label)
+        self._balance_preparation_step_intro(index)
+
+    def _balance_preparation_step_intro(self, index: int) -> None:
+        """Reserve equal side columns so the middle copy is truly centred."""
+
+        layouts = getattr(self, "preparation_step_intro_layouts", ())
+        left_pills = getattr(self, "preparation_step_left_pills", ())
+        right_pills = getattr(self, "preparation_step_right_pills", ())
+        if not (
+            0 <= index < len(layouts)
+            and index < len(left_pills)
+            and index < len(right_pills)
+        ):
+            return
+        side_width = max(
+            168,
+            left_pills[index].sizeHint().width(),
+            right_pills[index].sizeHint().width(),
+        )
+        layouts[index].setColumnMinimumWidth(0, side_width)
+        layouts[index].setColumnMinimumWidth(2, side_width)
 
     def _update_preparation_requirements(self) -> None:
-        if not hasattr(self, "preparation_progress_bar"):
+        if not hasattr(self, "preparation_step_selectors"):
             return
         source_selected = self.current_source_path is not None
         guide_visible = not source_selected
-        if (not self.gcode_import_guide_row.isHidden()) != guide_visible:
-            self.gcode_import_guide_row.setVisible(guide_visible)
+        if (not self.source_guide_row.isHidden()) != guide_visible:
+            self.source_guide_row.setVisible(guide_visible)
             QTimer.singleShot(0, self._refresh_preparation_section_layout)
-        source_analyzed = bool(
-            self.analysis_snapshot is not None
-            and not self._analysis_failed
-            and (
-                self.current_source_kind is SourceKind.GCODE
-                or (
-                    self.current_source_kind is SourceKind.STL
-                    and self.source_preslice_result is not None
-                    and self.prepared_analysis_source is not None
-                )
-            )
+        source_validated = bool(
+            self.current_source_kind is SourceKind.STL
+            and self.stl_validation_result is not None
+            and self.stl_validation_result.valid
+            and self.source_artifact is not None
         )
         installation = self.selected_slicer_installation
         slicer_detected = bool(
@@ -6204,7 +6879,7 @@ class MainWindow(QMainWindow):
         )
         catalog_confirmed = self._catalog_selection_is_confirmed()
         source_confirmation = self.confirmed_profile_context
-        profiles_source_validated = bool(
+        model_analyzed = bool(
             source_selected
             and catalog_confirmed
             and self.profile_match_result is not None
@@ -6212,45 +6887,136 @@ class MainWindow(QMainWindow):
             and self.source_artifact is not None
             and source_confirmation is not None
             and source_confirmation.matches_source(self.source_artifact)
+            and self.analysis_snapshot is not None
+            and not self._analysis_failed
+            and self.source_preslice_result is not None
+            and self.prepared_analysis_source is not None
         )
 
         requirements = {
             "source_selected": source_selected,
-            "source_analyzed": source_analyzed,
+            "source_validated": source_validated,
             "slicer_detected": slicer_detected,
             "profiles_loaded": profiles_loaded,
             "profiles_confirmed": catalog_confirmed,
-            "profiles_source_validated": profiles_source_validated,
+            "model_analyzed": model_analyzed,
         }
-        analysis_label = self.preparation_requirement_rows[
-            "source_analyzed"
-        ][1]
-        analysis_label.setText(
-            "Aus STL erzeugten G-Code erfolgreich analysiert"
-            if self.current_source_kind is SourceKind.STL
-            else "G-Code erfolgreich analysiert"
-        )
         fulfilled = 0
         for key, complete in requirements.items():
             icon_label, text_label = self.preparation_requirement_rows[key]
-            icon_label.setText("✓" if complete else "✕")
+            icon_label.setText("✓" if complete else "○")
             state = "complete" if complete else "missing"
             icon_label.setProperty("state", state)
             text_label.setProperty("state", state)
+            if isinstance(text_label, _PreparationRequirementLabel):
+                text_label.set_requirement_complete(complete)
             self._refresh_widget_style(icon_label)
             self._refresh_widget_style(text_label)
             fulfilled += int(complete)
         percent = round(100 * fulfilled / len(requirements))
-        self.preparation_progress_bar.setValue(percent)
-        self.preparation_progress_bar.setProperty(
-            "state", "complete" if percent == 100 else "incomplete"
+        preparation_complete = fulfilled == len(requirements)
+        self.workflow_group.setCheckable(preparation_complete)
+        step_requirement_keys = (
+            ("source_selected", "source_validated"),
+            (
+                "slicer_detected",
+                "profiles_loaded",
+                "profiles_confirmed",
+                "model_analyzed",
+            ),
         )
-        self._refresh_widget_style(self.preparation_progress_bar)
+        for selector, requirement_keys in zip(
+            self.preparation_step_selectors,
+            step_requirement_keys,
+            strict=True,
+        ):
+            step_fulfilled = sum(
+                int(requirements[key]) for key in requirement_keys
+            )
+            step_percent = round(
+                100 * step_fulfilled / len(requirement_keys)
+            )
+            selector.set_progress_value(step_percent)
+            selector.setAccessibleDescription(
+                f"{step_percent} Prozent der Voraussetzungen erfüllt"
+            )
         self.preparation_requirements.setAccessibleDescription(
             f"{fulfilled} von {len(requirements)} Voraussetzungen erfüllt"
         )
 
-        self._refresh_preparation_header_summary(percent == 100)
+        slicer_step_complete = bool(
+            slicer_detected
+            and profiles_loaded
+            and catalog_confirmed
+            and model_analyzed
+        )
+        self.preparation_tabs.setTabText(
+            0,
+            "✓ 1. Dateiübergabe"
+            if source_validated
+            else "1. Dateiübergabe",
+        )
+        self.preparation_tabs.setTabText(
+            1,
+            "✓ 2. Slicer-Einstellungen"
+            if slicer_step_complete
+            else "2. Slicer-Einstellungen",
+        )
+        for selector_index, complete in enumerate(
+            (source_validated, slicer_step_complete)
+        ):
+            selector = self.preparation_step_selectors[selector_index]
+            selector.setProperty("complete", complete)
+            self._refresh_widget_style(selector)
+            container = self.preparation_step_selector_containers[
+                selector_index
+            ]
+            container.setProperty("complete", complete)
+            self._refresh_widget_style(container)
+            icon = self.preparation_step_selector_icons[selector_index]
+            icon.setText("✓" if complete else "")
+            icon.setProperty("state", "complete" if complete else "pending")
+            self._refresh_widget_style(icon)
+
+        if source_validated:
+            source_step_text, source_step_state = "Abgeschlossen", "success"
+        elif (
+            source_selected
+            and self.stl_validation_result is not None
+            and not self.stl_validation_result.valid
+        ):
+            source_step_text, source_step_state = "Prüfung fehlgeschlagen", "error"
+        elif source_selected:
+            source_step_text, source_step_state = "STL wird geprüft", "active"
+        else:
+            source_step_text, source_step_state = "Bereit für STL", "pending"
+        self._set_preparation_step_state(
+            0,
+            source_step_text,
+            source_step_state,
+        )
+
+        if slicer_step_complete:
+            slicer_step_text, slicer_step_state = "Abgeschlossen", "success"
+        elif self._analysis_failed and catalog_confirmed:
+            slicer_step_text, slicer_step_state = "Analyse prüfen", "error"
+        elif catalog_confirmed and source_validated:
+            slicer_step_text, slicer_step_state = "Modell wird analysiert", "active"
+        elif catalog_confirmed:
+            slicer_step_text, slicer_step_state = "Wartet auf STL", "pending"
+        elif profiles_loaded:
+            slicer_step_text, slicer_step_state = "Auswahl bestätigen", "active"
+        elif slicer_detected:
+            slicer_step_text, slicer_step_state = "Profile werden geladen", "active"
+        else:
+            slicer_step_text, slicer_step_state = "Wird vorbereitet", "pending"
+        self._set_preparation_step_state(
+            1,
+            slicer_step_text,
+            slicer_step_state,
+        )
+
+        self._refresh_preparation_header_summary(preparation_complete)
 
     def _refresh_preparation_header_summary(self, complete: bool) -> None:
         """Show the completed file and profile overview in one fact column."""
@@ -6310,6 +7076,23 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._fit_reconstructed_config_height)
         QTimer.singleShot(0, self._refresh_preparation_section_layout)
 
+    def _toggle_stl_validation_details(self, expanded: bool) -> None:
+        """Toggle the STL evidence while keeping its compact control stable."""
+
+        self.stl_validation_details.setVisible(expanded)
+        self.stl_validation_details_toggle.setText(
+            "Technische Details ausblenden ▾"
+            if expanded
+            else "Technische Details anzeigen ▸"
+        )
+        self.stl_validation_details_toggle.setAccessibleName(
+            "Technische Details ausblenden"
+            if expanded
+            else "Technische Details einblenden"
+        )
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
+
     def _toggle_slicer_analysis_details(self, expanded: bool) -> None:
         """Reveal secondary Slicer evidence without crowding primary controls."""
 
@@ -6324,7 +7107,11 @@ class MainWindow(QMainWindow):
             if expanded
             else "Analyse- und Profildetails einblenden"
         )
-        QTimer.singleShot(0, self._refresh_slicer_section_layout)
+        # The QTabWidget publishes a fixed height for its current page.  Update
+        # that complete height after both opening and closing so the compact
+        # toggle can never be compressed into an almost invisible line.
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
 
     def _fit_reconstructed_config_height(self) -> None:
         if not self.reconstructed_config_text.isVisible():
@@ -6377,9 +7164,15 @@ class MainWindow(QMainWindow):
         return bool(
             self._slicer_prediction_is_offered()
             and result is not None
-            and result.selected is not None
-            and result.can_use_stl_mode
-            and result.execution_slicer.can_slice
+            and getattr(result, "selected", None) is not None
+            and bool(getattr(result, "can_use_stl_mode", False))
+            and bool(
+                getattr(
+                    getattr(result, "execution_slicer", None),
+                    "can_slice",
+                    False,
+                )
+            )
             and self.analysis_snapshot is not None
             and self.tower_assessment is not None
             and self.tower_assessment.tower_required
@@ -6393,9 +7186,8 @@ class MainWindow(QMainWindow):
             and not self.background_job_manager.has_active(JobKind.EXPORT)
         )
 
-    def _refresh_prediction_advice(self, estimate_kind: str) -> None:
-        analytical = estimate_kind == "Analytische Schätzung"
-        offered = analytical and self._slicer_prediction_is_offered()
+    def _refresh_prediction_advice(self, _estimate_kind: str = "") -> None:
+        offered = self._slicer_prediction_is_offered()
         running = self.background_job_manager.has_active(
             JobKind.SLICER_PREDICTION
         )
@@ -6403,13 +7195,12 @@ class MainWindow(QMainWindow):
             self.preview_state is PreviewState.BUILDING
             or self.background_job_manager.has_active(JobKind.PREVIEW)
         )
-        self.prediction_advice_frame.setProperty("active", analytical)
-        self.prediction_advice_label.setVisible(analytical)
+        self.prediction_advice_frame.setProperty("active", offered)
+        self.prediction_advice_label.setVisible(offered)
         self.prediction_advice_label.setText(
-            "Die analytische Schätzung ist relativ ungenau.\n"
-            "Eine Slicer-gestützte Schätzung wird empfohlen."
-            if analytical
-            else ""
+            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
+            "und den ausgewählten Profilen ermittelt."
+            if offered else ""
         )
         self.slicer_prediction_button.setVisible(offered)
         self.slicer_prediction_button.setEnabled(
@@ -6433,13 +7224,13 @@ class MainWindow(QMainWindow):
                 )
             else:
                 tooltip = (
-                    "Die Schätzung ist verfügbar, sobald G-Code, "
+                    "Die Schätzung ist verfügbar, sobald Modellanalyse, "
                     "Profilzuordnung und Geometrieprüfung abgeschlossen sind."
                 )
             self.slicer_prediction_button.setToolTip(tooltip)
         else:
             self.slicer_prediction_button.setToolTip("")
-        status = self._slicer_prediction_status if analytical else ""
+        status = self._slicer_prediction_status
         self.slicer_prediction_status_label.setText(status)
         self.slicer_prediction_status_label.setVisible(bool(status))
         self._refresh_widget_style(self.prediction_advice_frame)
@@ -6477,7 +7268,7 @@ class MainWindow(QMainWindow):
             self._slicer_prediction_status = (
                 "Die Profilzuordnung oder Geometrieprüfung ist noch nicht abgeschlossen."
             )
-            self._refresh_prediction_advice("Analytische Schätzung")
+            self._refresh_prediction_advice()
             return
         try:
             request = self._current_preview_request(
@@ -6485,7 +7276,7 @@ class MainWindow(QMainWindow):
             )
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self._slicer_prediction_status = german_user_message(error)
-            self._refresh_prediction_advice("Analytische Schätzung")
+            self._refresh_prediction_advice()
             return
 
         self._slicer_prediction_request_id += 1
@@ -6520,7 +7311,7 @@ class MainWindow(QMainWindow):
             f"{max(0, min(100, percent))} % · "
             f"{german_user_message(status)}"
         )
-        self._refresh_prediction_advice("Analytische Schätzung")
+        self._refresh_prediction_advice()
 
     def _on_slicer_prediction_succeeded(
         self,
@@ -6534,7 +7325,7 @@ class MainWindow(QMainWindow):
             if estimate is None:
                 self._slicer_prediction_status = (
                     "Der Slicer lieferte noch keine belastbare Layerzeit. "
-                    "Die analytische Schätzung bleibt aktiv."
+                    "Es wird keine Ersatzschätzung verwendet."
                 )
                 self._slicer_prediction_estimate_s = None
             else:
@@ -6584,24 +7375,20 @@ class MainWindow(QMainWindow):
             return
 
         estimate = None
-        estimate_kind = "Analytische Schätzung"
+        estimate_kind = "Slicer-Schätzung ausstehend"
         if (
             self.preview_state is PreviewState.CURRENT
             and self.current_preview is not None
             and self.current_preview.minimum_verified_layer_time_s is not None
         ):
             estimate = self.current_preview.minimum_verified_layer_time_s
-            estimate_kind = "Slicer-gestützte Annäherung"
+            estimate_kind = "Slicer-gestützte Schätzung"
         elif self._slicer_prediction_estimate_s is not None:
             estimate = self._slicer_prediction_estimate_s
-            estimate_kind = "Slicer-gestützte Annäherung"
-        elif self.profile_feasibility is not None:
-            estimate = (
-                self.profile_feasibility
-                .estimated_minimum_combined_layer_time_s
-            )
+            estimate_kind = "Slicer-gestützte Schätzung"
         elif not assessment.tower_required:
             estimate = snapshot.minimum_layer_time_s
+            estimate_kind = "Slicer-Analyse des Modells"
 
         target = assessment.target_layer_time_s
         self.prediction_method_label.setText(estimate_kind)
@@ -6652,10 +7439,11 @@ class MainWindow(QMainWindow):
             state = "available" if reached else "warning"
         self.prediction_label.setProperty("state", state)
         method_mode = (
-            "analytical"
-            if estimate_kind == "Analytische Schätzung"
-            else "slicer"
-            if estimate_kind == "Slicer-gestützte Annäherung"
+            "slicer"
+            if estimate_kind in {
+                "Slicer-gestützte Schätzung",
+                "Slicer-Analyse des Modells",
+            }
             else "neutral"
         )
         self.prediction_method_label.setProperty("mode", method_mode)
@@ -6745,13 +7533,12 @@ class MainWindow(QMainWindow):
         self.output_root_edit.setText(str(self.default_output_root))
         self.output_root_edit.selectAll()
 
-    def remove_gcode(self) -> None:
+    def remove_source(self) -> None:
         if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
-                "Der G-Code kann erst nach Abschluss des laufenden Exports entfernt werden."
+                "Die STL kann erst nach Abschluss des laufenden Exports entfernt werden."
             )
             return
-        self._analysis_request_id += 1
         self._stl_validation_request_id += 1
         self._discard_source_preslice("source_removed")
         self._workflow_error_message = None
@@ -6760,21 +7547,17 @@ class MainWindow(QMainWindow):
         self._preview_request_id += 1
         self._clear_slicer_prediction()
         self.background_job_manager.cancel_jobs(
-            JobKind.ANALYSIS,
-            reason="gcode_removed",
-        )
-        self.background_job_manager.cancel_jobs(
             JobKind.STL_VALIDATION,
             reason="source_removed",
         )
         self.background_job_manager.cancel_jobs(
             JobKind.PROFILE_MATCH,
-            reason="gcode_removed",
+            reason="source_removed",
         )
         self._cancel_feasibility_jobs()
         self.background_job_manager.cancel_jobs(
             JobKind.PREVIEW,
-            reason="gcode_removed",
+            reason="source_removed",
         )
         if self.current_preview is not None:
             self.current_preview.dispose()
@@ -6799,10 +7582,10 @@ class MainWindow(QMainWindow):
         self._clear_feasibility_issues()
         self.last_export_result = None
         self.drop_zone.clear_file()
-        self.gcode_progress_bar.setValue(0)
-        self.gcode_progress_bar.hide()
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
+        self.source_progress_bar.setValue(0)
+        self.source_progress_bar.hide()
+        self.source_progress_status_widget.show()
+        self._set_source_progress_status(
             "Datei auswählen",
             icon="○",
             state="pending",
@@ -6815,7 +7598,7 @@ class MainWindow(QMainWindow):
             preserve_catalog=True,
         )
         self._set_tower_need_message(
-            "Bitte zuerst eine STL- oder G-Code-Datei auswählen.", "pending"
+            "Bitte zuerst eine STL-Datei auswählen.", "pending"
         )
         self.result_label.clear()
         self.warning_text.clear()
@@ -6831,12 +7614,13 @@ class MainWindow(QMainWindow):
         )
         self._refresh_widget_style(self.preview_hint_label)
         self._set_main_status(
-            "Bitte STL oder G-Code auswählen",
+            "Bitte STL auswählen",
             icon="⇧",
             state="idle",
         )
         self._refresh_prediction()
         self.workflow.reset()
+        self.preparation_tabs.setCurrentIndex(0)
         if (
             self.selected_slicer_installation is not None
             and self._catalog_selection_is_confirmed()
@@ -6867,27 +7651,20 @@ class MainWindow(QMainWindow):
         self._update_preparation_requirements()
         self.validate_form()
 
-    def reload_gcode(self) -> None:
+    def reload_source(self) -> None:
         """Read and validate the selected source again from disk."""
 
         if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
-                "Der G-Code kann erst nach Abschluss des laufenden Exports "
+                "Die STL kann erst nach Abschluss des laufenden Exports "
                 "neu eingelesen werden."
             )
             return
-        path = (
-            self.current_source_path
-            or self.current_gcode_path
-            or self.drop_zone.selected_path
-        )
+        path = self.current_source_path or self.drop_zone.selected_path
         if path is None or not path.is_file():
             self._show_input_error(
                 "Die ausgewählte Quelldatei ist nicht mehr verfügbar."
             )
-            return
-        if self.current_source_path is None and self.current_gcode_path is not None:
-            self._on_file_selected(str(path.resolve()))
             return
         self.drop_zone.set_file(path.resolve())
 
@@ -6928,48 +7705,48 @@ class MainWindow(QMainWindow):
         self.validate_form()
         self._schedule_feasibility_validation()
 
-    def _on_file_selected(self, path: str) -> None:
-        """Compatibility entry point for a directly supplied G-code."""
-
-        self._on_source_selected(path, SourceKind.GCODE.value)
-
     def _on_source_selected(self, path: str, source_kind: str) -> None:
         kind = SourceKind(source_kind)
+        if kind is not SourceKind.STL:
+            self._show_input_error(
+                "Als Modelldatei wird derzeit ausschließlich STL unterstützt."
+            )
+            return
         resolved = Path(path).resolve()
         self.current_source_path = resolved
         self.current_source_kind = kind
         self.source_artifact = None
         self._update_preparation_requirements()
-        if kind is SourceKind.STL:
-            self._prepare_for_replaced_source(
-                "Eine andere STL-Datei wurde ausgewählt."
-            )
-            self.current_gcode_path = None
-            self.workflow.begin_source_validation(is_stl=True)
-            self.drop_zone.set_status(
-                "STL-Modell erkannt – Geometrie wird geprüft"
-            )
-            self._set_main_status(
-                "STL-Modell erkannt – Geometrie wird geprüft",
-                icon="⏳",
-                state="running",
-            )
-            self._start_stl_validation(resolved)
-            self.validate_form()
-            return
-
-        self.current_gcode_path = resolved
-        self._start_selected_gcode()
+        self._prepare_for_replaced_source(
+            "Eine andere STL-Datei wurde ausgewählt."
+        )
+        self.current_gcode_path = None
+        self.workflow.set_slicer_step_visible(False)
+        self.preparation_tabs.setCurrentIndex(0)
+        self.workflow.begin_source_validation(is_stl=True)
+        self.drop_zone.set_status(
+            "STL-Modell erkannt – Geometrie wird geprüft"
+        )
+        self._set_main_status(
+            "STL-Modell erkannt – Geometrie wird geprüft",
+            icon="⏳",
+            state="running",
+        )
+        self._start_stl_validation(resolved)
+        # Installation and source validation touch independent read-only
+        # resources and may therefore run in parallel. Visible Slicer feedback
+        # remains deferred by the workflow controller until tab 2 opens.
+        if (
+            self._slicer_service_was_injected
+            or self._startup_slicer_discovery_enabled
+        ):
+            self.start_slicer_discovery()
+        self.validate_form()
 
     def _prepare_for_replaced_source(self, reason: str) -> None:
         self._last_changed_setting_name = None
         self._workflow_error_message = None
-        self._analysis_request_id += 1
         self._discard_source_preslice("source_replaced")
-        self.background_job_manager.cancel_jobs(
-            JobKind.ANALYSIS,
-            reason="source_replaced",
-        )
         self._stl_validation_request_id += 1
         self.background_job_manager.cancel_jobs(
             JobKind.STL_VALIDATION,
@@ -7008,17 +7785,6 @@ class MainWindow(QMainWindow):
         self._show_reconstructed_configuration(None)
         self._refresh_prediction()
 
-    def _start_selected_gcode(self) -> None:
-        if self.current_gcode_path is None:
-            return
-        self.workflow.begin_analysis()
-        self._prepare_for_replaced_source(
-            "Eine andere G-Code-Datei wurde ausgewählt."
-        )
-        self.drop_zone.set_status("Analyse läuft")
-        self._start_gcode_analysis(self.current_gcode_path)
-        self.validate_form()
-
     def _start_stl_validation(self, path: Path) -> None:
         self.background_job_manager.cancel_jobs(
             JobKind.STL_VALIDATION,
@@ -7028,10 +7794,10 @@ class MainWindow(QMainWindow):
         request_id = self._stl_validation_request_id
         self.workflow.begin_source_validation(is_stl=True)
         self.drop_zone.set_analysis_state("analyzing")
-        self.gcode_progress_bar.setValue(0)
-        self.gcode_progress_bar.show()
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
+        self.source_progress_bar.setValue(0)
+        self.source_progress_bar.show()
+        self.source_progress_status_widget.show()
+        self._set_source_progress_status(
             "STL-Geometrie wird geprüft …",
             icon="⏳",
             state="running",
@@ -7058,10 +7824,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._stl_validation_request_id:
             return
-        self.gcode_progress_bar.setValue(max(0, min(100, int(percent))))
+        self.source_progress_bar.setValue(max(0, min(100, int(percent))))
         if percent >= 100:
-            self.gcode_progress_bar.hide()
-        self._set_gcode_progress_status(
+            self.source_progress_bar.hide()
+        self._set_source_progress_status(
             status,
             icon="⏳",
             state="running",
@@ -7084,9 +7850,9 @@ class MainWindow(QMainWindow):
             return
         self.stl_validation_result = result
         self.source_artifact = result.source_artifact
-        self.gcode_progress_bar.setValue(100)
+        self.source_progress_bar.setValue(100)
         self._finish_source_progress(completed=result.valid)
-        self.gcode_progress_status_widget.show()
+        self.source_progress_status_widget.show()
         if not result.valid:
             self._analysis_failed = True
             self._workflow_error_message = (
@@ -7095,8 +7861,8 @@ class MainWindow(QMainWindow):
             )
             self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
             self.drop_zone.set_analysis_state("rejected")
-            self.gcode_progress_status_widget.show()
-            self._set_gcode_progress_status(
+            self.source_progress_status_widget.show()
+            self._set_source_progress_status(
                 "STL-Prüfung fehlgeschlagen",
                 icon="✕",
                 state="error",
@@ -7134,7 +7900,7 @@ class MainWindow(QMainWindow):
         # perspective.  Later profile-bound analysis remains visible in the
         # shared workflow prerequisites without withholding this green cue.
         self.drop_zone.set_completed(True)
-        self._set_gcode_progress_status(
+        self._set_source_progress_status(
             "STL-Geometrie ist manifold (vollständig geschlossen)",
             icon="✓",
             state="success",
@@ -7167,6 +7933,7 @@ class MainWindow(QMainWindow):
             f"{self.current_source_path.name} · {result.face_count} Dreiecke",
             analysis_complete=False,
         )
+        self._show_confirmed_profiles_analysis_action()
         if result.warning_issues:
             self.source_group.set_summary_note(
                 "mit Geometriehinweis",
@@ -7179,11 +7946,10 @@ class MainWindow(QMainWindow):
             state="success",
         )
         self._update_preparation_requirements()
-        if (
-            self._slicer_service_was_injected
-            or os.environ.get("QT_QPA_PLATFORM", "").casefold() != "offscreen"
-        ):
-            self.start_slicer_discovery()
+        self._schedule_slicer_step_open(
+            request_id,
+            self.current_source_path,
+        )
         self.validate_form()
 
     def _on_stl_validation_failed(
@@ -7200,10 +7966,10 @@ class MainWindow(QMainWindow):
         self._workflow_error_message = german_user_message(message)
         self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
         self.drop_zone.set_analysis_state("rejected")
-        self.gcode_progress_bar.setValue(0)
+        self.source_progress_bar.setValue(0)
         self._finish_source_progress(completed=False)
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
+        self.source_progress_status_widget.show()
+        self._set_source_progress_status(
             "STL-Prüfung fehlgeschlagen",
             icon="✕",
             state="error",
@@ -7240,146 +8006,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "source_group"):
             self.source_group.set_summary_note(None)
 
-    def _start_gcode_analysis(self, path: Path) -> None:
-        self.background_job_manager.cancel_jobs(
-            JobKind.ANALYSIS,
-            reason="analysis_replaced",
-        )
-
-        self._analysis_request_id += 1
-        request_id = self._analysis_request_id
-        self.workflow.begin_analysis()
-        self.drop_zone.set_analysis_state("analyzing")
-        self._set_tower_need_message(
-            "G-Code wird analysiert …",
-            "analyzing",
-        )
-        self.gcode_progress_bar.setValue(0)
-        self.gcode_progress_bar.show()
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
-            "G-Code wird analysiert …", icon="⏳", state="running"
-        )
-        self._set_main_status(
-            "G-Code wird analysiert …", icon="⏳", state="running"
-        )
-
-        worker = AnalysisWorker(
-            request_id,
-            path,
-            self.analysis_service,
-        )
-        worker.progress.connect(self._on_analysis_progress)
-        worker.succeeded.connect(self._on_analysis_succeeded)
-        worker.failed.connect(self._on_analysis_failed)
-        self.background_job_manager.start_job(
-            kind=JobKind.ANALYSIS,
-            request_id=request_id,
-            worker=worker,
-        )
-
-    def _on_analysis_progress(
-        self,
-        request_id: int,
-        percent: int,
-        status: str,
-    ) -> None:
-        if request_id != self._analysis_request_id:
-            return
-        value = max(0, min(100, percent))
-        status = german_user_message(status)
-        self.gcode_progress_bar.setValue(value)
-        if value >= 100:
-            self.gcode_progress_bar.hide()
-        self._set_gcode_progress_status(
-            status, icon="⏳", state="running"
-        )
-        self.drop_zone.set_status("Analyse läuft")
-        if not self.result_label.text():
-            self._set_main_status(status, icon="⏳", state="running")
-
-    def _on_analysis_succeeded(
-        self,
-        request_id: int,
-        snapshot: GCodeAnalysisSnapshot,
-    ) -> None:
-        if request_id != self._analysis_request_id:
-            return
-        if self.current_gcode_path is None:
-            return
-        if snapshot.gcode_path != self.current_gcode_path.resolve():
-            return
-        try:
-            if snapshot.content_sha256:
-                self.source_artifact = SourceArtifact(
-                    source_kind=SourceKind.GCODE,
-                    original_path=snapshot.gcode_path,
-                    original_size=snapshot.file_size_bytes,
-                    original_mtime_ns=snapshot.file_modified_ns,
-                    original_sha256=snapshot.content_sha256,
-                )
-            elif self.current_gcode_path is not None:
-                self.source_artifact = SourceArtifact.capture(
-                    self.current_gcode_path,
-                    source_kind=SourceKind.GCODE,
-                )
-            if self.source_artifact is None:
-                raise ValueError("Die G-Code-Quelle konnte nicht gebunden werden.")
-            self.prepared_analysis_source = PreparedAnalysisSource.capture(
-                source_artifact=self.source_artifact,
-                analysis_gcode_path=snapshot.gcode_path,
-                gcode_origin=GCodeOrigin.USER_SUPPLIED,
-                slicer_identity=snapshot.metadata.slicer,
-                slicer_version=snapshot.metadata.slicer.version,
-            )
-        except (OSError, ValueError) as error:
-            self._on_analysis_failed(
-                request_id,
-                str(error),
-                f"{type(error).__name__}: {error}",
-            )
-            return
-        self._analysis_failed = False
-        self._adopt_common_analysis_snapshot(snapshot)
-        self._workflow_error_message = None
-        self.drop_zone.set_status("Analyse abgeschlossen")
-        self.drop_zone.set_analysis_state("ready")
-        self.gcode_progress_bar.setValue(100)
-        self._finish_source_progress(completed=True)
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
-            "G-Code-Analyse abgeschlossen", icon="✓", state="success"
-        )
-        self._show_reconstructed_configuration(snapshot)
-        self.workflow.analysis_succeeded(
-            f"{self.current_gcode_path.name} · {snapshot.layer_count} Layer"
-        )
-        if not self.result_label.text():
-            self._set_main_status(
-                f"{snapshot.layer_count} Layer analysiert · "
-                f"kleinste Layerzeit "
-                f"{snapshot.minimum_layer_time_s:.3f} s · "
-                f"maximale Druckhöhe "
-                f"{snapshot.maximum_print_z_mm:.3f} mm",
-                icon="✓",
-                state="success",
-            )
-        if (
-            self._slicer_service_was_injected
-            or os.environ.get("QT_QPA_PLATFORM", "").casefold() != "offscreen"
-        ):
-            self.start_slicer_discovery()
-        else:
-            self.workflow.slicer_unavailable(
-                "Slicer-Suche in dieser Sitzung deaktiviert"
-            )
-        self._update_preparation_requirements()
-
     def _adopt_common_analysis_snapshot(
         self,
         snapshot: GCodeAnalysisSnapshot,
     ) -> None:
-        """Enter the shared cooling-tower pipeline for either source kind."""
+        """Enter the cooling-tower pipeline for the prepared STL analysis."""
 
         self.analysis_snapshot = snapshot
         self._update_local_window_layer_limit(snapshot.layer_count)
@@ -7403,42 +8034,6 @@ class MainWindow(QMainWindow):
         self._setting_widgets[
             "local_reference_window"
         ].refresh_range_state()
-
-    def _on_analysis_failed(
-        self,
-        request_id: int,
-        message: str,
-        details: str,
-    ) -> None:
-        if request_id != self._analysis_request_id:
-            return
-        self.analysis_snapshot = None
-        self.tower_assessment = None
-        self.profile_feasibility = None
-        self._clear_feasibility_issues()
-        self._analysis_failed = True
-        self._workflow_error_message = german_user_message(message)
-        self._set_tower_need_message(
-            "Die G-Code-Datei konnte nicht analysiert werden.",
-            "error",
-        )
-        self.drop_zone.set_status("Analyse fehlgeschlagen")
-        self.drop_zone.set_analysis_state("failed")
-        self.gcode_progress_bar.setValue(0)
-        self._finish_source_progress(completed=False)
-        self.gcode_progress_status_widget.show()
-        self._set_gcode_progress_status(
-            "G-Code-Analyse fehlgeschlagen", icon="✕", state="error"
-        )
-        self.workflow.analysis_failed()
-        self._set_main_status(
-            "G-Code-Analyse fehlgeschlagen", icon="✕", state="error"
-        )
-        self._show_reconstructed_configuration(None)
-        self._refresh_prediction()
-        self._refresh_stl_availability()
-        self._update_preparation_requirements()
-        self.validate_form()
 
     def _refresh_tower_assessment(self) -> None:
         snapshot = self.analysis_snapshot
@@ -8341,8 +8936,6 @@ class MainWindow(QMainWindow):
                     "requires_confirmation": match.requires_confirmation,
                     "user_confirmed": match.user_confirmed,
                     "can_use_stl_mode": match.can_use_stl_mode,
-                    "can_use_gcode_mode": match.can_use_gcode_mode,
-                    "gcode_restrictions": list(match.gcode_restrictions),
                     "profiles_filtered": match.profiles_filtered,
                     "unfiltered_option_counts": list(
                         match.unfiltered_option_counts
@@ -8644,8 +9237,6 @@ class MainWindow(QMainWindow):
     def _source_height_description(self) -> str:
         if self.current_source_kind is SourceKind.STL:
             return "Höhe des automatisch geslicten Modells"
-        if self.current_source_kind is SourceKind.GCODE:
-            return "Höhe des analysierten G-Codes"
         return "ermittelte Modellhöhe"
 
     def validate_form(self) -> bool:
@@ -9582,41 +10173,21 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.progress_bar.hide()
-        if result.output_mode is OutputMode.STL:
-            kind = (
-                "slicerbasiert kalibriert und Zielzeit erreicht"
-                if result.calibrated
-                else "sliceroptimierter bester Zwischenstand"
-                if result.slicer_optimized
-                else "analytisch erzeugt"
-            )
-            self._set_main_status(
-                "STL erfolgreich exportiert", icon="✓", state="success"
-            )
-            self.result_label.setText(
-                f"Datei: {result.output_path.name}\n"
-                f"Erzeugungsart: {kind}\n"
-                "Kurzbericht und technischer Bericht wurden im "
-                "Exportordner gespeichert."
-            )
-            self.result_label.setToolTip(str(result.output_path))
-        else:
-            minimum = (
-                f"{result.minimum_verified_layer_time_s:.3f} s"
-                if result.minimum_verified_layer_time_s is not None
-                else "nicht separat verfügbar"
-            )
-            self._set_main_status(
-                "G-Code erfolgreich exportiert und endanalysiert",
-                icon="✓",
-                state="success",
-            )
-            self.result_label.setText(
-                f"G-Code gespeichert: {result.output_path}\n"
-                f"Kleinste geprüfte relevante Layerzeit: {minimum}. "
-                "Nachträgliche Objekt- oder Sliceränderungen erfordern einen neuen "
-                "Slicevorgang und eine neue Kühlturmerzeugung."
-            )
+        kind = (
+            "slicerbasiert kalibriert und Zielzeit erreicht"
+            if result.calibrated
+            else "sliceroptimierter bester Zwischenstand"
+        )
+        self._set_main_status(
+            "STL erfolgreich exportiert", icon="✓", state="success"
+        )
+        self.result_label.setText(
+            f"Datei: {result.output_path.name}\n"
+            f"Erzeugungsart: {kind}\n"
+            "Kurzbericht und technischer Bericht wurden im "
+            "Exportordner gespeichert."
+        )
+        self.result_label.setToolTip(str(result.output_path))
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(True)
@@ -9626,15 +10197,6 @@ class MainWindow(QMainWindow):
                     "Die Sliceroptimierung hat die Zielzeit nicht vollständig "
                     "erreicht.",
                     "Der beste gültige Zwischenstand wurde exportiert.",
-                ])
-            )
-            self.warning_text.show()
-        elif not result.calibrated:
-            self.warning_text.setPlainText(
-                _format_footer_notice([
-                    "Der Export wurde analytisch erstellt.",
-                    "Die Layerzeit konnte nicht durch einen erfolgreichen "
-                    "Slicerlauf bestätigt werden.",
                 ])
             )
             self.warning_text.show()
@@ -9708,7 +10270,7 @@ class MainWindow(QMainWindow):
         self._update_slicer_combo_widths()
         if hasattr(self, "slicer_columns"):
             QTimer.singleShot(0, self._refresh_slicer_section_layout)
-        if hasattr(self, "preparation_split"):
+        if hasattr(self, "preparation_tabs"):
             QTimer.singleShot(0, self._refresh_preparation_section_layout)
         if hasattr(self, "warning_text"):
             self.warning_text.schedule_height_update()

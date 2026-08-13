@@ -204,8 +204,11 @@ class StartupPreparationProgressTests(unittest.TestCase):
             self.assertEqual(profile_service.catalog_calls, 1)
             self.assertIsNone(window.current_source_path)
             self.assertTrue(window.slicer_progress_bar.isHidden())
-            self.assertTrue(window.gcode_progress_bar.isHidden())
-            self.assertEqual(window.preparation_progress_bar.value(), 33)
+            self.assertTrue(window.source_progress_bar.isHidden())
+            self.assertEqual(
+                window.preparation_step_selectors[1].progress_value,
+                50,
+            )
             self.assertEqual(
                 window.preparation_requirement_rows["slicer_detected"][0].text(),
                 "✓",
@@ -219,7 +222,10 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window.profile_confirm_button.click()
             self.app.processEvents()
             self.assertIsNotNone(window.profile_catalog_confirmation)
-            self.assertEqual(window.preparation_progress_bar.value(), 50)
+            self.assertEqual(
+                window.preparation_step_selectors[1].progress_value,
+                75,
+            )
             self.assertTrue(window.ready_grid.isHidden())
 
             alternative_index = next(
@@ -231,7 +237,10 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window.filament_profile_combo.setCurrentIndex(alternative_index)
             self.app.processEvents()
             self.assertIsNone(window.profile_catalog_confirmation)
-            self.assertEqual(window.preparation_progress_bar.value(), 33)
+            self.assertEqual(
+                window.preparation_step_selectors[1].progress_value,
+                50,
+            )
             self.assertTrue(window.profile_confirm_button.isEnabled())
             self.assertEqual(
                 slicer_service.profile_selections["filament"].profile_id,

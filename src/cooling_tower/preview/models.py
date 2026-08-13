@@ -110,19 +110,18 @@ class PreviewRequest:
             raise ValueError(
                 "Ausgabemodus und Kalibrierungsmodus der Vorschau müssen übereinstimmen."
             )
-        if self.output_mode is OutputMode.GCODE and (
+        if (
             self.adapter is None or self.effective_profile is None
         ):
             raise ValueError(
-                "Die G-Code-Vorschau benötigt einen geprüften Slicer und ein "
-                "wirksames Druckprofil."
+                "Vorschau und Export benötigen einen geprüften Slicer und "
+                "ein wirksames Druckprofil."
             )
         if (
-            self.output_mode is OutputMode.GCODE
-            and self.calibration_config.maximum_iterations == 0
+            self.calibration_config.maximum_iterations < 1
         ):
             raise ValueError(
-                "Die G-Code-Ausgabe benötigt mindestens einen Slicer-Durchlauf."
+                "Vorschau und Export benötigen mindestens einen Slicer-Durchlauf."
             )
         prepared = self.prepared_analysis_source
         artifact = self.source_artifact
@@ -134,11 +133,6 @@ class PreviewRequest:
             if artifact is not None and prepared.source_artifact != artifact:
                 raise ValueError(
                     "Originalquelle und vorbereiteter Analysekontext widersprechen sich."
-                )
-        if artifact is not None and prepared is None:
-            if artifact.source_kind.value == "gcode" and artifact.original_path != self.source_path:
-                raise ValueError(
-                    "Die G-Code-Originalquelle gehört nicht zum Analyse-Snapshot."
                 )
 
     @property

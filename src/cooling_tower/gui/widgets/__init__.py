@@ -1,5 +1,5 @@
 from cooling_tower.gui.widgets.auto_height_text_edit import AutoHeightTextEdit
-from cooling_tower.gui.widgets.gcode_drop_zone import GCodeDropZone, SourceDropZone
+from cooling_tower.gui.widgets.source_drop_zone import SourceDropZone
 from cooling_tower.gui.widgets.footer_notice_dropdown import (
     FooterNoticeDropdown,
 )
@@ -23,7 +23,6 @@ from cooling_tower.gui.widgets.wheel_safe_inputs import (
 __all__ = [
     "AutoHeightTextEdit",
     "FooterNoticeDropdown",
-    "GCodeDropZone",
     "SourceDropZone",
     "HintPopover",
     "InfoToolButton",

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import PropertyMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,13 +17,20 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QAbstractAnimation, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cooling_tower.gui.main_window import MainWindow
-from cooling_tower.gui.widgets import SectionState
-from cooling_tower.gui.workflow_controller import WorkflowStage
+from cooling_tower.gui.widgets import SectionCard, SectionState
+from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
+from cooling_tower.models import SourceKind
 
 
 class PreparationWorkflowUiTests(unittest.TestCase):
@@ -42,432 +50,943 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         return MainWindow(
             user_settings_path=self.root / "settings.json",
             enable_update_check=False,
+            enable_startup_slicer_discovery=False,
         )
 
-    def test_completed_header_uses_one_column_with_filename_first(self) -> None:
+    def test_named_steps_follow_overview_and_start_with_file_transfer(self) -> None:
         window = self.window()
-        window.resize(1400, 900)
-        window.show()
-        window.current_source_path = self.root / "modell.stl"
-        installation = SimpleNamespace(
-            display_name="Test Slicer",
-            identity_key="test-slicer",
-        )
-        window.slicer_discovery_result = SimpleNamespace(
-            installations=(installation,)
-        )
-        window._populating_slicer_combo = True
-        window.slicer_combo.clear()
-        window.slicer_combo.addItem(
-            installation.display_name,
-            installation.identity_key,
-        )
-        window._populating_slicer_combo = False
-        window._populating_profile_combos = True
-        for combo, text in (
-            (window.machine_profile_combo, "Drucker A"),
-            (window.filament_profile_combo, "PLA"),
-            (window.process_profile_combo, "Qualität"),
-        ):
-            combo.clear()
-            combo.addItem(text)
-        window._populating_profile_combos = False
+        try:
+            self.assertEqual(window.preparation_tabs.count(), 2)
+            self.assertEqual(window.preparation_tabs.tabText(0), "1. Dateiübergabe")
+            self.assertEqual(
+                window.preparation_tabs.tabText(1),
+                "2. Slicer-Einstellungen",
+            )
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            self.assertLess(
+                window.workflow_group.content_layout.indexOf(
+                    window.preparation_overview
+                ),
+                window.workflow_group.content_layout.indexOf(
+                    window.preparation_tabs
+                ),
+            )
+            self.assertFalse(window.workflow_group.property("bodyHover"))
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.workflow_group.toggle_button.isHidden())
+            window.workflow_group.setChecked(False)
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.preparation_tabs.tabBar().isHidden())
+            self.assertEqual(len(window.preparation_step_selectors), 2)
+            margins = window.preparation_overview.layout().contentsMargins()
+            self.assertEqual(
+                (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                (16, 14, 16, 14),
+            )
+            self.assertEqual(
+                window.preparation_requirements.grid.horizontalSpacing(),
+                12,
+            )
+            self.assertEqual(
+                window.preparation_requirements.grid.verticalSpacing(),
+                12,
+            )
+            self.assertTrue(window.preparation_step_selectors[0].isChecked())
+            self.assertFalse(window.preparation_step_selectors[1].isChecked())
+            self.assertTrue(
+                all(
+                    selector.cursor().shape()
+                    is Qt.CursorShape.PointingHandCursor
+                    for selector in window.preparation_step_selectors
+                )
+            )
+            self.assertEqual(
+                [label.text() for label in window.preparation_step_selector_titles],
+                ["1. Dateiübergabe", "2. Slicer-Einstellungen"],
+            )
+            self.assertEqual(len(window.preparation_step_shells), 2)
+            self.assertTrue(
+                all(
+                    shell.maximumWidth() == 700
+                    for shell in window.preparation_step_shells
+                )
+            )
+            self.assertTrue(window.source_group.property("embeddedStep"))
+            self.assertTrue(window.slicer_group.property("embeddedStep"))
+            self.assertTrue(window.source_group.header.isHidden())
+            self.assertTrue(window.slicer_group.header.isHidden())
+            self.assertEqual(window.source_group.title(), "Dateiübergabe")
+            self.assertEqual(window.slicer_group.title(), "Slicer-Einstellungen")
+        finally:
+            window.close()
 
-        window._refresh_preparation_header_summary(True)
-        self.app.processEvents()
-
-        left = window.workflow_group.split_summary_left
-        right = window.workflow_group.split_summary_right
-        self.assertNotIn("Dateiname", left.text())
-        self.assertNotIn("Dateityp", left.text())
-        self.assertTrue(left.isHidden())
-        summary = right.text()
-        expected_order = (
-            "Dateiname",
-            "modell.stl",
-            "Slicer",
-            "Test Slicer",
-            "Maschinenprofil",
-            "Filamentprofil",
-            "Prozessprofil",
-        )
-        positions = [summary.index(value) for value in expected_order]
-        self.assertEqual(positions, sorted(positions))
-        self.assertNotIn("Dateityp", summary)
-
-        self.assertLessEqual(right.width(), right.sizeHint().width() + 1)
-        self.assertLessEqual(
-            abs(
-                right.geometry().right()
-                - window.workflow_group.split_summary_widget.rect().right()
-            ),
-            1,
-        )
-
-        long_name = (
-            "DiesIstEinBeispiel_FürEinenLangenDateinamen_"
-            "UndDieserKönnteNochVielLängerSein.stl"
-        )
-        window.current_source_path = self.root / long_name
-        window.resize(720, 900)
-        window._refresh_preparation_header_summary(True)
-        QTest.qWait(30)
-        self.app.processEvents()
-        narrow_summary = right.text()
-        self.assertIn("...", narrow_summary)
-        self.assertIn(".stl", narrow_summary)
-        self.assertNotIn(long_name, narrow_summary)
-        self.assertEqual(right.toolTip(), long_name)
-        window.close()
-
-    def test_wide_and_narrow_preparation_layout_keep_required_order(self) -> None:
+    def test_step_contents_use_available_width_without_clipping_profile_text(self) -> None:
         window = self.window()
-        window.resize(1400, 900)
+        window.resize(1500, 900)
         window.show()
-        QTest.qWait(30)
         self.app.processEvents()
-
-        split = window.preparation_split
-        self.assertTrue(split.is_two_column())
-        self.assertEqual(
-            split.grid.getItemPosition(split.grid.indexOf(window.source_group)),
-            (0, 0, 1, 1),
-        )
-        self.assertEqual(
-            split.grid.getItemPosition(split.grid.indexOf(window.slicer_group)),
-            (0, 2, 1, 1),
-        )
-        self.assertTrue(window.preparation_vertical_divider.isVisibleTo(window))
-        self.assertTrue(window.preparation_horizontal_divider.isHidden())
-        self.assertEqual(
-            window.workflow_group.content_layout.contentsMargins(),
-            window.geometry_settings_group.content_layout.contentsMargins(),
-        )
-        source_margins = window.source_group.content_layout.contentsMargins()
-        slicer_margins = window.slicer_group.content_layout.contentsMargins()
-        self.assertEqual(
-            (
-                source_margins.left(),
-                source_margins.top(),
-                source_margins.right(),
-                source_margins.bottom(),
-            ),
-            (20, 10, 15, 10),
-        )
-        self.assertEqual(
-            (
-                slicer_margins.left(),
-                slicer_margins.top(),
-                slicer_margins.right(),
-                slicer_margins.bottom(),
-            ),
-            (15, 10, 20, 10),
-        )
-        self.assertEqual(
-            window.source_group.header.height(),
-            window.slicer_group.header.height(),
-        )
-        window.source_group.set_state(SectionState.ERROR)
-        self.app.processEvents()
-        self.assertEqual(
-            window.source_group.status_icon.height(),
-            max(18, window.source_group.title_label.sizeHint().height()),
-        )
-        window.source_group.set_state(SectionState.ACTIVE)
-        source_progress_y = window.gcode_progress_bar.mapTo(
-            window.workflow_group,
-            QPoint(0, 0),
-        ).y()
-        slicer_progress_y = window.slicer_progress_bar.mapTo(
-            window.workflow_group,
-            QPoint(0, 0),
-        ).y()
-        self.assertEqual(source_progress_y, slicer_progress_y)
-        self.assertLess(
-            window.workflow_group.content_layout.indexOf(
-                window.preparation_overview
-            ),
-            window.workflow_group.content_layout.indexOf(
-                window.preparation_split
-            ),
-        )
-        window.workflow_group.set_split_summary_columns(
-            (("Dateiname", "modell.stl"), ("Dateityp", "Binär-STL")),
-            (
-                ("Slicer", "Test Slicer"),
-                ("Maschinenprofil", "Drucker A"),
-                ("Filamentprofil", "PLA"),
-                ("Prozessprofil", "Qualität"),
-            ),
-        )
-        self.app.processEvents()
-        self.assertFalse(window.workflow_group.split_summary_widget.isHidden())
-        self.assertIn("modell.stl", window.workflow_group.split_summary_left.text())
-        self.assertIn("Drucker A", window.workflow_group.split_summary_right.text())
-        self.assertTrue(
-            window.workflow_group.split_summary_left.alignment()
-            & Qt.AlignmentFlag.AlignRight
-        )
-        self.assertIn(
-            'td align="right"',
-            window.workflow_group.split_summary_left.text(),
-        )
-        self.assertIn(
-            'td align="left"',
-            window.workflow_group.split_summary_right.text(),
-        )
-        self.assertGreater(
-            window.workflow_group.header.height(),
-            window.source_group.header.height(),
-        )
-        window.resize(720, 900)
-        QTest.qWait(50)
-        self.app.processEvents()
-        self.assertTrue(window.workflow_group.split_summary_left.isHidden())
-        self.assertFalse(window.workflow_group.split_summary_right.isHidden())
-        window.resize(1400, 900)
-        QTest.qWait(50)
-        self.app.processEvents()
-        self.assertFalse(window.workflow_group.split_summary_left.isHidden())
-        window.workflow_group.set_split_summary_columns((), ())
-        requirements = window.preparation_requirements
-        self.assertTrue(requirements.is_two_column())
-        self.assertEqual(requirements.grid.count(), 2)
-        self.assertEqual(
-            requirements.grid.getItemPosition(
-                requirements.grid.indexOf(
-                    window.preparation_source_requirements
-                )
-            ),
-            (0, 0, 1, 1),
-        )
-        self.assertEqual(
-            requirements.grid.getItemPosition(
-                requirements.grid.indexOf(
-                    window.preparation_slicer_requirements
-                )
-            ),
-            (0, 1, 1, 1),
-        )
-        wide_requirements_height = requirements.minimumHeight()
-        source_keys = (
-            "source_selected",
-            "source_analyzed",
-            "profiles_source_validated",
-        )
-        slicer_keys = (
-            "slicer_detected",
-            "profiles_loaded",
-            "profiles_confirmed",
-        )
-        self.assertTrue(
-            all(
-                window.preparation_requirement_rows[key][0].parent()
-                is window.preparation_source_requirements
-                for key in source_keys
+        try:
+            window.preparation_tabs.setCurrentIndex(1)
+            profile_text = (
+                "Anycubic Kobra 3 V2 0.4 nozzle – Settings v2"
             )
-        )
-        self.assertTrue(
-            all(
-                window.preparation_requirement_rows[key][0].parent()
-                is window.preparation_slicer_requirements
-                for key in slicer_keys
-            )
-        )
+            window.machine_profile_combo.addItem(profile_text)
+            window.machine_profile_combo.setCurrentText(profile_text)
+            window._refresh_preparation_section_layout()
+            self.app.processEvents()
 
-        window.resize(800, 900)
-        QTest.qWait(50)
+            self.assertEqual(window.slicer_group.width(), 700)
+            required_text_width = (
+                window.machine_profile_combo.fontMetrics().horizontalAdvance(
+                    profile_text
+                )
+                + 54
+            )
+            self.assertGreaterEqual(
+                window.machine_profile_combo.width(),
+                required_text_width,
+            )
+            self.assertTrue(window.preparation_step_selectors[1].isChecked())
+            self.assertFalse(window.preparation_step_selectors[0].isChecked())
+            self.assertEqual(
+                window.preparation_tabs.property("stepTone"),
+                "slicer",
+            )
+        finally:
+            window.close()
+
+    def test_embedded_step_cards_match_bottom_and_side_insets(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
         self.app.processEvents()
-        self.assertFalse(split.is_two_column())
-        self.assertEqual(
-            split.grid.getItemPosition(split.grid.indexOf(window.source_group)),
-            (0, 0, 1, 3),
-        )
-        self.assertEqual(
-            split.grid.getItemPosition(
-                split.grid.indexOf(window.preparation_horizontal_divider)
-            ),
-            (1, 0, 1, 3),
-        )
-        self.assertEqual(
-            split.grid.getItemPosition(split.grid.indexOf(window.slicer_group)),
-            (2, 0, 1, 3),
-        )
-        self.assertTrue(window.preparation_vertical_divider.isHidden())
-        self.assertTrue(window.preparation_horizontal_divider.isVisibleTo(window))
-        self.assertFalse(requirements.is_two_column())
-        self.assertEqual(requirements.grid.count(), 2)
-        self.assertEqual(
-            requirements.grid.getItemPosition(
-                requirements.grid.indexOf(
-                    window.preparation_slicer_requirements
+        try:
+            for index, card in enumerate(
+                (window.source_group, window.slicer_group)
+            ):
+                window.preparation_tabs.setCurrentIndex(index)
+                window._refresh_preparation_section_layout()
+                self.app.processEvents()
+                margins = card.content_layout.contentsMargins()
+                self.assertEqual(
+                    (
+                        margins.left(),
+                        margins.top(),
+                        margins.right(),
+                        margins.bottom(),
+                    ),
+                    (20, 20, 20, 20),
                 )
-            ),
-            (0, 0, 1, 2),
-        )
-        self.assertEqual(
-            requirements.grid.getItemPosition(
-                requirements.grid.indexOf(
-                    window.preparation_source_requirements
-                )
-            ),
-            (1, 0, 1, 2),
-        )
-        self.assertGreater(
-            requirements.minimumHeight(),
-            wide_requirements_height,
-        )
-        for card in (window.source_group, window.slicer_group):
-            margins = card.content_layout.contentsMargins()
+                for state in (
+                    "analyzing",
+                    "failed",
+                    "ready",
+                ):
+                    window.drop_zone.set_analysis_state(state)
+                    window._refresh_preparation_section_layout()
+                    state_margins = card.content_layout.contentsMargins()
+                    self.assertEqual(
+                        (
+                            state_margins.left(),
+                            state_margins.top(),
+                            state_margins.right(),
+                            state_margins.bottom(),
+                        ),
+                        (20, 20, 20, 20),
+                    )
+            selector_margins = (
+                window.slicer_selectors_layout.contentsMargins()
+            )
             self.assertEqual(
                 (
-                    margins.left(),
-                    margins.top(),
-                    margins.right(),
-                    margins.bottom(),
+                    selector_margins.left(),
+                    selector_margins.top(),
+                    selector_margins.right(),
+                    selector_margins.bottom(),
                 ),
-                (20, 10, 20, 10),
+                (0, 0, 0, 0),
             )
-        window.close()
-
-    def test_progress_blocks_are_first_and_details_are_secondary(self) -> None:
-        window = self.window()
-        self.assertEqual(
-            window.source_group.content_layout.indexOf(window.gcode_progress_bar),
-            0,
-        )
-        self.assertEqual(
-            window.slicer_group.content_layout.indexOf(window.slicer_progress_bar),
-            0,
-        )
-        self.assertTrue(window.gcode_progress_bar.isHidden())
-        self.assertTrue(window.slicer_progress_bar.isHidden())
-        window.gcode_progress_bar.show()
-        window._set_slicer_progress(
-            40,
-            "Profile werden geladen",
-            icon="⌛",
-            state="running",
-        )
-        self.assertFalse(window.gcode_progress_bar.isHidden())
-        self.assertFalse(window.slicer_progress_bar.isHidden())
-        window._finish_source_progress(completed=True)
-        window._set_slicer_progress(
-            100,
-            "Profile geladen",
-            icon="✓",
-            state="success",
-        )
-        self.assertTrue(window.gcode_progress_bar.isHidden())
-        self.assertTrue(window.slicer_progress_bar.isHidden())
-        self.assertTrue(window.slicer_analysis_details.isHidden())
-
-        self.assertEqual(window.preparation_progress_bar.value(), 0)
-        self.assertEqual(len(window.preparation_requirement_rows), 6)
-        for icon, _label in window.preparation_requirement_rows.values():
-            self.assertEqual(icon.text(), "✕")
-
-        layout = window.slicer_selectors_layout
-        ordered_widgets = (
-            window.slicer_selection_label,
-            window.slicer_combo,
-            window.machine_profile_label,
-            window.machine_profile_combo,
-            window.filament_profile_label,
-            window.filament_profile_combo,
-            window.process_profile_label,
-            window.process_profile_combo,
-        )
-        indices = [layout.indexOf(widget) for widget in ordered_widgets]
-        self.assertEqual(indices, sorted(indices))
-
-        window.slicer_analysis_details_toggle.click()
-        self.app.processEvents()
-        self.assertFalse(window.slicer_analysis_details.isHidden())
-        self.assertIn(
-            "ausblenden",
-            window.slicer_analysis_details_toggle.accessibleName(),
-        )
-        window.close()
-
-    def test_detail_disclosures_stay_at_the_bottom_of_both_columns(self) -> None:
-        window = self.window()
-        window.resize(1400, 900)
-        window.show()
-        window.stl_validation_details_toggle.show()
-        window._refresh_preparation_section_layout()
-        QTest.qWait(30)
-        self.app.processEvents()
-
-        for group, toggle in (
-            (window.source_group, window.stl_validation_details_toggle),
-            (window.slicer_group, window.slicer_analysis_details_toggle),
-        ):
-            bottom_gap = (
-                group.content_widget.rect().bottom()
-                - toggle.geometry().bottom()
+            window.preparation_tabs.setCurrentIndex(1)
+            window._refresh_preparation_section_layout()
+            self.app.processEvents()
+            visible_slicer_items = [
+                window.slicer_group.content_layout.itemAt(index).widget()
+                for index in range(
+                    window.slicer_group.content_layout.count()
+                )
+                if (
+                    window.slicer_group.content_layout.itemAt(index).widget()
+                    is not None
+                    and window.slicer_group.content_layout.itemAt(index)
+                    .widget()
+                    .isVisibleTo(window)
+                )
+            ]
+            last_bottom = max(
+                widget.geometry().bottom()
+                for widget in visible_slicer_items
             )
-            self.assertLessEqual(
-                bottom_gap,
-                group.content_layout.contentsMargins().bottom() + 1,
+            self.assertEqual(
+                window.slicer_group.content_widget.rect().bottom()
+                - last_bottom,
+                20,
             )
-        self.assertEqual(
-            window.stl_validation_details_toggle.mapTo(window, QPoint(0, 0)).y(),
-            window.slicer_analysis_details_toggle.mapTo(window, QPoint(0, 0)).y(),
-        )
-        window.close()
+        finally:
+            window.close()
 
-    def test_only_double_success_unlocks_and_collapses_the_workflow(self) -> None:
+    def test_secondary_details_are_compact_and_precede_primary_actions(self) -> None:
         window = self.window()
+        try:
+            self.assertTrue(
+                window.stl_validation_details_toggle.property(
+                    "compactDisclosure"
+                )
+            )
+            self.assertLess(
+                window.source_group.content_layout.indexOf(
+                    window.stl_validation_details_toggle
+                ),
+                window.source_group.content_layout.indexOf(
+                    window.stl_validation_message
+                ),
+            )
+            self.assertTrue(
+                window.slicer_analysis_details_toggle.property(
+                    "compactDisclosure"
+                )
+            )
+            self.assertLess(
+                window.slicer_group.content_layout.indexOf(
+                    window.slicer_analysis_details_toggle
+                ),
+                window.slicer_group.content_layout.indexOf(window.slicer_columns),
+            )
+            self.assertLess(
+                window.slicer_group.content_layout.indexOf(window.slicer_columns),
+                window.slicer_group.content_layout.indexOf(
+                    window.profile_confirm_button
+                ),
+            )
+        finally:
+            window.close()
+
+    def test_step_introductions_are_centered_between_aligned_pills(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
         window.show()
         self.app.processEvents()
-        gated_actions = (
-            window.open_output_button,
-            window.open_stl_button,
-            window.preview_action_control,
-            window.export_button,
-        )
-        self.assertTrue(all(widget.isHidden() for widget in gated_actions))
+        try:
+            for index, shell in enumerate(window.preparation_step_shells):
+                window.preparation_tabs.setCurrentIndex(index)
+                self.app.processEvents()
+                intro = shell.findChild(QWidget, "preparationStepIntro")
+                copy = shell.findChild(QWidget, "preparationStepCopy")
+                left = window.preparation_step_left_pills[index]
+                right = window.preparation_step_right_pills[index]
+                heading = window.preparation_step_heading_labels[index]
+                description = copy.findChild(
+                    QLabel,
+                    "preparationStepDescription",
+                )
 
-        window.workflow.source_validation_succeeded(
-            "modell.stl · Geometrie gültig",
-            analysis_complete=False,
-        )
-        window.workflow.slicer_succeeded("Testslicer")
-        self.assertIs(window.workflow.stage, WorkflowStage.DISCOVERING_SLICER)
-        self.assertTrue(window.workflow_group.isChecked())
-        self.assertTrue(all(widget.isHidden() for widget in gated_actions))
+                self.assertEqual(left.geometry().top(), right.geometry().top())
+                self.assertEqual((left.height(), right.height()), (26, 26))
+                self.assertLessEqual(
+                    abs(copy.geometry().center().x() - intro.rect().center().x()),
+                    1,
+                )
+                self.assertTrue(
+                    heading.alignment() & Qt.AlignmentFlag.AlignHCenter
+                )
+                self.assertTrue(
+                    description.alignment() & Qt.AlignmentFlag.AlignHCenter
+                )
+        finally:
+            window.close()
 
-        window.workflow.reset()
-        window.workflow.analysis_succeeded("modell.gcode · 20 Layer")
-        self.assertIs(window.workflow.stage, WorkflowStage.DISCOVERING_SLICER)
-        self.assertTrue(window.workflow_group.isChecked())
-        self.assertTrue(all(widget.isHidden() for widget in gated_actions))
-
-        window.workflow.slicer_unavailable("Kein Slicer bestätigt")
-        self.assertIs(window.workflow.stage, WorkflowStage.DEGRADED)
-        self.assertIs(window.workflow_group.state(), SectionState.WARNING)
-        self.assertTrue(window.workflow_group.isChecked())
-        self.assertTrue(all(widget.isHidden() for widget in gated_actions))
-
-        window.workflow.slicer_succeeded("Testslicer")
+    def test_detail_toggles_remain_visible_and_restore_closed_height(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
         self.app.processEvents()
-        self.assertIs(window.workflow.stage, WorkflowStage.READY)
-        self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
-        self.assertEqual(window.workflow_group.status_icon.text(), "✓")
-        self.assertEqual(
-            window.workflow_group.summary(),
-            "Vorbereitung abgeschlossen",
-        )
-        self.assertFalse(window.workflow_group.isChecked())
-        self.assertTrue(all(widget.isVisible() for widget in gated_actions))
+        try:
+            self.assertIsInstance(window.slicer_analysis_details, QScrollArea)
+            self.assertIs(
+                window.slicer_analysis_details.widget(),
+                window.slicer_analysis_details_content,
+            )
+            self.assertIs(
+                window.slicer_analysis_details.horizontalScrollBarPolicy(),
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+            )
+            self.assertIs(
+                window.slicer_analysis_details.verticalScrollBarPolicy(),
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+            )
+            for toggle in (
+                window.stl_validation_details_toggle,
+                window.slicer_analysis_details_toggle,
+            ):
+                self.assertIs(toggle.focusPolicy(), Qt.FocusPolicy.NoFocus)
+                self.assertGreaterEqual(toggle.minimumHeight(), 24)
 
-        window.workflow.begin_analysis()
+            window.preparation_tabs.setCurrentIndex(1)
+            window.slicer_analysis_details_toggle.show()
+            window._refresh_preparation_section_layout()
+            self.app.processEvents()
+            slicer_closed_height = window.preparation_tabs.height()
+            window.slicer_analysis_details_toggle.click()
+            self.app.processEvents()
+            self.app.processEvents()
+            self.assertTrue(window.slicer_analysis_details.isVisibleTo(window))
+            self.assertGreaterEqual(
+                window.slicer_analysis_details_toggle.height(),
+                24,
+            )
+            self.assertFalse(window.slicer_analysis_details_toggle.hasFocus())
+            self.assertGreater(
+                window.preparation_tabs.height(),
+                slicer_closed_height,
+            )
+            window.slicer_analysis_details_toggle.click()
+            self.app.processEvents()
+            self.app.processEvents()
+            self.assertTrue(window.slicer_analysis_details.isHidden())
+            self.assertEqual(
+                window.preparation_tabs.height(),
+                slicer_closed_height,
+            )
+
+            window.preparation_tabs.setCurrentIndex(0)
+            window.stl_validation_details.setPlainText("A\nB\nC")
+            window.stl_validation_details_toggle.show()
+            window._refresh_preparation_section_layout()
+            self.app.processEvents()
+            stl_closed_height = window.preparation_tabs.height()
+            window.stl_validation_details_toggle.click()
+            self.app.processEvents()
+            self.assertTrue(window.stl_validation_details.isVisibleTo(window))
+            self.assertGreater(window.preparation_tabs.height(), stl_closed_height)
+            window.stl_validation_details_toggle.click()
+            self.app.processEvents()
+            self.app.processEvents()
+            self.assertTrue(window.stl_validation_details.isHidden())
+            self.assertEqual(
+                window.preparation_tabs.height(),
+                stl_closed_height,
+            )
+            stylesheet = window.styleSheet()
+            self.assertIn(
+                'QPushButton[compactDisclosure="true"]:focus',
+                stylesheet,
+            )
+            self.assertIn(
+                "QScrollArea#slicerAnalysisDetails QLabel",
+                stylesheet,
+            )
+            self.assertIn("QTextEdit#stlValidationDetails", stylesheet)
+        finally:
+            window.close()
+
+    def test_preparation_header_lead_icon_is_larger_than_title_text(self) -> None:
+        window = self.window()
+        window.show()
         self.app.processEvents()
-        self.assertIs(window.workflow.stage, WorkflowStage.ANALYZING_GCODE)
-        self.assertTrue(window.workflow_group.isChecked())
-        self.assertTrue(all(widget.isHidden() for widget in gated_actions))
-        window.close()
+        try:
+            icon = window.workflow_group.status_icon
+            title = window.workflow_group.title_label
+            self.assertTrue(icon.property("headerLead"))
+            self.assertEqual((icon.width(), icon.height()), (45, 24))
+            self.assertGreaterEqual(
+                icon.font().pointSizeF(),
+                title.font().pointSizeF(),
+            )
+            window.workflow_group.set_state(SectionState.ERROR)
+            self.assertEqual((icon.width(), icon.height()), (45, 24))
+        finally:
+            window.close()
+
+    def test_step_heads_share_colours_and_page_surface_stays_connected(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
+        self.app.processEvents()
+        try:
+            stylesheet = window.styleSheet()
+            active_rule = stylesheet.split(
+                'QPushButton#preparationStepSelector[stepTone="source"]'
+                '[active="true"] {',
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: qlineargradient(", active_rule)
+            self.assertIn("stop: 0 #eef7fc", active_rule)
+            self.assertIn("stop: 1 #cfe3ef", active_rule)
+            self.assertIn("color: #40576a;", active_rule)
+            self.assertIn(
+                'QWidget#preparationStepPage[stepTone="source"],',
+                stylesheet,
+            )
+            preparation_body_rule = stylesheet.split(
+                'QFrame#sectionCard[outerDropdown="true"]'
+                '[role="preparation"] > QFrame#sectionCardBody {',
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("stop: 0 #e7f1f7", preparation_body_rule)
+            overview_rule = stylesheet.split(
+                "QWidget#preparationOverview,",
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: transparent;", overview_rule)
+            page_rule = stylesheet.split(
+                'QWidget#preparationStepPage[stepTone="source"],',
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: transparent;", page_rule)
+            for tone in ("source", "slicer"):
+                pane_rule = stylesheet.split(
+                    f'QTabWidget#preparationSteps[stepTone="{tone}"]::pane {{',
+                    1,
+                )[1].split("}", 1)[0]
+                self.assertIn("background: transparent;", pane_rule)
+                self.assertIn("border: none;", pane_rule)
+                self.assertIn("border-top: 2px solid #7fb8d8;", pane_rule)
+
+            selector_rule = stylesheet.split(
+                "QPushButton#preparationStepSelector {",
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("border: 1px solid #76a2be;", selector_rule)
+            self.assertIn("border-top-left-radius: 8px;", selector_rule)
+            self.assertIn("border-top-right-radius: 8px;", selector_rule)
+            self.assertIn("border-bottom-left-radius: 0;", selector_rule)
+            self.assertIn("border-bottom-right-radius: 0;", selector_rule)
+
+            source, slicer = window.preparation_step_selectors
+            source_image = source.grab().toImage()
+            slicer_image = slicer.grab().toImage()
+            for y in (8, source.height() - 8):
+                self.assertEqual(
+                    source_image.pixelColor(6, y),
+                    slicer_image.pixelColor(6, y),
+                )
+            slicer.click()
+            self.app.processEvents()
+            source_image = source.grab().toImage()
+            slicer_image = slicer.grab().toImage()
+            for y in (8, source.height() - 8):
+                self.assertEqual(
+                    source_image.pixelColor(6, y),
+                    slicer_image.pixelColor(6, y),
+                )
+        finally:
+            window.close()
+
+    def test_progress_fill_and_hover_keep_header_text_readable(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
+        self.app.processEvents()
+        try:
+            selector = window.preparation_step_selectors[0]
+            title = window.preparation_step_selector_titles[0]
+            selector.set_progress_value(50)
+            self.app.processEvents()
+
+            normal = selector.grab().toImage()
+            green_before = normal.pixelColor(selector.width() // 4, 8)
+            blue_before = normal.pixelColor(3 * selector.width() // 4, 8)
+            self.assertNotEqual(green_before, blue_before)
+            self.assertEqual(
+                title.palette().color(title.foregroundRole()).name(),
+                "#40576a",
+            )
+
+            window._set_preparation_step_hovered(0, True)
+            self.app.processEvents()
+            hovered = selector.grab().toImage()
+            green_after = hovered.pixelColor(selector.width() // 4, 8)
+            blue_after = hovered.pixelColor(3 * selector.width() // 4, 8)
+            self.assertNotEqual(green_before, green_after)
+            self.assertNotEqual(blue_before, blue_after)
+            self.assertEqual(
+                title.palette().color(title.foregroundRole()).name(),
+                "#40576a",
+            )
+        finally:
+            window.close()
+
+    def test_progress_fill_preserves_rounded_blue_header_outline(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
+        self.app.processEvents()
+        try:
+            for selector in window.preparation_step_selectors:
+                for progress in (1, 50, 100):
+                    selector.set_progress_value(progress)
+                    self.app.processEvents()
+                    image = selector.grab().toImage()
+                    self.assertEqual(image.pixelColor(8, 0).name(), "#76a2be")
+                    self.assertEqual(image.pixelColor(0, 8).name(), "#76a2be")
+                    self.assertEqual(
+                        image.pixelColor(0, selector.height() - 8).name(),
+                        "#76a2be",
+                    )
+                    # This antialiased arc pixel was previously overwritten
+                    # by the green progress fill and became almost white.
+                    corner = image.pixelColor(2, 2)
+                    self.assertLess(corner.blue(), 245)
+
+                window._set_preparation_step_hovered(
+                    window.preparation_step_selectors.index(selector),
+                    True,
+                )
+                self.app.processEvents()
+                hovered = selector.grab().toImage()
+                self.assertEqual(hovered.pixelColor(8, 0).name(), "#6198b9")
+                self.assertEqual(hovered.pixelColor(0, 8).name(), "#6198b9")
+                window._set_preparation_step_hovered(
+                    window.preparation_step_selectors.index(selector),
+                    False,
+                )
+        finally:
+            window.close()
+
+    def test_embedded_step_cards_are_framed_against_tinted_workspace(self) -> None:
+        window = self.window()
+        try:
+            stylesheet = window.styleSheet()
+            for tone in ("source", "slicer"):
+                card_rule = stylesheet.split(
+                    f'QFrame#sectionCard[embeddedStep="true"][stepTone="{tone}"] {{',
+                    1,
+                )[1].split("}", 1)[0]
+                body_rule = stylesheet.split(
+                    f'QFrame#sectionCard[embeddedStep="true"][stepTone="{tone}"] '
+                    "> QFrame#sectionCardBody {",
+                    1,
+                )[1].split("}", 1)[0]
+                self.assertIn("background: #ffffff;", card_rule)
+                self.assertIn("border: 1px solid #c4d6e2;", card_rule)
+                self.assertIn("border-radius: 10px;", card_rule)
+                self.assertIn("background: #ffffff;", body_rule)
+                self.assertIn("border-radius: 10px;", body_rule)
+
+            stl_drop_zone_rule = stylesheet.split(
+                "QFrame#sourceDropZone {",
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: #f6fafd;", stl_drop_zone_rule)
+            self.assertIn("border: 2px dashed #2f6690;", stl_drop_zone_rule)
+
+            slicer_combo_rule = stylesheet.split(
+                'QWidget#slicerSelectorColumn QComboBox[important="true"] {',
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("color: #123f63;", slicer_combo_rule)
+            self.assertIn("background: #eef6fb;", slicer_combo_rule)
+            self.assertIn("border-color: #9fc7e5;", slicer_combo_rule)
+        finally:
+            window.close()
+
+    def test_integrated_file_step_badge_reflects_validation_failure(self) -> None:
+        window = self.window()
+        try:
+            window.current_source_path = self.root / "fehlerhaft.stl"
+            window.stl_validation_result = SimpleNamespace(valid=False)
+            window._update_preparation_requirements()
+
+            badge = window.preparation_step_state_labels[0]
+            self.assertEqual(badge.text(), "Prüfung fehlgeschlagen")
+            self.assertEqual(badge.property("state"), "error")
+            self.assertFalse(window.source_group.header.isVisible())
+        finally:
+            window.close()
+
+    def test_requirements_live_inside_persistent_coloured_step_containers(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        try:
+            source_selector, slicer_selector = window.preparation_step_selectors
+            self.assertIs(
+                window.preparation_source_requirements.parentWidget(),
+                window.preparation_step_selector_containers[0],
+            )
+            self.assertIs(
+                window.preparation_slicer_requirements.parentWidget(),
+                window.preparation_step_selector_containers[1],
+            )
+            self.assertEqual(source_selector.property("stepTone"), "source")
+            self.assertEqual(slicer_selector.property("stepTone"), "slicer")
+            self.assertLess(
+                window.preparation_step_selector_containers[0]
+                .layout()
+                .indexOf(source_selector),
+                window.preparation_step_selector_containers[0]
+                .layout()
+                .indexOf(
+                    window.preparation_source_requirements
+                ),
+            )
+            self.assertEqual(
+                window.preparation_overview.layout().indexOf(
+                    window.preparation_requirements
+                ),
+                0,
+            )
+            self.assertTrue(source_selector.isVisibleTo(window))
+            self.assertTrue(slicer_selector.isVisibleTo(window))
+
+            slicer_selector.click()
+            self.app.processEvents()
+            self.assertEqual(window.preparation_tabs.currentIndex(), 1)
+            self.assertEqual(window.preparation_tabs.property("stepTone"), "slicer")
+            self.assertTrue(source_selector.isVisibleTo(window))
+            self.assertTrue(slicer_selector.isVisibleTo(window))
+            stylesheet = window.styleSheet()
+            self.assertIn(
+                'QPushButton#preparationStepSelector[stepTone="source"]',
+                stylesheet,
+            )
+            self.assertIn(
+                'QPushButton#preparationStepSelector[stepTone="slicer"]',
+                stylesheet,
+            )
+            self.assertIn(
+                'QWidget#preparationStepPage[stepTone="source"]',
+                stylesheet,
+            )
+            self.assertIn(
+                'QWidget#preparationStepPage[stepTone="slicer"]',
+                stylesheet,
+            )
+        finally:
+            window.close()
+
+    def test_missing_requirements_pulse_gently_between_grey_and_red(self) -> None:
+        window = self.window()
+        try:
+            _icon, label = window.preparation_requirement_rows[
+                "source_selected"
+            ]
+            animation = label.attention_animation
+            self.assertEqual(animation.loopCount(), -1)
+            self.assertEqual(animation.animationCount(), 2)
+            self.assertEqual(
+                [
+                    animation.animationAt(index).duration()
+                    for index in range(animation.animationCount())
+                ],
+                [1000, 1000],
+            )
+            self.assertIs(
+                animation.state(),
+                QAbstractAnimation.State.Running,
+            )
+            self.assertEqual(label._to_hint.startValue(), 0.0)
+            self.assertEqual(label._to_hint.endValue(), 1.0)
+            self.assertEqual(
+                label._attention_effect.color().name(),
+                "#b86f73",
+            )
+
+            label.set_requirement_complete(True)
+            self.assertIs(
+                animation.state(),
+                QAbstractAnimation.State.Stopped,
+            )
+            self.assertFalse(label._attention_effect.isEnabled())
+            label.set_requirement_complete(False)
+            self.assertIs(
+                animation.state(),
+                QAbstractAnimation.State.Running,
+            )
+            self.assertTrue(label._attention_effect.isEnabled())
+        finally:
+            window.close()
+
+    def test_confirmed_profiles_offer_analysis_after_later_stl_upload(self) -> None:
+        window = self.window()
+        source = (self.root / "modell.stl").resolve()
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+        artifact = SimpleNamespace(original_path=source)
+        result = SimpleNamespace(
+            valid=True,
+            source_artifact=artifact,
+            face_count=4,
+            component_count=1,
+            warning_issues=(),
+            technical_summary="STL gültig",
+        )
+        installation = SimpleNamespace(
+            verified=True,
+            can_slice=True,
+            identity_key="testslicer",
+            display_name="Testslicer",
+        )
+        window.current_source_path = source
+        window.current_source_kind = SourceKind.STL
+        window._stl_validation_request_id = 7
+        window.profile_catalog = SimpleNamespace(
+            complete=True,
+            execution_slicer=SimpleNamespace(identity_key="testslicer"),
+        )
+        try:
+            with (
+                patch.object(
+                    type(window),
+                    "selected_slicer_installation",
+                    new_callable=PropertyMock,
+                    return_value=installation,
+                ),
+                patch.object(
+                    window,
+                    "_catalog_selection_is_confirmed",
+                    return_value=True,
+                ),
+                patch.object(
+                    window,
+                    "_profile_matching_context",
+                    return_value=object(),
+                ),
+                patch.object(window, "start_profile_matching") as start_match,
+            ):
+                window._on_stl_validation_succeeded(7, result)
+
+                self.assertFalse(window.profile_confirm_button.isHidden())
+                self.assertTrue(window.profile_confirm_button.isEnabled())
+                self.assertEqual(
+                    window.profile_confirm_button.text(),
+                    "Modell bestätigen und mit Profilen analysieren",
+                )
+                window.profile_confirm_button.click()
+                start_match.assert_called_once_with()
+                self.assertFalse(window.profile_confirm_button.isEnabled())
+                self.assertEqual(
+                    window.profile_confirm_button.text(),
+                    "Modellanalyse wird vorbereitet …",
+                )
+        finally:
+            window.close()
+
+    def test_completed_steps_use_tab_checks_without_green_content_badges(self) -> None:
+        window = self.window()
+        window.current_source_path = self.root / "modell.stl"
+        window.current_source_kind = SourceKind.STL
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        window.source_artifact = object()
+        installation = SimpleNamespace(
+            verified=True,
+            identity_key="testslicer",
+            display_name="Testslicer 1.0",
+        )
+        window.profile_catalog = SimpleNamespace(
+            complete=True,
+            execution_slicer=SimpleNamespace(identity_key="testslicer"),
+        )
+        window.profile_match_result = SimpleNamespace(user_confirmed=True)
+        window.confirmed_profile_context = SimpleNamespace(
+            matches_source=lambda _source: True
+        )
+        window.analysis_snapshot = object()
+        window.source_preslice_result = SimpleNamespace(cleanup=lambda: None)
+        window.prepared_analysis_source = object()
+        try:
+            with (
+                patch.object(
+                    type(window),
+                    "selected_slicer_installation",
+                    new_callable=PropertyMock,
+                    return_value=installation,
+                ),
+                patch.object(
+                    window,
+                    "_catalog_selection_is_confirmed",
+                    return_value=True,
+                ),
+            ):
+                window._update_preparation_requirements()
+
+                self.assertTrue(window.workflow_group.isCheckable())
+                self.assertEqual(
+                    [
+                        icon.text()
+                        for icon in window.preparation_step_selector_icons
+                    ],
+                    ["✓", "✓"],
+                )
+                self.assertTrue(
+                    all(
+                        badge.isHidden()
+                        for badge in window.preparation_step_state_labels
+                    )
+                )
+                self.assertEqual(
+                    [
+                        page.property("stepTone")
+                        for page in window.preparation_tab_pages
+                    ],
+                    ["source", "slicer"],
+                )
+                window.workflow_group.setChecked(False)
+                self.assertFalse(window.workflow_group.isChecked())
+                window.analysis_snapshot = None
+                window._update_preparation_requirements()
+                self.assertFalse(window.workflow_group.isCheckable())
+                self.assertTrue(window.workflow_group.isChecked())
+                self.assertTrue(window.workflow_group.toggle_button.isHidden())
+        finally:
+            window.close()
+
+    def test_source_success_stays_green_then_opens_slicer_after_one_second(self) -> None:
+        window = self.window()
+        source = self.root / "modell.stl"
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+        window.current_source_path = source.resolve()
+        window.current_source_kind = window.drop_zone._selected_kind = None
+        window._stl_validation_request_id = 7
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        try:
+            window.workflow.source_validation_succeeded(
+                "modell.stl · Geometrie gültig",
+                analysis_complete=False,
+            )
+            self.assertIs(window.source_group.state(), SectionState.SUCCESS)
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            window._schedule_slicer_step_open(7, source.resolve())
+            QTest.qWait(850)
+            self.app.processEvents()
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            QTest.qWait(220)
+            self.app.processEvents()
+            self.assertEqual(window.preparation_tabs.currentIndex(), 1)
+        finally:
+            window.close()
+
+    def test_background_slicer_error_is_deferred_until_step_two(self) -> None:
+        window = self.window()
+        try:
+            window.workflow.begin_source_validation(is_stl=True)
+            window.workflow.required_slicer_unavailable("Slicer fehlt")
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
+            self.assertIs(window.slicer_group.state(), SectionState.ERROR)
+            window.preparation_tabs.setCurrentIndex(1)
+            self.app.processEvents()
+            self.assertIs(window.workflow_group.state(), SectionState.ERROR)
+            self.assertIs(window.workflow.stage, WorkflowStage.ERROR)
+        finally:
+            window.close()
+
+    def test_requirements_are_reassigned_to_stl_and_slicer_steps(self) -> None:
+        window = self.window()
+        try:
+            self.assertEqual(
+                set(window.preparation_requirement_rows),
+                {
+                    "source_selected",
+                    "source_validated",
+                    "slicer_detected",
+                    "profiles_loaded",
+                    "profiles_confirmed",
+                    "model_analyzed",
+                },
+            )
+            source_keys = {"source_selected", "source_validated"}
+            slicer_keys = set(window.preparation_requirement_rows) - source_keys
+            self.assertTrue(
+                all(
+                    window.preparation_requirement_rows[key][0].parent()
+                    is window.preparation_source_requirements
+                    for key in source_keys
+                )
+            )
+            self.assertTrue(
+                all(
+                    window.preparation_requirement_rows[key][0].parent()
+                    is window.preparation_slicer_requirements
+                    for key in slicer_keys
+                )
+            )
+        finally:
+            window.close()
+
+    def test_double_success_collapses_preparation_before_revealing_settings(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        try:
+            window.workflow.set_slicer_step_visible(True)
+            window.workflow.source_validation_succeeded(
+                "modell.stl · Geometrie gültig",
+                analysis_complete=True,
+            )
+            window.workflow.slicer_succeeded("Testslicer")
+            self.app.processEvents()
+            self.assertIs(window.workflow.stage, WorkflowStage.READY)
+            self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
+            self.assertFalse(window.workflow_group.isChecked())
+            self.assertFalse(window.ready_grid.isHidden())
+        finally:
+            window.close()
+
+    def test_collapse_finishes_before_the_settings_fade_starts(self) -> None:
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        preparation = SectionCard(
+            "Datei und Slicer vorbereiten",
+            collapsible=True,
+            expanded=True,
+        )
+        source = SectionCard("Dateiübergabe", collapsible=False)
+        slicer = SectionCard("Slicer-Einstellungen", collapsible=False)
+        preparation.content_layout.addWidget(source)
+        preparation.content_layout.addWidget(slicer)
+        settings = QLabel("Kühlturm-Einstellungen")
+        layout.addWidget(preparation)
+        layout.addWidget(settings)
+        controller = WorkflowController(
+            source_card=source,
+            slicer_card=slicer,
+            workflow_card=preparation,
+            downstream_widgets=(settings,),
+            parent=host,
+            duration_ms=500,
+            first_success_duration_ms=1000,
+        )
+        controller.reset()
+        host.resize(800, 700)
+        host.show()
+        self.app.processEvents()
+        try:
+            controller.set_slicer_step_visible(True)
+            controller.source_validation_succeeded(
+                "modell.stl geprüft",
+                analysis_complete=True,
+            )
+            controller.slicer_succeeded("Testslicer")
+
+            self.assertIs(preparation.state(), SectionState.SUCCESS)
+            self.assertTrue(preparation.isChecked())
+            self.assertTrue(settings.isHidden())
+            QTest.qWait(300)
+            self.assertTrue(preparation.isChecked())
+            self.assertTrue(settings.isHidden())
+
+            QTest.qWait(260)
+            self.assertFalse(preparation.isChecked())
+            self.assertFalse(settings.isHidden())
+            effect = settings.graphicsEffect()
+            self.assertIsNotNone(effect)
+            self.assertLess(effect.opacity(), 1.0)
+
+            QTest.qWait(520)
+            self.assertIsNone(settings.graphicsEffect())
+            self.assertIs(controller.stage, WorkflowStage.READY)
+        finally:
+            host.close()
 
 
 if __name__ == "__main__":

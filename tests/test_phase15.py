@@ -30,6 +30,7 @@ from cooling_tower.slicers import (
     ProfileInventoryService,
     ProfileMappingStore,
     ProfileMatchState,
+    ProfileMatchingContext,
     ProfileMatchingService,
     ProfileValidationOutcome,
     ProfileValidationState,
@@ -615,83 +616,6 @@ class Phase15ProfileTests(unittest.TestCase):
         process_path.write_text(json.dumps(payload), encoding="utf-8")
         second = service.match(self._gcode(), self.installation, self.adapter)
         self.assertNotEqual(first.inventory_fingerprint, second.inventory_fingerprint)
-
-    def test_gui_exposes_three_separate_compatible_profile_choices(self) -> None:
-        app = QApplication.instance() or QApplication([])
-        snapshot = self._gcode(omit=("fan_min_speed", "fan_max_speed"))
-        matching_service = self.service(validator=SuccessfulProbeValidator())
-        result = matching_service.match(
-            snapshot,
-            self.installation,
-            self.adapter,
-        )
-        discovery = SlicerDiscoveryResult(
-            installations=(self.installation,),
-            recommended_key=self.installation.identity_key,
-            gui_state=SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
-            message="Slicer verfügbar",
-            source_slicer=snapshot.metadata.slicer,
-        )
-        window = MainWindow(
-            user_settings_path=self.root / "gui_user.json",
-            slicer_service=StaticGuiSlicerService(self.adapter),
-            profile_service=matching_service,
-        )
-        window.analysis_snapshot = snapshot
-        window.source_artifact = SourceArtifact.capture(snapshot.gcode_path)
-        window.workflow._set_stage(WorkflowStage.MATCHING_PROFILES, force=True)
-        window.slicer_discovery_result = discovery
-        window._populating_slicer_combo = True
-        window.slicer_combo.addItem(
-            self.installation.display_name,
-            self.installation.identity_key,
-        )
-        window._populating_slicer_combo = False
-        window._profile_request_id = 3
-        window._on_profile_matching_succeeded(3, result)
-        self.assertTrue(window.profile_match_result.requires_confirmation)
-        self.assertFalse(window.profile_match_result.user_confirmed)
-        self.assertFalse(window.profile_confirm_button.isHidden())
-        self.assertEqual(
-            window.profile_confirm_button.text(),
-            "Slicer und Profile bestätigen",
-        )
-        self.assertIs(
-            window.workflow.stage,
-            WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION,
-        )
-        self.assertGreater(window.machine_profile_combo.count(), 0)
-        self.assertGreater(window.process_profile_combo.count(), 0)
-        self.assertGreater(window.filament_profile_combo.count(), 0)
-        self.assertEqual(
-            window.machine_profile_combo.currentData(),
-            str(result.selected.machine.path),
-        )
-        self.assertTrue(window.profile_status_label.isHidden())
-        self.assertTrue(window.show_all_profiles_checkbox.isEnabled())
-        self.assertIn("G-Code", window.profile_filter_label.text())
-        requests: list[dict[str, object]] = []
-        window.start_profile_matching = lambda **kwargs: requests.append(kwargs)
-        window.show_all_profiles_checkbox.setChecked(True)
-        self.assertEqual(requests, [{"include_all_profiles": True}])
-        self.assertIn("Alle Maschinenprofile", window.profile_filter_label.text())
-        window.profile_match_result = replace(
-            result,
-            profile_filter_source="manual",
-        )
-        window.show_all_profiles_checkbox.setChecked(False)
-        self.assertFalse(requests[-1]["include_all_profiles"])
-        selected_machine = requests[-1]["selected_profile_ids"]["machine"]
-        self.assertEqual(
-            selected_machine.profile_id,
-            result.selected.machine.profile_id,
-        )
-        self.assertEqual(
-            selected_machine.path,
-            result.selected.machine.path,
-        )
-        window.close()
-        app.processEvents()
 
     def test_profile_matching_exposes_every_valid_preset_beyond_rank_limit(self) -> None:
         for index in range(12):

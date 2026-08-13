@@ -96,6 +96,44 @@ def preview_scene() -> PreviewScene:
     )
 
 
+class SyntheticSuccessfulCalibrator:
+    """Small deterministic slicer stand-in for preview/export UI tests."""
+
+    def calibrate(self, _snapshot, _settings, **kwargs):
+        root = Path(kwargs["output_directory"])
+        root.mkdir(parents=True, exist_ok=True)
+        artifact = root / "tower.stl"
+        artifact.write_text("solid tower\nendsolid tower\n", encoding="utf-8")
+        profile = SimpleNamespace(
+            points=(
+                SimpleNamespace(outer_radius_mm=5.0, z_mm=0.2),
+                SimpleNamespace(outer_radius_mm=6.0, z_mm=5.0),
+            ),
+            layers=(),
+        )
+        return SimpleNamespace(
+            state=CalibrationState.CONVERGED,
+            success=True,
+            has_usable_improvement=True,
+            profile=profile,
+            placement=TowerPlacement(
+                80.0,
+                20.0,
+                6.0,
+                BedBounds(0.0, 100.0, 0.0, 100.0),
+                25.0,
+            ),
+            warnings=(),
+            failures=(),
+            gcode_path=None,
+            stl_path=artifact,
+            project_path=None,
+            iterations=(),
+            best_iteration=None,
+            configured_iteration_count=kwargs["config"].maximum_iterations,
+        )
+
+
 class Phase17Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -118,6 +156,19 @@ class Phase17Tests(unittest.TestCase):
             "settings": GenerationSettings(),
             "output_mode": OutputMode.STL,
             "calibration_config": CalibrationConfig(mode=CalibrationMode.STL),
+            "slicer_identity_key": "synthetic-slicer",
+            "profile_fingerprint": "synthetic-profile",
+            "effective_profile": SimpleNamespace(
+                effective_values={
+                    "printable_area": [
+                        [0, 0],
+                        [100, 0],
+                        [100, 100],
+                        [0, 100],
+                    ]
+                }
+            ),
+            "adapter": object(),
             "maximum_object_segments": 200,
         }
         values.update(changes)
@@ -127,6 +178,13 @@ class Phase17Tests(unittest.TestCase):
         return MainWindow(
             user_settings_path=self.root / "user_settings.json",
             **kwargs,
+        )
+
+    def complete_source_step(self, window: MainWindow) -> None:
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
         )
 
     @staticmethod
@@ -145,9 +203,54 @@ class Phase17Tests(unittest.TestCase):
         )
 
     def ready_window(self, **kwargs) -> MainWindow:
+        kwargs.setdefault(
+            "preview_service",
+            PreviewService(SyntheticSuccessfulCalibrator()),
+        )
         window = self.window(**kwargs)
+        original_stl = self.root / "object.stl"
+        original_stl.write_text(
+            "solid object\nendsolid object\n",
+            encoding="utf-8",
+        )
+        window.current_source_path = original_stl.resolve()
+        window.source_artifact = SourceArtifact.capture(original_stl)
         window.current_gcode_path = self.source
         window.analysis_snapshot = self.snapshot
+        installation = self.installation(self.root, "ReadySlicer")
+        window.slicer_discovery_result = SlicerDiscoveryResult(
+            (installation,),
+            installation.identity_key,
+            SlicerGuiState.AVAILABLE,
+            "Slicer verfügbar",
+        )
+        window.slicer_combo.addItem(
+            installation.display_name,
+            installation.identity_key,
+        )
+        effective_profile = SimpleNamespace(
+            effective_values={
+                "printable_area": [
+                    [0, 0],
+                    [100, 0],
+                    [100, 100],
+                    [0, 100],
+                ]
+            }
+        )
+        window.profile_match_result = SimpleNamespace(
+            selected=SimpleNamespace(
+                effective_profile=effective_profile,
+                bundle_id="ready-bundle",
+            ),
+            can_use_stl_mode=True,
+            execution_slicer=installation,
+            inventory_fingerprint="ready-inventory",
+            user_confirmed=True,
+        )
+        window.slicer_service = SimpleNamespace(
+            adapter_for=lambda _installation: object()
+        )
         settings = window.collect_settings()
         window.tower_assessment = assess_tower_need(self.snapshot, settings)
         window.profile_feasibility = ProfileFeasibilityAssessment(True, True)
@@ -259,10 +362,11 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(hasattr(window, "gcode_mode_radio"))
         window.close()
 
-    def test_10_stl_fallback_remains_available_without_slicer(self) -> None:
+    def test_10_stl_processing_requires_a_confirmed_slicer(self) -> None:
         window = self.window()
         window._refresh_stl_availability()
-        self.assertIn("Fallback", window.stl_mode_status.text())
+        self.assertIn("Slicer ist erforderlich", window.stl_mode_status.text())
+        self.assertNotIn("Fallback", window.stl_mode_status.text())
         window.close()
 
     def test_11_preview_is_not_computed_until_requested(self) -> None:
@@ -280,7 +384,9 @@ class Phase17Tests(unittest.TestCase):
         window.close()
 
     def test_12_preview_contains_object_and_tower(self) -> None:
-        result = PreviewService().prepare(self.request())
+        result = PreviewService(SyntheticSuccessfulCalibrator()).prepare(
+            self.request()
+        )
         self.assertTrue(result.scene.object_segments)
         self.assertTrue(result.scene.tower_segments)
         self.assertGreater(result.scene.tower_height_mm, 0)
@@ -336,7 +442,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_17_service_rejects_stale_preview(self) -> None:
         request = self.request()
-        result = PreviewService().prepare(request)
+        result = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         changed = self.request(
             settings=GenerationSettings(target_layer_time_s=23.0)
         )
@@ -346,7 +452,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_18_current_preview_exports_and_writes_integrity_report(self) -> None:
         request = self.request()
-        preview = PreviewService().prepare(request)
+        preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         result = PreviewExportService().export(preview, request, self.root / "out")
         self.assertTrue(result.output_path.is_file())
         report = json.loads(result.report_path.read_text(encoding="utf-8"))
@@ -372,7 +478,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_export_rechecks_copied_artifact_and_removes_partial_run(self) -> None:
         request = self.request()
-        preview = PreviewService().prepare(request)
+        preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         output_root = self.root / "out"
 
         def replace_during_copy(_source: Path, destination: Path) -> None:
@@ -453,7 +559,7 @@ class Phase17Tests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         self.assertTrue(window.preview_button.isHidden())
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         for width, height in ((720, 640), (1400, 1000)):
             window.resize(width, height)
@@ -642,7 +748,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_27_reports_explain_failed_calibration_in_both_detail_levels(self) -> None:
         request = self.request()
-        preview = PreviewService().prepare(request)
+        preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         preview.calibration = SimpleNamespace(
             state=CalibrationState.LIMIT_REACHED,
             mode=CalibrationMode.STL,
@@ -657,9 +763,11 @@ class Phase17Tests(unittest.TestCase):
             iterations=(SimpleNamespace(), SimpleNamespace()),
             warnings=("Kalibrierungsgrenze erreicht.",),
         )
+        preview.calibrated = False
+        preview.slicer_optimized = False
+        preview.generation_kind = "Slicer-Kalibrierung fehlgeschlagen"
         preview.warnings = (
-            "Slicerbasierte Kalibrierung war nicht erfolgreich; der Export "
-            "verwendet den analytischen STL-Fallback.",
+            "Die Slicer-Kalibrierung erreichte kein verwendbares Ergebnis.",
         )
         result = PreviewExportService().export(
             preview, request, self.root / "failed_calibration_report"
@@ -673,7 +781,8 @@ class Phase17Tests(unittest.TestCase):
         self.assertEqual(calibration["failures"][0]["code"], "iteration_limit")
         self.assertEqual(calibration["failures"][0]["layer_index"], 12)
         summary = result.user_report_path.read_text(encoding="utf-8")
-        self.assertIn("nicht slicerbasiert bestätigt", summary)
+        self.assertIn("Kein belastbares slicerbasiertes Resultat", summary)
+        self.assertIn("erfolgreichen Slicerlauf", summary)
         self.assertIn("maximale Anzahl", summary)
         self.assertIn("Layer 12", summary)
         self.assertNotIn("Vorschau verwendet", summary)
@@ -681,7 +790,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_28_short_report_names_unknown_filament_profile_type(self) -> None:
         request = self.request()
-        preview = PreviewService().prepare(request)
+        preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         preview.calibration = SimpleNamespace(
             state=CalibrationState.SLICER_FAILED,
             mode=CalibrationMode.STL,
@@ -700,6 +809,9 @@ class Phase17Tests(unittest.TestCase):
             iterations=(),
             warnings=(),
         )
+        preview.calibrated = False
+        preview.slicer_optimized = False
+        preview.generation_kind = "Slicer-Kalibrierung fehlgeschlagen"
         result = PreviewExportService().export(
             preview, request, self.root / "filament_failure_report"
         )
@@ -864,40 +976,15 @@ class Phase17Tests(unittest.TestCase):
         exact_preview.dispose()
         fast_preview.dispose()
 
-    def test_30_zero_iterations_create_analytical_stl_without_calibrator(self) -> None:
-        class ForbiddenCalibrator:
-            def calibrate(self, *_args, **_kwargs):
-                raise AssertionError("The slicer calibrator must not be called")
-
-        request = self.request(
-            settings=GenerationSettings(target_layer_time_s=13.0),
-            calibration_config=CalibrationConfig(
-                mode=CalibrationMode.STL,
-                maximum_iterations=0,
-                time_tolerance_s=0.12,
-                profile_change_tolerance_mm=0.02,
-                slicer_metadata_tolerance_s=0.65,
-            ),
-        )
-        preview = PreviewService(ForbiddenCalibrator()).prepare(request)
-        self.assertFalse(preview.calibrated)
-        self.assertFalse(preview.slicer_optimized)
-        self.assertIsNone(preview.calibration)
-        self.assertIn("deaktiviert", preview.generation_kind)
-        self.assertEqual(preview.target_layer_time_s, 13.0)
-        self.assertEqual(preview.calibration_time_tolerance_s, 0.12)
-        self.assertEqual(preview.calibration_profile_tolerance_mm, 0.02)
-        self.assertEqual(preview.calibration_metadata_tolerance_s, 0.65)
-        self.assertTrue(preview.artifact_path.is_file())
-        exported = PreviewExportService().export(
-            preview,
-            request,
-            self.root / "analytical_only",
-        )
-        summary = exported.user_report_path.read_text(encoding="utf-8")
-        self.assertIn("bewusst nicht ausgeführt", summary)
-        self.assertNotIn("Warum wurde nicht kalibriert?", summary)
-        preview.dispose()
+    def test_30_zero_slicer_iterations_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "mindestens einen Slicer-Durchlauf"):
+            self.request(
+                settings=GenerationSettings(target_layer_time_s=13.0),
+                calibration_config=CalibrationConfig(
+                    mode=CalibrationMode.STL,
+                    maximum_iterations=0,
+                ),
+            )
 
     def test_31_partial_slicer_improvement_is_explained_and_exported(self) -> None:
         request = self.request(
@@ -907,7 +994,7 @@ class Phase17Tests(unittest.TestCase):
                 maximum_iterations=5,
             ),
         )
-        preview = PreviewService().prepare(request)
+        preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         best = SimpleNamespace(
             number=2,
             maximum_remaining_deficit_s=0.537,
@@ -930,7 +1017,7 @@ class Phase17Tests(unittest.TestCase):
             configured_iteration_count=5,
             best_iteration_number=2,
             best_iteration=best,
-            improved_over_analytical=True,
+            improved_over_initial_candidate=True,
         )
         preview.calibrated = False
         preview.slicer_optimized = True
@@ -952,7 +1039,6 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("Exportierter bester Durchlauf: 2", summary)
         self.assertIn("-0.537 s", summary)
         self.assertIn("Noch betroffene Layer: 4", summary)
-        self.assertNotIn("analytisch berechneter STL-Kühlturm", summary)
         self.assertNotIn("Temporary cooling overrides", summary)
         self.assertNotIn("Calibration did not", summary)
         read_only_hint = (
@@ -969,9 +1055,6 @@ class Phase17Tests(unittest.TestCase):
         )
         self.assertTrue(
             technical["diagnostic_guidance"]["uses_slicer_evaluated_candidate"]
-        )
-        self.assertFalse(
-            technical["diagnostic_guidance"]["fallback_is_valid_export"]
         )
         preview.dispose()
 
@@ -1006,7 +1089,7 @@ class Phase17Tests(unittest.TestCase):
             window.export_button,
         ):
             self.assertTrue(button.isHidden())
-        window.workflow.analysis_succeeded("test.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.app.processEvents()
         self.assertTrue(window.reset_button.isHidden())
@@ -1190,7 +1273,7 @@ class Phase17Tests(unittest.TestCase):
         window.close()
 
         ready = self.ready_window()
-        ready.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(ready)
         ready.workflow.slicer_succeeded("Testslicer")
         ready.show()
         self.app.processEvents()
@@ -1206,7 +1289,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_39_dev_checkbox_hides_input_errors_and_unblocks_export(self) -> None:
         window = self.ready_window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.show()
         self.app.processEvents()
@@ -1246,7 +1329,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_40_dev_checkbox_visual_states_keep_size_and_contrast(self) -> None:
         window = self.ready_window()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.show()
         self.app.processEvents()

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -19,10 +20,13 @@ if str(SRC_ROOT) not in sys.path:
 
 from cooling_tower.calibration.gcode_integration import determine_occupied_bounds
 from cooling_tower.models import (
+    BedBounds,
     CalibrationConfig,
     CalibrationMode,
+    CalibrationState,
     GenerationSettings,
     OccupiedBounds,
+    TowerPlacement,
 )
 from cooling_tower.preview import (
     LineSegment3D,
@@ -54,6 +58,39 @@ def source_gcode(layer_count: int = 4, moves_per_layer: int = 4) -> str:
     return "\n".join(lines) + "\n"
 
 
+class SyntheticSuccessfulCalibrator:
+    def calibrate(self, _snapshot, _settings, **kwargs):
+        root = Path(kwargs["output_directory"])
+        root.mkdir(parents=True, exist_ok=True)
+        artifact = root / "tower.stl"
+        artifact.write_text("solid tower\nendsolid tower\n", encoding="utf-8")
+        return SimpleNamespace(
+            state=CalibrationState.CONVERGED,
+            success=True,
+            has_usable_improvement=True,
+            profile=SimpleNamespace(
+                points=(
+                    SimpleNamespace(outer_radius_mm=5.0, z_mm=0.2),
+                    SimpleNamespace(outer_radius_mm=6.0, z_mm=5.0),
+                )
+            ),
+            placement=TowerPlacement(
+                80.0,
+                20.0,
+                6.0,
+                BedBounds(0.0, 100.0, 0.0, 100.0),
+                25.0,
+            ),
+            warnings=(),
+            failures=(),
+            gcode_path=None,
+            stl_path=artifact,
+            project_path=None,
+            iterations=(),
+            best_iteration=None,
+        )
+
+
 class PreviewSourceCacheIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -73,15 +110,26 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
             "output_mode": OutputMode.STL,
             "calibration_config": CalibrationConfig(
                 mode=CalibrationMode.STL,
-                maximum_iterations=0,
+                maximum_iterations=1,
             ),
+            "effective_profile": SimpleNamespace(
+                effective_values={
+                    "printable_area": [
+                        [0, 0],
+                        [100, 0],
+                        [100, 100],
+                        [0, 100],
+                    ]
+                }
+            ),
+            "adapter": object(),
             "maximum_object_segments": 200,
         }
         values.update(changes)
         return PreviewRequest(**values)
 
     def test_reuses_source_data_across_setting_changes(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         statuses: list[str] = []
         with (
             patch(
@@ -113,7 +161,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         second.dispose()
 
     def test_sampling_contract_change_creates_a_separate_entry(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         with patch(
             "cooling_tower.preview.service.extract_deposition_toolpaths",
             wraps=extract_deposition_toolpaths,
@@ -127,7 +175,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         second.dispose()
 
     def test_changed_file_version_replaces_stale_variants_for_same_path(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         first = service.prepare(self.request(maximum_object_segments=200))
         second = service.prepare(self.request(maximum_object_segments=300))
         self.assertEqual(len(service.source_data_cache), 2)
@@ -146,7 +194,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         third.dispose()
 
     def test_same_metadata_but_changed_content_is_rejected_and_invalidated(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         preview = service.prepare(self.request())
         preview.dispose()
         before = self.source.stat()
@@ -180,7 +228,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         self.assertNotEqual(first.content_sha256, second.content_sha256)
 
     def test_cancelled_source_calculation_is_not_cached(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         cancellation = Event()
         cancellation.set()
 
@@ -192,7 +240,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         self.assertEqual(len(service.source_data_cache), 0)
 
     def test_failed_bounds_calculation_is_not_cached(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         with patch(
             "cooling_tower.preview.service.determine_occupied_bounds",
             side_effect=ValueError("synthetic bounds failure"),
@@ -202,7 +250,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         self.assertEqual(len(service.source_data_cache), 0)
 
     def test_file_change_during_source_calculation_is_not_cached(self) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         original = self.source.read_text(encoding="utf-8")
 
         def changing_bounds(path: str | Path) -> OccupiedBounds:
@@ -221,7 +269,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
     def test_file_removal_after_initial_validation_is_handled_and_invalidated(
         self,
     ) -> None:
-        service = PreviewService()
+        service = PreviewService(SyntheticSuccessfulCalibrator())
         preview = service.prepare(self.request())
         preview.dispose()
 

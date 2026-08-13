@@ -99,7 +99,11 @@ class UiRedesignTests(unittest.TestCase):
     def test_04_issue_panel_only_appears_for_real_errors(self) -> None:
         window = self.window()
         window.show()
-        window.workflow.analysis_succeeded("referenz.gcode")
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft",
+            analysis_complete=True,
+        )
         window.workflow.slicer_succeeded("Testslicer")
         self.app.processEvents()
         self.assertTrue(window.error_panel.isHidden())

@@ -92,12 +92,12 @@ class GCodeProfileEvidence:
 class ProfileMatchingContext:
     """Neutral input for G-code evidence or an STL source inventory match."""
 
-    source_kind: SourceKind
+    source_kind: SourceKind | None
     source_artifact: SourceArtifact | None = None
     gcode_snapshot: GCodeAnalysisSnapshot | None = None
 
     def __post_init__(self) -> None:
-        if self.source_kind is SourceKind.GCODE and self.gcode_snapshot is None:
+        if self.source_kind is None and self.gcode_snapshot is None:
             raise ValueError("Für G-Code fehlt der Analyse-Snapshot.")
         if self.source_kind is SourceKind.STL and self.source_artifact is None:
             raise ValueError("Für STL fehlt die unveränderliche Quellenidentität.")
@@ -115,7 +115,7 @@ class ProfileMatchingContext:
         snapshot: GCodeAnalysisSnapshot,
         source_artifact: SourceArtifact | None = None,
     ) -> "ProfileMatchingContext":
-        return cls(SourceKind.GCODE, source_artifact, snapshot)
+        return cls(None, source_artifact, snapshot)
 
     @classmethod
     def from_stl(

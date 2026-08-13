@@ -67,9 +67,10 @@ class CalibrationConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.perform_joint_final_slice, bool):
             raise ValueError("perform_joint_final_slice must be a boolean")
-        if not 0 <= self.maximum_iterations <= 8:
+        if not 1 <= self.maximum_iterations <= 8:
             raise ValueError(
-                "maximum_iterations muss zwischen null und acht liegen"
+                "Die Kalibrierung benötigt mindestens einen Slicer-Durchlauf "
+                "und erlaubt höchstens acht Durchläufe."
             )
         if self.repeated_result_limit < 1:
             raise ValueError("repeated_result_limit must be at least one")
@@ -233,7 +234,7 @@ class CalibrationResult:
     output_sha256: str | None = None
     configured_iteration_count: int = 0
     best_iteration_number: int | None = None
-    improved_over_analytical: bool = False
+    improved_over_initial_candidate: bool = False
 
     @property
     def success(self) -> bool:
@@ -261,7 +262,7 @@ class CalibrationResult:
     def has_usable_improvement(self) -> bool:
         return self.has_slicer_evaluated_output and (
             self.success
-            or self.improved_over_analytical
+            or self.improved_over_initial_candidate
             or self.project_path is not None
         )
 
@@ -286,7 +287,9 @@ class CalibrationResult:
             "configured_iteration_count": self.configured_iteration_count,
             "completed_iteration_count": len(self.iterations),
             "best_iteration_number": self.best_iteration_number,
-            "improved_over_analytical": self.improved_over_analytical,
+            "improved_over_initial_candidate": (
+                self.improved_over_initial_candidate
+            ),
             "has_slicer_evaluated_output": self.has_slicer_evaluated_output,
             "has_usable_improvement": self.has_usable_improvement,
             "iterations": [

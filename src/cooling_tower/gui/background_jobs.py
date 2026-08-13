@@ -21,7 +21,6 @@ class JobKind(str, Enum):
     UPDATE_DOWNLOAD = "update-download"
     SLICER_DISCOVERY = "slicer"
     PROFILE_MATCH = "profile"
-    ANALYSIS = "analysis"
     STL_VALIDATION = "stl-validation"
     PRESLICE = "preslice"
     FEASIBILITY = "feasibility"

@@ -742,7 +742,10 @@ class SectionCard(QFrame):
         # Status glyphs (especially the error X) share the title's actual line
         # height instead of inheriting a visually smaller QLabel box.
         self.status_icon.setFixedHeight(
-            max(18, self.title_label.sizeHint().height())
+            max(
+                24 if self.status_icon.property("headerLead") else 18,
+                self.title_label.sizeHint().height(),
+            )
         )
         self.status_icon.setVisible(bool(self.status_icon.text()))
         self._repolish(self)

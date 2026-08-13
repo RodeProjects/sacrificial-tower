@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,12 +25,14 @@ from cooling_tower.application import enable_native_crash_log
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.worker_contract import CancelableWorker
-from cooling_tower.models import SlicerFamily
+from cooling_tower.models import SlicerFamily, SourceArtifact, SourceKind
 from cooling_tower.slicers import (
+    SlicerCapability,
     SlicerDiscoveryResult,
     SlicerDiscoverySource,
     SlicerGuiState,
     SlicerInstallation,
+    SlicerSupportLevel,
 )
 
 
@@ -184,9 +187,10 @@ class GuiCrashStabilityTests(unittest.TestCase):
             version="1.0",
             executable_path=self.root / "slicer.exe",
             verified=True,
-            capabilities=frozenset(),
+            capabilities=frozenset({SlicerCapability.CLI_SLICE}),
             discovery_source=SlicerDiscoverySource.MANUAL,
             family=SlicerFamily.OTHER,
+            support_level=SlicerSupportLevel.FULL,
         )
         discovery = SlicerDiscoveryResult(
             installations=(installation,),
@@ -201,6 +205,12 @@ class GuiCrashStabilityTests(unittest.TestCase):
         )
         window.analysis_snapshot = object()
         window.profile_match_result = object()
+        stl_path = self.root / "stability.stl"
+        stl_path.write_text("solid stability\nendsolid stability\n", encoding="utf-8")
+        window.current_source_path = stl_path.resolve()
+        window.current_source_kind = SourceKind.STL
+        window.source_artifact = SourceArtifact.capture(stl_path)
+        window.stl_validation_result = SimpleNamespace(valid=True)
         window.slicer_discovery_result = discovery
         window._populating_slicer_combo = True
         window.slicer_combo.addItem(
@@ -222,7 +232,7 @@ class GuiCrashStabilityTests(unittest.TestCase):
         window = self.make_window(StableProfileService())
         worker = ControlledTimerOwningWorker(41)
         job_id = window.background_job_manager.start_job(
-            kind=JobKind.ANALYSIS,
+            kind=JobKind.STL_VALIDATION,
             request_id=41,
             worker=worker,
         )
@@ -251,20 +261,20 @@ class GuiCrashStabilityTests(unittest.TestCase):
         for request_id in range(1, 101):
             worker = TimerOwningWorker(request_id)
             window.background_job_manager.start_job(
-                kind=JobKind.ANALYSIS,
+                kind=JobKind.STL_VALIDATION,
                 request_id=request_id,
                 worker=worker,
             )
             self.wait_until(
                 lambda: window.background_job_manager.job_for_request(
-                    JobKind.ANALYSIS,
+                    JobKind.STL_VALIDATION,
                     request_id,
                 )
                 is None
             )
 
         self.assertFalse(
-            window.background_job_manager.has_active(JobKind.ANALYSIS)
+            window.background_job_manager.has_active(JobKind.STL_VALIDATION)
         )
         window.close()
 
@@ -272,7 +282,7 @@ class GuiCrashStabilityTests(unittest.TestCase):
         window = self.make_window(StableProfileService())
         worker = ControlledTimerOwningWorker(42)
         job_id = window.background_job_manager.start_job(
-            kind=JobKind.ANALYSIS,
+            kind=JobKind.STL_VALIDATION,
             request_id=42,
             worker=worker,
         )

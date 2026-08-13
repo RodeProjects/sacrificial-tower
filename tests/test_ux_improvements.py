@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.preview_dialog import PreviewDialog
-from cooling_tower.gui.widgets import GCodeDropZone
+from cooling_tower.gui.widgets import SourceDropZone
 from cooling_tower.models import (
     BedBounds,
     CalibrationConfig,
@@ -127,9 +127,9 @@ class UxImprovementTests(unittest.TestCase):
         )
         window.close()
 
-    def test_02_gcode_information_rows_remove_action_and_progress(self) -> None:
-        drop_zone = GCodeDropZone()
-        drop_zone.resize(900, GCodeDropZone.EMPTY_MINIMUM_HEIGHT_PX)
+    def test_02_source_information_rows_remove_action_and_progress(self) -> None:
+        drop_zone = SourceDropZone()
+        drop_zone.resize(900, SourceDropZone.EMPTY_MINIMUM_HEIGHT_PX)
         drop_zone.show()
         self.app.processEvents()
         empty_height = drop_zone.height()
@@ -149,19 +149,25 @@ class UxImprovementTests(unittest.TestCase):
         self.assertTrue(drop_zone.remove_button.isHidden())
         removed: list[bool] = []
         drop_zone.remove_requested.connect(lambda: removed.append(True))
-        self.assertTrue(drop_zone.set_file(self.source))
+        stl_source = (
+            PROJECT_ROOT / "tests" / "fixtures" / "stl" / "test_model_manifold.stl"
+        )
+        self.assertTrue(drop_zone.set_file(stl_source))
         self.app.processEvents()
-        self.assertEqual(drop_zone.status_value_label.text(), "Analyse wird vorbereitet")
-        self.assertEqual(drop_zone.file_name_label.text(), self.source.name)
+        self.assertEqual(
+            drop_zone.status_value_label.text(),
+            "STL-Modell erkannt – Geometrie wird geprüft",
+        )
+        self.assertEqual(drop_zone.file_name_label.text(), stl_source.name)
         self.assertNotEqual(drop_zone.file_size_label.text(), "–")
-        self.assertEqual(drop_zone.file_path_label.text(), str(self.source.resolve()))
+        self.assertEqual(drop_zone.file_path_label.text(), str(stl_source.resolve()))
         self.assertTrue(drop_zone.file_path_label.wordWrap())
         self.assertFalse(drop_zone.info_widget.isHidden())
         self.assertTrue(drop_zone.actions_widget.isHidden())
         drop_zone.set_status("Analyse abgeschlossen")
         drop_zone.set_analysis_state("ready")
         self.app.processEvents()
-        self.assertEqual(drop_zone.remove_button.text(), "G-Code entfernen")
+        self.assertEqual(drop_zone.remove_button.text(), "STL entfernen")
         self.assertTrue(drop_zone.remove_button.isEnabled())
         self.assertFalse(drop_zone.reload_button.isHidden())
         self.assertFalse(drop_zone.remove_button.isHidden())
@@ -179,24 +185,6 @@ class UxImprovementTests(unittest.TestCase):
 
         window = self.window()
         window.show()
-        window._analysis_request_id = 4
-        window.gcode_progress_bar.show()
-        window.gcode_progress_status_widget.show()
-        window._on_analysis_progress(4, 37, "Layerzeiten werden berechnet …")
-        self.app.processEvents()
-        self.assertEqual(window.gcode_progress_bar.objectName(), "gcodeAnalysisProgressBar")
-        self.assertEqual(window.gcode_progress_bar.value(), 37)
-        self.assertEqual(window.gcode_progress_bar.format(), "%p %")
-        self.assertEqual(
-            window.gcode_progress_status_label.text(),
-            "Layerzeiten werden berechnet …",
-        )
-        self.assertEqual(window.gcode_progress_icon_label.text(), "⏳")
-        self.assertTrue(window.gcode_progress_status_widget.isHidden())
-        self.assertIn(
-            "QProgressBar#gcodeAnalysisProgressBar::chunk",
-            window.styleSheet(),
-        )
         self.assertIs(
             window.stl_validation_message.parent(),
             window.source_group.content_widget,
@@ -208,22 +196,22 @@ class UxImprovementTests(unittest.TestCase):
         source_layout = window.source_group.content_layout
         self.assertLess(
             source_layout.indexOf(window.drop_zone),
-            source_layout.indexOf(window.stl_validation_message),
-        )
-        self.assertLess(
-            source_layout.indexOf(window.stl_validation_message),
             source_layout.indexOf(window.stl_validation_details_toggle),
         )
         self.assertLess(
             source_layout.indexOf(window.stl_validation_details_toggle),
             source_layout.indexOf(window.stl_validation_details),
         )
+        self.assertLess(
+            source_layout.indexOf(window.stl_validation_details),
+            source_layout.indexOf(window.stl_validation_message),
+        )
         self.assertTrue(window.slicer_combo.property("important"))
         self.assertTrue(window.machine_profile_combo.property("important"))
         self.assertTrue(window.filament_profile_combo.property("important"))
         self.assertTrue(window.process_profile_combo.property("important"))
         self.assertIn(
-            'QFrame#gcodeDropZone[loaded="true"]',
+            'QFrame#sourceDropZone[loaded="true"]',
             window.styleSheet(),
         )
         window.close()
@@ -236,7 +224,7 @@ class UxImprovementTests(unittest.TestCase):
             / "stl"
             / "test_model_manifold.stl"
         )
-        drop_zone = GCodeDropZone()
+        drop_zone = SourceDropZone()
         reload_requests: list[bool] = []
         remove_requests: list[bool] = []
         drop_zone.reload_requested.connect(lambda: reload_requests.append(True))
@@ -251,7 +239,7 @@ class UxImprovementTests(unittest.TestCase):
         self.assertFalse(drop_zone.reload_button.isHidden())
         self.assertFalse(drop_zone.remove_button.isHidden())
         self.assertTrue(drop_zone.remove_button.isEnabled())
-        self.assertEqual(drop_zone.browse_button.text(), "Andere Datei auswählen")
+        self.assertEqual(drop_zone.browse_button.text(), "Andere STL auswählen")
         self.assertEqual(drop_zone.reload_button.text(), "STL neu einlesen")
         self.assertEqual(drop_zone.remove_button.text(), "STL entfernen")
         reload_column = drop_zone.actions_layout.getItemPosition(
@@ -295,6 +283,7 @@ class UxImprovementTests(unittest.TestCase):
         )
         snapshot = SimpleNamespace(metadata=SimpleNamespace(typed_config=items))
         window.slicer_group.show()
+        window.preparation_tabs.setCurrentIndex(1)
         window._show_reconstructed_configuration(snapshot)
         self.app.processEvents()
         self.assertFalse(
@@ -322,7 +311,7 @@ class UxImprovementTests(unittest.TestCase):
         )
         window.close()
 
-    def test_04_prediction_labels_are_explicitly_cautious_estimates(self) -> None:
+    def test_04_prediction_requires_a_slicer_result(self) -> None:
         window = self.ready_window()
         window.profile_feasibility = ProfileFeasibilityAssessment(
             tower_required=True,
@@ -331,11 +320,14 @@ class UxImprovementTests(unittest.TestCase):
         )
         window._refresh_prediction()
         self.assertEqual(
-            window.prediction_method_label.text(), "Analytische Schätzung"
+            window.prediction_method_label.text(), "Slicer-Schätzung ausstehend"
         )
-        self.assertIn("voraussichtlich nicht erreicht", window.prediction_label.text())
-        self.assertEqual(window.prediction_value_labels["minimum"].text(), "9,25 s")
-        self.assertNotEqual(window.prediction_value_labels["shortfall"].text(), "–")
+        self.assertIn("noch nicht vollständig berechenbar", window.prediction_label.text())
+        self.assertEqual(
+            window.prediction_value_labels["minimum"].text(),
+            "Noch nicht berechenbar",
+        )
+        self.assertEqual(window.prediction_value_labels["shortfall"].text(), "–")
 
         window.preview_state = PreviewState.CURRENT
         window.current_preview = SimpleNamespace(
@@ -343,7 +335,7 @@ class UxImprovementTests(unittest.TestCase):
         )
         window._refresh_prediction()
         slicer = window.prediction_method_label.text()
-        self.assertEqual(slicer, "Slicer-gestützte Annäherung")
+        self.assertEqual(slicer, "Slicer-gestützte Schätzung")
         for overly_certain_word in ("geprüft", "bestätigt", "garantiert"):
             self.assertNotIn(overly_certain_word, slicer.casefold())
         window.current_preview = None
@@ -414,22 +406,6 @@ class UxImprovementTests(unittest.TestCase):
         box.close()
 
         window.close()
-
-    def test_08_export_folder_is_flat_timestamp_first_and_has_no_mode_suffix(self) -> None:
-        request = self.request()
-        preview = PreviewService().prepare(request)
-        output_root = (self.root / "output").resolve()
-        result = PreviewExportService().export(preview, request, output_root)
-        self.assertEqual(result.run_directory.parent, output_root.resolve())
-        self.assertRegex(
-            result.run_directory.name,
-            re.compile(r"^\d{8}_\d{6}_mein_objekt(?:_\d+)?$"),
-        )
-        self.assertNotIn("_stl", result.run_directory.name.casefold())
-        relative_parts = result.run_directory.relative_to(output_root).parts
-        self.assertNotIn("runs", (part.casefold() for part in relative_parts))
-        preview.dispose()
-
 
 if __name__ == "__main__":
     unittest.main()

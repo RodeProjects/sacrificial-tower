@@ -233,7 +233,8 @@ class Phase16Tests(unittest.TestCase):
 
     def test_01_config_rejects_unbounded_values(self) -> None:
         self.assertEqual(CalibrationConfig().maximum_iterations, 5)
-        self.assertEqual(CalibrationConfig(maximum_iterations=0).maximum_iterations, 0)
+        with self.assertRaisesRegex(ValueError, "mindestens einen Slicer-Durchlauf"):
+            CalibrationConfig(maximum_iterations=0)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=-1)
         self.assertEqual(CalibrationConfig(maximum_iterations=8).maximum_iterations, 8)
@@ -1053,30 +1054,6 @@ class Phase16Tests(unittest.TestCase):
         self.assertLessEqual(suffixes.count(".3mf"), 2)
         self.assertIsNotNone(result.project_path)
 
-    def test_existing_gcode_uses_explicit_layerwise_approximation_in_stl_mode(self) -> None:
-        artifact = SourceArtifact.capture(self.source)
-        result = CalibrationService().calibrate(
-            self.snapshot,
-            GenerationSettings(target_layer_time_s=2.0),
-            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
-            profile=self.profile,
-            output_directory=self.root / "gcode_source_stl_mode",
-            config=CalibrationConfig(maximum_iterations=1),
-            source_artifact=artifact,
-        )
-
-        self.assertTrue(result.success)
-        self.assertIsNotNone(result.gcode_path)
-        self.assertTrue(result.gcode_path.is_file())
-        self.assertIsNone(result.project_path)
-        self.assertEqual(
-            result.iterations[0].evaluation.metadata_source,
-            "final_combined_gcode",
-        )
-        self.assertTrue(
-            any("Näherung" in warning for warning in result.warnings)
-        )
-
     def test_25_gcode_mode_rejects_unknown_bed_before_slicing(self) -> None:
         profile = EffectiveProfile(
             self.profile.installation, self.profile.machine, self.profile.process, (),
@@ -1117,22 +1094,6 @@ class Phase16Tests(unittest.TestCase):
             for previous, current in zip(hollow.points, hollow.points[1:])
         ))
 
-    def test_28_zero_iterations_skips_slicer_and_creates_no_calibration_output(self) -> None:
-        adapter = FakeAdapter(tower_gcode())
-        output = self.root / "zero_iterations"
-        result = CalibrationService().calibrate(
-            self.snapshot,
-            GenerationSettings(target_layer_time_s=2.0),
-            adapter=adapter,
-            profile=self.profile,
-            output_directory=output,
-            config=CalibrationConfig(maximum_iterations=0),
-        )
-        self.assertEqual(result.state, CalibrationState.NOT_STARTED)
-        self.assertFalse(adapter.requests)
-        self.assertFalse(output.exists())
-        self.assertEqual(result.configured_iteration_count, 0)
-
     def test_29_later_failure_exports_best_measured_improvement(self) -> None:
         adapter = SequencedAdapter(
             [
@@ -1154,7 +1115,7 @@ class Phase16Tests(unittest.TestCase):
         )
         self.assertEqual(result.state, CalibrationState.SLICER_FAILED)
         self.assertFalse(result.success)
-        self.assertTrue(result.improved_over_analytical)
+        self.assertTrue(result.improved_over_initial_candidate)
         self.assertTrue(result.has_usable_improvement)
         self.assertEqual(result.best_iteration_number, 2)
         self.assertEqual(len(result.iterations), 2)
@@ -1473,7 +1434,7 @@ class Phase16RealAnycubicTest(unittest.TestCase):
                             15.0 - 0.15,
                         )
             else:
-                self.assertTrue(result.improved_over_analytical)
+                self.assertTrue(result.improved_over_initial_candidate)
                 self.assertEqual(result.best_iteration_number, 5)
 
 

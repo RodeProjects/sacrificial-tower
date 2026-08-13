@@ -58,7 +58,7 @@ class SolidTowerProfile:
     base_outer_radius_mm: float
     effective_base_height_mm: float
     feasibility_issues: tuple[FeasibilityIssue, ...] = ()
-    analytical_limitations: tuple[FeasibilityIssue, ...] = ()
+    initial_geometry_limitations: tuple[FeasibilityIssue, ...] = ()
     support_point_count: int = 0
     maximum_spline_error_mm: float = SPLINE_RADIAL_ERROR_MM
 
@@ -136,7 +136,7 @@ def build_solid_tower_profile(
 ) -> SolidTowerProfile:
     """Build a closed, cavity-free tower controlled only by outer diameter.
 
-    The analytical input deliberately estimates only the outside perimeter.
+    The initial geometry input deliberately estimates only the outside perimeter.
     Real wall and infill contributions are measured by the calibration slice
     and feed the next diameter iteration back into this same builder.
     """
@@ -207,9 +207,9 @@ def build_solid_tower_profile(
         ),
     )
 
-    analytical_limitations: list[FeasibilityIssue] = []
+    initial_geometry_limitations: list[FeasibilityIssue] = []
     _append_angle_issues(
-        issues=analytical_limitations,
+        issues=initial_geometry_limitations,
         supports=supports,
         unreachable_indices=unreachable,
         outer_radii=outer_radii,
@@ -220,11 +220,11 @@ def build_solid_tower_profile(
         supports=supports,
         outer_radii=outer_radii,
         settings=settings,
-        analytical_limitations=analytical_limitations,
+        initial_geometry_limitations=initial_geometry_limitations,
         effective_base_height_mm=effective_base_height,
     )
     points = _sample_support_splines(support_points)
-    unique_limitations = _unique_issues(analytical_limitations)
+    unique_limitations = _unique_issues(initial_geometry_limitations)
     warnings = [
         "Der Kühlturm wird als geschlossener Vollkörper ohne Hohlraum erzeugt.",
         (
@@ -238,7 +238,7 @@ def build_solid_tower_profile(
     ]
     if unique_limitations:
         warnings.append(
-            "Die analytische Umfangsschätzung erreicht eine Geometriegrenze. "
+            "Der erste Geometriekandidat erreicht eine Geometriegrenze. "
             "Der Testslice entscheidet anhand der tatsächlichen Wände und "
             "Füllung, ob die Ziel-Layerzeit dennoch erreicht wird."
         )
@@ -251,7 +251,7 @@ def build_solid_tower_profile(
         base_outer_radius_mm=base_outer,
         effective_base_height_mm=effective_base_height,
         feasibility_issues=(),
-        analytical_limitations=unique_limitations,
+        initial_geometry_limitations=unique_limitations,
         support_point_count=len(support_points),
     )
 
@@ -370,7 +370,7 @@ def _build_support_results(
     supports: tuple[_RawSupport, ...],
     outer_radii: tuple[float, ...],
     settings: GenerationSettings,
-    analytical_limitations: list[FeasibilityIssue],
+    initial_geometry_limitations: list[FeasibilityIssue],
     effective_base_height_mm: float,
 ) -> tuple[tuple[SolidTowerPoint, ...], tuple[TowerLayerProfile, ...]]:
     z_values = tuple(support.z_mm for support in supports)
@@ -382,11 +382,11 @@ def _build_support_results(
         reached = outer + EPSILON >= support.requested_outer_radius_mm
         available_path = math.tau * outer
         if not reached and support.layer_index is not None:
-            analytical_limitations.append(
+            initial_geometry_limitations.append(
                 FeasibilityIssue(
                     code="MAXIMUM_OUTER_DIAMETER_REACHED",
                     message=(
-                        "Die analytisch benötigte Layerzeit ist trotz größtem "
+                        "Die benötigte Layerzeit ist beim ersten Kandidaten trotz größtem "
                         "Außendurchmesser noch nicht erreichbar. Der Testslice "
                         "prüft zusätzlich die Zeitwirkung der Füllung."
                     ),

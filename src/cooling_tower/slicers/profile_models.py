@@ -446,7 +446,7 @@ class ProfileMatchResult:
     unfiltered_option_counts: tuple[int, int, int] = (0, 0, 0)
     visible_option_counts: tuple[int, int, int] = (0, 0, 0)
     active_preset_fingerprint: str | None = None
-    source_kind: SourceKind = SourceKind.GCODE
+    source_kind: SourceKind | None = None
     effective_profile_fingerprint: str | None = None
 
     def to_report_dict(self) -> dict[str, Any]:
@@ -454,7 +454,9 @@ class ProfileMatchResult:
             "profile_report_schema_version": PROFILE_REPORT_SCHEMA_VERSION,
             "state": self.state.value,
             "message": self.message,
-            "source_kind": self.source_kind.value,
+            "source_kind": (
+                self.source_kind.value if self.source_kind is not None else "internal_gcode"
+            ),
             "execution_slicer": {
                 "adapter_id": self.execution_slicer.adapter_id,
                 "product_name": self.execution_slicer.product_name,

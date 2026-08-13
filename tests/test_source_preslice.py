@@ -643,6 +643,7 @@ class SourcePreSliceServiceTests(unittest.TestCase):
                 source_artifact=self.validation.source_artifact,
                 prepared_analysis_source=result.prepared_source,
                 effective_profile=self.match.selected.effective_profile,
+                adapter=object(),
                 maximum_object_segments=100,
             )
             artifact = result.workspace_root / "tower.stl"
