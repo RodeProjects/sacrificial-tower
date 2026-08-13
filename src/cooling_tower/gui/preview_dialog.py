@@ -363,8 +363,15 @@ class PreviewDialog(QDialog):
         iterations = tuple(getattr(calibration, "iterations", ()) or ())
         completed = len(iterations)
         calibrated = bool(getattr(result, "calibrated", False))
+        joint_sliced = bool(getattr(result, "joint_sliced", False))
         slicer_optimized = bool(getattr(result, "slicer_optimized", False))
-        if calibrated and configured == 1:
+        if calibrated and not joint_sliced:
+            headline = (
+                f"✓ Ergebnis nach {completed} Durchläufen bestätigt – schnelle "
+                "Vorschau; der gemeinsame Präzisionsslice folgt erst beim Export"
+            )
+            state = "success"
+        elif calibrated and configured == 1:
             headline = (
                 "✓ Ein Durchlauf abgeschlossen – eine Wiederholungsstabilität "
                 "kann damit nicht geprüft werden"
@@ -403,7 +410,14 @@ class PreviewDialog(QDialog):
                 else f"um {-difference - time_tolerance:.3f} s außerhalb der Toleranz"
             )
             lines.append(
-                "Kleinste geprüfte Layerzeit des besten Messkandidaten: "
+                (
+                    "Kleinste angenäherte Layerzeit des schnellen "
+                    "Vorschaukandidaten: "
+                    if not joint_sliced
+                    else "Kleinste geprüfte Layerzeit des gemeinsam "
+                    "geslicten Kandidaten: "
+                )
+                +
                 f"{float(minimum_time):.3f} s bei {float(target_time):.3f} s "
                 f"Ziel ({difference:+.3f} s; {relation})"
             )
@@ -470,6 +484,20 @@ class PreviewDialog(QDialog):
                     "Slicer-Metadatenabweichung",
                     metadata_difference,
                     metadata_tolerance,
+                    "s",
+                )
+            )
+        joint_deviation = getattr(
+            last,
+            "maximum_target_deviation_s",
+            None,
+        )
+        if joint_deviation is not None:
+            lines.append(
+                PreviewDialog._maximum_value_assessment(
+                    "Größte Zielabweichung im gemeinsamen Slice",
+                    joint_deviation,
+                    time_tolerance,
                     "s",
                 )
             )

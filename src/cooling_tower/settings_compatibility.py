@@ -91,6 +91,13 @@ SETTING_COMPATIBILITY_RULES = (
         group="generation.solid-geometry-v1", minimum=0.002, maximum=1000.0,
     ),
     _generation_rule(
+        "minimum_object_tower_distance_mm",
+        "object-tower-edge-distance-mm-v1",
+        "float",
+        minimum=0.0,
+        maximum=1000.0,
+    ),
+    _generation_rule(
         "simulate_full_tower_infill", "full-tower-infill-simulation-v1", "bool",
         group="generation.solid-geometry-v1",
     ),

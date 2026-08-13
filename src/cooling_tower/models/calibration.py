@@ -39,6 +39,7 @@ class CalibrationFailureCode(str, Enum):
     STALLED = "stalled"
     GEOMETRY_INVALID = "geometry_invalid"
     FINAL_TIMING_DEFICIT = "final_timing_deficit"
+    OBJECT_OVERRIDE_REJECTED = "object_override_rejected"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,14 +56,17 @@ class CalibrationConfig:
     minimum_path_growth_mm: float = 0.5
     material_reduction_factor: float = 1.0
     repeated_result_limit: int = 2
-    object_clearance_mm: float = 5.0
+    object_clearance_mm: float = 25.0
     bed_edge_clearance_mm: float = 3.0
     travel_speed_mm_s: float = 150.0
     retraction_length_mm: float = 0.8
     retraction_speed_mm_s: float = 35.0
     timeout_per_slice_s: float = 300.0
+    perform_joint_final_slice: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.perform_joint_final_slice, bool):
+            raise ValueError("perform_joint_final_slice must be a boolean")
         if not 0 <= self.maximum_iterations <= 8:
             raise ValueError(
                 "maximum_iterations muss zwischen null und acht liegen"
@@ -115,6 +119,21 @@ class BedBounds:
             raise ValueError("Bed X bounds are empty")
         if self.maximum_y_mm <= self.minimum_y_mm:
             raise ValueError("Bed Y bounds are empty")
+
+
+@dataclass(frozen=True, slots=True)
+class BedGeometry:
+    """Printable bed polygon and slicer-declared exclusion polygons."""
+
+    bounds: BedBounds
+    printable_polygon: tuple[tuple[float, float], ...]
+    excluded_polygons: tuple[tuple[tuple[float, float], ...], ...] = ()
+
+    def __post_init__(self) -> None:
+        if len(self.printable_polygon) < 3:
+            raise ValueError("Printable bed polygon needs at least three points")
+        if any(len(polygon) < 3 for polygon in self.excluded_polygons):
+            raise ValueError("Bed exclusion polygons need at least three points")
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +212,8 @@ class CalibrationIteration:
     maximum_slicer_result_change_s: float | None = None
     slicer_result_stable: bool = False
     final_combined_gcode_path: Path | None = None
+    joint_slice: bool = False
+    maximum_target_deviation_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +225,7 @@ class CalibrationResult:
     stl_path: Path | None
     gcode_path: Path | None
     placement: TowerPlacement | None
+    project_path: Path | None = None
     failures: tuple[CalibrationFailure, ...] = ()
     warnings: tuple[str, ...] = ()
     report_path: Path | None = None
@@ -238,7 +260,9 @@ class CalibrationResult:
     @property
     def has_usable_improvement(self) -> bool:
         return self.has_slicer_evaluated_output and (
-            self.success or self.improved_over_analytical
+            self.success
+            or self.improved_over_analytical
+            or self.project_path is not None
         )
 
     @property
@@ -295,6 +319,9 @@ class CalibrationResult:
             ],
             "stl_path": str(self.stl_path) if self.stl_path else None,
             "gcode_path": str(self.gcode_path) if self.gcode_path else None,
+            "project_path": (
+                str(self.project_path) if self.project_path else None
+            ),
             "placement": (
                 {
                     "center_x_mm": self.placement.center_x_mm,

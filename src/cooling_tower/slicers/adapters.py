@@ -3,6 +3,8 @@ from __future__ import annotations
 import configparser
 import json
 import os
+import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from cooling_tower.models.gcode_metadata import SlicerFamily
@@ -144,11 +146,10 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                     ";".join(str(path) for path in filaments),
                 )
             )
+        if not request.preserve_model_positions:
+            arguments.extend(("--arrange", "1", "--ensure-on-bed"))
         arguments.extend(
             (
-                "--arrange",
-                "1",
-                "--ensure-on-bed",
                 "--slice",
                 "0",
                 "--outputdir",
@@ -157,6 +158,79 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
             )
         )
         return profile.installation.executable_path, tuple(arguments)
+
+    def create_joint_project(
+        self,
+        request: SliceRequest,
+        source_model_path: Path,
+        tower_model_path: Path,
+        destination: Path,
+        *,
+        occupied: object,
+        placement: object,
+        tower_full_infill: bool,
+    ) -> object:
+        """Let the CLI create native metadata, then lock app-chosen positions."""
+
+        from cooling_tower.calibration.joint_project import (
+            JointProjectError,
+            finalize_slicer_project,
+        )
+
+        project_request = replace(
+            request,
+            model_path=Path(source_model_path).resolve(),
+            preserve_model_positions=False,
+            placement_xy_mm=None,
+        )
+        prepared = self.prepare_slice(project_request)
+        try:
+            copied_tower = prepared.input_directory / Path(tower_model_path).name
+            shutil.copy2(Path(tower_model_path).resolve(), copied_tower)
+            arguments = list(prepared.arguments)
+            try:
+                option_index = arguments.index("--arrange")
+            except ValueError as error:
+                raise JointProjectError(
+                    "Der Slicer-Aufruf enthält keine sichere Projektanordnung."
+                ) from error
+            native_project = prepared.working_root / "native_project.3mf"
+            export_arguments = (
+                *arguments[:option_index],
+                "--arrange",
+                "1",
+                "--ensure-on-bed",
+                "--export-3mf",
+                str(native_project),
+                str(prepared.copied_model),
+                str(copied_tower),
+            )
+            outcome = self.runner.run(
+                prepared.executable,
+                export_arguments,
+                working_directory=prepared.working_root,
+                timeout_s=request.timeout_s,
+                cancellation_event=request.cancellation_event,
+            )
+            if outcome.return_code != 0 or not native_project.is_file():
+                details = (outcome.stderr or outcome.stdout).strip()
+                if len(details) > 1000:
+                    details = details[-1000:]
+                raise JointProjectError(
+                    "Der Slicer hat das gemeinsame 3MF nicht akzeptiert."
+                    + (f" Slicer-Ausgabe: {details}" if details else "")
+                )
+            return finalize_slicer_project(
+                native_project,
+                prepared.copied_model,
+                copied_tower,
+                destination,
+                occupied=occupied,
+                placement=placement,
+                tower_full_infill=tower_full_infill,
+            )
+        finally:
+            self.cleanup_prepared_slice(prepared)
 
     @staticmethod
     def _materialize_cli_profile(

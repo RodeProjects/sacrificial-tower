@@ -193,6 +193,7 @@ class SliceRequest:
     temporary_overrides: Mapping[str, Any] = field(default_factory=dict)
     expected_layer_heights_mm: tuple[float, ...] = ()
     placement_xy_mm: tuple[float, float] | None = None
+    preserve_model_positions: bool = False
     purpose: str = "normal"
     calibration_round: int | None = None
     cancellation_event: Event | None = field(

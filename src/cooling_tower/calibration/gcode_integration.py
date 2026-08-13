@@ -16,7 +16,12 @@ from cooling_tower.gcode.parser import (
     parse_gcode_line,
     GCodeLine,
 )
-from cooling_tower.models import BedBounds, OccupiedBounds, TowerPlacement
+from cooling_tower.models import (
+    BedBounds,
+    BedGeometry,
+    OccupiedBounds,
+    TowerPlacement,
+)
 from cooling_tower.services.analysis_service import GCodeAnalysisService
 
 
@@ -150,26 +155,121 @@ def _numbers(value: object) -> tuple[float, ...]:
         return ()
 
 
-def parse_bed_bounds(values: Mapping[str, object]) -> BedBounds | None:
+def _polygon(numbers: Sequence[float]) -> tuple[tuple[float, float], ...]:
+    return tuple(zip(numbers[0::2], numbers[1::2]))
+
+
+def parse_bed_geometry(values: Mapping[str, object]) -> BedGeometry | None:
+    printable: tuple[tuple[float, float], ...] | None = None
     for key in ("printable_area", "bed_shape", "machine_shape"):
         numbers = _numbers(values.get(key))
-        if len(numbers) >= 4 and len(numbers) % 2 == 0:
+        if len(numbers) >= 6 and len(numbers) % 2 == 0:
             xs = numbers[0::2]
             ys = numbers[1::2]
             if max(xs) > min(xs) and max(ys) > min(ys):
-                return BedBounds(min(xs), max(xs), min(ys), max(ys))
+                printable = _polygon(numbers)
+                break
     width_keys = ("printable_width", "machine_width", "bed_size_x")
     depth_keys = ("printable_depth", "machine_depth", "bed_size_y")
     width = next((_numbers(values.get(key)) for key in width_keys if key in values), ())
     depth = next((_numbers(values.get(key)) for key in depth_keys if key in values), ())
-    if width and depth and width[0] > 0.0 and depth[0] > 0.0:
+    if printable is None and width and depth and width[0] > 0.0 and depth[0] > 0.0:
         centered = str(values.get("machine_center_is_zero", "false")).casefold() in {
             "1", "true", "yes",
         }
         if centered:
-            return BedBounds(-width[0] / 2, width[0] / 2, -depth[0] / 2, depth[0] / 2)
-        return BedBounds(0.0, width[0], 0.0, depth[0])
-    return None
+            minimum_x, maximum_x = -width[0] / 2, width[0] / 2
+            minimum_y, maximum_y = -depth[0] / 2, depth[0] / 2
+        else:
+            minimum_x, maximum_x = 0.0, width[0]
+            minimum_y, maximum_y = 0.0, depth[0]
+        printable = (
+            (minimum_x, minimum_y),
+            (maximum_x, minimum_y),
+            (maximum_x, maximum_y),
+            (minimum_x, maximum_y),
+        )
+    if printable is None:
+        return None
+    xs = tuple(point[0] for point in printable)
+    ys = tuple(point[1] for point in printable)
+    bounds = BedBounds(min(xs), max(xs), min(ys), max(ys))
+    excluded_numbers = _numbers(values.get("bed_exclude_area"))
+    excluded: list[tuple[tuple[float, float], ...]] = []
+    # Orca-family profiles serialize each rectangular exclusion as four XY
+    # points. Ignore an incomplete tail rather than expanding its meaning.
+    for offset in range(0, len(excluded_numbers) - 7, 8):
+        candidate = _polygon(excluded_numbers[offset:offset + 8])
+        if len(set(candidate)) >= 3:
+            excluded.append(candidate)
+    return BedGeometry(bounds, printable, tuple(excluded))
+
+
+def parse_bed_bounds(values: Mapping[str, object]) -> BedBounds | None:
+    geometry = parse_bed_geometry(values)
+    return geometry.bounds if geometry is not None else None
+
+
+def _point_in_polygon(
+    point: tuple[float, float],
+    polygon: Sequence[tuple[float, float]],
+) -> bool:
+    x, y = point
+    inside = False
+    previous_x, previous_y = polygon[-1]
+    for current_x, current_y in polygon:
+        if ((current_y > y) != (previous_y > y)) and (
+            x < (previous_x - current_x) * (y - current_y)
+            / (previous_y - current_y) + current_x
+        ):
+            inside = not inside
+        previous_x, previous_y = current_x, current_y
+    return inside
+
+
+def _point_segment_distance(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    px, py = point
+    ax, ay = start
+    bx, by = end
+    dx, dy = bx - ax, by - ay
+    length_squared = dx * dx + dy * dy
+    if length_squared <= 1e-18:
+        return math.hypot(px - ax, py - ay)
+    factor = min(1.0, max(0.0, ((px - ax) * dx + (py - ay) * dy) / length_squared))
+    return math.hypot(px - (ax + factor * dx), py - (ay + factor * dy))
+
+
+def _distance_to_polygon_edges(
+    point: tuple[float, float],
+    polygon: Sequence[tuple[float, float]],
+) -> float:
+    return min(
+        _point_segment_distance(point, polygon[index - 1], polygon[index])
+        for index in range(len(polygon))
+    )
+
+
+def _circle_fits_bed(
+    point: tuple[float, float],
+    radius: float,
+    edge_clearance: float,
+    geometry: BedGeometry,
+) -> bool:
+    required = radius + edge_clearance
+    if not _point_in_polygon(point, geometry.printable_polygon):
+        return False
+    if _distance_to_polygon_edges(point, geometry.printable_polygon) < required - 1e-9:
+        return False
+    for excluded in geometry.excluded_polygons:
+        if _point_in_polygon(point, excluded):
+            return False
+        if _distance_to_polygon_edges(point, excluded) < required - 1e-9:
+            return False
+    return True
 
 
 def _circle_intersects_bounds(
@@ -190,6 +290,7 @@ def propose_tower_placement(
     tower_radius_mm: float,
     object_clearance_mm: float,
     edge_clearance_mm: float,
+    bed_geometry: BedGeometry | None = None,
 ) -> TowerPlacement:
     if tower_radius_mm <= 0.0:
         raise ValueError("Der Turmradius muss größer als null sein.")
@@ -198,29 +299,68 @@ def propose_tower_placement(
     min_y, max_y = bed.minimum_y_mm + inset, bed.maximum_y_mm - inset
     if min_x > max_x or min_y > max_y:
         raise GCodeIntegrationError("Der Kühlturm passt nicht auf das Druckbett.")
+    if object_clearance_mm < 0.0 or edge_clearance_mm < 0.0:
+        raise ValueError("Abstände dürfen nicht negativ sein.")
+    geometry = bed_geometry or BedGeometry(
+        bed,
+        (
+            (bed.minimum_x_mm, bed.minimum_y_mm),
+            (bed.maximum_x_mm, bed.minimum_y_mm),
+            (bed.maximum_x_mm, bed.maximum_y_mm),
+            (bed.minimum_x_mm, bed.maximum_y_mm),
+        ),
+    )
     expanded = occupied.expanded(object_clearance_mm)
     center_x = (bed.minimum_x_mm + bed.maximum_x_mm) / 2.0
     center_y = (bed.minimum_y_mm + bed.maximum_y_mm) / 2.0
-    candidates = (
-        (min_x, min_y), (max_x, min_y), (min_x, max_y), (max_x, max_y),
-        (center_x, min_y), (center_x, max_y), (min_x, center_y), (max_x, center_y),
-    )
-    valid = [
-        point for point in candidates
-        if not _circle_intersects_bounds(point[0], point[1], tower_radius_mm, expanded)
-    ]
-    if not valid:
-        raise GCodeIntegrationError(
-            "Auf dem Druckbett wurde keine kollisionsfreie Position für den "
-            "Kühlturm gefunden."
-        )
-    # Prefer the shortest average travel to the object while retaining all
-    # clearances.  This reduces non-productive time and stringing.
     object_center = (
         (occupied.minimum_x_mm + occupied.maximum_x_mm) / 2.0,
         (occupied.minimum_y_mm + occupied.maximum_y_mm) / 2.0,
     )
-    x, y = min(valid, key=lambda point: math.dist(point, object_center))
+    offset = tower_radius_mm + object_clearance_mm
+    xs = {
+        min_x, max_x, center_x, object_center[0],
+        occupied.minimum_x_mm - offset,
+        occupied.maximum_x_mm + offset,
+    }
+    ys = {
+        min_y, max_y, center_y, object_center[1],
+        occupied.minimum_y_mm - offset,
+        occupied.maximum_y_mm + offset,
+    }
+    # The semantic candidates normally find the nearest solution exactly.
+    # A bounded grid additionally covers irregular beds and exclusion areas.
+    step = max(2.0, min(10.0, tower_radius_mm))
+    cursor = min_x
+    while cursor <= max_x + 1e-9:
+        xs.add(min(cursor, max_x))
+        cursor += step
+    cursor = min_y
+    while cursor <= max_y + 1e-9:
+        ys.add(min(cursor, max_y))
+        cursor += step
+    candidates = tuple((x, y) for x in xs for y in ys)
+    valid = [
+        point for point in candidates
+        if min_x - 1e-9 <= point[0] <= max_x + 1e-9
+        and min_y - 1e-9 <= point[1] <= max_y + 1e-9
+        and _circle_fits_bed(point, tower_radius_mm, edge_clearance_mm, geometry)
+        and not _circle_intersects_bounds(point[0], point[1], tower_radius_mm, expanded)
+    ]
+    if not valid:
+        raise GCodeIntegrationError(
+            "Auf dem Druckbett wurde keine Position gefunden, die den "
+            f"Kantenabstand von {object_clearance_mm:g} mm zum Objekt sowie "
+            "Druckbettrand und Ausschlussflächen einhält."
+        )
+    # Prefer the shortest average travel to the object while retaining all
+    # clearances.  This reduces non-productive time and stringing.
+    x, y = min(
+        valid,
+        key=lambda point: (
+            math.dist(point, object_center), point[1], point[0]
+        ),
+    )
     return TowerPlacement(x, y, tower_radius_mm, bed, object_clearance_mm)
 
 

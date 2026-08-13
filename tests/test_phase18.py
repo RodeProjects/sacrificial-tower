@@ -538,8 +538,8 @@ class Phase18UiTests(unittest.TestCase):
             )
             self.assertEqual(
                 body_image.pixelColor(
-                    body_image.width() // 2,
-                    body_image.height() // 2,
+                    body_image.width() - 5,
+                    body_image.height() - 5,
                 ).name(),
                 "#ffffff",
             )

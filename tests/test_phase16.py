@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+import trimesh
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +39,7 @@ from cooling_tower.models import (
     CalibrationState,
     GenerationSettings,
     OccupiedBounds,
+    SourceArtifact,
 )
 from cooling_tower.services import GCodeAnalysisService
 from cooling_tower.slicers import (
@@ -881,6 +883,199 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(len(result.iterations), 4)
         self.assertFalse(output.exists())
         self.assertTrue(result.failures)
+
+    def test_joint_stl_calibration_uses_fixed_3mf_and_object_scoped_infill(self) -> None:
+        source_stl = self.root / "source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        artifact = SourceArtifact.capture(source_stl)
+        source_before = source_stl.read_bytes()
+        adapter = FakeAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n"
+        )
+
+        service = CalibrationService()
+        with patch.object(
+            service.evaluator.analysis_service,
+            "analyze",
+            wraps=service.evaluator.analysis_service.analyze,
+        ) as analyze:
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(
+                    target_layer_time_s=2.0,
+                    simulate_full_tower_infill=True,
+                ),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_result",
+                config=CalibrationConfig(maximum_iterations=1),
+                source_artifact=artifact,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(analyze.call_count, 1)
+        self.assertIsNotNone(result.project_path)
+        self.assertTrue(result.project_path.is_file())
+        self.assertEqual(source_stl.read_bytes(), source_before)
+        self.assertEqual(adapter.requests[0].model_path.suffix, ".3mf")
+        self.assertTrue(adapter.requests[0].preserve_model_positions)
+        self.assertNotIn(
+            "sparse_infill_density",
+            adapter.requests[0].temporary_overrides,
+        )
+        self.assertEqual(
+            result.iterations[0].evaluation.metadata_source,
+            "final_combined_gcode",
+        )
+
+    def test_joint_stl_preview_rounds_never_reslice_the_complete_object(self) -> None:
+        source_stl = self.root / "preview_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(
+                target_layer_time_s=2.0,
+                simulate_full_tower_infill=True,
+            ),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "fast_joint_preview",
+            config=CalibrationConfig(
+                maximum_iterations=3,
+                perform_joint_final_slice=False,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+        )
+
+        self.assertTrue(result.success, result.failures)
+        self.assertEqual(len(adapter.requests), 3)
+        self.assertTrue(
+            all(request.model_path.suffix == ".stl" for request in adapter.requests)
+        )
+        self.assertTrue(
+            all(
+                "sparse_infill_density" in request.temporary_overrides
+                for request in adapter.requests
+            )
+        )
+        self.assertIsNone(result.project_path)
+
+    def test_joint_export_reuses_preview_candidate_for_at_most_two_complete_slices(self) -> None:
+        source_stl = self.root / "seed_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        artifact = SourceArtifact.capture(source_stl)
+        preview_adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        service = CalibrationService()
+        preview = service.calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=preview_adapter,
+            profile=self.profile,
+            output_directory=self.root / "seed_preview",
+            config=CalibrationConfig(
+                maximum_iterations=8,
+                perform_joint_final_slice=False,
+            ),
+            source_artifact=artifact,
+        )
+        self.assertTrue(preview.has_usable_improvement)
+
+        export_adapter = FakeAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n"
+        )
+        with patch(
+            "cooling_tower.calibration.calibration_service."
+            "build_calibration_profile",
+            wraps=build_calibration_profile,
+        ) as build_profile:
+            exported = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=2.0),
+                adapter=export_adapter,
+                profile=self.profile,
+                output_directory=self.root / "seed_export",
+                config=CalibrationConfig(
+                    maximum_iterations=8,
+                    perform_joint_final_slice=True,
+                ),
+                source_artifact=artifact,
+                seed_profile=preview.profile,
+                seed_stl_path=preview.stl_path,
+            )
+
+        self.assertTrue(exported.has_usable_improvement, exported.failures)
+        self.assertGreaterEqual(len(export_adapter.requests), 1)
+        self.assertLessEqual(len(export_adapter.requests), 2)
+        self.assertTrue(
+            all(request.model_path.suffix == ".3mf" for request in export_adapter.requests)
+        )
+        self.assertTrue(
+            all(request.preserve_model_positions for request in export_adapter.requests)
+        )
+        self.assertIsNotNone(exported.project_path)
+        self.assertEqual(exported.configured_iteration_count, 8)
+        self.assertEqual(build_profile.call_count, 1)
+
+    def test_joint_export_limits_complete_object_slices_to_two(self) -> None:
+        source_stl = self.root / "bounded_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n"
+        )
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "bounded_joint_export",
+            config=CalibrationConfig(
+                maximum_iterations=4,
+                perform_joint_final_slice=True,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+        )
+
+        suffixes = [request.model_path.suffix for request in adapter.requests]
+        self.assertEqual(suffixes[:3], [".stl", ".stl", ".stl"])
+        self.assertGreaterEqual(suffixes.count(".3mf"), 1)
+        self.assertLessEqual(suffixes.count(".3mf"), 2)
+        self.assertIsNotNone(result.project_path)
+
+    def test_existing_gcode_uses_explicit_layerwise_approximation_in_stl_mode(self) -> None:
+        artifact = SourceArtifact.capture(self.source)
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+            profile=self.profile,
+            output_directory=self.root / "gcode_source_stl_mode",
+            config=CalibrationConfig(maximum_iterations=1),
+            source_artifact=artifact,
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.gcode_path)
+        self.assertTrue(result.gcode_path.is_file())
+        self.assertIsNone(result.project_path)
+        self.assertEqual(
+            result.iterations[0].evaluation.metadata_source,
+            "final_combined_gcode",
+        )
+        self.assertTrue(
+            any("Näherung" in warning for warning in result.warnings)
+        )
 
     def test_25_gcode_mode_rejects_unknown_bed_before_slicing(self) -> None:
         profile = EffectiveProfile(

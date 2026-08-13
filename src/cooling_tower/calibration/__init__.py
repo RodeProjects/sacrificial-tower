@@ -8,6 +8,7 @@ from cooling_tower.calibration.gcode_integration import (
     assess_gcode_support,
     determine_occupied_bounds,
     parse_bed_bounds,
+    parse_bed_geometry,
     propose_tower_placement,
 )
 from cooling_tower.calibration.profile_adjuster import adjust_radius_profile
@@ -27,5 +28,6 @@ __all__ = [
     "determine_occupied_bounds",
     "evaluate_convergence",
     "parse_bed_bounds",
+    "parse_bed_geometry",
     "propose_tower_placement",
 ]

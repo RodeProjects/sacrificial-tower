@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from gcode_parser import (
@@ -11,6 +12,7 @@ from gcode_parser import (
     MotionTimingPlanner,
     calculate_movement_timing,
     parse_gcode_line,
+    plan_movement_run,
 )
 
 from cooling_tower.services.analysis_service import GCodeAnalysisService
@@ -148,6 +150,24 @@ class AccelerationProfileTests(unittest.TestCase):
 
 
 class MotionLookaheadTests(unittest.TestCase):
+    def test_planning_preserves_every_non_timing_movement_field(self) -> None:
+        tracker = MachineStateTracker()
+        tracker.process_line(parsed("M204 S10"))
+        tracker.process_line(parsed("M205 X5 Y6 Z7 E8"))
+        original = movement(tracker, "G1 X10 Y4 E1 F600")
+
+        planned = plan_movement_run([original])[0]
+        expected = replace(
+            original,
+            duration_s=planned.duration_s,
+            timing_error=planned.timing_error,
+            entry_speed_mm_s=planned.entry_speed_mm_s,
+            cruise_speed_mm_s=planned.cruise_speed_mm_s,
+            exit_speed_mm_s=planned.exit_speed_mm_s,
+        )
+
+        self.assertEqual(planned, expected)
+
     def test_collinear_moves_keep_velocity_through_junction(self) -> None:
         tracker = MachineStateTracker()
         tracker.process_line(parsed("M204 S10"))

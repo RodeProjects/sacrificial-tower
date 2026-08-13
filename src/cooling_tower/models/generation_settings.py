@@ -32,6 +32,7 @@ class GenerationSettings:
 
     minimum_outer_diameter_mm: float
     maximum_outer_diameter_mm: float
+    minimum_object_tower_distance_mm: float
     simulate_full_tower_infill: bool
 
     minimum_base_radius_mm: float
@@ -71,6 +72,7 @@ class GenerationSettings:
         safety_factor: float = 1.10,
         minimum_outer_diameter_mm: float | object = _UNSET,
         maximum_outer_diameter_mm: float | object = _UNSET,
+        minimum_object_tower_distance_mm: float = 25.0,
         simulate_full_tower_infill: bool = False,
         minimum_base_radius_mm: float = 10.0,
         base_height_mm: float = 4.0,
@@ -114,6 +116,7 @@ class GenerationSettings:
             "safety_factor": safety_factor,
             "minimum_outer_diameter_mm": minimum_outer_diameter_mm,
             "maximum_outer_diameter_mm": maximum_outer_diameter_mm,
+            "minimum_object_tower_distance_mm": minimum_object_tower_distance_mm,
             "simulate_full_tower_infill": simulate_full_tower_infill,
             "minimum_base_radius_mm": minimum_base_radius_mm,
             "base_height_mm": base_height_mm,

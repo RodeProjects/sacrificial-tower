@@ -49,6 +49,7 @@ DEFAULT_CSV_PATH = Path("output/layer_analysis.csv")
 DEFAULT_SAFETY_FACTOR = 1.10
 DEFAULT_MINIMUM_DIAMETER_MM = 10.0
 DEFAULT_MAXIMUM_DIAMETER_MM = 40.0
+DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM = 25.0
 DEFAULT_LOCAL_TIME_FACTOR_WINDOW = 5
 DEFAULT_MINIMUM_RADIUS_HEIGHT_FACTOR = 0.04
 DEFAULT_MINIMUM_BASE_RADIUS_MM = 10.0
@@ -137,9 +138,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--simulate-full-tower-infill",
         action="store_true",
         help=(
-            "Simulate 100 percent tower infill in isolated calibration slices. "
-            "The exported STL still requires a matching object-specific "
-            "slicer setting."
+            "Use an object-specific 100 percent infill override for the tower "
+            "in joint calibration projects."
+        ),
+    )
+
+    parser.add_argument(
+        "--minimum-object-tower-distance",
+        type=float,
+        default=DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM,
+        help=(
+            "Minimum edge-to-edge distance between source object and tower "
+            "in millimeters. Default: "
+            f"{DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM}"
         ),
     )
 
@@ -1308,6 +1319,9 @@ def main() -> int:
                 safety_factor=arguments.safety_factor,
                 minimum_outer_diameter_mm=arguments.minimum_diameter,
                 maximum_outer_diameter_mm=arguments.maximum_diameter,
+                minimum_object_tower_distance_mm=(
+                    arguments.minimum_object_tower_distance
+                ),
                 simulate_full_tower_infill=(
                     arguments.simulate_full_tower_infill
                 ),

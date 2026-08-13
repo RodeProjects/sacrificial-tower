@@ -39,6 +39,7 @@ from cooling_tower.models import (
     CalibrationState,
     GenerationSettings,
     ProfileFeasibilityAssessment,
+    SourceArtifact,
     TowerPlacement,
 )
 from cooling_tower.preview import (
@@ -727,9 +728,21 @@ class Phase17Tests(unittest.TestCase):
         self.assertIsNone(window._slicer_prediction_estimate_s)
         self.assertEqual(window._slicer_prediction_status, "")
         self.assertEqual(window._calibration_config().maximum_iterations, 8)
+        self.assertFalse(
+            window._calibration_config().perform_joint_final_slice
+        )
         self.assertEqual(
             window._export_calibration_config().maximum_iterations,
             8,
+        )
+        self.assertFalse(
+            window._export_calibration_config().perform_joint_final_slice
+        )
+        window.source_artifact = SimpleNamespace(
+            source_kind=SimpleNamespace(value="stl")
+        )
+        self.assertTrue(
+            window._export_calibration_config().perform_joint_final_slice
         )
         self.assertEqual(
             window.preview_iteration_count_label.text(),
@@ -739,6 +752,117 @@ class Phase17Tests(unittest.TestCase):
         self.assertEqual(window.preview_precise_label.text(), "Präziser")
         self.assertIn("mehr Zeit", window.preview_iteration_slider.toolTip())
         window.close()
+
+    def test_joint_export_signature_accepts_matching_fast_preview_seed(self) -> None:
+        fast = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=8,
+                perform_joint_final_slice=False,
+            )
+        )
+        exact = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=8,
+                perform_joint_final_slice=True,
+            )
+        )
+
+        self.assertNotEqual(fast.signature(), exact.signature())
+        self.assertEqual(
+            fast.signature(),
+            exact.signature_for_joint_slice(False),
+        )
+
+    def test_exact_preview_build_reuses_matching_fast_preview_artifact(self) -> None:
+        class SeedAwareCalibrator:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def calibrate(self, _snapshot, _settings, **kwargs):
+                self.calls.append(kwargs)
+                root = Path(kwargs["output_directory"])
+                root.mkdir(parents=True, exist_ok=True)
+                artifact = root / "tower.stl"
+                artifact.write_bytes(b"synthetic tower")
+                project = None
+                if kwargs["config"].perform_joint_final_slice:
+                    project = root / "joint.3mf"
+                    project.write_bytes(b"synthetic project")
+                profile = SimpleNamespace(
+                    points=(
+                        SimpleNamespace(outer_radius_mm=5.0, z_mm=0.0),
+                        SimpleNamespace(outer_radius_mm=5.0, z_mm=0.8),
+                    ),
+                    layers=(),
+                )
+                return SimpleNamespace(
+                    state=CalibrationState.CONVERGED,
+                    success=True,
+                    has_usable_improvement=True,
+                    profile=profile,
+                    placement=TowerPlacement(
+                        80.0,
+                        20.0,
+                        5.0,
+                        BedBounds(0.0, 100.0, 0.0, 100.0),
+                        25.0,
+                    ),
+                    warnings=(),
+                    failures=(),
+                    gcode_path=None,
+                    stl_path=artifact,
+                    project_path=project,
+                    iterations=(),
+                    best_iteration=None,
+                )
+
+        original_stl = self.root / "original.stl"
+        original_stl.write_bytes(b"synthetic source")
+        artifact = SourceArtifact.capture(original_stl)
+        profile = SimpleNamespace(
+            effective_values={
+                "printable_area": [[0, 0], [100, 0], [100, 100], [0, 100]]
+            }
+        )
+        calibrator = SeedAwareCalibrator()
+        service = PreviewService(calibrator)
+        fast_request = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=8,
+                perform_joint_final_slice=False,
+            ),
+            adapter=object(),
+            effective_profile=profile,
+            source_artifact=artifact,
+        )
+        fast_preview = service.prepare(fast_request)
+        exact_request = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=8,
+                perform_joint_final_slice=True,
+            ),
+            adapter=object(),
+            effective_profile=profile,
+            source_artifact=artifact,
+        )
+
+        exact_preview = service.prepare(
+            exact_request,
+            seed_preview=fast_preview,
+        )
+
+        self.assertEqual(len(calibrator.calls), 2)
+        self.assertIs(
+            calibrator.calls[1]["seed_profile"],
+            fast_preview.calibration.profile,
+        )
+        self.assertEqual(
+            calibrator.calls[1]["seed_stl_path"],
+            fast_preview.artifact_path,
+        )
+        self.assertTrue(exact_preview.joint_sliced)
+        exact_preview.dispose()
+        fast_preview.dispose()
 
     def test_30_zero_iterations_create_analytical_stl_without_calibrator(self) -> None:
         class ForbiddenCalibrator:

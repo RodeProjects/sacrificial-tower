@@ -708,6 +708,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "safety_factor": "",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
+            "minimum_object_tower_distance_mm": "mm",
             "manual_base_width_mm": "mm",
             "base_height_mm": "mm",
             "maximum_expansion_angle_deg": "°",

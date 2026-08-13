@@ -46,19 +46,29 @@ class PreviewBuildController(QObject):
         *,
         cancellation_event: Event,
         progress_callback: Callable[[int, str], None],
+        seed_preview: PreviewResult | None = None,
     ) -> PreviewResult:
         self._assert_owner_thread()
         self._transition(PreviewBuildState.PREPARING)
         try:
-            result = self.service.prepare(
-                request,
-                cancellation_event=cancellation_event,
-                progress_callback=lambda percent, status: self._on_progress(
-                    percent,
-                    status,
-                    progress_callback,
-                ),
+            progress = lambda percent, status: self._on_progress(
+                percent,
+                status,
+                progress_callback,
             )
+            if seed_preview is None:
+                result = self.service.prepare(
+                    request,
+                    cancellation_event=cancellation_event,
+                    progress_callback=progress,
+                )
+            else:
+                result = self.service.prepare(
+                    request,
+                    cancellation_event=cancellation_event,
+                    progress_callback=progress,
+                    seed_preview=seed_preview,
+                )
         except PreviewCancelled:
             self._transition(PreviewBuildState.CANCELLED)
             raise
@@ -76,7 +86,11 @@ class PreviewBuildController(QObject):
     ) -> None:
         self._assert_owner_thread()
         normalized = status.casefold()
-        if "slicer-auftrag" in normalized:
+        if (
+            "slicer-auftrag" in normalized
+            or "präzisionsslice" in normalized
+            or "kühlturm-abgleich" in normalized
+        ):
             target = PreviewBuildState.SLICER_RUNNING
         elif "slicer-ergebnis" in normalized:
             target = PreviewBuildState.EVALUATING

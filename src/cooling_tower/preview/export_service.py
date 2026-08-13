@@ -60,6 +60,15 @@ class PreviewExportService:
             raise StalePreviewError(
                 "Das geprüfte Vorschau-Artefakt ist nicht mehr unverändert verfügbar."
             )
+        project = preview.project_path
+        if project is not None and (
+            preview.project_sha256 is None
+            or not project.is_file()
+            or sha256_file(project) != preview.project_sha256
+        ):
+            raise StalePreviewError(
+                "Das gemeinsame 3MF ist nicht mehr unverändert verfügbar."
+            )
 
         root = Path(output_root).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
@@ -93,6 +102,16 @@ class PreviewExportService:
                 raise StalePreviewError(
                     "Das Vorschau-Artefakt wurde während des Exports verändert."
                 )
+            project_output_path = None
+            if project is not None:
+                project_output_path = destination / (
+                    f"{source_name}_mit_kuehlturm.3mf"
+                )
+                shutil.copy2(project, project_output_path)
+                if sha256_file(project_output_path) != preview.project_sha256:
+                    raise StalePreviewError(
+                        "Das gemeinsame 3MF wurde während des Exports verändert."
+                    )
             report_path = destination / "export_report.json"
             user_report_path = destination / "export_summary.txt"
             report = build_technical_report(
@@ -101,6 +120,7 @@ class PreviewExportService:
                 output_path=output_path,
                 output_sha256=output_hash,
                 created_at=created_at,
+                project_path=project_output_path,
             )
             report_path.write_text(
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n",
@@ -113,6 +133,7 @@ class PreviewExportService:
                     output_path=output_path,
                     technical_report_path=report_path.resolve(),
                     created_at=created_at,
+                    project_path=project_output_path,
                 ),
                 encoding="utf-8",
             )
@@ -135,4 +156,8 @@ class PreviewExportService:
             ),
             source_sha256=preview.source_sha256,
             output_sha256=output_hash,
+            project_path=(
+                project_output_path.resolve()
+                if project_output_path is not None else None
+            ),
         )

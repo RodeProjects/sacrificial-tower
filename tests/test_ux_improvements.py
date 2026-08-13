@@ -117,14 +117,13 @@ class UxImprovementTests(unittest.TestCase):
             maximum_object_segments=200,
         )
 
-    def test_01_full_infill_hint_explains_simulation_and_manual_step(self) -> None:
+    def test_01_full_infill_hint_explains_object_specific_joint_project(self) -> None:
         window = self.window()
         window.full_infill_checkbox.setChecked(True)
         self.assertEqual(
             window.full_infill_hint.text(),
-            "Testslices verwenden eine temporäre Prozessprofilkopie mit "
-            "100 % Fülldichte. Für die exportierte STL anschließend auch "
-            "im Slicer objektspezifisch 100 % Fülldichte einstellen.",
+            "Der gemeinsame Testslice und das exportierte 3MF weisen im "
+            "Slicer nur dem Kühlturm objektspezifisch 100 % Fülldichte zu.",
         )
         window.close()
 

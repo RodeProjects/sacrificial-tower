@@ -104,6 +104,10 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
             "Maximum outer diameter must be greater than or equal to "
             "minimum outer diameter."
         )
+    if settings.minimum_object_tower_distance_mm < 0.0:
+        raise ValueError(
+            "Minimum object/tower distance must not be negative."
+        )
     if settings.base_height_mm < 0.0:
         raise ValueError("Base height must not be negative.")
     if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:

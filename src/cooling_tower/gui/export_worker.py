@@ -30,6 +30,7 @@ class ExportWorker(CancelableWorker):
         output_root: Path,
         export_service: PreviewExportService,
         preview_service: PreviewService,
+        seed_preview: PreviewResult | None = None,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -38,6 +39,7 @@ class ExportWorker(CancelableWorker):
         self.output_root = output_root
         self.export_service = export_service
         self.preview_service = preview_service
+        self.seed_preview = seed_preview
 
     @Slot()
     def run(self) -> None:
@@ -53,6 +55,7 @@ class ExportWorker(CancelableWorker):
                         progress_callback=lambda percent, status: self.progress.emit(
                             self.request_id, percent, status
                         ),
+                        seed_preview=self.seed_preview,
                     )
                     preview = generated_preview
                 else:

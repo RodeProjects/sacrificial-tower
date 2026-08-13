@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -1716,14 +1716,54 @@ def plan_movement_run(
             entry_speed_mm_s=boundary_speeds[index],
             exit_speed_mm_s=boundary_speeds[index + 1],
         )
+        # ``dataclasses.replace`` discovers and reads every field dynamically.
+        # This function runs more than once per physical G-code movement due
+        # to the bounded look-ahead window, making that convenience overhead a
+        # measurable part of large joint slices. The explicit copy preserves
+        # the exact immutable value while avoiding repeated field reflection.
         planned_movements.append(
-            replace(
-                movement,
+            Movement(
+                line_number=movement.line_number,
+                command=movement.command,
+                start_x=movement.start_x,
+                start_y=movement.start_y,
+                start_z=movement.start_z,
+                start_e=movement.start_e,
+                end_x=movement.end_x,
+                end_y=movement.end_y,
+                end_z=movement.end_z,
+                end_e=movement.end_e,
+                delta_x=movement.delta_x,
+                delta_y=movement.delta_y,
+                delta_z=movement.delta_z,
+                delta_e=movement.delta_e,
+                endpoint_distance_xy_mm=movement.endpoint_distance_xy_mm,
+                endpoint_distance_xyz_mm=movement.endpoint_distance_xyz_mm,
+                path_length_mm=movement.path_length_mm,
+                feedrate_mm_min=movement.feedrate_mm_min,
+                effective_feedrate_mm_min=(
+                    movement.effective_feedrate_mm_min
+                ),
+                timing_distance_mm=movement.timing_distance_mm,
                 duration_s=timing.duration_s,
                 timing_error=timing.error,
+                is_arc=movement.is_arc,
+                arc_plane=movement.arc_plane,
+                arc_radius_mm=movement.arc_radius_mm,
+                arc_sweep_degrees=movement.arc_sweep_degrees,
+                arc_error=movement.arc_error,
+                category=movement.category,
+                acceleration_mm_s2=movement.acceleration_mm_s2,
                 entry_speed_mm_s=timing.entry_speed_mm_s,
                 cruise_speed_mm_s=timing.cruise_speed_mm_s,
                 exit_speed_mm_s=timing.exit_speed_mm_s,
+                jerk_x_mm_s=movement.jerk_x_mm_s,
+                jerk_y_mm_s=movement.jerk_y_mm_s,
+                jerk_z_mm_s=movement.jerk_z_mm_s,
+                jerk_e_mm_s=movement.jerk_e_mm_s,
+                square_corner_velocity_mm_s=(
+                    movement.square_corner_velocity_mm_s
+                ),
             )
         )
 

@@ -541,7 +541,7 @@ class BaseSlicerAdapter:
         """Copy inputs and build a command without starting an external process."""
 
         if not request.model_path.is_file():
-            raise FileNotFoundError(f"STL model not found: {request.model_path}")
+            raise FileNotFoundError(f"Model file not found: {request.model_path}")
         if request.profile.installation.adapter_id != self.adapter_id:
             raise ValueError("Slice request belongs to a different adapter.")
         if not request.profile.installation.can_slice:

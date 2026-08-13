@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
@@ -723,6 +724,17 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         ):
             self.assertIn(argument, command)
         self.assertNotIn("shell", " ".join(command).casefold())
+
+    def test_fixed_project_positions_disable_arrangement_and_bed_shift(self) -> None:
+        runner = ConfigurableRunner()
+        adapter, request = self.request(runner)
+        result = adapter.slice_model(
+            replace(request, preserve_model_positions=True)
+        )
+        self.assertTrue(result.success)
+        self.assertNotIn("--arrange", result.command)
+        self.assertNotIn("--ensure-on-bed", result.command)
+        self.assertIn("--slice", result.command)
 
     def test_anycubic_cli_receives_typed_isolated_profile_copies(self) -> None:
         for record in (self.machine, self.process, self.filament):

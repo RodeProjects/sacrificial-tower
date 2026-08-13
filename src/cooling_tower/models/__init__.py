@@ -49,6 +49,7 @@ from cooling_tower.models.tower_need import (
 from cooling_tower.models.tower_profile import TowerLayerProfile
 from cooling_tower.models.calibration import (
     BedBounds,
+    BedGeometry,
     CalibrationConfig,
     CalibrationFailure,
     CalibrationFailureCode,
@@ -100,6 +101,7 @@ __all__ = [
     "TowerNeedAssessment",
     "TowerLayerProfile",
     "BedBounds",
+    "BedGeometry",
     "CalibrationConfig",
     "CalibrationFailure",
     "CalibrationFailureCode",

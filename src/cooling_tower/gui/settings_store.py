@@ -216,6 +216,17 @@ def _migrate_settings_7_to_8(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_8_to_9(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add the edge-to-edge object/tower distance with its safe default."""
+
+    migrated = _nest_legacy_generation(payload)
+    generation = dict(migrated.get("generation", {}))
+    generation.setdefault("minimum_object_tower_distance_mm", 25.0)
+    migrated["generation"] = _generation_values(generation)
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -297,6 +308,7 @@ _USER_SETTINGS_MIGRATIONS = {
     5: _migrate_settings_5_to_6,
     6: _migrate_settings_6_to_7,
     7: _migrate_settings_7_to_8,
+    8: _migrate_settings_8_to_9,
 }
 
 

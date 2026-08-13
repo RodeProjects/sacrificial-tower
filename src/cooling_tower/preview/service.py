@@ -13,7 +13,7 @@ from cooling_tower.calibration import CalibrationService
 from cooling_tower.calibration.gcode_integration import (
     GCodeIntegrationError,
     determine_occupied_bounds,
-    parse_bed_bounds,
+    parse_bed_geometry,
     propose_tower_placement,
 )
 from cooling_tower.models import (
@@ -63,15 +63,22 @@ class PreviewBuildError(RuntimeError):
     pass
 
 
-def _fallback_bed(occupied: OccupiedBounds, tower_radius: float) -> BedBounds:
-    margin = max(15.0, tower_radius + 8.0)
-    width = occupied.maximum_x_mm - occupied.minimum_x_mm
-    depth = occupied.maximum_y_mm - occupied.minimum_y_mm
+def _fallback_bed(
+    occupied: OccupiedBounds,
+    tower_radius: float,
+    *,
+    object_clearance: float,
+    edge_clearance: float,
+) -> BedBounds:
+    margin = max(
+        15.0,
+        object_clearance + 2.0 * tower_radius + edge_clearance + 5.0,
+    )
     return BedBounds(
         occupied.minimum_x_mm - margin,
-        occupied.maximum_x_mm + margin + max(2.0 * tower_radius, width * 0.2),
+        occupied.maximum_x_mm + margin,
         occupied.minimum_y_mm - margin,
-        occupied.maximum_y_mm + margin + max(2.0 * tower_radius, depth * 0.1),
+        occupied.maximum_y_mm + margin,
     )
 
 
@@ -80,23 +87,16 @@ def _suggest_placement(
     occupied: OccupiedBounds,
     tower_radius: float,
     request: PreviewRequest,
+    bed_geometry: object | None = None,
 ) -> TowerPlacement:
-    try:
-        return propose_tower_placement(
-            bed,
-            occupied,
-            tower_radius_mm=tower_radius,
-            object_clearance_mm=request.calibration_config.object_clearance_mm,
-            edge_clearance_mm=request.calibration_config.bed_edge_clearance_mm,
-        )
-    except GCodeIntegrationError:
-        return TowerPlacement(
-            bed.maximum_x_mm - tower_radius - 3.0,
-            bed.minimum_y_mm + tower_radius + 3.0,
-            tower_radius,
-            bed,
-            request.calibration_config.object_clearance_mm,
-        )
+    return propose_tower_placement(
+        bed,
+        occupied,
+        tower_radius_mm=tower_radius,
+        object_clearance_mm=request.calibration_config.object_clearance_mm,
+        edge_clearance_mm=request.calibration_config.bed_edge_clearance_mm,
+        bed_geometry=bed_geometry,
+    )
 
 
 def _tower_wireframe(profile: object, placement: TowerPlacement) -> tuple[LineSegment3D, ...]:
@@ -277,10 +277,35 @@ class PreviewService:
         *,
         cancellation_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
+        seed_preview: PreviewResult | None = None,
     ) -> PreviewResult:
         notify = progress_callback or (lambda _percent, _status: None)
         signature = request.signature()
         source = request.source_path
+        seed_profile = None
+        seed_stl_path = None
+        if seed_preview is not None:
+            expected_seed_signature = request.signature_for_joint_slice(False)
+            seed_calibration = getattr(seed_preview, "calibration", None)
+            if (
+                request.output_mode is not OutputMode.STL
+                or not request.calibration_config.perform_joint_final_slice
+                or request.source_artifact is None
+                or request.source_artifact.source_kind.value != "stl"
+                or seed_preview.request_signature != expected_seed_signature
+                or seed_preview.output_mode is not request.output_mode
+                or seed_calibration is None
+                or getattr(seed_calibration, "profile", None) is None
+                or not seed_preview.artifact_path.is_file()
+                or sha256_file(seed_preview.artifact_path)
+                != seed_preview.artifact_sha256
+            ):
+                raise PreviewBuildError(
+                    "Der schnelle Vorschaukandidat kann für den Präzisionsexport "
+                    "nicht sicher wiederverwendet werden."
+                )
+            seed_profile = seed_calibration.profile
+            seed_stl_path = seed_preview.artifact_path
         if not request.original_source_is_current():
             raise PreviewBuildError(
                 "Die ursprüngliche Quelldatei wurde seit ihrer Prüfung verändert."
@@ -304,6 +329,7 @@ class PreviewService:
             profile = None
             calibration = None
             calibrated = False
+            joint_sliced = False
             slicer_optimized = False
             warnings: list[str] = []
             artifact: Path | None = None
@@ -329,9 +355,36 @@ class PreviewService:
                         25 + round(max(0, min(100, percent)) * 0.6),
                         status,
                     ),
+                    source_artifact=request.source_artifact,
+                    seed_profile=seed_profile,
+                    seed_stl_path=seed_stl_path,
                 )
                 if calibration.state is CalibrationState.CANCELLED:
                     raise PreviewCancelled()
+                joint_critical_failures = tuple(
+                    failure
+                    for failure in getattr(calibration, "failures", ())
+                    if getattr(getattr(failure, "code", None), "value", "")
+                    in {
+                        "no_bed_space",
+                        "object_override_rejected",
+                        "slicer_failure",
+                        "geometry_invalid",
+                    }
+                )
+                if (
+                    request.source_artifact is not None
+                    and request.source_artifact.source_kind.value == "stl"
+                    and request.calibration_config.perform_joint_final_slice
+                    and joint_critical_failures
+                ):
+                    detail = " ".join(
+                        item.message for item in joint_critical_failures
+                    )
+                    raise PreviewBuildError(
+                        "Das gemeinsame Objekt-/Turm-Projekt konnte nicht "
+                        "sicher geslicet werden. " + detail
+                    )
                 has_usable_improvement = bool(
                     getattr(
                         calibration,
@@ -343,12 +396,20 @@ class PreviewService:
                     profile = calibration.profile
                     placement = calibration.placement
                     calibrated = calibration.success
+                    joint_sliced = getattr(calibration, "project_path", None) is not None
                     slicer_optimized = True
-                    generation_kind = (
-                        "slicerbasiert kalibriert"
-                        if calibration.success
-                        else "sliceroptimierter bester Zwischenstand"
-                    )
+                    if joint_sliced:
+                        generation_kind = (
+                            "gemeinsam slicerbasiert kalibriert"
+                            if calibration.success
+                            else "gemeinsam gesliceter, prüfbarer Zwischenstand"
+                        )
+                    else:
+                        generation_kind = (
+                            "schnell slicerbasiert angenähert"
+                            if calibration.success
+                            else "schnell optimierter Vorschau-Zwischenstand"
+                        )
                     warnings.extend(calibration.warnings)
                     artifact = (
                         calibration.gcode_path
@@ -358,8 +419,14 @@ class PreviewService:
                     if not calibration.success:
                         warnings.append(
                             "Die Ziel-Layerzeit wurde nicht vollständig erreicht; "
-                            "exportiert wird der gegenüber dem analytischen Ausgang "
-                            "messbar bessere Slicer-Zwischenstand."
+                            + (
+                                "exportiert wird der einmal gemeinsam geslicte, "
+                                "prüfbare Zwischenstand."
+                                if joint_sliced
+                                else "exportiert wird der gegenüber dem "
+                                "analytischen Ausgang messbar bessere "
+                                "Slicer-Zwischenstand."
+                            )
                         )
                 elif request.output_mode is OutputMode.GCODE:
                     detail = " ".join(item.message for item in calibration.failures)
@@ -410,16 +477,37 @@ class PreviewService:
 
             occupied = source_data.occupied_bounds
             bed = None
+            bed_geometry = None
             if request.effective_profile is not None:
-                bed = parse_bed_bounds(request.effective_profile.effective_values)
+                bed_geometry = parse_bed_geometry(
+                    request.effective_profile.effective_values
+                )
+                bed = bed_geometry.bounds if bed_geometry is not None else None
             tower_radius = max(
                 float(getattr(point, "outer_radius_mm"))
                 for point in getattr(profile, "points")
             )
-            bed = bed or _fallback_bed(occupied, tower_radius)
-            placement = placement or _suggest_placement(
-                bed, occupied, tower_radius, request
+            bed = bed or _fallback_bed(
+                occupied,
+                tower_radius,
+                object_clearance=(
+                    request.calibration_config.object_clearance_mm
+                ),
+                edge_clearance=(
+                    request.calibration_config.bed_edge_clearance_mm
+                ),
             )
+            if placement is None:
+                try:
+                    placement = _suggest_placement(
+                        bed,
+                        occupied,
+                        tower_radius,
+                        request,
+                        bed_geometry,
+                    )
+                except GCodeIntegrationError as error:
+                    raise PreviewBuildError(str(error)) from error
             notify(90, "Vorschau wird aufgebaut …")
             tower_segments = _tower_wireframe(profile, placement)
             tower_height = max(
@@ -461,6 +549,17 @@ class PreviewService:
                 artifact_path=artifact.resolve(),
                 source_sha256=final_sha256,
                 artifact_sha256=sha256_file(artifact),
+                project_path=(
+                    getattr(calibration, "project_path", None)
+                    if calibration is not None else None
+                ),
+                project_sha256=(
+                    sha256_file(getattr(calibration, "project_path"))
+                    if calibration is not None
+                    and getattr(calibration, "project_path", None) is not None
+                    else None
+                ),
+                joint_sliced=joint_sliced,
                 calibrated=calibrated,
                 generation_kind=generation_kind,
                 slicer_optimized=slicer_optimized,

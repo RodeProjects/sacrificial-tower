@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+from cooling_tower.file_integrity import sha256_file
 from cooling_tower.preview.models import OutputMode, PreviewRequest, PreviewResult
 
 
@@ -32,6 +33,9 @@ _FAILURE_LABELS = {
     "no_bed_space": "Auf dem Druckbett wurde kein sicherer Platz für den Turm gefunden.",
     "slicer_failure": "Der Slicer konnte einen Kalibrierungslauf nicht erfolgreich abschließen.",
     "profile_incomplete": "Das ausgewählte Druckprofil enthält nicht alle benötigten Angaben.",
+    "object_override_rejected": (
+        "Der Slicer hat die objektspezifische 100-%-Turmfüllung nicht bestätigt."
+    ),
     "layer_mismatch": "Die Layer des geslicten Turms konnten nicht eindeutig dem Objekt zugeordnet werden.",
     "unsupported_gcode": "Der Quell-G-Code verwendet eine nicht sicher unterstützte Funktion.",
     "slicer_timing_mismatch": "Slicerangabe und aus dem G-Code berechnete Zeit widersprechen sich zu stark.",
@@ -196,6 +200,14 @@ def calibration_diagnostics(
         "mode": _enum_value(getattr(calibration, "mode", None)),
         "configured_iteration_count": requested_iterations,
         "iteration_count": len(iterations),
+        "fast_iteration_count": sum(
+            not bool(getattr(item, "joint_slice", False))
+            for item in iterations
+        ),
+        "joint_slice_count": sum(
+            bool(getattr(item, "joint_slice", False))
+            for item in iterations
+        ),
         "best_iteration_number": best_iteration_number,
         "best_maximum_remaining_deficit_s": getattr(
             best_iteration,
@@ -219,6 +231,14 @@ def calibration_diagnostics(
         ),
         "best_slicer_result_stable": bool(
             getattr(best_iteration, "slicer_result_stable", False)
+        ),
+        "best_joint_slice": bool(
+            getattr(best_iteration, "joint_slice", False)
+        ),
+        "best_maximum_target_deviation_s": getattr(
+            best_iteration,
+            "maximum_target_deviation_s",
+            None,
         ),
         "failures": failure_dicts,
         "warnings": list(getattr(calibration, "warnings", ())) if attempted else [],
@@ -351,6 +371,7 @@ def build_technical_report(
     output_path: Path,
     output_sha256: str,
     created_at: datetime,
+    project_path: Path | None = None,
 ) -> dict[str, Any]:
     snapshot = request.snapshot
     calibration = calibration_diagnostics(preview, request)
@@ -383,6 +404,10 @@ def build_technical_report(
         "source_provenance": _source_provenance(request),
         "output_path": str(output_path.resolve()),
         "output_sha256": output_sha256,
+        "joint_project_path": (
+            str(project_path.resolve()) if project_path is not None else None
+        ),
+        "joint_sliced": preview.joint_sliced,
         "calibrated": preview.calibrated,
         "slicer_optimized": preview.slicer_optimized,
         "generation_kind": preview.generation_kind,
@@ -404,6 +429,7 @@ def build_technical_report(
             "calibration_attempted": calibration["attempted"],
             "calibration_succeeded": preview.calibrated,
             "slicer_optimized": preview.slicer_optimized,
+            "joint_sliced": preview.joint_sliced,
             "calibration_state": calibration["state"],
             "minimum_verified_layer_time_s": (
                 preview.minimum_verified_layer_time_s
@@ -448,6 +474,14 @@ def build_technical_report(
             "sha256": output_sha256,
             "size_bytes": output_path.stat().st_size,
             "mode": preview.output_mode.value,
+            "joint_project": (
+                {
+                    "path": str(project_path.resolve()),
+                    "sha256": sha256_file(project_path),
+                    "size_bytes": project_path.stat().st_size,
+                }
+                if project_path is not None else None
+            ),
         },
         "request": {
             "signature": preview.request_signature,
@@ -469,6 +503,7 @@ def build_technical_report(
         "preview_and_geometry": {
             "generation_kind": preview.generation_kind,
             "calibrated": preview.calibrated,
+            "joint_sliced": preview.joint_sliced,
             "tower_height_mm": preview.scene.tower_height_mm,
             "tower_center_xy_mm": list(preview.scene.tower_center_xy_mm),
             "source_toolpath_segment_count": preview.scene.source_segment_count,
@@ -501,6 +536,7 @@ def build_user_report(
     output_path: Path,
     technical_report_path: Path,
     created_at: datetime,
+    project_path: Path | None = None,
 ) -> str:
     diagnostics = calibration_diagnostics(preview, request)
     lines = [
@@ -509,6 +545,10 @@ def build_user_report(
         "",
         f"Erstellt: {created_at.astimezone().strftime('%d.%m.%Y %H:%M:%S %Z')}",
         f"Ausgabe: {output_path}",
+        *(
+            (f"Gemeinsames 3MF: {project_path}",)
+            if project_path is not None else ()
+        ),
         f"Modus: {preview.output_mode.value.upper()}",
         "Ursprüngliche Eingabe: "
         f"{request.output_source_path.name} "
@@ -526,13 +566,28 @@ def build_user_report(
     if preview.calibrated:
         lines.extend(
             (
-                "Ergebnis: Erfolgreich und slicerbasiert kalibriert.",
-                "Der Kühlturm wurde durch einen Slicerlauf geprüft und an die gemessenen Layerzeiten angepasst.",
+                (
+                    "Ergebnis: Erfolgreich gemeinsam slicerbasiert kalibriert."
+                    if preview.joint_sliced
+                    else "Ergebnis: Erfolgreich schnell slicerbasiert angenähert."
+                ),
+                (
+                    "Objekt und Kühlturm wurden im abschließenden "
+                    "Präzisionsslice gemeinsam geprüft."
+                    if preview.joint_sliced
+                    else "Der Kühlturm wurde separat schnell geprüft; der "
+                    "gemeinsame Präzisionsslice folgt beim Export."
+                ),
             )
         )
         if preview.minimum_verified_layer_time_s is not None:
             lines.append(
-                "Kleinste geprüfte relevante Layerzeit: "
+                (
+                    "Kleinste gemeinsam geprüfte relevante Layerzeit: "
+                    if preview.joint_sliced
+                    else "Kleinste angenäherte relevante Layerzeit: "
+                )
+                +
                 f"{preview.minimum_verified_layer_time_s:.3f} s"
             )
             difference = (
@@ -543,16 +598,40 @@ def build_user_report(
                 "Abweichung der kleinsten berechneten Layerzeit vom Ziel: "
                 f"{difference:+.3f} s"
             )
+        joint_deviation = diagnostics[
+            "best_maximum_target_deviation_s"
+        ]
+        if joint_deviation is not None:
+            lines.append(
+                "Größte absolute Zielabweichung im gemeinsamen Slice: "
+                f"{joint_deviation:.3f} s"
+            )
         completed = diagnostics["iteration_count"]
         configured = diagnostics["configured_iteration_count"]
-        lines.append(
-            f"Durchgeführte Slicer-Durchläufe: {completed} von maximal "
-            f"{configured}."
-        )
+        if preview.joint_sliced:
+            lines.append(
+                "Gemeinsame Präzisionsslices im Exportlauf: "
+                f"{diagnostics['joint_slice_count']} (höchstens zwei)."
+            )
+            if diagnostics["fast_iteration_count"]:
+                lines.append(
+                    "Schnelle Kühlturm-Abgleiche im Exportlauf: "
+                    f"{diagnostics['fast_iteration_count']}."
+                )
+            else:
+                lines.append(
+                    "Der bereits berechnete schnelle Vorschaukandidat wurde "
+                    "wiederverwendet."
+                )
+        else:
+            lines.append(
+                f"Durchgeführte schnelle Slicer-Abgleiche: {completed} von "
+                f"maximal {configured}."
+            )
         best_iteration = diagnostics["best_iteration_number"]
         if best_iteration is not None:
             lines.append(f"Exportierter bester Durchlauf: {best_iteration}.")
-        if completed < configured:
+        if not preview.joint_sliced and completed < configured:
             lines.append(
                 "Weitere Durchläufe waren nicht erforderlich, weil die "
                 "eingestellte Zielzeit erreicht wurde und zwei "
@@ -568,20 +647,41 @@ def build_user_report(
                 f"{result_change:.3f} s."
             )
         lines.append(
-            "Bitte kontrollieren Sie die tatsächliche Layerzeit dennoch im "
-            "final gemeinsam geslicten Projekt."
+            "Das gemeinsame 3MF bewahrt die beim Präzisionsslice verwendete "
+            "Anordnung und die objektspezifischen Turmeinstellungen."
+            if preview.joint_sliced
+            else "Die endgültige gemeinsame Layerzeit wird erst beim Export "
+            "präzisionsgeprüft."
         )
     elif preview.slicer_optimized:
         lines.extend(
             (
-                "Ergebnis: Sliceroptimierter bester Zwischenstand exportiert.",
+                (
+                    "Ergebnis: Gemeinsam gesliceter, prüfbarer Zwischenstand "
+                    "exportiert."
+                    if preview.joint_sliced
+                    else "Ergebnis: Sliceroptimierter bester Zwischenstand "
+                    "exportiert."
+                ),
                 "Die Ziel-Layerzeit wurde noch nicht vollständig erreicht, "
-                "der ausgegebene Kühlturm ist laut den gemessenen Slicerzeiten "
-                "aber besser als die analytische Ausgangsvariante.",
+                + (
+                    "der ausgegebene Kühlturm wurde jedoch zusammen mit dem "
+                    "Objekt gemessen und bleibt im 3MF reproduzierbar."
+                    if preview.joint_sliced
+                    else "der ausgegebene Kühlturm ist laut den gemessenen "
+                    "Slicerzeiten aber besser als die analytische "
+                    "Ausgangsvariante."
+                ),
                 "",
                 "Kalibrierungsergebnis:",
-                f"- Durchgeführt: {diagnostics['iteration_count']} von maximal "
-                f"{diagnostics['configured_iteration_count']} Slicer-Durchläufen",
+                (
+                    "- Gemeinsame Präzisionsslices: "
+                    f"{diagnostics['joint_slice_count']} (höchstens zwei)"
+                    if preview.joint_sliced
+                    else f"- Durchgeführt: {diagnostics['iteration_count']} "
+                    f"von maximal {diagnostics['configured_iteration_count']} "
+                    "schnelle Slicer-Abgleiche"
+                ),
                 f"- Exportierter bester Durchlauf: "
                 f"{diagnostics['best_iteration_number']}",
             )

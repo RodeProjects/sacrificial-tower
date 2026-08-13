@@ -213,13 +213,26 @@ class PreviewRequest:
         }
 
     def signature(self) -> str:
-        payload = json.dumps(
-            self.signature_payload(),
+        return self._signature_for_payload(self.signature_payload())
+
+    def signature_for_joint_slice(self, enabled: bool) -> str:
+        """Return the same request identity with only the joint-slice policy changed."""
+
+        payload = self.signature_payload()
+        calibration = dict(payload["calibration"])
+        calibration["perform_joint_final_slice"] = bool(enabled)
+        payload["calibration"] = calibration
+        return self._signature_for_payload(payload)
+
+    @staticmethod
+    def _signature_for_payload(payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
+        return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(slots=True)
@@ -232,6 +245,9 @@ class PreviewResult:
     artifact_sha256: str
     calibrated: bool
     generation_kind: str
+    project_path: Path | None = None
+    project_sha256: str | None = None
+    joint_sliced: bool = False
     slicer_optimized: bool = False
     calibration: Any = None
     minimum_verified_layer_time_s: float | None = None
@@ -264,6 +280,7 @@ class PreviewExportResult:
     minimum_verified_layer_time_s: float | None
     source_sha256: str
     output_sha256: str
+    project_path: Path | None = None
 
     @property
     def technical_report_path(self) -> Path:

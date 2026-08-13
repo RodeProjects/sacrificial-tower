@@ -236,6 +236,7 @@ SETTING_UNITS = {
     "safety_factor": "",
     "minimum_outer_diameter_mm": "mm",
     "maximum_outer_diameter_mm": "mm",
+    "minimum_object_tower_distance_mm": "mm",
     "manual_base_width_mm": "mm",
     "base_height_mm": "mm",
     "maximum_expansion_angle_deg": "°",
@@ -1670,6 +1671,9 @@ class MainWindow(QMainWindow):
         self.maximum_outer_spin = self._double_spin(
             0.002, 1000.0, 3, 1.0, "maximumOuterDiameter"
         )
+        self.minimum_object_tower_distance_spin = self._double_spin(
+            0.0, 1000.0, 1, 1.0, "minimumObjectTowerDistance"
+        )
         self._add_numeric_setting(
             geometry_layout,
             "minimum_outer_diameter_mm",
@@ -1682,13 +1686,24 @@ class MainWindow(QMainWindow):
             "Größter Außendurchmesser",
             self.maximum_outer_spin,
         )
+        self._add_numeric_setting(
+            geometry_layout,
+            "minimum_object_tower_distance_mm",
+            "Mindestabstand zu Objekt",
+            self.minimum_object_tower_distance_spin,
+            helper_text=(
+                "Kleinster Abstand zwischen den belegten Außenkanten von "
+                "Druckobjekt und Kühlturm; Brim und Support werden über den "
+                "voranalysierten G-Code berücksichtigt."
+            ),
+        )
         self.full_infill_checkbox = QCheckBox(
             "100 % Turmfüllung simulieren"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
         self.full_infill_checkbox.setToolTip(
-            "Verwendet ausschließlich für die Testslices eine temporäre "
-            "Prozessprofilkopie mit 100 % Fülldichte."
+            "Weist im gemeinsamen temporären 3MF ausschließlich dem Kühlturm "
+            "objektspezifisch 100 % Fülldichte zu."
         )
         geometry_layout.addWidget(self.full_infill_checkbox)
         geometry_hint = QLabel(
@@ -2440,10 +2455,12 @@ class MainWindow(QMainWindow):
         )
         self.preview_iteration_slider.setValue(DEFAULT_PREVIEW_ITERATIONS)
         self.preview_iteration_slider.setToolTip(
-            "Legt fest, wie viele aufeinanderfolgende Slicer-Durchläufe für "
-            "Vorschau und Export ausgeführt werden. Mehr Durchläufe erlauben "
-            "eine genauere Annäherung, benötigen aber mehr Zeit. Bei einem "
-            "technischen Fehler wird die Prüfung sicher abgebrochen."
+            "Legt fest, wie viele schnelle Kühlturm-Abgleichläufe die Vorschau "
+            "verwendet. Beim Export wird der aktuelle Kandidat gemeinsam mit "
+            "dem Objekt geslicet; nur bei relevanter Abweichung folgt höchstens "
+            "eine gemeinsame Korrekturprüfung. "
+            "Mehr Durchläufe erhöhen die Vorschauqualität und benötigen etwas mehr "
+            "Zeit, erhöhen aber nicht mehr die Zahl der teuren Objekt-Slices."
         )
         self.preview_iteration_slider.setAccessibleName(
             "Slicer-Durchläufe für Vorschau und Export"
@@ -3340,6 +3357,10 @@ class MainWindow(QMainWindow):
         return CalibrationConfig(
             mode=CalibrationMode.STL,
             maximum_iterations=self.preview_iterations,
+            object_clearance_mm=(
+                self.minimum_object_tower_distance_spin.value()
+            ),
+            perform_joint_final_slice=False,
         )
 
     @property
@@ -3371,7 +3392,9 @@ class MainWindow(QMainWindow):
         noun = "Durchlauf" if iterations == 1 else "Durchläufe"
         self.preview_iteration_count_label.setText(f"{iterations} {noun}")
         self.preview_iteration_slider.setAccessibleDescription(
-            f"Aktuell sind {iterations} Slicer-{noun} eingestellt."
+            f"Aktuell sind {iterations} schnelle Kühlturm-{noun} für die "
+            "Vorschau eingestellt. Der Export ergänzt einen gemeinsamen "
+            "Präzisionsslice."
         )
 
     def _on_preview_iterations_changed(self, _value: int) -> None:
@@ -3384,9 +3407,17 @@ class MainWindow(QMainWindow):
         self._update_section_summaries()
 
     def _export_calibration_config(self) -> CalibrationConfig:
+        joint_slice_available = bool(
+            self.source_artifact is not None
+            and self.source_artifact.source_kind.value == "stl"
+        )
         return CalibrationConfig(
             mode=CalibrationMode.STL,
             maximum_iterations=self.preview_iterations,
+            object_clearance_mm=(
+                self.minimum_object_tower_distance_spin.value()
+            ),
+            perform_joint_final_slice=joint_slice_available,
         )
 
     def _profile_origin_text(self, result: ProfileMatchResult) -> str:
@@ -8371,6 +8402,9 @@ class MainWindow(QMainWindow):
             safety_factor=self.safety_factor_spin.value(),
             minimum_outer_diameter_mm=self.minimum_outer_spin.value(),
             maximum_outer_diameter_mm=self.maximum_outer_spin.value(),
+            minimum_object_tower_distance_mm=(
+                self.minimum_object_tower_distance_spin.value()
+            ),
             simulate_full_tower_infill=(
                 self.full_infill_checkbox.isChecked()
             ),
@@ -8402,6 +8436,10 @@ class MainWindow(QMainWindow):
             (self.safety_factor_spin, settings.safety_factor),
             (self.minimum_outer_spin, settings.minimum_outer_diameter_mm),
             (self.maximum_outer_spin, settings.maximum_outer_diameter_mm),
+            (
+                self.minimum_object_tower_distance_spin,
+                settings.minimum_object_tower_distance_mm,
+            ),
             (self.minimum_base_spin, settings.minimum_base_radius_mm),
             (self.manual_base_width_spin, settings.manual_base_width_mm),
             (self.base_height_spin, settings.base_height_mm),
@@ -8469,9 +8507,8 @@ class MainWindow(QMainWindow):
     def update_wall_path_preview(self) -> None:
         if self.full_infill_checkbox.isChecked():
             self.full_infill_hint.setText(
-                "Testslices verwenden eine temporäre Prozessprofilkopie mit "
-                "100 % Fülldichte. Für die exportierte STL anschließend auch "
-                "im Slicer objektspezifisch 100 % Fülldichte einstellen."
+                "Der gemeinsame Testslice und das exportierte 3MF weisen im "
+                "Slicer nur dem Kühlturm objektspezifisch 100 % Fülldichte zu."
             )
         else:
             density = None
@@ -9016,6 +9053,7 @@ class MainWindow(QMainWindow):
                 {
                     "minimum_outer_diameter_mm",
                     "maximum_outer_diameter_mm",
+                    "minimum_object_tower_distance_mm",
                     "automatic_base_width",
                     "manual_base_width_mm",
                     "base_height_mm",
@@ -9425,6 +9463,16 @@ class MainWindow(QMainWindow):
             and request.signature() == preview.request_signature
         )
         export_preview = preview if preview_is_current else None
+        export_seed = (
+            preview
+            if preview_matches_current_settings
+            and preview is not None
+            and export_preview is None
+            and getattr(preview, "calibration", None) is not None
+            and self.source_artifact is not None
+            and self.source_artifact.source_kind.value == "stl"
+            else None
+        )
         self._export_request_id += 1
         request_id = self._export_request_id
         self._set_export_button_state(
@@ -9437,8 +9485,11 @@ class MainWindow(QMainWindow):
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(False)
         self._set_main_status(
-            "Kühlturm wird mit "
-            f"{self.preview_iterations} Slicer-Durchläufen erzeugt und exportiert …"
+            "Aktueller Vorschaukandidat wird gemeinsam mit dem Objekt "
+            "präzisionsgeslicet und bei Bedarf einmal korrigiert …"
+            if export_seed is not None
+            else "Kühlturm wird mit schnellen Abgleichläufen und einem "
+            "gemeinsamen Präzisionsslice erzeugt und exportiert …"
             if export_preview is None
             else "Aktuelle Vorschau wird exportiert …",
             icon="⏳",
@@ -9456,6 +9507,7 @@ class MainWindow(QMainWindow):
             Path(self.output_root_edit.text()).expanduser(),
             self.export_service,
             self.preview_service,
+            seed_preview=export_seed,
         )
         worker.progress.connect(self._on_export_progress)
         worker.succeeded.connect(self._on_export_succeeded)
@@ -9509,8 +9561,11 @@ class MainWindow(QMainWindow):
             return
         status = german_user_message(status)
         self._set_main_status(status, icon="⏳", state="running")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(max(0, min(100, percent)))
+        if "präzisionsslice" in status.casefold():
+            self.progress_bar.setRange(0, 0)
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_bar.show()
 
     def _on_export_succeeded(
