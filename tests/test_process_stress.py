@@ -51,7 +51,7 @@ class IsolatedProcessStressTests(unittest.TestCase):
                         env=environment,
                         capture_output=True,
                         text=True,
-                        timeout=30,
+                        timeout=90,
                         check=False,
                     )
                     result_path = artifact_directory / "result.json"

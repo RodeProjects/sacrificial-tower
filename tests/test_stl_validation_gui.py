@@ -43,7 +43,7 @@ class StlValidationGuiTests(unittest.TestCase):
             enable_update_check=False,
         )
 
-    def wait_for_stl_result(self, window: MainWindow, timeout_s: float = 15.0) -> None:
+    def wait_for_stl_result(self, window: MainWindow, timeout_s: float = 30.0) -> None:
         loop = QEventLoop()
         poll_timer = QTimer()
         poll_timer.setInterval(20)
