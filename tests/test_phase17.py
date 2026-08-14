@@ -677,7 +677,7 @@ class Phase17Tests(unittest.TestCase):
 
     def test_25a_selected_preview_pass_count_is_reused_for_export(self) -> None:
         window = self.ready_window()
-        window.preview_iteration_slider.setValue(1)
+        window.preview_iteration_slider.setValue(3)
         window.start_preview()
         deadline = time.monotonic() + 10.0
         while (
@@ -687,7 +687,7 @@ class Phase17Tests(unittest.TestCase):
             self.app.processEvents()
             time.sleep(0.01)
         self.assertIsNotNone(window.current_preview)
-        self.assertEqual(window._calibration_config().maximum_iterations, 1)
+        self.assertEqual(window._calibration_config().maximum_iterations, 3)
 
         window.output_root_edit.setText(str(self.root / "exact_output"))
         window.validate_form()
@@ -708,7 +708,7 @@ class Phase17Tests(unittest.TestCase):
         )
         self.assertEqual(
             report["calibration"]["configured_iteration_count"],
-            1,
+            3,
         )
         window.close()
 
@@ -820,20 +820,20 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("keinen erkennbaren Profiltyp", summary)
         preview.dispose()
 
-    def test_29_preview_iterations_use_a_one_to_eight_slider(self) -> None:
+    def test_29_preview_iterations_use_a_three_to_eight_slider(self) -> None:
         window = self.window()
         self.assertEqual(
             Path(window.output_root_edit.text()),
             (PROJECT_ROOT / "output").resolve(),
         )
         self.assertNotIn("slicer_iterations", window._setting_widgets)
-        self.assertEqual(window.preview_iteration_slider.minimum(), 1)
+        self.assertEqual(window.preview_iteration_slider.minimum(), 3)
         self.assertEqual(window.preview_iteration_slider.maximum(), 8)
         self.assertEqual(window.preview_iteration_slider.singleStep(), 1)
         self.assertEqual(window.preview_iterations, 3)
         self.assertEqual(window._calibration_config().maximum_iterations, 3)
         window.preview_iteration_slider.setValue(1)
-        self.assertEqual(window._calibration_config().maximum_iterations, 1)
+        self.assertEqual(window._calibration_config().maximum_iterations, 3)
         window._slicer_prediction_estimate_s = 14.75
         window._slicer_prediction_status = "Alte Schätzung"
         window.preview_iteration_slider.setValue(8)
@@ -1408,8 +1408,9 @@ class Phase17Tests(unittest.TestCase):
             calibration=unstable_calibration,
             minimum_verified_layer_time_s=11.58,
             target_layer_time_s=12.0,
-            calibration_time_tolerance_s=0.15,
-            calibration_profile_tolerance_mm=0.03,
+            calibration_time_tolerance_s=0.2,
+            calibration_slicer_result_tolerance_s=0.25,
+            calibration_profile_tolerance_mm=0.1,
             calibration_metadata_tolerance_s=0.75,
         )
 
@@ -1418,18 +1419,37 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("Ergebnis noch nicht bestätigt", summary)
         self.assertIn("Ausgeführt: 5 von 5 eingestellten Durchläufen", summary)
         self.assertNotIn("Messwerte des letzten Durchlaufs", summary)
-        self.assertIn("Ergebnisse blieben instabil", summary)
+        self.assertNotIn("Ergebnisse blieben instabil", summary)
+        self.assertNotIn("Grund", summary)
         self.assertEqual(dialog.quality_label.property("state"), "warning")
         self.assertFalse(dialog.quality_details_toggle.isHidden())
         self.assertFalse(dialog.quality_details_toggle.isChecked())
         self.assertTrue(dialog.quality_details_label.isHidden())
         details = dialog.quality_details_label.text()
-        self.assertIn("0.420 s > 0.150 s", details)
-        self.assertIn("0.310 s > 0.150 s", details)
-        self.assertIn("0.060 mm > 0.030 mm", details)
+        self.assertIn("0.420 s > 0.200 s", details)
+        self.assertIn("0.310 s > 0.250 s", details)
+        self.assertIn("0.060 mm ≤ 0.100 mm", details)
         self.assertIn("0.900 s > 0.750 s", details)
+        self.assertIn("Ergebnisse blieben instabil", details)
         dialog.quality_details_toggle.click()
         self.assertFalse(dialog.quality_details_label.isHidden())
+
+        tolerated = SimpleNamespace(
+            **{
+                **first.__dict__,
+                "minimum_verified_layer_time_s": 11.82,
+            }
+        )
+        dialog.set_preview(tolerated)
+        tolerated_summary = dialog.quality_label.text()
+        self.assertIn("Ziel-Layerzeit innerhalb der Toleranz", tolerated_summary)
+        self.assertIn("Abweichung: -0.180 s", tolerated_summary)
+        self.assertNotIn("Ergebnisse blieben instabil", tolerated_summary)
+        self.assertEqual(dialog.quality_label.property("state"), "success")
+        self.assertIn(
+            "Ergebnisse blieben instabil",
+            dialog.quality_details_label.text(),
+        )
 
         stable_iteration = SimpleNamespace(
             maximum_remaining_deficit_s=0.05,
@@ -1450,21 +1470,22 @@ class Phase17Tests(unittest.TestCase):
             ),
             minimum_verified_layer_time_s=11.95,
             target_layer_time_s=12.0,
-            calibration_time_tolerance_s=0.15,
-            calibration_profile_tolerance_mm=0.03,
+            calibration_time_tolerance_s=0.2,
+            calibration_slicer_result_tolerance_s=0.25,
+            calibration_profile_tolerance_mm=0.1,
             calibration_metadata_tolerance_s=0.75,
         )
 
         dialog.set_preview(second)
         refreshed = dialog.quality_label.text()
-        self.assertIn("Ergebnis nach 2 Durchläufen bestätigt", refreshed)
+        self.assertIn("Ziel-Layerzeit innerhalb der Toleranz", refreshed)
         self.assertIn("Ausgeführt: 2 von 2 eingestellten Durchläufen", refreshed)
         self.assertNotIn("0.040 s ≤ 0.150 s", refreshed)
         self.assertNotIn("0.310 s", refreshed)
         self.assertNotIn("Ergebnisse blieben instabil", refreshed)
         self.assertEqual(dialog.quality_label.property("state"), "success")
         self.assertIn(
-            "0.040 s ≤ 0.150 s",
+            "0.040 s ≤ 0.250 s",
             dialog.quality_details_label.text(),
         )
         self.assertNotIn("0.310 s", dialog.quality_details_label.text())

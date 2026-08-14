@@ -23,17 +23,7 @@ class SourceDropZone(QFrame):
     """Drag-and-drop and file-dialog input for one STL model."""
 
     EMPTY_MINIMUM_HEIGHT_PX = 260
-    LOADED_REPLACEMENT_HINT_MIN_HEIGHT_PX = 330
     EMPTY_PROMPT = "STL hier ablegen\noder über den Dialog auswählen"
-    REJECTED_PROMPT = (
-        "Andere STL hier ablegen\n"
-        "Die bisherige Datei wird ersetzt und direkt neu geprüft"
-    )
-
-    REPLACEMENT_PROMPT = (
-        "Andere STL hier ablegen.\n"
-        "Die bisherige Datei wird dadurch ersetzt"
-    )
 
     source_selected = Signal(str, str)
     file_rejected = Signal(str)
@@ -336,6 +326,7 @@ class SourceDropZone(QFrame):
         rejected = state == "rejected"
         actions_ready = ready or preslice_failed or rejected
         self.setMinimumHeight(self.EMPTY_MINIMUM_HEIGHT_PX if empty else 0)
+        self.setMaximumHeight(16777215)
         spacer_policy = (
             QSizePolicy.Policy.Expanding
             if empty
@@ -397,14 +388,25 @@ class SourceDropZone(QFrame):
         self.root_layout.invalidate()
         self.style().unpolish(self)
         self.style().polish(self)
+        if failed or preslice_failed or rejected:
+            # Error states use the same file facts and action layout as the
+            # valid state.  Reserve the layout's complete preferred height;
+            # minimumSize() omits the labels' real line heights and lets the
+            # action row overlap the file facts.
+            self.root_layout.activate()
+            self.setMinimumHeight(
+                max(
+                    0,
+                    self.root_layout.sizeHint().height()
+                    + self.frameWidth() * 2,
+                )
+            )
+        self.updateGeometry()
 
     def _sync_prompt_presentation(self) -> None:
         empty = self._display_state == "empty"
-        replacement = not empty
-        self.prompt_label.setText(
-            self.REPLACEMENT_PROMPT if replacement else self.EMPTY_PROMPT
-        )
-        self.prompt_label.setProperty("replacementHint", replacement)
+        self.prompt_label.setText(self.EMPTY_PROMPT)
+        self.prompt_label.setProperty("replacementHint", False)
         self.prompt_label.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Maximum,
@@ -413,20 +415,7 @@ class SourceDropZone(QFrame):
             self.root_layout.indexOf(self.prompt_label),
             0,
         )
-        must_offer_replacement = self._display_state in {
-            "failed",
-            "preslice_failed",
-            "rejected",
-        }
-        self.prompt_label.setVisible(
-            empty
-            or must_offer_replacement
-            or (
-                self._display_state == "analyzing"
-                and self.height()
-                >= self.LOADED_REPLACEMENT_HINT_MIN_HEIGHT_PX
-            )
-        )
+        self.prompt_label.setVisible(empty)
         style = self.prompt_label.style()
         style.unpolish(self.prompt_label)
         style.polish(self.prompt_label)

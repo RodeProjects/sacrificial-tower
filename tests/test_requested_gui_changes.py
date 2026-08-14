@@ -340,7 +340,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.start_profile_matching = lambda **kwargs: requests.append(kwargs)
         window.machine_profile_combo.setCurrentIndex(2)
         self.assertEqual(requests, [])
-        self.assertTrue(window.profile_confirm_button.isEnabled())
+        self.assertFalse(window.profile_confirm_button.isEnabled())
+        self.assertIn("gültigen STL", window.profile_confirm_button.toolTip())
         self.assertTrue(window.profile_status_label.isHidden())
         window.filament_profile_combo.setCurrentIndex(2)
         self.assertEqual(requests, [])
@@ -502,7 +503,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         self.assertFalse(hasattr(window, "slicer_iterations_spin"))
         self.assertNotIn("slicer_iterations", window._setting_widgets)
-        for iterations in (1, 3, 5, 8):
+        for iterations in (3, 5, 8):
             window.preview_iteration_slider.setValue(iterations)
             self.assertEqual(
                 window._calibration_config().maximum_iterations,
@@ -562,7 +563,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             176,
         )
         self.assertEqual(window.preview_quality_panel.height(), 48)
-        self.assertEqual(window.preview_iteration_slider.minimum(), 1)
+        self.assertEqual(window.preview_iteration_slider.minimum(), 3)
         self.assertEqual(window.preview_iteration_slider.maximum(), 8)
         self.assertEqual(window.preview_iteration_slider.singleStep(), 1)
         self.assertEqual(window.preview_faster_label.text(), "Schneller")

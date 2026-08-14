@@ -9,15 +9,13 @@ from pathlib import Path
 from weakref import ref
 
 from PySide6.QtCore import (
-    QAbstractAnimation,
     QEvent,
     QEasingCurve,
     QObject,
+    QParallelAnimationGroup,
     QPoint,
     QPropertyAnimation,
     QRect,
-    QRectF,
-    QSequentialAnimationGroup,
     QSize,
     QTimer,
     Qt,
@@ -26,13 +24,9 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QCloseEvent,
-    QColor,
     QCursor,
     QFontMetrics,
     QIcon,
-    QLinearGradient,
-    QPainter,
-    QPainterPath,
     QPixmap,
     QResizeEvent,
     QStandardItemModel,
@@ -46,7 +40,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
-    QGraphicsColorizeEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -60,6 +53,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QStackedWidget,
     QTabWidget,
     QTextEdit,
     QToolButton,
@@ -192,13 +186,13 @@ from cooling_tower.tower.base_calculator import (
 
 
 LEGACY_PREVIEW_QUALITY_ITERATIONS = {
-    "fast": 1,
+    "fast": 3,
     "balanced": 3,
     "exact": 5,
 }
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-MINIMUM_PREVIEW_ITERATIONS = 1
+MINIMUM_PREVIEW_ITERATIONS = 3
 MAXIMUM_PREVIEW_ITERATIONS = 8
 DEFAULT_PREVIEW_ITERATIONS = 3
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
@@ -583,6 +577,227 @@ class _InternalDialogRevealFilter(QObject):
             dialog.activateWindow()
 
 
+class _SequentialPreparationTabs(QTabWidget):
+    """Guarded preparation pages with a directional card transition."""
+
+    step_blocked = Signal(int)
+    transition_started = Signal(int, int, int)
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        transition_duration_ms: int = 500,
+    ) -> None:
+        super().__init__(parent)
+        self.transition_duration_ms = max(0, int(transition_duration_ms))
+        self._effective_transition_duration_ms = (
+            0
+            if os.environ.get("QT_QPA_PLATFORM", "").casefold()
+            == "offscreen"
+            else self.transition_duration_ms
+        )
+        self._step_guard: Callable[[int], bool] | None = None
+        self._transition_targets: tuple[QWidget, ...] = ()
+        self._transition_prepare: Callable[[], None] | None = None
+        self._transition_animation: QParallelAnimationGroup | None = None
+        self._transition_viewport: QWidget | None = None
+        self._transition_overlays: list[QLabel] = []
+        self._pending_transition_index: int | None = None
+        self.last_transition: tuple[int, int, int] | None = None
+        self.last_blocked_index: int | None = None
+
+    def set_step_guard(self, guard: Callable[[int], bool]) -> None:
+        self._step_guard = guard
+
+    def set_transition_targets(
+        self,
+        targets: tuple[QWidget, ...],
+        prepare_layout: Callable[[], None],
+    ) -> None:
+        self._transition_targets = targets
+        self._transition_prepare = prepare_layout
+
+    def can_navigate_to(self, index: int) -> bool:
+        return (
+            0 <= index < self.count()
+            and (self._step_guard is None or self._step_guard(index))
+        )
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 - Qt API
+        if self._transition_animation is not None:
+            return
+        current_index = super().currentIndex()
+        if index == current_index:
+            return
+        if not self.can_navigate_to(index):
+            self.last_blocked_index = index
+            self.step_blocked.emit(index)
+            return
+        self.last_blocked_index = None
+        self.last_transition = (
+            current_index,
+            index,
+            self.transition_duration_ms,
+        )
+        self.transition_started.emit(
+            current_index,
+            index,
+            self.transition_duration_ms,
+        )
+        if (
+            current_index < 0
+            or self._effective_transition_duration_ms <= 0
+            or not self.isVisible()
+        ):
+            super().setCurrentIndex(index)
+            return
+        self._animate_to(index)
+
+    def _animate_to(self, index: int) -> None:
+        stack = self.findChild(QStackedWidget)
+        old_index = super().currentIndex()
+        if (
+            stack is None
+            or stack.width() <= 0
+            or not (0 <= old_index < len(self._transition_targets))
+            or not (0 <= index < len(self._transition_targets))
+        ):
+            super().setCurrentIndex(index)
+            return
+        self._finish_transition()
+        old_target = self._transition_targets[old_index]
+        new_target = self._transition_targets[index]
+        old_pixmap = old_target.grab()
+        old_position = old_target.mapTo(stack, QPoint(0, 0))
+        old_tab_height = self.height()
+
+        # Lay out and capture the target page synchronously while signals are
+        # blocked.  No paint event can expose it before the old page is
+        # restored, and currentChanged is emitted only after the animation.
+        signals_were_blocked = self.blockSignals(True)
+        try:
+            super().setCurrentIndex(index)
+            if self._transition_prepare is not None:
+                self._transition_prepare()
+            new_pixmap = new_target.grab()
+            new_position = new_target.mapTo(stack, QPoint(0, 0))
+            new_tab_height = self.height()
+            super().setCurrentIndex(old_index)
+            if self._transition_prepare is not None:
+                self._transition_prepare()
+        finally:
+            self.blockSignals(signals_were_blocked)
+
+        if old_pixmap.isNull() or new_pixmap.isNull():
+            super().setCurrentIndex(index)
+            return
+
+        viewport_width = max(old_pixmap.width(), new_pixmap.width())
+        viewport_left = max(0, (stack.width() - viewport_width) // 2)
+        viewport_top = min(old_position.y(), new_position.y())
+        viewport_bottom = max(
+            old_position.y() + old_pixmap.height(),
+            new_position.y() + new_pixmap.height(),
+        )
+        viewport_height = max(1, viewport_bottom - viewport_top)
+        self.setFixedHeight(max(old_tab_height, new_tab_height))
+
+        viewport = QWidget(stack)
+        viewport.setObjectName("preparationTransitionViewport")
+        viewport.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        viewport.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        viewport.setGeometry(
+            viewport_left,
+            viewport_top,
+            viewport_width,
+            viewport_height,
+        )
+        viewport.show()
+        viewport.raise_()
+        self._transition_viewport = viewport
+
+        direction = 1 if index > old_index else -1
+        old_overlay = QLabel(viewport)
+        new_overlay = QLabel(viewport)
+        for overlay, pixmap in (
+            (old_overlay, old_pixmap),
+            (new_overlay, new_pixmap),
+        ):
+            overlay.setObjectName("preparationTransitionOverlay")
+            overlay.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                True,
+            )
+            overlay.setPixmap(
+                pixmap
+            )
+            overlay.resize(pixmap.size())
+            overlay.show()
+            overlay.raise_()
+        old_start = QPoint(
+            old_position.x() - viewport_left,
+            old_position.y() - viewport_top,
+        )
+        new_end = QPoint(
+            new_position.x() - viewport_left,
+            new_position.y() - viewport_top,
+        )
+        old_overlay.move(old_start)
+        new_overlay.move(
+            new_end + QPoint(direction * viewport_width, 0)
+        )
+        self._transition_overlays = [old_overlay, new_overlay]
+        self._pending_transition_index = index
+
+        animation_group = QParallelAnimationGroup(self)
+        for overlay, end_position in (
+            (
+                old_overlay,
+                old_start + QPoint(-direction * viewport_width, 0),
+            ),
+            (new_overlay, new_end),
+        ):
+            animation = QPropertyAnimation(overlay, b"pos", animation_group)
+            animation.setDuration(self._effective_transition_duration_ms)
+            animation.setStartValue(overlay.pos())
+            animation.setEndValue(end_position)
+            animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            animation_group.addAnimation(animation)
+        animation_group.finished.connect(self._complete_transition)
+        self._transition_animation = animation_group
+        animation_group.start()
+
+    def _complete_transition(self) -> None:
+        index = self._pending_transition_index
+        self._finish_transition()
+        if index is None:
+            return
+        super().setCurrentIndex(index)
+        if self._transition_prepare is not None:
+            self._transition_prepare()
+
+    def _finish_transition(self) -> None:
+        animation = self._transition_animation
+        self._transition_animation = None
+        self._pending_transition_index = None
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+        for overlay in self._transition_overlays:
+            overlay.hide()
+            overlay.deleteLater()
+        self._transition_overlays.clear()
+        viewport = self._transition_viewport
+        self._transition_viewport = None
+        if viewport is not None:
+            viewport.hide()
+            viewport.deleteLater()
+
+
 class _PreparationStepSelector(QPushButton):
     """Step selector that exposes its hover state to the complete card."""
 
@@ -601,9 +816,13 @@ class _PreparationStepSelector(QPushButton):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
         )
+        # Progress belongs to the preparation as a whole.  The value remains
+        # available for accessibility and compatibility, but is no longer
+        # painted as a separate per-step bar.
+        self.progress_label.hide()
 
     def set_progress_value(self, value: int) -> None:
-        """Update the progress painted into the selector background."""
+        """Update the step progress exposed to accessibility and tests."""
 
         progress_value = max(0, min(100, int(value)))
         if progress_value == self._progress_value:
@@ -614,7 +833,7 @@ class _PreparationStepSelector(QPushButton):
 
     @property
     def progress_value(self) -> int:
-        """Return the percentage represented by the selector background."""
+        """Return the percentage fulfilled inside this preparation step."""
 
         return self._progress_value
 
@@ -631,58 +850,6 @@ class _PreparationStepSelector(QPushButton):
 
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().paintEvent(event)
-        if self._progress_value <= 0:
-            return
-        # Leave the complete QSS-painted one-pixel frame untouched.  Progress
-        # is clipped slightly farther inside and therefore needs no second,
-        # custom-painted outline.
-        inner_rect = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
-        progress_rect = QRectF(inner_rect)
-        progress_rect.setWidth(
-            inner_rect.width() * self._progress_value / 100
-        )
-        hovered = bool(self.property("groupHovered"))
-        progress_gradient = QLinearGradient(
-            progress_rect.topLeft(),
-            progress_rect.bottomLeft(),
-        )
-        progress_gradient.setColorAt(
-            0.0,
-            QColor("#f3faf6" if hovered else "#ffffff"),
-        )
-        progress_gradient.setColorAt(
-            1.0,
-            QColor("#c9e5d3" if hovered else "#dcefe3"),
-        )
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # Match the button's rounded upper corners before painting progress.
-        # Without this clip, the custom fill covers the antialiased inner half
-        # of the QSS border and makes its corners appear interrupted.
-        inner_radius = 6.0
-        inner_path = QPainterPath()
-        inner_path.moveTo(inner_rect.left() + inner_radius, inner_rect.top())
-        inner_path.lineTo(inner_rect.right() - inner_radius, inner_rect.top())
-        inner_path.quadTo(
-            inner_rect.right(),
-            inner_rect.top(),
-            inner_rect.right(),
-            inner_rect.top() + inner_radius,
-        )
-        inner_path.lineTo(inner_rect.bottomRight())
-        inner_path.lineTo(inner_rect.bottomLeft())
-        inner_path.lineTo(inner_rect.left(), inner_rect.top() + inner_radius)
-        inner_path.quadTo(
-            inner_rect.left(),
-            inner_rect.top(),
-            inner_rect.left() + inner_radius,
-            inner_rect.top(),
-        )
-        inner_path.closeSubpath()
-        painter.setClipPath(inner_path)
-        painter.fillRect(progress_rect, progress_gradient)
-        painter.end()
 
     def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         self.hover_changed.emit(True)
@@ -730,60 +897,6 @@ class _PreparationRequirementsPanel(QFrame):
             event.accept()
             return
         super().keyPressEvent(event)
-
-
-class _PreparationRequirementLabel(QLabel):
-    """Requirement copy with a quiet, continuous missing-state reminder."""
-
-    HINT_COLOR = QColor("#b86f73")
-    TRANSITION_DURATION_MS = 1000
-
-    def __init__(
-        self,
-        text: str,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(text, parent)
-        self._attention_effect = QGraphicsColorizeEffect(self)
-        self._attention_effect.setColor(self.HINT_COLOR)
-        self._attention_effect.setStrength(0.0)
-        self.setGraphicsEffect(self._attention_effect)
-        self._to_hint = self._strength_transition(0.0, 1.0)
-        self._to_neutral = self._strength_transition(1.0, 0.0)
-        self.attention_animation = QSequentialAnimationGroup(self)
-        self.attention_animation.addAnimation(self._to_hint)
-        self.attention_animation.addAnimation(self._to_neutral)
-        self.attention_animation.setLoopCount(-1)
-        self.set_requirement_complete(False)
-
-    def _strength_transition(
-        self,
-        start: float,
-        end: float,
-    ) -> QPropertyAnimation:
-        animation = QPropertyAnimation(
-            self._attention_effect,
-            b"strength",
-            self,
-        )
-        animation.setStartValue(start)
-        animation.setEndValue(end)
-        animation.setDuration(self.TRANSITION_DURATION_MS)
-        animation.setEasingCurve(QEasingCurve.Type.InOutSine)
-        return animation
-
-    def set_requirement_complete(self, complete: bool) -> None:
-        if complete:
-            self.attention_animation.stop()
-            self._attention_effect.setEnabled(False)
-            return
-        if (
-            self.attention_animation.state()
-            is not QAbstractAnimation.State.Running
-        ):
-            self._attention_effect.setStrength(0.0)
-            self._attention_effect.setEnabled(True)
-            self.attention_animation.start()
 
 
 class MainWindow(QMainWindow):
@@ -1239,10 +1352,11 @@ class MainWindow(QMainWindow):
         self.settings_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        # Reserve the vertical gutter permanently so expanding or collapsing a
-        # section never changes the width of the two-column cards.
+        # The gutter is needed only when the current viewport cannot display
+        # the real content height.  Large windows therefore keep their full
+        # width instead of showing an inactive scrollbar beside empty space.
         self.settings_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.settings_scroll.verticalScrollBar().rangeChanged.connect(
             self._on_settings_scroll_range_changed
@@ -1251,7 +1365,13 @@ class MainWindow(QMainWindow):
         content.setObjectName("settingsContent")
         self.settings_content = content
         self.content_layout = QVBoxLayout(content)
-        self.content_layout.setContentsMargins(22, 8, 22, 8)
+        self._settings_content_bottom_margin_px = 22
+        self.content_layout.setContentsMargins(
+            22,
+            8,
+            22,
+            self._settings_content_bottom_margin_px,
+        )
         self.content_layout.setSpacing(10)
 
         workflow_group = SectionCard(
@@ -1291,7 +1411,11 @@ class MainWindow(QMainWindow):
         source_group.setProperty("role", "source")
         source_group.setProperty("subsection", "fileTransfer")
         source_layout = source_group.content_layout
-        source_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # The card itself is fitted to the exact sum of its visible blocks.
+        # A global AlignTop constraint makes QVBoxLayout retain a cached,
+        # smaller allocation for a drop-zone that grows after validation and
+        # lets the fixed-height widget protrude into the following row.
+        source_layout.setAlignment(Qt.Alignment())
         source_layout.setContentsMargins(20, 20, 20, 20)
 
         # Local progress is transient: the persistent state is represented by
@@ -1809,8 +1933,16 @@ class MainWindow(QMainWindow):
         # but receive an integrated step introduction instead of another
         # top-level card header.  The centred shell uses most of the available
         # width while remaining pleasantly bounded on very wide windows.
-        self.preparation_tabs = QTabWidget()
+        self.preparation_tabs = _SequentialPreparationTabs(
+            transition_duration_ms=500,
+        )
         self.preparation_tabs.setObjectName("preparationSteps")
+        self.preparation_tabs.set_step_guard(
+            self._can_open_preparation_step
+        )
+        self.preparation_tabs.step_blocked.connect(
+            self._on_preparation_step_blocked
+        )
         # Document mode keeps the page pane flush with the custom navigation
         # that is inserted below the shared progress bar.
         self.preparation_tabs.setDocumentMode(True)
@@ -1968,12 +2100,77 @@ class MainWindow(QMainWindow):
             self.preparation_step_right_pills.append(step_state)
             self.preparation_step_intro_layouts.append(step_intro_layout)
         self.preparation_tabs.setCurrentIndex(0)
+        self.preparation_tabs.set_transition_targets(
+            tuple(self.preparation_step_shells),
+            self._refresh_preparation_section_layout,
+        )
 
         self.preparation_overview = QWidget()
         self.preparation_overview.setObjectName("preparationOverview")
+        # Match the page's 24 px side insets plus the 700 px white content
+        # card.  Navigation, connector, and progress therefore align exactly
+        # with the active card at every responsive width.
+        self.preparation_overview.setMaximumWidth(748)
+        self.preparation_overview.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Maximum,
+        )
         preparation_overview_layout = QVBoxLayout(self.preparation_overview)
-        preparation_overview_layout.setContentsMargins(16, 14, 16, 14)
-        preparation_overview_layout.setSpacing(0)
+        preparation_overview_layout.setContentsMargins(24, 14, 24, 14)
+        preparation_overview_layout.setSpacing(10)
+        preparation_overview_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.preparation_progress_header = QWidget()
+        self.preparation_progress_header.setObjectName(
+            "preparationProgressHeader"
+        )
+        self.preparation_progress_header.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        preparation_progress_header_layout = QHBoxLayout(
+            self.preparation_progress_header
+        )
+        preparation_progress_header_layout.setContentsMargins(0, 0, 0, 0)
+        preparation_progress_header_layout.setSpacing(12)
+        self.preparation_progress_title_label = QLabel(
+            "Vorbereitungsfortschritt"
+        )
+        self.preparation_progress_title_label.setObjectName(
+            "preparationProgressTitle"
+        )
+        self.preparation_progress_status_label = QLabel(
+            "Schritt 1 von 2 · Dateiübergabe"
+        )
+        self.preparation_progress_status_label.setObjectName(
+            "preparationProgressStatus"
+        )
+        self.preparation_progress_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        preparation_progress_header_layout.addWidget(
+            self.preparation_progress_title_label
+        )
+        preparation_progress_header_layout.addStretch(1)
+        preparation_progress_header_layout.addWidget(
+            self.preparation_progress_status_label
+        )
+        self.preparation_progress_bar = QProgressBar()
+        self.preparation_progress_bar.setObjectName(
+            "preparationProgressBar"
+        )
+        self.preparation_progress_bar.setRange(0, 100)
+        self.preparation_progress_bar.setValue(0)
+        self.preparation_progress_bar.setFormat("%p %")
+        self.preparation_progress_bar.setTextVisible(True)
+        self.preparation_progress_bar.setAccessibleName(
+            "Gesamtfortschritt der Vorbereitung"
+        )
+        preparation_overview_layout.addWidget(
+            self.preparation_progress_header
+        )
+        preparation_overview_layout.addWidget(
+            self.preparation_progress_bar
+        )
         self.preparation_requirements = ResponsiveCardGrid(
             breakpoint_px=500,
             horizontal_spacing_px=12,
@@ -2034,7 +2231,7 @@ class MainWindow(QMainWindow):
                 icon_label.setProperty("state", "missing")
                 icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 icon_label.setFixedWidth(18)
-                text_label = _PreparationRequirementLabel(text_value)
+                text_label = QLabel(text_value)
                 text_label.setObjectName("preparationRequirementText")
                 text_label.setWordWrap(True)
                 text_label.setProperty("state", "missing")
@@ -2072,7 +2269,7 @@ class MainWindow(QMainWindow):
             selector_container.setProperty("complete", False)
             selector_container.setSizePolicy(
                 QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
             )
             selector_container_layout = QVBoxLayout(selector_container)
             selector_container_layout.setContentsMargins(0, 0, 0, 0)
@@ -2163,13 +2360,45 @@ class MainWindow(QMainWindow):
         self.preparation_step_selectors[0].setChecked(True)
         self.preparation_step_selectors[0].setProperty("active", True)
         self.preparation_step_selectors[1].setProperty("active", False)
+        self.preparation_step_connector = QLabel("›››")
+        self.preparation_step_connector.setObjectName(
+            "preparationStepConnector"
+        )
+        self.preparation_step_connector.setProperty("state", "locked")
+        self.preparation_step_connector.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preparation_step_connector.setFixedWidth(48)
+        self.preparation_step_connector.setAccessibleName(
+            "Schrittfolge von Dateiübergabe zu Slicer-Einstellungen"
+        )
+        self.preparation_requirements.set_vertical_separator(
+            self.preparation_step_connector
+        )
         self.preparation_requirements.add_pair(
             self.preparation_step_selector_containers[0],
             self.preparation_step_selector_containers[1],
             equal_height=True,
         )
         preparation_overview_layout.addWidget(self.preparation_requirements)
-        workflow_group.content_layout.addWidget(self.preparation_overview)
+        self.preparation_overview_host = QWidget()
+        self.preparation_overview_host.setObjectName(
+            "preparationOverviewHost"
+        )
+        self.preparation_overview_host.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Maximum,
+        )
+        preparation_overview_host_layout = QHBoxLayout(
+            self.preparation_overview_host
+        )
+        preparation_overview_host_layout.setContentsMargins(0, 0, 0, 0)
+        preparation_overview_host_layout.setSpacing(0)
+        preparation_overview_host_layout.addStretch(1)
+        preparation_overview_host_layout.addWidget(
+            self.preparation_overview,
+            16,
+        )
+        preparation_overview_host_layout.addStretch(1)
+        workflow_group.content_layout.addWidget(self.preparation_overview_host)
         workflow_group.content_layout.addWidget(self.preparation_tabs)
         self.content_layout.addWidget(workflow_group)
 
@@ -2824,8 +3053,8 @@ class MainWindow(QMainWindow):
             self.ready_grid,
             Qt.AlignmentFlag.AlignTop,
         )
-        # A trailing stretch keeps the initial file-transfer card at its natural
-        # height instead of letting it consume the entire scroll viewport.
+        # The trailing stretch is enabled only after preparation. Before that,
+        # the workflow card itself consumes the available viewport height.
         self.content_layout.addStretch(1)
 
         workflow_group.toggled.connect(
@@ -2855,7 +3084,9 @@ class MainWindow(QMainWindow):
                 == "offscreen"
                 else 500
             ),
-            first_success_duration_ms=1000,
+            # The accepted card remains visible throughout the slide itself;
+            # no additional pause is inserted before the 0.5 s transition.
+            first_success_duration_ms=0,
         )
         self.preparation_tabs.currentChanged.connect(
             self._on_preparation_tab_changed
@@ -3257,6 +3488,7 @@ class MainWindow(QMainWindow):
         """Show fixed footer actions only after both prerequisites succeeded."""
 
         actions_visible = stage_value == WorkflowStage.READY.value
+        self._set_preparation_viewport_fill(not actions_visible)
         if hasattr(self, "footer"):
             self.footer.setVisible(actions_visible)
         self._set_setting_feedback_enabled(actions_visible)
@@ -3296,6 +3528,41 @@ class MainWindow(QMainWindow):
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
 
+    def _set_preparation_viewport_fill(self, enabled: bool) -> None:
+        """Fill the usable scroll viewport while preparation is unfinished."""
+
+        vertical_policy = (
+            QSizePolicy.Policy.Expanding
+            if enabled
+            else QSizePolicy.Policy.Preferred
+        )
+        self.workflow_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            vertical_policy,
+        )
+        self.workflow_group.content_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            vertical_policy,
+        )
+        workflow_index = self.content_layout.indexOf(self.workflow_group)
+        if workflow_index >= 0:
+            self.content_layout.setStretch(
+                workflow_index,
+                1 if enabled else 0,
+            )
+        # The final layout item is the deliberately retained trailing stretch.
+        # It takes over only when the preparation card no longer owns the page.
+        trailing_index = self.content_layout.count() - 1
+        if trailing_index >= 0:
+            self.content_layout.setStretch(
+                trailing_index,
+                0 if enabled else 1,
+            )
+        self.content_layout.invalidate()
+        self.workflow_group.updateGeometry()
+        self._refresh_settings_content_minimum_height()
+        QTimer.singleShot(0, self._refresh_settings_content_minimum_height)
+
     def _on_preparation_tab_changed(self, index: int) -> None:
         """Reveal Slicer feedback only when its named step becomes relevant."""
 
@@ -3326,9 +3593,56 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "workflow"):
             self._refresh_preparation_section_layout()
             return
-        if index == 1:
-            self.workflow.set_slicer_step_visible(True)
+        self.workflow.set_slicer_step_visible(index == 1)
+        self._update_preparation_requirements()
         self._refresh_preparation_section_layout()
+
+    def _source_step_is_complete(self) -> bool:
+        """Return whether the currently selected STL owns a valid result."""
+
+        source_path = self.current_source_path
+        artifact = self.source_artifact
+        validation = self.stl_validation_result
+        if (
+            self.current_source_kind is not SourceKind.STL
+            or source_path is None
+            or artifact is None
+            or validation is None
+            or not validation.valid
+        ):
+            return False
+        artifact_path = getattr(artifact, "original_path", source_path)
+        try:
+            if Path(artifact_path).resolve() != source_path.resolve():
+                return False
+        except (OSError, TypeError, ValueError):
+            return False
+        matches_current_file = getattr(artifact, "matches_current_file", None)
+        if callable(matches_current_file):
+            try:
+                if not matches_current_file():
+                    return False
+            except OSError:
+                return False
+        return True
+
+    def _can_open_preparation_step(self, index: int) -> bool:
+        """Allow every backward step, but gate all forward preparation."""
+
+        return index == 0 or (index == 1 and self._source_step_is_complete())
+
+    def _on_preparation_step_blocked(self, index: int) -> None:
+        """Explain why an attempted forward navigation cannot continue."""
+
+        if index != 1:
+            return
+        self._set_main_status(
+            "Schritt 2 ist gesperrt · zuerst eine gültige STL übergeben",
+            icon="⇧",
+            state="idle",
+        )
+        selector = self.preparation_step_selectors[0]
+        selector.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _set_preparation_step_hovered(
         self,
@@ -3354,7 +3668,7 @@ class MainWindow(QMainWindow):
         selectors[index].update()
 
     def _schedule_slicer_step_open(self, request_id: int, source: Path) -> None:
-        """Keep the successful file step green for one second before step 2."""
+        """Move from the accepted STL into the now-unlocked Slicer step."""
 
         delay_ms = max(0, self.workflow.first_success_duration_ms)
 
@@ -3363,8 +3677,7 @@ class MainWindow(QMainWindow):
                 self._closing
                 or request_id != self._stl_validation_request_id
                 or self.current_source_path != source
-                or self.stl_validation_result is None
-                or not self.stl_validation_result.valid
+                or not self._source_step_is_complete()
             ):
                 return
             self.preparation_tabs.setCurrentIndex(1)
@@ -4093,10 +4406,7 @@ class MainWindow(QMainWindow):
         """Offer source-bound analysis after profiles were confirmed first."""
 
         if (
-            self.current_source_kind is not SourceKind.STL
-            or self.stl_validation_result is None
-            or not self.stl_validation_result.valid
-            or self.source_artifact is None
+            not self._source_step_is_complete()
             or not self._catalog_selection_is_confirmed()
             or self.profile_match_result is not None
         ):
@@ -4975,6 +5285,13 @@ class MainWindow(QMainWindow):
         )
 
     def _confirm_catalog_selection(self) -> bool:
+        if not self._source_step_is_complete():
+            self._set_profile_notice(
+                "Bitte zuerst Schritt 1 mit einer gültigen STL abschließen.",
+                state="error",
+            )
+            self._on_preparation_step_blocked(1)
+            return False
         catalog = self.profile_catalog
         if catalog is None or not catalog.complete:
             return False
@@ -5026,12 +5343,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _profile_matching_context(self) -> ProfileMatchingContext | None:
-        if (
-            self.current_source_kind is not SourceKind.STL
-            or self.source_artifact is None
-            or self.stl_validation_result is None
-            or not self.stl_validation_result.valid
-        ):
+        if not self._source_step_is_complete():
             return None
         return ProfileMatchingContext.from_stl(self.source_artifact)
 
@@ -5731,6 +6043,13 @@ class MainWindow(QMainWindow):
             )
 
     def confirm_profile_selection(self) -> None:
+        if not self._source_step_is_complete():
+            self._set_profile_notice(
+                "Bitte zuerst Schritt 1 mit einer gültigen STL abschließen.",
+                state="error",
+            )
+            self._on_preparation_step_blocked(1)
+            return
         result = self.profile_match_result
         if (
             self.profile_catalog is not None
@@ -5823,9 +6142,8 @@ class MainWindow(QMainWindow):
         profile_match = self.profile_match_result
         confirmation = self.confirmed_profile_context
         if (
-            self.current_source_kind is not SourceKind.STL
+            not self._source_step_is_complete()
             or validation is None
-            or not validation.valid
             or profile_match is None
             or not profile_match.user_confirmed
             or confirmation is None
@@ -6392,16 +6710,40 @@ class MainWindow(QMainWindow):
 
         if not hasattr(self, "preparation_tabs"):
             return
+        # QStackedWidget normally lays out only its visible page. Keep the
+        # hidden target step at the same responsive page size as the current
+        # one, so controls already own the correct width when a transition is
+        # captured or the window is narrowed before step 2 is unlocked.
+        current_page = self.preparation_tabs.currentWidget()
+        if current_page is not None and current_page.width() > 0:
+            current_page_size = current_page.size()
+            for page_index in range(self.preparation_tabs.count()):
+                step_page = self.preparation_tabs.widget(page_index)
+                if step_page is not current_page:
+                    step_page.resize(current_page_size)
+                if step_page.layout() is not None:
+                    step_page.layout().setGeometry(step_page.rect())
+                if page_index < len(self.preparation_step_shells):
+                    step_shell = self.preparation_step_shells[page_index]
+                    if step_shell.layout() is not None:
+                        step_shell.layout().setGeometry(step_shell.rect())
         for index in range(len(self.preparation_step_intro_layouts)):
             self._balance_preparation_step_intro(index)
         for card in (self.source_group, self.slicer_group):
             card.setMinimumHeight(0)
             card.setMaximumHeight(16777215)
             card.content_widget.setMinimumHeight(0)
+            if card.layout() is not None:
+                card.layout().setGeometry(card.rect())
+            card.content_layout.setGeometry(card.content_widget.rect())
             card.content_layout.invalidate()
             card.content_layout.activate()
             card.updateGeometry()
         self.slicer_columns.refresh_layout()
+        self.slicer_columns.grid.setGeometry(self.slicer_columns.rect())
+        self.slicer_selectors_layout.setGeometry(
+            self.slicer_selector_column.contentsRect()
+        )
         self.preparation_requirements.setMinimumHeight(0)
         self.preparation_requirements.setMaximumHeight(16777215)
         self.preparation_requirements.refresh_layout()
@@ -6410,12 +6752,19 @@ class MainWindow(QMainWindow):
         requirements_height = (
             self.preparation_requirements.content_height_hint()
         )
-        self.preparation_requirements.setMinimumHeight(
+        # The navigation owns exactly the height of its visible cards.  A
+        # minimum-only constraint allowed the expanding preparation body to
+        # leave an empty band below the cards and pushed the following step
+        # introduction down when switching back to the shorter STL page.
+        self.preparation_requirements.setFixedHeight(
             max(0, requirements_height)
         )
         self.preparation_requirements.updateGeometry()
         self.preparation_overview.layout().invalidate()
         self.preparation_overview.layout().activate()
+        overview_height = self.preparation_overview.layout().sizeHint().height()
+        self.preparation_overview.setFixedHeight(max(0, overview_height))
+        self.preparation_overview_host.setFixedHeight(max(0, overview_height))
         self.preparation_overview.updateGeometry()
         # Every view rendered inside either white preparation card uses one
         # stable inset.  State changes may alter the visible children, but
@@ -6465,18 +6814,60 @@ class MainWindow(QMainWindow):
                 * max(0, len(child_heights) - 1)
             )
             card.setFixedHeight(body_height + card.frameWidth() * 2)
-        for shell in self.preparation_step_shells:
+            card_layout = card.layout()
+            if card_layout is not None:
+                card_layout.invalidate()
+                card_layout.setGeometry(card.rect())
+                card_layout.activate()
+            # The root layout assigns the resized body geometry. Activate the
+            # child layout only afterwards; otherwise a newly visible error
+            # message can retain the smaller pre-validation body rectangle
+            # and squeeze the drop-zone below its own minimum height.
+            card.content_layout.invalidate()
+            card.content_layout.setGeometry(card.content_widget.rect())
+            card.content_layout.activate()
+        # Card heights can change while the target step is still hidden.
+        # Re-run every page layout after those heights are final so the
+        # transition snapshot receives the same centred introduction as the
+        # visible page instead of stale child geometry from the first pass.
+        for step_page in self.preparation_tab_pages:
+            page_layout = step_page.layout()
+            if page_layout is not None:
+                page_layout.invalidate()
+                page_layout.activate()
+                page_layout.setGeometry(step_page.rect())
+        for shell_index, shell in enumerate(self.preparation_step_shells):
             if shell.layout() is not None:
                 shell.layout().invalidate()
                 shell.layout().activate()
+                shell.layout().setGeometry(shell.rect())
+            if shell_index < len(self.preparation_step_intro_layouts):
+                intro_layout = self.preparation_step_intro_layouts[shell_index]
+                intro_layout.invalidate()
+                intro_layout.activate()
+                if intro_layout.parentWidget() is not None:
+                    intro_layout.setGeometry(intro_layout.parentWidget().rect())
             shell.updateGeometry()
+        self.slicer_columns.grid.setGeometry(self.slicer_columns.rect())
+        self.slicer_selectors_layout.setGeometry(
+            self.slicer_selector_column.contentsRect()
+        )
         page = self.preparation_tabs.currentWidget()
         if page is not None and page.layout() is not None:
             page.layout().invalidate()
             page.layout().activate()
             page.updateGeometry()
-            tab_height = self.preparation_tabs.tabBar().sizeHint().height()
-            page_height = page.layout().sizeHint().height()
+            # The native tab bar is intentionally hidden because the visible
+            # step cards above replace it.  Reserving its size hint still
+            # added an invisible row and made the main scrollbar appear
+            # before any visible preparation content reached the viewport.
+            tab_height = 0
+            page_layout = page.layout()
+            page_height = (
+                page_layout.heightForWidth(max(1, page.width()))
+                if page_layout.hasHeightForWidth()
+                else page_layout.sizeHint().height()
+            )
             self.preparation_tabs.setFixedHeight(
                 max(0, tab_height + page_height + 4)
             )
@@ -6519,17 +6910,58 @@ class MainWindow(QMainWindow):
         content = self.settings_scroll.widget()
         if content is None:
             return
+        # Drop the former cached preferred height before asking the layout for
+        # its true non-overlapping minimum. QScrollArea expands a resizable
+        # child to its viewport on its own; only this minimum may create a
+        # vertical range when a small window would otherwise clip controls.
+        if content.minimumHeight() != 0:
+            content.setMinimumHeight(0)
         content.updateGeometry()
         layout = content.layout()
         if layout is not None:
             layout.invalidate()
             layout.activate()
-            required_height = max(0, layout.sizeHint().height())
+            # Keep the full 22 px lower page margin whenever there is room.
+            # While preparation is unfinished that decorative margin may
+            # shrink before a scrollbar is introduced: scrolling begins only
+            # when a visible control/card would otherwise be clipped, not
+            # merely because empty breathing space no longer fits.
+            workflow = getattr(self, "workflow", None)
+            preparation_incomplete = (
+                workflow is None
+                or workflow.stage is not WorkflowStage.READY
+            )
+            margins = layout.contentsMargins()
+            standard_bottom = getattr(
+                self,
+                "_settings_content_bottom_margin_px",
+                margins.bottom(),
+            )
+            target_bottom = standard_bottom
+            if preparation_incomplete:
+                required_without_bottom = max(
+                    0,
+                    layout.minimumSize().height() - margins.bottom(),
+                )
+                target_bottom = min(
+                    standard_bottom,
+                    max(
+                        0,
+                        self.settings_scroll.viewport().height()
+                        - required_without_bottom,
+                    ),
+                )
+            if margins.bottom() != target_bottom:
+                layout.setContentsMargins(
+                    margins.left(),
+                    margins.top(),
+                    margins.right(),
+                    target_bottom,
+                )
+                layout.invalidate()
+                layout.activate()
+            required_height = max(0, layout.minimumSize().height())
             if content.minimumHeight() != required_height:
-                # QScrollArea can cache the resizable child's previous size
-                # hint after a deeply nested grid row changes. Synchronising
-                # only the vertical minimum makes the new scroll range explicit
-                # without imposing a horizontal minimum at narrow widths.
                 content.setMinimumHeight(required_height)
                 content.updateGeometry()
                 layout.invalidate()
@@ -6859,12 +7291,7 @@ class MainWindow(QMainWindow):
         if (not self.source_guide_row.isHidden()) != guide_visible:
             self.source_guide_row.setVisible(guide_visible)
             QTimer.singleShot(0, self._refresh_preparation_section_layout)
-        source_validated = bool(
-            self.current_source_kind is SourceKind.STL
-            and self.stl_validation_result is not None
-            and self.stl_validation_result.valid
-            and self.source_artifact is not None
-        )
+        source_validated = self._source_step_is_complete()
         installation = self.selected_slicer_installation
         slicer_detected = bool(
             installation is not None and installation.verified
@@ -6908,12 +7335,9 @@ class MainWindow(QMainWindow):
             state = "complete" if complete else "missing"
             icon_label.setProperty("state", state)
             text_label.setProperty("state", state)
-            if isinstance(text_label, _PreparationRequirementLabel):
-                text_label.set_requirement_complete(complete)
             self._refresh_widget_style(icon_label)
             self._refresh_widget_style(text_label)
             fulfilled += int(complete)
-        percent = round(100 * fulfilled / len(requirements))
         preparation_complete = fulfilled == len(requirements)
         self.workflow_group.setCheckable(preparation_complete)
         step_requirement_keys = (
@@ -6940,6 +7364,43 @@ class MainWindow(QMainWindow):
             selector.setAccessibleDescription(
                 f"{step_percent} Prozent der Voraussetzungen erfüllt"
             )
+        source_fulfilled = sum(
+            int(requirements[key])
+            for key in ("source_selected", "source_validated")
+        )
+        slicer_fulfilled = sum(
+            int(requirements[key])
+            for key in (
+                "slicer_detected",
+                "profiles_loaded",
+                "profiles_confirmed",
+                "model_analyzed",
+            )
+        )
+        # Later background work must not visually advance the sequence before
+        # its prerequisite step is actually complete.
+        percent = round(
+            50 * source_fulfilled / 2
+            + (50 * slicer_fulfilled / 4 if source_validated else 0)
+        )
+        self.preparation_progress_bar.setValue(percent)
+        self.preparation_progress_bar.setAccessibleDescription(
+            f"{percent} Prozent der Vorbereitung abgeschlossen"
+        )
+        if preparation_complete:
+            progress_text = "Vorbereitung abgeschlossen"
+            progress_state = "complete"
+        elif self.preparation_tabs.currentIndex() == 1 and source_validated:
+            progress_text = "Schritt 2 von 2 · Slicer-Einstellungen"
+            progress_state = "active"
+        else:
+            progress_text = "Schritt 1 von 2 · Dateiübergabe"
+            progress_state = "active"
+        self.preparation_progress_status_label.setText(progress_text)
+        self.preparation_progress_status_label.setProperty(
+            "state", progress_state
+        )
+        self._refresh_widget_style(self.preparation_progress_status_label)
         self.preparation_requirements.setAccessibleDescription(
             f"{fulfilled} von {len(requirements)} Voraussetzungen erfüllt"
         )
@@ -6965,18 +7426,99 @@ class MainWindow(QMainWindow):
         for selector_index, complete in enumerate(
             (source_validated, slicer_step_complete)
         ):
+            locked = selector_index == 1 and not source_validated
             selector = self.preparation_step_selectors[selector_index]
             selector.setProperty("complete", complete)
+            selector.setProperty("locked", locked)
+            selector.setCursor(
+                Qt.CursorShape.ForbiddenCursor
+                if locked
+                else Qt.CursorShape.PointingHandCursor
+            )
+            selector.setToolTip(
+                "Zuerst Schritt 1 mit einer gültigen STL abschließen."
+                if locked
+                else f"Schritt {selector_index + 1} öffnen"
+            )
             self._refresh_widget_style(selector)
             container = self.preparation_step_selector_containers[
                 selector_index
             ]
             container.setProperty("complete", complete)
+            container.setProperty("locked", locked)
             self._refresh_widget_style(container)
+            requirements_widget = (
+                self.preparation_source_requirements,
+                self.preparation_slicer_requirements,
+            )[selector_index]
+            requirements_widget.setProperty("locked", locked)
+            requirements_widget.setCursor(
+                Qt.CursorShape.ForbiddenCursor
+                if locked
+                else Qt.CursorShape.PointingHandCursor
+            )
+            requirements_widget.setAccessibleDescription(
+                "Gesperrt, bis eine gültige STL übergeben wurde."
+                if locked
+                else f"Öffnet Schritt {selector_index + 1}"
+            )
+            self._refresh_widget_style(requirements_widget)
             icon = self.preparation_step_selector_icons[selector_index]
-            icon.setText("✓" if complete else "")
-            icon.setProperty("state", "complete" if complete else "pending")
+            icon.setText("✓" if complete else ("🔒" if locked else ""))
+            icon.setProperty(
+                "state",
+                "complete" if complete else ("locked" if locked else "pending"),
+            )
             self._refresh_widget_style(icon)
+
+        self.preparation_step_connector.setText("›››")
+        self.preparation_step_connector.setProperty(
+            "state", "open" if source_validated else "locked"
+        )
+        self._refresh_widget_style(self.preparation_step_connector)
+
+        if not source_validated:
+            self.profile_confirm_button.setEnabled(False)
+            self.profile_confirm_button.setToolTip(
+                "Die Bestätigung wird nach einer gültigen STL freigeschaltet."
+            )
+        else:
+            self.profile_confirm_button.setToolTip("")
+            selections_ready = all(
+                self._profile_combo_reference(combo) is not None
+                for combo in (
+                    self.machine_profile_combo,
+                    self.process_profile_combo,
+                    self.filament_profile_combo,
+                )
+            )
+            result_requires_confirmation = bool(
+                self.profile_match_result is not None
+                and getattr(
+                    self.profile_match_result,
+                    "requires_confirmation",
+                    False,
+                )
+            )
+            catalog_requires_confirmation = bool(
+                profiles_loaded
+                and selections_ready
+                and not catalog_confirmed
+            )
+            source_analysis_can_start = bool(
+                self.profile_match_result is None
+                and catalog_confirmed
+                and self._profile_matching_context() is not None
+            )
+            if not self.profile_confirm_button.isHidden():
+                self.profile_confirm_button.setEnabled(
+                    result_requires_confirmation
+                    or catalog_requires_confirmation
+                    or source_analysis_can_start
+                )
+
+        if not source_validated and self.preparation_tabs.currentIndex() > 0:
+            self.preparation_tabs.setCurrentIndex(0)
 
         if source_validated:
             source_step_text, source_step_state = "Abgeschlossen", "success"
@@ -6996,7 +7538,12 @@ class MainWindow(QMainWindow):
             source_step_state,
         )
 
-        if slicer_step_complete:
+        if not source_validated:
+            slicer_step_text, slicer_step_state = (
+                "Gesperrt bis STL gültig",
+                "locked",
+            )
+        elif slicer_step_complete:
             slicer_step_text, slicer_step_state = "Abgeschlossen", "success"
         elif self._analysis_failed and catalog_confirmed:
             slicer_step_text, slicer_step_state = "Analyse prüfen", "error"
@@ -7889,6 +8436,8 @@ class MainWindow(QMainWindow):
                 state="error",
             )
             self._update_preparation_requirements()
+            self._refresh_preparation_section_layout()
+            QTimer.singleShot(0, self._refresh_preparation_section_layout)
             self.validate_form()
             return
 
@@ -7990,6 +8539,8 @@ class MainWindow(QMainWindow):
             state="error",
         )
         self._update_preparation_requirements()
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
         self.validate_form()
 
     def _clear_stl_validation_details(self) -> None:

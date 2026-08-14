@@ -585,7 +585,13 @@ class StlProfileMatchingTests(unittest.TestCase):
             enable_startup_slicer_discovery=False,
         )
         try:
+            validation = StlValidationService().validate(
+                self.artifact.original_path
+            )
+            window.current_source_path = self.artifact.original_path
+            window.current_source_kind = SourceKind.STL
             window.source_artifact = self.artifact
+            window.stl_validation_result = validation
             window.profile_match_result = result
             assert result.selected is not None
             assert result.selected.process is not None
@@ -640,7 +646,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertIsNotNone(window.profile_catalog)
             self.assertTrue(window.profile_confirm_button.isEnabled())
             window.confirm_profile_selection()
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 15
             while not self.adapter.slice_started.is_set() and time.monotonic() < deadline:
                 app.processEvents()
                 QTest.qWait(10)

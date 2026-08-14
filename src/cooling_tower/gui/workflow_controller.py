@@ -8,7 +8,6 @@ from PySide6.QtCore import (
     QParallelAnimationGroup,
     QPropertyAnimation,
     Signal,
-    QVariantAnimation,
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 from cooling_tower.gui.widgets import SectionCard, SectionState
@@ -197,7 +196,6 @@ class WorkflowController(QObject):
         self._slicer_complete = False
         self._slicer_step_visible = workflow_card is None
         self._deferred_slicer_feedback: tuple[str, tuple[object, ...]] | None = None
-        self._collapse_animation: QVariantAnimation | None = None
         self._reveal_animation: QParallelAnimationGroup | None = None
 
     def reset(self) -> None:
@@ -241,13 +239,58 @@ class WorkflowController(QObject):
 
         self._slicer_step_visible = bool(visible)
         if not self._slicer_step_visible:
-            self._deferred_slicer_feedback = None
+            self._show_source_step_summary()
             return
-        if not self._slicer_step_visible or self._deferred_slicer_feedback is None:
+        if self._deferred_slicer_feedback is None:
+            self._show_slicer_step_summary()
             return
         method_name, arguments = self._deferred_slicer_feedback
         self._deferred_slicer_feedback = None
         getattr(self, method_name)(*arguments)
+
+    def _show_source_step_summary(self) -> None:
+        """Keep Slicer-only feedback out of the file-transfer step."""
+
+        if self.workflow_card is None or self.stage is WorkflowStage.READY:
+            return
+        source_state = self.source_card.state()
+        if source_state is SectionState.ERROR:
+            self._set_workflow_incomplete(
+                "Datei prüfen und Fehler beheben",
+                SectionState.ERROR,
+            )
+        elif source_state is SectionState.SUCCESS:
+            self._set_workflow_incomplete(
+                "Dateiübergabe abgeschlossen · weiter mit Schritt 2",
+                SectionState.ACTIVE,
+            )
+        else:
+            self._set_workflow_incomplete(
+                "Datei auswählen und prüfen",
+                SectionState.ACTIVE,
+            )
+
+    def _show_slicer_step_summary(self) -> None:
+        """Restore the current Slicer result when step 2 is revisited."""
+
+        if self.workflow_card is None or self.stage is WorkflowStage.READY:
+            return
+        slicer_state = self.slicer_card.state()
+        if slicer_state is SectionState.ERROR:
+            self._set_workflow_incomplete(
+                "Slicer-Einstellungen prüfen",
+                SectionState.ERROR,
+            )
+        elif slicer_state is SectionState.WARNING:
+            self._set_workflow_incomplete(
+                "Slicer-Erkennung oder Bestätigung erforderlich",
+                SectionState.WARNING,
+            )
+        else:
+            self._set_workflow_incomplete(
+                "Slicer und Profile festlegen",
+                SectionState.ACTIVE,
+            )
 
     def _defer_slicer_feedback(
         self,
@@ -575,43 +618,10 @@ class WorkflowController(QObject):
 
         if not self._workflow_auto_collapsed:
             self._workflow_auto_collapsed = True
-            self._collapse_then_reveal(card, reveal_ready_state)
+            card.set_expanded(False)
+            reveal_ready_state()
         else:
             reveal_ready_state()
-
-    def _collapse_then_reveal(
-        self,
-        card: SectionCard,
-        on_finished,
-    ) -> None:
-        """Collapse the preparation body before any downstream fade starts."""
-
-        if self.duration_ms <= 0 or not card.isVisible():
-            card.set_expanded(False)
-            on_finished()
-            return
-        body = card.content_widget
-        start_height = max(body.height(), body.sizeHint().height(), 1)
-        body.setMinimumHeight(0)
-        body.setMaximumHeight(start_height)
-        animation = QVariantAnimation(self)
-        self._collapse_animation = animation
-        animation.setStartValue(start_height)
-        animation.setEndValue(0)
-        animation.setDuration(self.duration_ms)
-        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-        animation.valueChanged.connect(
-            lambda value: body.setMaximumHeight(max(0, int(value)))
-        )
-
-        def finish() -> None:
-            card.set_expanded(False)
-            body.setMaximumHeight(16777215)
-            self._collapse_animation = None
-            on_finished()
-
-        animation.finished.connect(finish)
-        animation.start()
 
     def _hide_downstream(self) -> None:
         if self._reveal_animation is not None:

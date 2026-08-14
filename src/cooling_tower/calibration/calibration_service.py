@@ -649,9 +649,18 @@ class CalibrationService:
                     )
                     if joint_round else None
                 )
+                minimum_target_difference_s = self._minimum_target_difference(
+                    source_layers,
+                    evaluation.added_time_by_layer,
+                    target_time_s=settings.target_layer_time_s,
+                )
+                target_time_confirmed = bool(
+                    math.isfinite(minimum_target_difference_s)
+                    and minimum_target_difference_s
+                    >= -config.time_tolerance_s
+                )
                 joint_precision_confirmed = bool(
-                    joint_target_deviation_s is not None
-                    and joint_target_deviation_s <= config.time_tolerance_s
+                    joint_round and target_time_confirmed
                 )
                 current_added_times_s = {
                     int(index): float(value)
@@ -679,7 +688,7 @@ class CalibrationService:
                         minimum_iterations_reached
                         and maximum_slicer_result_change_s is not None
                         and maximum_slicer_result_change_s
-                        <= config.time_tolerance_s
+                        <= config.slicer_result_change_tolerance_s
                     )
                 iteration = CalibrationIteration(
                     number=number,
@@ -719,6 +728,10 @@ class CalibrationService:
                     minimum_iterations_reached=minimum_iterations_reached,
                     joint_target_deviation_s=joint_target_deviation_s,
                     joint_precision_confirmed=joint_precision_confirmed,
+                    minimum_target_difference_s=(
+                        minimum_target_difference_s
+                    ),
+                    target_time_confirmed=target_time_confirmed,
                 )
                 metadata_conflict = (
                     (config.mode is CalibrationMode.GCODE or candidate_project is not None)
@@ -747,19 +760,11 @@ class CalibrationService:
                     best_project = candidate_project
                     best_iteration_number = number
                 joint_candidate_accepted = bool(
-                    joint_round
-                    and (
-                        joint_precision_confirmed
-                        or (
-                            config.maximum_iterations == 1
-                            and convergence.converged
-                        )
-                    )
+                    joint_round and target_time_confirmed
                 )
                 isolated_candidate_accepted = bool(
                     not joint_round
-                    and convergence.converged
-                    and slicer_result_stable
+                    and target_time_confirmed
                     and number >= iteration_count
                 )
                 if (
@@ -912,7 +917,7 @@ class CalibrationService:
                         "Slicer-Ergebnisse blieben bis zum Durchlauflimit "
                         "instabil (größte Layerzeit-Abweichung zuletzt: "
                         f"{rendered_change}; zulässig: "
-                        f"{config.time_tolerance_s:.3f} s).",
+                        f"{config.slicer_result_change_tolerance_s:.3f} s).",
                     ))
                 else:
                     failures.append(CalibrationFailure(
@@ -1076,6 +1081,34 @@ class CalibrationService:
             observed_added = max(0.0, float(added_times_s.get(index, 0.0)))
             deviations.append(abs(observed_added - required_added))
         return max(deviations, default=0.0)
+
+    @staticmethod
+    def _minimum_target_difference(
+        source_layers: tuple[object, ...],
+        added_times_s: dict[int, float],
+        *,
+        target_time_s: float,
+    ) -> float:
+        """Return the signed deviation of the critical minimum layer time."""
+
+        combined_times = [
+            float(getattr(layer, "total_time_s"))
+            + max(
+                0.0,
+                float(
+                    added_times_s.get(
+                        int(getattr(layer, "index")),
+                        0.0,
+                    )
+                ),
+            )
+            for layer in source_layers
+        ]
+        if not combined_times or not all(
+            math.isfinite(value) for value in combined_times
+        ):
+            return math.inf
+        return min(combined_times) - target_time_s
 
     @staticmethod
     def _candidate_score(

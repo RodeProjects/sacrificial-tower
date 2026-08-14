@@ -120,7 +120,7 @@ class PreviewDialog(QDialog):
         self._last_quality_text = ""
         layout.addWidget(self.quality_label)
         self.quality_details_toggle = QPushButton(
-            "Messwerte des letzten Durchlaufs anzeigen ▸"
+            "Prüfdetails anzeigen ▸"
         )
         self.quality_details_toggle.setObjectName(
             "previewQualityDetailsToggle"
@@ -333,9 +333,9 @@ class PreviewDialog(QDialog):
 
     def _toggle_quality_details(self, expanded: bool) -> None:
         self.quality_details_toggle.setText(
-            "Messwerte des letzten Durchlaufs ausblenden ▾"
+            "Prüfdetails ausblenden ▾"
             if expanded
-            else "Messwerte des letzten Durchlaufs anzeigen ▸"
+            else "Prüfdetails anzeigen ▸"
         )
         self.quality_details_label.setVisible(
             expanded and bool(self.quality_details_label.text().strip())
@@ -361,7 +361,29 @@ class PreviewDialog(QDialog):
         calibrated = bool(getattr(result, "calibrated", False))
         joint_sliced = bool(getattr(result, "joint_sliced", False))
         slicer_optimized = bool(getattr(result, "slicer_optimized", False))
-        if calibrated and not joint_sliced:
+        time_tolerance = float(
+            getattr(result, "calibration_time_tolerance_s", 0.2)
+        )
+        target_time = getattr(result, "target_layer_time_s", None)
+        minimum_time = getattr(result, "minimum_verified_layer_time_s", None)
+        difference = (
+            float(minimum_time) - float(target_time)
+            if PreviewDialog._is_finite(target_time)
+            and PreviewDialog._is_finite(minimum_time)
+            else None
+        )
+        target_time_confirmed = bool(
+            difference is not None
+            and abs(difference) <= time_tolerance
+        )
+        if target_time_confirmed:
+            headline = (
+                "✓ Ziel-Layerzeit innerhalb der Toleranz erreicht "
+                f"(Abweichung: {difference:+.3f} s; zulässig: "
+                f"±{time_tolerance:.3f} s)"
+            )
+            state = "success"
+        elif calibrated and not joint_sliced:
             headline = (
                 f"✓ Ergebnis nach {completed} Durchläufen bestätigt – schnelle "
                 "Vorschau; der gemeinsame Präzisionsslice folgt erst beim Export"
@@ -391,19 +413,11 @@ class PreviewDialog(QDialog):
             headline,
             f"Ausgeführt: {completed} von {configured} eingestellten Durchläufen",
         ]
-        time_tolerance = float(
-            getattr(result, "calibration_time_tolerance_s", 0.15)
-        )
-        target_time = getattr(result, "target_layer_time_s", None)
-        minimum_time = getattr(result, "minimum_verified_layer_time_s", None)
-        if PreviewDialog._is_finite(target_time) and PreviewDialog._is_finite(
-            minimum_time
-        ):
-            difference = float(minimum_time) - float(target_time)
+        if difference is not None:
             relation = (
                 "innerhalb der Toleranz"
-                if difference >= -time_tolerance
-                else f"um {-difference - time_tolerance:.3f} s außerhalb der Toleranz"
+                if abs(difference) <= time_tolerance
+                else f"um {abs(difference) - time_tolerance:.3f} s außerhalb der Toleranz"
             )
             lines.append(
                 (
@@ -418,8 +432,6 @@ class PreviewDialog(QDialog):
                 f"Ziel ({difference:+.3f} s; {relation})"
             )
 
-        failures = tuple(getattr(calibration, "failures", ()) or ())
-        lines.extend(PreviewDialog._summarized_failures(failures))
         return "\n".join(lines), state
 
     @staticmethod
@@ -434,10 +446,17 @@ class PreviewDialog(QDialog):
             return ""
         last = iterations[-1]
         time_tolerance = float(
-            getattr(result, "calibration_time_tolerance_s", 0.15)
+            getattr(result, "calibration_time_tolerance_s", 0.2)
+        )
+        slicer_result_tolerance = float(
+            getattr(
+                result,
+                "calibration_slicer_result_tolerance_s",
+                0.25,
+            )
         )
         profile_tolerance = float(
-            getattr(result, "calibration_profile_tolerance_mm", 0.03)
+            getattr(result, "calibration_profile_tolerance_mm", 0.1)
         )
         metadata_tolerance = float(
             getattr(result, "calibration_metadata_tolerance_s", 0.75)
@@ -459,7 +478,7 @@ class PreviewDialog(QDialog):
             PreviewDialog._maximum_value_assessment(
                 "Änderung zum vorherigen Slicer-Durchlauf",
                 getattr(last, "maximum_slicer_result_change_s", None),
-                time_tolerance,
+                slicer_result_tolerance,
                 "s",
             ),
             PreviewDialog._maximum_value_assessment(
@@ -469,6 +488,11 @@ class PreviewDialog(QDialog):
                 "mm",
             ),
         ]
+        failures = tuple(getattr(calibration, "failures", ()) or ())
+        failure_details = PreviewDialog._summarized_failures(failures)
+        if failure_details:
+            lines.append("Weitere Prüfgründe:")
+            lines.extend(failure_details)
         metadata_difference = getattr(
             getattr(last, "evaluation", None),
             "maximum_metadata_difference_s",

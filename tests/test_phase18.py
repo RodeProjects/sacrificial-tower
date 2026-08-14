@@ -38,6 +38,7 @@ from cooling_tower.models import (
     FeasibilityIssue,
     GenerationSettings,
     ProfileFeasibilityAssessment,
+    SourceKind,
 )
 from cooling_tower.preview import (
     LineSegment3D,
@@ -78,6 +79,18 @@ class Phase18UiTests(unittest.TestCase):
             "referenz.stl geprüft",
             analysis_complete=True,
         )
+
+    def unlock_preparation_step(self, window: MainWindow) -> None:
+        source = (self.root / "referenz.stl").resolve()
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+        window.current_source_path = source
+        window.current_source_kind = SourceKind.STL
+        window.source_artifact = SimpleNamespace(
+            original_path=source,
+            matches_current_file=lambda: True,
+        )
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        window._update_preparation_requirements()
 
     def test_section_and_workflow_state_changes_are_immediate(self) -> None:
         host = QWidget()
@@ -292,6 +305,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1100, 900)
         window.show()
+        self.unlock_preparation_step(window)
         window.preparation_tabs.setCurrentIndex(1)
         window.ready_grid.show()
         self.app.processEvents()
@@ -503,7 +517,7 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertEqual(
             window.geometry_settings_group.title_label.font().pointSizeF(),
-            13.0,
+            12.0,
         )
         self.assertEqual(
             window.geometry_calculation_title.font().weight(),
@@ -647,6 +661,12 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.settings_scroll.horizontalScrollBar().maximum(), 0)
         window.preparation_tabs.setCurrentIndex(1)
         self.app.processEvents()
+        self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+        self.assertTrue(window.source_group.isVisible())
+        self.assertFalse(window.slicer_group.isVisible())
+        self.unlock_preparation_step(window)
+        window.preparation_tabs.setCurrentIndex(1)
+        self.app.processEvents()
         self.assertFalse(window.source_group.isVisible())
         self.assertTrue(window.slicer_group.isVisible())
         self.assertEqual(window.slicer_group.width(), 700)
@@ -703,15 +723,19 @@ class Phase18UiTests(unittest.TestCase):
             self.assertNotIn("border-left:", hover_rule)
             self.assertNotIn("border-color:", hover_rule)
             self.assertNotIn("border-radius:", hover_rule)
+        # The downstream cards are deliberately hidden during preparation.
+        # Reveal them only for this paint-level style check.
+        window.ready_grid.show()
+        self.app.processEvents()
         initial_header = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             initial_header.pixelColor(initial_header.width() // 2, 5).name(),
-            "#e1eef6",
+            "#ebf5fb",
         )
         timing_header = window.timing_group.header.grab().toImage()
         self.assertEqual(
             timing_header.pixelColor(timing_header.width() // 2, 5).name(),
-            "#e1eef6",
+            "#ebf5fb",
         )
         geometry_header = window.geometry_settings_group.header.grab().toImage()
         self.assertEqual(
@@ -719,7 +743,7 @@ class Phase18UiTests(unittest.TestCase):
                 geometry_header.width() // 2,
                 5,
             ).name(),
-            "#e1eef6",
+            "#ebf5fb",
         )
         prediction_header = window.prediction_frame.header.grab().toImage()
         self.assertEqual(
@@ -727,7 +751,34 @@ class Phase18UiTests(unittest.TestCase):
                 prediction_header.width() // 2,
                 5,
             ).name(),
-            "#f3f0ff",
+            "#f4f1fe",
+        )
+        for group in (
+            window.workflow_group,
+            window.timing_group,
+            window.geometry_settings_group,
+        ):
+            self.assertEqual(group.title_label.font().pointSizeF(), 12.0)
+            self.assertEqual(group.title_label.font().weight(), 700)
+            self.assertEqual(
+                group.title_label.palette().color(
+                    group.title_label.foregroundRole()
+                ).name(),
+                "#40576a",
+            )
+        self.assertEqual(
+            window.prediction_frame.title_label.font().pointSizeF(),
+            12.0,
+        )
+        self.assertEqual(
+            window.prediction_frame.title_label.font().weight(),
+            700,
+        )
+        self.assertEqual(
+            window.prediction_frame.title_label.palette().color(
+                window.prediction_frame.title_label.foregroundRole()
+            ).name(),
+            "#4d3c86",
         )
         expected_accents = {
             window.timing_group: "#1769aa",
@@ -803,7 +854,15 @@ class Phase18UiTests(unittest.TestCase):
         image = window.workflow_group.header.grab().toImage()
         self.assertEqual(
             image.pixelColor(image.width() // 2, 5).name(),
-            "#e1eef6",
+            "#ebf5fb",
+        )
+        completed_preparation = window.workflow_group.grab().toImage()
+        self.assertEqual(
+            completed_preparation.pixelColor(
+                1,
+                completed_preparation.height() // 2,
+            ).name(),
+            "#238a5b",
         )
         prediction_image = window.prediction_frame.grab().toImage()
         self.assertEqual(
@@ -974,7 +1033,6 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1200, 900)
         window.show()
-        window.preparation_tabs.setCurrentIndex(1)
         self.app.processEvents()
         self.assertEqual(
             window.status_label.text(),
@@ -1569,26 +1627,41 @@ class Phase18UiTests(unittest.TestCase):
             self.assertTrue(card.content_widget.isVisible())
         self.assertEqual(window.timing_group.height(), timing_height)
         self.assertEqual(window.prediction_frame.height(), prediction_height)
-        self.assertEqual(window.timing_group.geometry(), timing_geometry)
-        self.assertEqual(window.prediction_frame.geometry(), prediction_geometry)
-        self.assertEqual(
-            window.ready_grid.mapTo(window.settings_content, QPoint(0, 0)),
-            ready_origin,
+        self.assertGreater(window.timing_group.width(), timing_geometry.width())
+        self.assertGreater(
+            window.prediction_frame.width(),
+            prediction_geometry.width(),
         )
-        self.assertEqual(window.ready_grid.width(), ready_width)
-        self.assertEqual(window.settings_scroll.viewport().width(), viewport_width)
+        self.assertGreater(window.ready_grid.width(), ready_width)
+        self.assertGreater(
+            window.settings_scroll.viewport().width(),
+            viewport_width,
+        )
+        self.assertFalse(
+            window.settings_scroll.verticalScrollBar().isVisible()
+        )
         self.assertIsNone(window.timing_group.graphicsEffect())
         self.assertIsNone(window.prediction_frame.graphicsEffect())
-        self.assertEqual(window.timing_group.grab().toImage(), timing_image)
-        self.assertEqual(
-            window.prediction_frame.grab().toImage(), prediction_image
-        )
 
         QTest.qWait(METRICS.animation_duration_ms)
         self.app.processEvents()
         self.assertTrue(window.geometry_settings_group.content_widget.isHidden())
         self.assertTrue(window.timing_group.content_widget.isVisible())
         self.assertTrue(window.prediction_frame.content_widget.isVisible())
+        self.assertFalse(
+            window.settings_scroll.verticalScrollBar().isVisible()
+        )
+
+        window.geometry_settings_group.toggle()
+        QTest.qWait(METRICS.animation_duration_ms // 2)
+        self.app.processEvents()
+        self.assertIsNone(window.timing_group.graphicsEffect())
+        self.assertIsNone(window.prediction_frame.graphicsEffect())
+        self.assertIsNone(window.timing_group.content_widget.graphicsEffect())
+        self.assertIsNone(window.prediction_frame.content_widget.graphicsEffect())
+        QTest.qWait(METRICS.animation_duration_ms)
+        self.app.processEvents()
+        self.assertFalse(window.geometry_settings_group.content_widget.isHidden())
         self.assertEqual(window.timing_group.geometry(), timing_geometry)
         self.assertEqual(window.prediction_frame.geometry(), prediction_geometry)
         self.assertEqual(
@@ -1598,19 +1671,10 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.ready_grid.width(), ready_width)
         self.assertEqual(window.settings_scroll.viewport().width(), viewport_width)
         self.assertTrue(window.settings_scroll.verticalScrollBar().isVisible())
-
-        window.geometry_settings_group.toggle()
-        QTest.qWait(METRICS.animation_duration_ms // 2)
-        self.app.processEvents()
-        self.assertEqual(window.timing_group.geometry(), timing_geometry)
-        self.assertEqual(window.prediction_frame.geometry(), prediction_geometry)
-        self.assertIsNone(window.timing_group.graphicsEffect())
-        self.assertIsNone(window.prediction_frame.graphicsEffect())
-        self.assertIsNone(window.timing_group.content_widget.graphicsEffect())
-        self.assertIsNone(window.prediction_frame.content_widget.graphicsEffect())
-        QTest.qWait(METRICS.animation_duration_ms)
-        self.app.processEvents()
-        self.assertFalse(window.geometry_settings_group.content_widget.isHidden())
+        self.assertEqual(window.timing_group.grab().toImage(), timing_image)
+        self.assertEqual(
+            window.prediction_frame.grab().toImage(), prediction_image
+        )
         window.close()
 
     def test_geometry_dropdown_first_open_from_restored_collapsed_state(self) -> None:
@@ -1706,18 +1770,18 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.reset_button.isHidden())
         window.close()
 
-    def test_workflow_uses_sequential_collapse_and_fade_animations(self) -> None:
+    def test_workflow_uses_immediate_collapse_and_fade_animation(self) -> None:
         workflow_source = (
             SRC_ROOT / "cooling_tower" / "gui" / "workflow_controller.py"
         ).read_text(encoding="utf-8")
         required = (
             "QPropertyAnimation",
-            "QVariantAnimation",
             "QParallelAnimationGroup",
             "QGraphicsOpacityEffect",
         )
         for class_name in required:
             self.assertIn(class_name, workflow_source)
+        self.assertNotIn("QVariantAnimation", workflow_source)
 
     def test_invalid_domain_limits_preserve_the_entered_value(self) -> None:
         window = self.window()

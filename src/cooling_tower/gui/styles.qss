@@ -222,9 +222,12 @@ QFrame#sectionCard[outerDropdown="true"][state="error"] {
 }
 
 /* Die Vorbereitung ist bis zum letzten erfüllten Punkt ein fester Bereich.
-   In diesem Zustand ersetzt die normale Kartenlinie den Dropdown-Akzent. */
+   Die linke Kante behält intern bereits die Dropdown-Breite, wird aber erst
+   nach dem Abschluss grün hervorgehoben. Dadurch kann Qt beim dynamischen
+   Wechsel zum einklappbaren Header die volle Akzentbreite zuverlässig neu
+   einfärben. */
 QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="false"] {
-    border: 1px solid #d6dee8;
+    border-left-color: #d6dee8;
 }
 
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] {
@@ -271,7 +274,11 @@ QFrame#sectionCard[outerDropdown="true"][state="success"] > QFrame#sectionCardHe
 QFrame#sectionCard[outerDropdown="true"][role="preparation"] > QFrame#sectionCardHeader,
 QFrame#sectionCard[outerDropdown="true"][role="timing"] > QFrame#sectionCardHeader,
 QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"] > QFrame#sectionCardHeader {
-    background: #e1eef6;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #eef7fc,
+        stop: 1 #cfe3ef
+    );
 }
 
 QFrame#sectionCard[outerDropdown="true"][role="preparation"] > QFrame#sectionCardBodyDivider,
@@ -284,7 +291,18 @@ QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"] > QFrame#secti
 }
 
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] > QFrame#sectionCardHeader {
-    background: #f3f0ff;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #f7f4ff,
+        stop: 1 #ddd5f5
+    );
+}
+
+QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] > QFrame#sectionCardBodyDivider {
+    background: #a99ad8;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
 }
 
 QFrame#sectionCardBodyDivider {
@@ -313,13 +331,21 @@ QFrame#sectionCard[outerDropdown="true"][collapsible="true"] > QFrame#sectionCar
 QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="true"] > QFrame#sectionCardHeader:hover,
 QFrame#sectionCard[outerDropdown="true"][role="timing"][collapsible="true"] > QFrame#sectionCardHeader:hover,
 QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"][collapsible="true"] > QFrame#sectionCardHeader:hover {
-    background: #d4e6f2;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e3f1f8,
+        stop: 1 #bdd9e9
+    );
 }
 
 QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="true"] > QFrame#sectionCardHeader:pressed,
 QFrame#sectionCard[outerDropdown="true"][role="timing"][collapsible="true"] > QFrame#sectionCardHeader:pressed,
 QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"][collapsible="true"] > QFrame#sectionCardHeader:pressed {
-    background: #c9deec;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #d8eaf4,
+        stop: 1 #aecfe1
+    );
 }
 
 QFrame#sectionCard[outerDropdown="true"][collapsible="true"][state="success"] > QFrame#sectionCardHeader:hover {
@@ -329,7 +355,11 @@ QFrame#sectionCard[outerDropdown="true"][collapsible="true"][state="success"] > 
 QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="true"][state="success"] > QFrame#sectionCardHeader:hover,
 QFrame#sectionCard[outerDropdown="true"][role="timing"][collapsible="true"][state="success"] > QFrame#sectionCardHeader:hover,
 QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"][collapsible="true"][state="success"] > QFrame#sectionCardHeader:hover {
-    background: #d4e6f2;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e3f1f8,
+        stop: 1 #bdd9e9
+    );
 }
 
 QFrame#sectionCard[collapsible="true"] QFrame#sectionCardHeader:pressed {
@@ -338,7 +368,11 @@ QFrame#sectionCard[collapsible="true"] QFrame#sectionCardHeader:pressed {
 
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"][collapsible="true"] > QFrame#sectionCardHeader:hover,
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"][collapsible="true"] > QFrame#sectionCardHeader:pressed {
-    background: #e8e1ff;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #eee9ff,
+        stop: 1 #cec3ef
+    );
 }
 
 /* Expanded headers end at a divider. Only their upper corners remain rounded,
@@ -357,6 +391,24 @@ QLabel#sectionCardTitle {
     color: #21384f;
     font-size: 13pt;
     font-weight: 650;
+}
+
+QFrame#sectionCard[outerDropdown="true"][role="preparation"]
+> QFrame#sectionCardHeader QLabel#sectionCardTitle,
+QFrame#sectionCard[outerDropdown="true"][role="timing"]
+> QFrame#sectionCardHeader QLabel#sectionCardTitle,
+QFrame#sectionCard[outerDropdown="true"][role="geometrySettings"]
+> QFrame#sectionCardHeader QLabel#sectionCardTitle {
+    color: #40576a;
+    font-size: 12pt;
+    font-weight: 700;
+}
+
+QFrame#sectionCard[outerDropdown="true"][cardTone="preview"]
+> QFrame#sectionCardHeader QLabel#sectionCardTitle {
+    color: #4d3c86;
+    font-size: 12pt;
+    font-weight: 700;
 }
 
 QLabel#sectionCardTitleNote {
@@ -552,9 +604,54 @@ QFrame#geometryVerticalDivider {
 }
 
 QWidget#preparationOverview,
+QWidget#preparationOverviewHost,
 QWidget#preparationRequirements {
     background: transparent;
     border: none;
+}
+
+QWidget#preparationProgressHeader {
+    background: transparent;
+    border: none;
+}
+
+QLabel#preparationProgressTitle {
+    color: #294c69;
+    background: transparent;
+    font-size: 9.5pt;
+    font-weight: 700;
+}
+
+QLabel#preparationProgressStatus {
+    color: #526b7e;
+    background: transparent;
+    font-size: 9pt;
+    font-weight: 600;
+}
+
+QLabel#preparationProgressStatus[state="complete"] {
+    color: #176b45;
+}
+
+QProgressBar#preparationProgressBar {
+    color: #294457;
+    background: #dce7ed;
+    border: 1px solid #abc0cd;
+    border-radius: 6px;
+    min-height: 18px;
+    max-height: 18px;
+    text-align: center;
+    font-size: 8.5pt;
+    font-weight: 650;
+}
+
+QProgressBar#preparationProgressBar::chunk {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 #2f7fb7,
+        stop: 1 #26965f
+    );
+    border-radius: 5px;
 }
 
 /* Ein einziger Verlauf verbindet Reiterübersicht und aktuelle Arbeitsfläche.
@@ -619,6 +716,25 @@ QPushButton#preparationStepSelector[stepTone="slicer"] {
     border-color: #76a2be;
 }
 
+QPushButton#preparationStepSelector[locked="true"] {
+    color: #7a8791;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #edf1f3,
+        stop: 1 #dfe5e8
+    );
+    border-color: #aebbc3;
+}
+
+QPushButton#preparationStepSelector[locked="true"][groupHovered="true"] {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e9edef,
+        stop: 1 #d8dfe3
+    );
+    border-color: #9baab4;
+}
+
 QWidget#preparationRequirements[twoColumn="false"] QPushButton#preparationStepSelector[stepTone="slicer"] {
     border: 1px solid #76a2be;
 }
@@ -681,6 +797,28 @@ QWidget#preparationSlicerRequirements[active="false"] {
         stop: 0.58 #f2f5f6,
         stop: 1 #f8f9fa
     );
+}
+
+QWidget#preparationSlicerRequirements[locked="true"] {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e4e9ec,
+        stop: 0.58 #eff2f4,
+        stop: 1 #f7f8f9
+    );
+    border-color: #b7c1c7;
+}
+
+QLabel#preparationStepConnector {
+    color: #8697a3;
+    background: transparent;
+    border: none;
+    font-size: 14pt;
+    font-weight: 750;
+}
+
+QLabel#preparationStepConnector[state="open"] {
+    color: #24784f;
 }
 
 QWidget#preparationSourceRequirements[active="true"],
@@ -760,6 +898,16 @@ QWidget#preparationStepPage[stepTone="slicer"] {
     border: none;
 }
 
+QWidget#preparationTransitionViewport {
+    background: #f1f6f9;
+    border: none;
+}
+
+QLabel#preparationTransitionOverlay {
+    background: transparent;
+    border: none;
+}
+
 QWidget#preparationStepShell,
 QWidget#preparationStepCopy {
     background: transparent;
@@ -830,6 +978,12 @@ QLabel#preparationStepState[state="error"] {
     color: #9c2b22;
     background: #fff1ef;
     border-color: #edb6b0;
+}
+
+QLabel#preparationStepState[state="locked"] {
+    color: #687781;
+    background: #edf1f3;
+    border-color: #c5cfd5;
 }
 
 QFrame#sectionCard[embeddedStep="true"][stepTone="source"] {

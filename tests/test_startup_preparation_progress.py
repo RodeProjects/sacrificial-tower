@@ -209,6 +209,10 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window.preparation_step_selectors[1].progress_value,
                 50,
             )
+            self.assertEqual(window.preparation_progress_bar.value(), 0)
+            self.assertTrue(
+                window.preparation_step_selectors[1].property("locked")
+            )
             self.assertEqual(
                 window.preparation_requirement_rows["slicer_detected"][0].text(),
                 "✓",
@@ -217,14 +221,14 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window.preparation_requirement_rows["profiles_loaded"][0].text(),
                 "✓",
             )
-            self.assertTrue(window.profile_confirm_button.isEnabled())
+            self.assertFalse(window.profile_confirm_button.isEnabled())
 
             window.profile_confirm_button.click()
             self.app.processEvents()
-            self.assertIsNotNone(window.profile_catalog_confirmation)
+            self.assertIsNone(window.profile_catalog_confirmation)
             self.assertEqual(
                 window.preparation_step_selectors[1].progress_value,
-                75,
+                50,
             )
             self.assertTrue(window.ready_grid.isHidden())
 
@@ -241,11 +245,8 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window.preparation_step_selectors[1].progress_value,
                 50,
             )
-            self.assertTrue(window.profile_confirm_button.isEnabled())
-            self.assertEqual(
-                slicer_service.profile_selections["filament"].profile_id,
-                self.records["filament"].profile_id,
-            )
+            self.assertFalse(window.profile_confirm_button.isEnabled())
+            self.assertNotIn("filament", slicer_service.profile_selections)
 
             self.assertEqual(
                 {
@@ -313,7 +314,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 self.installation.identity_key,
                 slicer_service.remembered_identity_keys,
             )
-            self.assertTrue(window.profile_confirm_button.isEnabled())
+            self.assertFalse(window.profile_confirm_button.isEnabled())
             self.assertIsNone(window.profile_catalog_confirmation)
         finally:
             window.close()

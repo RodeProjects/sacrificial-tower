@@ -575,15 +575,19 @@ class Phase16Tests(unittest.TestCase):
         self.assertLess(efficient_within_tolerance, exact_but_wasteful)
 
     def test_08_convergence_requires_time_and_profile_stability(self) -> None:
+        config = CalibrationConfig()
+        self.assertEqual(config.time_tolerance_s, 0.2)
+        self.assertEqual(config.slicer_result_change_tolerance_s, 0.25)
+        self.assertEqual(config.profile_change_tolerance_mm, 0.1)
         enough = {layer.index: 20.0 for layer in self.snapshot.layers}
         result = evaluate_convergence(
             self.snapshot.layers, enough, target_time_s=5.0,
-            maximum_profile_change_mm=0.0, config=CalibrationConfig(),
+            maximum_profile_change_mm=0.1, config=config,
         )
         self.assertTrue(result.converged)
         unstable = evaluate_convergence(
             self.snapshot.layers, enough, target_time_s=5.0,
-            maximum_profile_change_mm=1.0, config=CalibrationConfig(),
+            maximum_profile_change_mm=0.1001, config=config,
         )
         self.assertFalse(unstable.converged)
 
@@ -766,7 +770,7 @@ class Phase16Tests(unittest.TestCase):
         self.assertFalse(result.iterations[1].slicer_result_stable)
         self.assertTrue(result.iterations[2].slicer_result_stable)
 
-    def test_adaptive_rounds_stop_at_limit_when_results_keep_changing(self) -> None:
+    def test_target_time_wins_even_when_slicer_results_keep_changing(self) -> None:
         adapter = SequencedAdapter(
             [
                 tower_gcode(path_size=1.0, feed=60),
@@ -785,7 +789,7 @@ class Phase16Tests(unittest.TestCase):
             config=CalibrationConfig(maximum_iterations=5),
         )
 
-        self.assertFalse(result.success)
+        self.assertTrue(result.success, result.failures)
         self.assertEqual(len(adapter.requests), 5)
         self.assertEqual(len(result.iterations), 5)
         self.assertTrue(
@@ -794,11 +798,14 @@ class Phase16Tests(unittest.TestCase):
                 for iteration in result.iterations
             )
         )
-        self.assertEqual(
-            result.failures[-1].code,
-            CalibrationFailureCode.STALLED,
+        self.assertFalse(result.failures)
+        self.assertTrue(
+            all(
+                iteration.maximum_slicer_result_change_s
+                > CalibrationConfig().slicer_result_change_tolerance_s
+                for iteration in result.iterations[1:]
+            )
         )
-        self.assertIn("instabil", result.failures[-1].message)
 
     def test_single_selected_pass_remains_supported(self) -> None:
         adapter = FakeAdapter(tower_gcode(path_size=1.0, feed=60))

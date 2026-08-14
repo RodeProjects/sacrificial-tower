@@ -535,6 +535,10 @@ class PreviewService:
                 calibration_time_tolerance_s=(
                     request.calibration_config.time_tolerance_s
                 ),
+                calibration_slicer_result_tolerance_s=(
+                    request.calibration_config
+                    .slicer_result_change_tolerance_s
+                ),
                 calibration_profile_tolerance_mm=(
                     request.calibration_config.profile_change_tolerance_mm
                 ),

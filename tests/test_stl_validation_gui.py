@@ -146,12 +146,9 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.source_guide_row.isHidden())
             self.assertEqual(
                 window.drop_zone.prompt_label.text(),
-                window.drop_zone.REPLACEMENT_PROMPT,
+                window.drop_zone.EMPTY_PROMPT,
             )
-            self.assertEqual(
-                window.drop_zone.prompt_label.isHidden(),
-                False,
-            )
+            self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertFalse(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.source_progress_bar.isHidden())
             self.assertEqual(
@@ -167,10 +164,6 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.browse_button.isEnabled())
             self.assertTrue(window.drop_zone.reload_button.isEnabled())
             self.assertTrue(window.drop_zone.remove_button.isEnabled())
-            self.assertIn(
-                "Die bisherige Datei wird dadurch ersetzt",
-                window.drop_zone.prompt_label.text(),
-            )
             reload_column = window.drop_zone.actions_layout.getItemPosition(
                 window.drop_zone.actions_layout.indexOf(
                     window.drop_zone.reload_button
@@ -347,10 +340,7 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIsNot(window.stl_validation_result, first_result)
             self.assertIs(window.workflow.stage, WorkflowStage.SOURCE_INVALID)
             self.assertEqual(window.drop_zone.selected_path, source.resolve())
-            self.assertEqual(
-                window.drop_zone.prompt_label.isHidden(),
-                False,
-            )
+            self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertFalse(window.drop_zone.remove_button.isHidden())
         finally:
             window.close()
@@ -425,12 +415,9 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIsNone(window.stl_validation_result)
             self.assertEqual(
                 window.drop_zone.prompt_label.text(),
-                window.drop_zone.REPLACEMENT_PROMPT,
+                window.drop_zone.EMPTY_PROMPT,
             )
-            self.assertEqual(
-                window.drop_zone.prompt_label.isHidden(),
-                False,
-            )
+            self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertFalse(window.drop_zone.info_widget.isHidden())
             self.assertTrue(window.source_progress_bar.isHidden())
             self.assertEqual(

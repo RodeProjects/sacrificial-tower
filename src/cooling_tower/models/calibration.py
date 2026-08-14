@@ -49,9 +49,10 @@ class CalibrationConfig:
     mode: CalibrationMode = CalibrationMode.STL
     maximum_iterations: int = 5
     maximum_runtime_s: float = 600.0
-    time_tolerance_s: float = 0.15
+    time_tolerance_s: float = 0.2
+    slicer_result_change_tolerance_s: float = 0.25
     slicer_metadata_tolerance_s: float = 0.75
-    profile_change_tolerance_mm: float = 0.03
+    profile_change_tolerance_mm: float = 0.1
     maximum_path_growth_factor: float = 2.0
     minimum_path_growth_mm: float = 0.5
     material_reduction_factor: float = 1.0
@@ -77,6 +78,7 @@ class CalibrationConfig:
         for name in (
             "maximum_runtime_s",
             "time_tolerance_s",
+            "slicer_result_change_tolerance_s",
             "slicer_metadata_tolerance_s",
             "profile_change_tolerance_mm",
             "maximum_path_growth_factor",

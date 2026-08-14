@@ -30,6 +30,7 @@ from cooling_tower.models import (
     CalibrationMode,
     GenerationSettings,
     ProfileFeasibilityAssessment,
+    SourceKind,
 )
 from cooling_tower.preview import (
     LineSegment3D,
@@ -233,7 +234,7 @@ class UxImprovementTests(unittest.TestCase):
         self.assertTrue(drop_zone.set_file(source))
         drop_zone.set_analysis_state("rejected")
         self.app.processEvents()
-        self.assertFalse(drop_zone.prompt_label.isHidden())
+        self.assertTrue(drop_zone.prompt_label.isHidden())
         self.assertFalse(drop_zone.info_widget.isHidden())
         self.assertFalse(drop_zone.browse_button.isHidden())
         self.assertFalse(drop_zone.reload_button.isHidden())
@@ -277,6 +278,16 @@ class UxImprovementTests(unittest.TestCase):
     def test_03_reconstructed_configuration_starts_collapsed_and_fits_content(self) -> None:
         window = self.window()
         window.show()
+        source = (self.root / "reconstructed.stl").resolve()
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+        window.current_source_path = source
+        window.current_source_kind = SourceKind.STL
+        window.source_artifact = SimpleNamespace(
+            original_path=source,
+            matches_current_file=lambda: True,
+        )
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        window._update_preparation_requirements()
         items = tuple(
             SimpleNamespace(key=f"wert_{index}", raw_value=f"inhalt_{index}")
             for index in range(12)

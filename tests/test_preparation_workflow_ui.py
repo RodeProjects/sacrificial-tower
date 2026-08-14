@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QAbstractAnimation, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -53,6 +54,23 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             enable_startup_slicer_discovery=False,
         )
 
+    def mark_valid_source(
+        self,
+        window: MainWindow,
+        name: str = "modell.stl",
+    ) -> Path:
+        source = (self.root / name).resolve()
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+        window.current_source_path = source
+        window.current_source_kind = SourceKind.STL
+        window.source_artifact = SimpleNamespace(
+            original_path=source,
+            matches_current_file=lambda: True,
+        )
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        window._update_preparation_requirements()
+        return source
+
     def test_named_steps_follow_overview_and_start_with_file_transfer(self) -> None:
         window = self.window()
         try:
@@ -65,7 +83,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
             self.assertLess(
                 window.workflow_group.content_layout.indexOf(
-                    window.preparation_overview
+                    window.preparation_overview_host
                 ),
                 window.workflow_group.content_layout.indexOf(
                     window.preparation_tabs
@@ -82,11 +100,12 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             margins = window.preparation_overview.layout().contentsMargins()
             self.assertEqual(
                 (margins.left(), margins.top(), margins.right(), margins.bottom()),
-                (16, 14, 16, 14),
+                (24, 14, 24, 14),
             )
+            self.assertEqual(window.preparation_overview.maximumWidth(), 748)
             self.assertEqual(
                 window.preparation_requirements.grid.horizontalSpacing(),
-                12,
+                0,
             )
             self.assertEqual(
                 window.preparation_requirements.grid.verticalSpacing(),
@@ -94,12 +113,20 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )
             self.assertTrue(window.preparation_step_selectors[0].isChecked())
             self.assertFalse(window.preparation_step_selectors[1].isChecked())
-            self.assertTrue(
-                all(
+            self.assertEqual(
+                [
                     selector.cursor().shape()
-                    is Qt.CursorShape.PointingHandCursor
                     for selector in window.preparation_step_selectors
-                )
+                ],
+                [
+                    Qt.CursorShape.PointingHandCursor,
+                    Qt.CursorShape.ForbiddenCursor,
+                ],
+            )
+            self.assertEqual(window.preparation_progress_bar.value(), 0)
+            self.assertEqual(window.preparation_step_connector.text(), "›››")
+            self.assertTrue(
+                window.preparation_step_selectors[1].property("locked")
             )
             self.assertEqual(
                 [label.text() for label in window.preparation_step_selector_titles],
@@ -127,6 +154,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         try:
+            self.mark_valid_source(window)
             window.preparation_tabs.setCurrentIndex(1)
             profile_text = (
                 "Anycubic Kobra 3 V2 0.4 nozzle – Settings v2"
@@ -137,6 +165,10 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertEqual(window.slicer_group.width(), 700)
+            self.assertEqual(
+                window.preparation_requirements.width(),
+                window.slicer_group.width(),
+            )
             required_text_width = (
                 window.machine_profile_combo.fontMetrics().horizontalAdvance(
                     profile_text
@@ -162,6 +194,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         try:
+            self.mark_valid_source(window)
             for index, card in enumerate(
                 (window.source_group, window.slicer_group)
             ):
@@ -311,6 +344,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         try:
+            self.mark_valid_source(window)
             self.assertIsInstance(window.slicer_analysis_details, QScrollArea)
             self.assertIs(
                 window.slicer_analysis_details.widget(),
@@ -397,13 +431,13 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             icon = window.workflow_group.status_icon
             title = window.workflow_group.title_label
             self.assertTrue(icon.property("headerLead"))
-            self.assertEqual((icon.width(), icon.height()), (45, 24))
+            self.assertEqual((icon.width(), icon.height()), (45, 40))
             self.assertGreaterEqual(
                 icon.font().pointSizeF(),
                 title.font().pointSizeF(),
             )
             window.workflow_group.set_state(SectionState.ERROR)
-            self.assertEqual((icon.width(), icon.height()), (45, 24))
+            self.assertEqual((icon.width(), icon.height()), (45, 40))
         finally:
             window.close()
 
@@ -462,6 +496,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertIn("border-bottom-left-radius: 0;", selector_rule)
             self.assertIn("border-bottom-right-radius: 0;", selector_rule)
 
+            self.mark_valid_source(window)
             source, slicer = window.preparation_step_selectors
             source_image = source.grab().toImage()
             slicer_image = slicer.grab().toImage()
@@ -482,7 +517,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_progress_fill_and_hover_keep_header_text_readable(self) -> None:
+    def test_general_progress_replaces_separate_step_fills(self) -> None:
         window = self.window()
         window.resize(1200, 900)
         window.show()
@@ -492,36 +527,33 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             title = window.preparation_step_selector_titles[0]
             selector.set_progress_value(50)
             self.app.processEvents()
-
-            normal = selector.grab().toImage()
-            green_before = normal.pixelColor(selector.width() // 4, 8)
-            blue_before = normal.pixelColor(3 * selector.width() // 4, 8)
-            self.assertNotEqual(green_before, blue_before)
+            self.assertTrue(selector.progress_label.isHidden())
+            self.assertTrue(
+                window.preparation_step_selectors[1].progress_label.isHidden()
+            )
+            self.assertEqual(window.preparation_progress_bar.value(), 0)
             self.assertEqual(
                 title.palette().color(title.foregroundRole()).name(),
                 "#40576a",
             )
 
-            window._set_preparation_step_hovered(0, True)
+            self.mark_valid_source(window)
             self.app.processEvents()
-            hovered = selector.grab().toImage()
-            green_after = hovered.pixelColor(selector.width() // 4, 8)
-            blue_after = hovered.pixelColor(3 * selector.width() // 4, 8)
-            self.assertNotEqual(green_before, green_after)
-            self.assertNotEqual(blue_before, blue_after)
-            self.assertEqual(
-                title.palette().color(title.foregroundRole()).name(),
-                "#40576a",
+            self.assertEqual(window.preparation_progress_bar.value(), 50)
+            self.assertEqual(window.preparation_step_connector.text(), "›››")
+            self.assertFalse(
+                window.preparation_step_selectors[1].property("locked")
             )
         finally:
             window.close()
 
-    def test_progress_fill_preserves_rounded_blue_header_outline(self) -> None:
+    def test_step_progress_values_do_not_overpaint_navigation_outline(self) -> None:
         window = self.window()
         window.resize(1200, 900)
         window.show()
         self.app.processEvents()
         try:
+            self.mark_valid_source(window)
             for selector in window.preparation_step_selectors:
                 for progress in (1, 50, 100):
                     selector.set_progress_value(progress)
@@ -533,8 +565,6 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                         image.pixelColor(0, selector.height() - 8).name(),
                         "#76a2be",
                     )
-                    # This antialiased arc pixel was previously overwritten
-                    # by the green progress fill and became almost white.
                     corner = image.pixelColor(2, 2)
                     self.assertLess(corner.blue(), 245)
 
@@ -604,6 +634,65 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_invalid_stl_keeps_file_step_blocks_separate(self) -> None:
+        window = self.window()
+        window.resize(1342, 1308)
+        window.show()
+        self.app.processEvents()
+        source = (self.root / "fehlerhaft.stl").resolve()
+        source.write_text("solid bad\nendsolid bad\n", encoding="ascii")
+        artifact = SimpleNamespace(original_path=source)
+        try:
+            window.current_source_path = source
+            window.current_source_kind = SourceKind.STL
+            window._stl_validation_request_id = 3
+            window.drop_zone._selected_path = source
+            window.drop_zone._selected_kind = SourceKind.STL
+            window.drop_zone.setProperty("loaded", True)
+            window.workflow.begin_source_validation(is_stl=True)
+            window._on_stl_validation_succeeded(
+                3,
+                SimpleNamespace(
+                    valid=False,
+                    source_artifact=artifact,
+                    technical_summary="Nicht manifold",
+                ),
+            )
+            for _ in range(6):
+                self.app.processEvents()
+
+            drop_zone = window.drop_zone
+            self.assertGreaterEqual(
+                drop_zone.height(),
+                drop_zone.minimumHeight(),
+            )
+            self.assertGreaterEqual(
+                drop_zone.info_widget.height(),
+                drop_zone.info_widget.minimumSizeHint().height(),
+            )
+            self.assertTrue(drop_zone.prompt_label.isHidden())
+            internal_blocks = (
+                drop_zone.info_widget,
+                drop_zone.actions_widget,
+            )
+            for upper, lower in zip(internal_blocks, internal_blocks[1:]):
+                self.assertLess(upper.geometry().bottom(), lower.geometry().top())
+
+            source_blocks = (
+                drop_zone,
+                window.stl_validation_details_toggle,
+                window.stl_validation_message,
+            )
+            for upper, lower in zip(source_blocks, source_blocks[1:]):
+                self.assertLess(upper.geometry().bottom(), lower.geometry().top())
+            self.assertLessEqual(
+                window.stl_validation_message.geometry().bottom(),
+                window.source_group.content_widget.rect().bottom()
+                - window.source_group.content_layout.contentsMargins().bottom(),
+            )
+        finally:
+            window.close()
+
     def test_requirements_live_inside_persistent_coloured_step_containers(self) -> None:
         window = self.window()
         window.show()
@@ -634,11 +723,12 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.preparation_overview.layout().indexOf(
                     window.preparation_requirements
                 ),
-                0,
+                2,
             )
             self.assertTrue(source_selector.isVisibleTo(window))
             self.assertTrue(slicer_selector.isVisibleTo(window))
 
+            self.mark_valid_source(window)
             slicer_selector.click()
             self.app.processEvents()
             self.assertEqual(window.preparation_tabs.currentIndex(), 1)
@@ -665,45 +755,101 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_missing_requirements_pulse_gently_between_grey_and_red(self) -> None:
+    def test_missing_requirements_remain_static(self) -> None:
         window = self.window()
         try:
             _icon, label = window.preparation_requirement_rows[
                 "source_selected"
             ]
-            animation = label.attention_animation
-            self.assertEqual(animation.loopCount(), -1)
-            self.assertEqual(animation.animationCount(), 2)
+            self.assertIsNone(label.graphicsEffect())
+            self.assertFalse(hasattr(label, "attention_animation"))
+
+            self.mark_valid_source(window)
+            self.assertIsNone(label.graphicsEffect())
+            self.assertFalse(hasattr(label, "attention_animation"))
+        finally:
+            window.close()
+
+    def test_incomplete_preparation_fills_viewport_and_scrolls_only_on_overflow(
+        self,
+    ) -> None:
+        window = self.window()
+        window.resize(1530, 1393)
+        window.show()
+        for _ in range(6):
+            self.app.processEvents()
+        try:
             self.assertEqual(
-                [
-                    animation.animationAt(index).duration()
-                    for index in range(animation.animationCount())
-                ],
-                [1000, 1000],
+                window.settings_scroll.verticalScrollBarPolicy(),
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded,
             )
-            self.assertIs(
-                animation.state(),
-                QAbstractAnimation.State.Running,
-            )
-            self.assertEqual(label._to_hint.startValue(), 0.0)
-            self.assertEqual(label._to_hint.endValue(), 1.0)
             self.assertEqual(
-                label._attention_effect.color().name(),
-                "#b86f73",
+                window.settings_scroll.verticalScrollBar().maximum(),
+                0,
+            )
+            self.assertFalse(
+                window.settings_scroll.verticalScrollBar().isVisible()
+            )
+            margins = window.content_layout.contentsMargins()
+            self.assertEqual(margins.bottom(), margins.left())
+            self.assertEqual(margins.bottom(), margins.right())
+            self.assertEqual(
+                window.settings_content.height()
+                - window.workflow_group.geometry().bottom()
+                - 1,
+                margins.bottom(),
+            )
+            progress_header = window.preparation_progress_header.geometry()
+            progress_bar = window.preparation_progress_bar.geometry()
+            requirements = window.preparation_requirements.geometry()
+            self.assertLessEqual(progress_header.top(), 16)
+            self.assertLessEqual(
+                progress_bar.top() - progress_header.bottom() - 1,
+                10,
+            )
+            self.assertLessEqual(
+                requirements.top() - progress_bar.bottom() - 1,
+                10,
+            )
+            self.assertEqual(
+                window.preparation_tabs.geometry().top(),
+                window.preparation_overview_host.geometry().bottom() + 1,
+            )
+            self.assertGreater(
+                window.workflow_group.content_widget.height()
+                - window.preparation_tabs.geometry().bottom(),
+                100,
             )
 
-            label.set_requirement_complete(True)
-            self.assertIs(
-                animation.state(),
-                QAbstractAnimation.State.Stopped,
+            # The taller Slicer step still fits at this height. A shrinking
+            # decorative bottom margin must not create a premature scrollbar.
+            self.mark_valid_source(window)
+            window.preparation_tabs.setCurrentIndex(1)
+            window.resize(1400, 1120)
+            for _ in range(6):
+                self.app.processEvents()
+            self.assertFalse(
+                window.settings_scroll.verticalScrollBar().isVisible()
             )
-            self.assertFalse(label._attention_effect.isEnabled())
-            label.set_requirement_complete(False)
-            self.assertIs(
-                animation.state(),
-                QAbstractAnimation.State.Running,
+            slicer_bottom = window.slicer_group.mapTo(
+                window.settings_content,
+                window.slicer_group.rect().bottomLeft(),
+            ).y()
+            self.assertLess(
+                slicer_bottom,
+                window.settings_scroll.viewport().height(),
             )
-            self.assertTrue(label._attention_effect.isEnabled())
+
+            window.resize(760, 600)
+            for _ in range(6):
+                self.app.processEvents()
+            self.assertGreater(
+                window.settings_scroll.verticalScrollBar().maximum(),
+                0,
+            )
+            self.assertTrue(
+                window.settings_scroll.verticalScrollBar().isVisible()
+            )
         finally:
             window.close()
 
@@ -840,14 +986,10 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_source_success_stays_green_then_opens_slicer_after_one_second(self) -> None:
+    def test_source_success_opens_slicer_with_500_ms_transition(self) -> None:
         window = self.window()
-        source = self.root / "modell.stl"
-        source.write_text("solid x\nendsolid x\n", encoding="ascii")
-        window.current_source_path = source.resolve()
-        window.current_source_kind = window.drop_zone._selected_kind = None
+        source = self.mark_valid_source(window)
         window._stl_validation_request_id = 7
-        window.stl_validation_result = SimpleNamespace(valid=True)
         try:
             window.workflow.source_validation_succeeded(
                 "modell.stl · Geometrie gültig",
@@ -855,19 +997,104 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )
             self.assertIs(window.source_group.state(), SectionState.SUCCESS)
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
-            window._schedule_slicer_step_open(7, source.resolve())
-            QTest.qWait(850)
-            self.app.processEvents()
-            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
-            QTest.qWait(220)
+            window._schedule_slicer_step_open(7, source)
             self.app.processEvents()
             self.assertEqual(window.preparation_tabs.currentIndex(), 1)
+            self.assertEqual(
+                window.preparation_tabs.last_transition,
+                (0, 1, 500),
+            )
+        finally:
+            window.close()
+
+    def test_locked_forward_step_relocks_after_invalid_replacement(self) -> None:
+        window = self.window()
+        try:
+            window.preparation_tabs.setCurrentIndex(1)
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            self.assertEqual(window.preparation_tabs.last_blocked_index, 1)
+
+            self.mark_valid_source(window, "erste.stl")
+            window.preparation_tabs.setCurrentIndex(1)
+            self.assertEqual(window.preparation_tabs.currentIndex(), 1)
+            window.preparation_tabs.setCurrentIndex(0)
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+
+            replacement = (self.root / "ungueltig.stl").resolve()
+            replacement.write_text("keine stl", encoding="utf-8")
+            window.current_source_path = replacement
+            window.current_source_kind = SourceKind.STL
+            window.source_artifact = None
+            window.stl_validation_result = SimpleNamespace(valid=False)
+            window._update_preparation_requirements()
+
+            self.assertTrue(
+                window.preparation_step_selectors[1].property("locked")
+            )
+            self.assertEqual(window.preparation_progress_bar.value(), 25)
+            window.preparation_tabs.setCurrentIndex(1)
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+        finally:
+            window.close()
+
+    def test_each_direction_change_starts_a_fresh_card_animation(self) -> None:
+        window = self.window()
+        window.resize(1200, 900)
+        window.show()
+        self.app.processEvents()
+        transitions: list[tuple[int, int, int]] = []
+        window.preparation_tabs.transition_started.connect(
+            lambda old, new, duration: transitions.append(
+                (old, new, duration)
+            )
+        )
+        # Keep this offscreen regression fast while retaining the production
+        # duration published by every transition.
+        window.preparation_tabs._effective_transition_duration_ms = 30
+        try:
+            self.mark_valid_source(window)
+            window.preparation_tabs.setCurrentIndex(1)
+            self.app.processEvents()
+            self.assertEqual(window.preparation_tabs.currentIndex(), 0)
+            self.assertIsNotNone(
+                window.preparation_tabs._transition_animation
+            )
+            self.assertIsNotNone(
+                window.preparation_tabs._transition_viewport
+            )
+            self.assertEqual(
+                window.preparation_tabs._transition_viewport.width(),
+                window.source_group.width(),
+            )
+            self.assertEqual(
+                window.preparation_tabs._transition_animation.duration(),
+                30,
+            )
+            QTest.qWait(50)
+            self.app.processEvents()
+            self.assertEqual(window.preparation_tabs.currentIndex(), 1)
+
+            window.preparation_tabs.setCurrentIndex(0)
+            QTest.qWait(50)
+            self.app.processEvents()
+            window.preparation_tabs.setCurrentIndex(1)
+            self.app.processEvents()
+
+            self.assertEqual(
+                transitions,
+                [
+                    (0, 1, 500),
+                    (1, 0, 500),
+                    (0, 1, 500),
+                ],
+            )
         finally:
             window.close()
 
     def test_background_slicer_error_is_deferred_until_step_two(self) -> None:
         window = self.window()
         try:
+            self.mark_valid_source(window)
             window.workflow.begin_source_validation(is_stl=True)
             window.workflow.required_slicer_unavailable("Slicer fehlt")
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
@@ -932,7 +1159,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_collapse_finishes_before_the_settings_fade_starts(self) -> None:
+    def test_immediate_collapse_starts_the_settings_fade(self) -> None:
         host = QWidget()
         layout = QVBoxLayout(host)
         preparation = SectionCard(
@@ -969,20 +1196,19 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             controller.slicer_succeeded("Testslicer")
 
             self.assertIs(preparation.state(), SectionState.SUCCESS)
-            self.assertTrue(preparation.isChecked())
-            self.assertTrue(settings.isHidden())
-            QTest.qWait(300)
-            self.assertTrue(preparation.isChecked())
-            self.assertTrue(settings.isHidden())
-
-            QTest.qWait(260)
             self.assertFalse(preparation.isChecked())
             self.assertFalse(settings.isHidden())
             effect = settings.graphicsEffect()
             self.assertIsNotNone(effect)
             self.assertLess(effect.opacity(), 1.0)
 
-            QTest.qWait(520)
+            deadline = time.monotonic() + 2
+            while (
+                settings.graphicsEffect() is not None
+                and time.monotonic() < deadline
+            ):
+                self.app.processEvents()
+                QTest.qWait(10)
             self.assertIsNone(settings.graphicsEffect())
             self.assertIs(controller.stage, WorkflowStage.READY)
         finally:
