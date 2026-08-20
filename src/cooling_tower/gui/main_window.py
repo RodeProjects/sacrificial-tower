@@ -1512,6 +1512,17 @@ class MainWindow(QMainWindow):
             source_layout.indexOf(self.drop_zone) + 1,
             self.stl_validation_message,
         )
+        self.accept_rejected_stl_button = QPushButton("STL trotzdem verwenden")
+        self.accept_rejected_stl_button.setObjectName(
+            "acceptRejectedStlButton"
+        )
+        self.accept_rejected_stl_button.setAccessibleName(
+            "Abgelehnte STL nach Sicherheitsbestätigung trotzdem verwenden"
+        )
+        self.accept_rejected_stl_button.clicked.connect(
+            self._confirm_rejected_stl
+        )
+        self.accept_rejected_stl_button.hide()
         self.stl_validation_details_toggle = QPushButton(
             "Technische Details anzeigen ▸"
         )
@@ -1556,6 +1567,12 @@ class MainWindow(QMainWindow):
         source_layout.insertWidget(
             source_details_index + 1,
             self.stl_validation_details,
+        )
+        source_layout.insertWidget(
+            source_layout.indexOf(self.stl_validation_message) + 1,
+            self.accept_rejected_stl_button,
+            0,
+            Qt.AlignmentFlag.AlignRight,
         )
 
         self.reconstructed_config_toggle = QPushButton(
@@ -3608,7 +3625,7 @@ class MainWindow(QMainWindow):
             or source_path is None
             or artifact is None
             or validation is None
-            or not validation.valid
+            or not getattr(validation, "accepted", validation.valid)
         ):
             return False
         artifact_path = getattr(artifact, "original_path", source_path)
@@ -7525,7 +7542,11 @@ class MainWindow(QMainWindow):
         elif (
             source_selected
             and self.stl_validation_result is not None
-            and not self.stl_validation_result.valid
+            and not getattr(
+                self.stl_validation_result,
+                "accepted",
+                self.stl_validation_result.valid,
+            )
         ):
             source_step_text, source_step_state = "Prüfung fehlgeschlagen", "error"
         elif source_selected:
@@ -8398,9 +8419,10 @@ class MainWindow(QMainWindow):
         self.stl_validation_result = result
         self.source_artifact = result.source_artifact
         self.source_progress_bar.setValue(100)
-        self._finish_source_progress(completed=result.valid)
+        accepted = bool(getattr(result, "accepted", result.valid))
+        self._finish_source_progress(completed=accepted)
         self.source_progress_status_widget.show()
-        if not result.valid:
+        if not accepted:
             self._analysis_failed = True
             self._workflow_error_message = (
                 "Die STL ist non-manifold (nicht vollständig geschlossen) "
@@ -8429,6 +8451,7 @@ class MainWindow(QMainWindow):
             self.stl_validation_message.show()
             self.stl_validation_details.setPlainText(result.technical_summary)
             self.stl_validation_details_toggle.show()
+            self.accept_rejected_stl_button.show()
             self.workflow.source_invalid("STL-Geometrie ist ungültig")
             self._set_main_status(
                 "Die STL ist non-manifold (nicht vollständig geschlossen)",
@@ -8441,20 +8464,168 @@ class MainWindow(QMainWindow):
             self.validate_form()
             return
 
+        self._complete_accepted_stl(request_id, result)
+
+    def _confirm_rejected_stl(self) -> None:
+        """Ask for an explicit risk acknowledgement before overriding rejection."""
+
+        result = self.stl_validation_result
+        source_path = self.current_source_path
+        if (
+            result is None
+            or result.accepted
+            or source_path is None
+            or result.source_artifact.original_path != source_path.resolve()
+        ):
+            self.accept_rejected_stl_button.hide()
+            return
+        if not self._ask_rejected_stl_confirmation():
+            return
+        matches_current_file = getattr(
+            result.source_artifact,
+            "matches_current_file",
+            None,
+        )
+        try:
+            source_unchanged = not callable(matches_current_file) or bool(
+                matches_current_file(verify_content=True)
+            )
+        except (OSError, TypeError, ValueError):
+            source_unchanged = False
+        if not source_unchanged:
+            self._show_input_error(
+                "Die STL wurde seit der Prüfung verändert. Bitte die Datei "
+                "neu einlesen und anschließend erneut bestätigen."
+            )
+            return
+        confirmed = replace(result, user_confirmed=True)
+        self.stl_validation_result = confirmed
+        # Re-enter the documented source-validation path so the workflow
+        # state machine records this as an explicit acceptance transition.
+        self.workflow.begin_source_validation(is_stl=True)
+        self._complete_accepted_stl(
+            self._stl_validation_request_id,
+            confirmed,
+        )
+
+    def _create_rejected_stl_message_box(self) -> QMessageBox:
+        """Build a Qt-owned warning box that never falls back to a native dialog."""
+
+        box = QMessageBox(self)
+        box.setObjectName("rejectedStlConfirmationDialog")
+        box.setWindowTitle("Abgelehnte STL trotzdem verwenden?")
+        box.setWindowModality(Qt.WindowModality.WindowModal)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            "Diese STL wurde von der Sicherheits- und Geometrieprüfung "
+            "abgelehnt. Wenn du sie trotzdem verwendest, kann dies zu "
+            "unerwarteten oder nicht zufriedenstellenden Ergebnissen, "
+            "Fehlern oder Fehlverhalten führen.\n\n"
+            "Bist du sicher, dass du die STL auf eigenes Risiko verwenden "
+            "möchtest?"
+        )
+        accept_button = box.addButton(
+            "Trotzdem verwenden",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_button = box.addButton(
+            "Abbrechen",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        box.setDefaultButton(cancel_button)
+        box.setEscapeButton(cancel_button)
+        box._rejected_stl_accept_button = accept_button  # type: ignore[attr-defined]
+        box._rejected_stl_cancel_button = cancel_button  # type: ignore[attr-defined]
+        return box
+
+    def _ask_rejected_stl_confirmation(self) -> bool:
+        """Show the warning visibly on-screen and return the explicit decision."""
+
+        box = self._create_rejected_stl_message_box()
+        box.ensurePolished()
+        box.adjustSize()
+        target = QRect(QPoint(0, 0), box.size())
+        target.moveCenter(self.frameGeometry().center())
+        screen = (
+            QApplication.screenAt(self.frameGeometry().center())
+            or self.screen()
+            or QApplication.primaryScreen()
+        )
+        if screen is not None:
+            available = screen.availableGeometry()
+            target.moveLeft(
+                min(
+                    max(target.left(), available.left()),
+                    max(available.left(), available.right() - target.width() + 1),
+                )
+            )
+            target.moveTop(
+                min(
+                    max(target.top(), available.top()),
+                    max(available.top(), available.bottom() - target.height() + 1),
+                )
+            )
+        box.move(target.topLeft())
+        # The global internal-dialog filter normally conceals the first native
+        # frame for a few milliseconds. This safety-critical modal is already
+        # sized and positioned, so make it visible synchronously before exec()
+        # can block interaction with its parent window.
+        box.show()
+        box.setWindowOpacity(1.0)
+        box.raise_()
+        box.activateWindow()
+        box._rejected_stl_cancel_button.setFocus(  # type: ignore[attr-defined]
+            Qt.FocusReason.OtherFocusReason
+        )
+        box.exec()
+        return (
+            box.clickedButton()
+            is box._rejected_stl_accept_button  # type: ignore[attr-defined]
+        )
+
+    def _complete_accepted_stl(
+        self,
+        request_id: int,
+        result: StlValidationResult,
+    ) -> None:
+        """Continue with an automatically or explicitly accepted STL."""
+
+        user_confirmed = bool(
+            getattr(result, "user_confirmed", False) and not result.valid
+        )
         self._analysis_failed = False
         self._workflow_error_message = None
-        self.drop_zone.set_status("STL-Prüfung abgeschlossen")
+        self.accept_rejected_stl_button.hide()
+        self.drop_zone.set_status(
+            "STL user-bestätigt"
+            if user_confirmed
+            else "STL-Prüfung abgeschlossen"
+        )
         self.drop_zone.set_analysis_state("ready")
         # A safely accepted source is already complete from the file-input
         # perspective.  Later profile-bound analysis remains visible in the
         # shared workflow prerequisites without withholding this green cue.
         self.drop_zone.set_completed(True)
         self._set_source_progress_status(
-            "STL-Geometrie ist manifold (vollständig geschlossen)",
+            "STL auf ausdrücklichen Benutzerwunsch akzeptiert"
+            if user_confirmed
+            else "STL-Geometrie ist manifold (vollständig geschlossen)",
             icon="✓",
-            state="success",
+            state="warning" if user_confirmed else "success",
         )
-        if result.warning_issues:
+        if user_confirmed:
+            self.stl_validation_message.setText(
+                "Die STL wurde trotz fehlgeschlagener Prüfung auf deinen "
+                "ausdrücklichen Wunsch als „user-bestätigt“ akzeptiert. "
+                "Unerwartete oder nicht zufriedenstellende Ergebnisse, "
+                "Fehler oder Fehlverhalten sind weiterhin möglich."
+            )
+            self.stl_validation_message.setProperty("severity", "warning")
+            self._refresh_widget_style(self.stl_validation_message)
+            self.stl_validation_message.show()
+            self.stl_validation_details.setPlainText(result.technical_summary)
+            self.stl_validation_details_toggle.show()
+        elif result.warning_issues:
             self.stl_validation_message.setText(
                 "Die STL wurde akzeptiert. Hinweis: Es wurden nur "
                 "geringfügige lokale Flächenüberschneidungen erkannt. "
@@ -8479,20 +8650,30 @@ class MainWindow(QMainWindow):
             self.stl_validation_details.setPlainText(result.technical_summary)
             self.stl_validation_details_toggle.show()
         self.workflow.source_validation_succeeded(
-            f"{self.current_source_path.name} · {result.face_count} Dreiecke",
+            f"{self.current_source_path.name} · {result.face_count} Dreiecke"
+            + (" · user-bestätigt" if user_confirmed else ""),
             analysis_complete=False,
         )
         self._show_confirmed_profiles_analysis_action()
-        if result.warning_issues:
+        if user_confirmed:
+            self.source_group.set_summary_note(
+                "user-bestätigt · auf eigenes Risiko",
+                severity="warning",
+            )
+        elif result.warning_issues:
             self.source_group.set_summary_note(
                 "mit Geometriehinweis",
                 severity="warning",
             )
         self._set_main_status(
-            f"STL geprüft · {result.face_count} Dreiecke · "
-            f"{result.component_count} Komponente(n)",
+            (
+                "STL user-bestätigt · Verwendung auf eigenes Risiko"
+                if user_confirmed
+                else f"STL geprüft · {result.face_count} Dreiecke · "
+                f"{result.component_count} Komponente(n)"
+            ),
             icon="✓",
-            state="success",
+            state="warning" if user_confirmed else "success",
         )
         self._update_preparation_requirements()
         self._schedule_slicer_step_open(
@@ -8554,6 +8735,8 @@ class MainWindow(QMainWindow):
         self.stl_validation_details.hide()
         self.stl_validation_details_toggle.setChecked(False)
         self.stl_validation_details_toggle.hide()
+        if hasattr(self, "accept_rejected_stl_button"):
+            self.accept_rejected_stl_button.hide()
         if hasattr(self, "source_group"):
             self.source_group.set_summary_note(None)
 

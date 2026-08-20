@@ -573,6 +573,28 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             )
         self.assertEqual(adapter.requests, [])
 
+    def test_user_confirmed_rejected_stl_enters_normal_preslice_pipeline(self) -> None:
+        adapter = FakeSliceAdapter()
+        validation = replace(
+            self.validation,
+            valid=False,
+            user_confirmed=True,
+        )
+
+        result = self.service.run(
+            stl_validation=validation,
+            profile_match=self.match,
+            confirmation=self.confirmation,
+            adapter=adapter,
+        )
+
+        try:
+            self.assertTrue(validation.accepted)
+            self.assertEqual(len(adapter.requests), 1)
+            self.assertEqual(result.analysis_snapshot.layer_count, 2)
+        finally:
+            result.cleanup()
+
     def test_profile_fingerprint_change_is_rejected(self) -> None:
         selected = self.match.selected
         assert selected is not None

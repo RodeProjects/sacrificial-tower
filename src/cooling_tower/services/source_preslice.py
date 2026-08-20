@@ -338,8 +338,10 @@ class SourcePreSliceService:
     ) -> None:
         source = stl_validation.source_artifact
         selected = profile_match.selected
-        if not stl_validation.valid or source.source_kind is not SourceKind.STL:
-            raise SourcePreSliceError("Nur eine gültige STL darf geslict werden.")
+        if not stl_validation.accepted or source.source_kind is not SourceKind.STL:
+            raise SourcePreSliceError(
+                "Nur eine akzeptierte STL darf geslict werden."
+            )
         if (
             selected is None
             or selected.machine is None

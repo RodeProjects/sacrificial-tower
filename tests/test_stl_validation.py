@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -120,6 +121,19 @@ class StlValidationTests(unittest.TestCase):
         result = self.validate_binary(np.concatenate((TETRAHEDRON, extra)))
         self.assertFalse(result.valid)
         self.assertGreater(result.non_manifold_edge_count, 0)
+
+    def test_rejected_result_can_be_explicitly_user_confirmed(self) -> None:
+        triangles = np.concatenate((TETRAHEDRON, TETRAHEDRON[:1]), axis=0)
+        result = self.validate_binary(triangles)
+
+        self.assertFalse(result.valid)
+        self.assertFalse(result.accepted)
+        confirmed = replace(result, user_confirmed=True)
+
+        self.assertFalse(confirmed.valid)
+        self.assertTrue(confirmed.user_confirmed)
+        self.assertTrue(confirmed.accepted)
+        self.assertIn("Akzeptanz: user-bestätigt", confirmed.technical_summary)
         self.assert_issue(result, StlIssueCode.NON_MANIFOLD_EDGE)
 
     def test_inconsistent_winding_is_blocked(self) -> None:

@@ -127,6 +127,13 @@ class StlValidationResult:
     component_volumes_mm3: tuple[float, ...]
     issues: tuple[StlValidationIssue, ...]
     intersection_check_complete: bool = True
+    user_confirmed: bool = False
+
+    @property
+    def accepted(self) -> bool:
+        """Whether validation or an explicit user override accepts the STL."""
+
+        return self.valid or self.user_confirmed
 
     @property
     def blocking_issues(self) -> tuple[StlValidationIssue, ...]:
@@ -139,6 +146,12 @@ class StlValidationResult:
     @property
     def technical_summary(self) -> str:
         rows = [
+            "Akzeptanz: "
+            + (
+                "user-bestätigt"
+                if self.user_confirmed and not self.valid
+                else ("automatisch akzeptiert" if self.valid else "abgelehnt")
+            ),
             f"Format: {self.format.value if self.format else 'unbekannt'}",
             f"Vertices (topologisch): {self.vertex_count}",
             f"Dreiecke: {self.face_count}",

@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,8 +16,8 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QEventLoop, QMimeData, QTimer, QUrl
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop, QMimeData, QTimer, Qt, QUrl
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.workflow_controller import WorkflowStage
@@ -138,6 +139,11 @@ class StlValidationGuiTests(unittest.TestCase):
                 (10, 8, 10, 8),
             )
             self.assertFalse(window.stl_validation_details_toggle.isHidden())
+            self.assertFalse(window.accept_rejected_stl_button.isHidden())
+            self.assertEqual(
+                window.accept_rejected_stl_button.text(),
+                "STL trotzdem verwenden",
+            )
             self.assertIn("Offene Kanten: 161", window.stl_validation_details.toPlainText())
             self.assertIs(
                 window.stl_validation_message.parent(),
@@ -176,6 +182,102 @@ class StlValidationGuiTests(unittest.TestCase):
             )[1]
             self.assertGreater(remove_column, reload_column)
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_rejected_stl_requires_warning_confirmation_before_acceptance(self) -> None:
+        source = self.fixture_root / "test_model_non_manifold.stl"
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
+        window = self.window()
+        try:
+            self.assertTrue(window.drop_zone.set_file(source))
+            self.wait_for_stl_result(window)
+
+            with patch.object(
+                window,
+                "_ask_rejected_stl_confirmation",
+                side_effect=(
+                    False,
+                    True,
+                ),
+            ) as confirmation:
+                window.accept_rejected_stl_button.click()
+                self.assertFalse(window.stl_validation_result.accepted)
+                self.assertIs(window.workflow.stage, WorkflowStage.SOURCE_INVALID)
+                self.assertFalse(window.accept_rejected_stl_button.isHidden())
+
+                window.accept_rejected_stl_button.click()
+
+            result = window.stl_validation_result
+            assert result is not None
+            self.assertEqual(confirmation.call_count, 2)
+            warning_text = window._create_rejected_stl_message_box().text()
+            self.assertIn("nicht zufriedenstellenden Ergebnissen", warning_text)
+            self.assertIn("Fehlern oder Fehlverhalten", warning_text)
+            self.assertFalse(result.valid)
+            self.assertTrue(result.user_confirmed)
+            self.assertTrue(result.accepted)
+            self.assertTrue(window._source_step_is_complete())
+            self.assertIs(window.workflow.stage, WorkflowStage.DISCOVERING_SLICER)
+            self.assertTrue(window.accept_rejected_stl_button.isHidden())
+            self.assertEqual(window.drop_zone.status_value_label.text(), "STL user-bestätigt")
+            self.assertEqual(
+                window.stl_validation_message.property("severity"),
+                "warning",
+            )
+            self.assertIn("user-bestätigt", window.stl_validation_message.text())
+            self.assertIn("Akzeptanz: user-bestätigt", window.stl_validation_details.toPlainText())
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_rejected_stl_confirmation_is_visible_on_screen_and_cancellable(self) -> None:
+        window = self.window()
+        window.resize(900, 800)
+        window.show()
+        self.app.processEvents()
+        observed: dict[str, object] = {}
+
+        def inspect_and_cancel() -> None:
+            dialogs = [
+                widget
+                for widget in self.app.topLevelWidgets()
+                if isinstance(widget, QMessageBox)
+                and widget.objectName() == "rejectedStlConfirmationDialog"
+            ]
+            self.assertEqual(len(dialogs), 1)
+            dialog = dialogs[0]
+            observed["visible"] = dialog.isVisible()
+            observed["opacity"] = dialog.windowOpacity()
+            observed["modality"] = dialog.windowModality()
+            observed["on_screen"] = bool(
+                dialog.frameGeometry().intersects(
+                    dialog.screen().availableGeometry()
+                )
+            )
+            observed["default"] = dialog.defaultButton().text()
+            observed["escape"] = dialog.escapeButton().text()
+            dialog._rejected_stl_cancel_button.click()
+
+        try:
+            QTimer.singleShot(0, inspect_and_cancel)
+            self.assertFalse(window._ask_rejected_stl_confirmation())
+
+            self.assertEqual(
+                observed,
+                {
+                    "visible": True,
+                    "opacity": 1.0,
+                    "modality": Qt.WindowModality.WindowModal,
+                    "on_screen": True,
+                    "default": "Abbrechen",
+                    "escape": "Abbrechen",
+                },
+            )
         finally:
             window.close()
             window.deleteLater()
