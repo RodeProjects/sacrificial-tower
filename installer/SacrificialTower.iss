@@ -52,6 +52,7 @@ SetupLogging=yes
 Uninstallable=yes
 UninstallDisplayName=Sacrificial Tower
 UninstallDisplayIcon={app}\SacrificialTower.exe
+SetupIconFile=..\src\cooling_tower\gui\assets\app.ico
 #ifdef SignBuild
 SignTool=authenticode
 SignedUninstaller=yes

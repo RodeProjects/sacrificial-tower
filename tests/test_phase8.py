@@ -502,18 +502,57 @@ class ReportingAndLaunchTests(unittest.TestCase):
             ):
                 self.assertIn(label, text)
 
-    def test_windows_start_script_uses_hidden_venv_gui_launcher(self) -> None:
-        batch_content = (PROJECT_ROOT / "start_gui.bat").read_text(
+    def test_windows_start_file_uses_project_venv_without_shell_launchers(
+        self,
+    ) -> None:
+        launcher_content = (PROJECT_ROOT / "start_gui.pyw").read_text(
             encoding="utf-8"
         ).lower()
-        vbs_content = (PROJECT_ROOT / "start_gui.vbs").read_text(
-            encoding="utf-8"
-        ).lower()
-        self.assertIn("wscript.exe", batch_content)
-        self.assertIn("start_gui.vbs", batch_content)
-        self.assertIn(".venv\\scripts\\pythonw.exe", vbs_content)
-        self.assertIn("start_gui.pyw", vbs_content)
-        self.assertIn("shell.run command, 0, false", vbs_content)
+        self.assertIn('project_venv = project_root / ".venv"', launcher_content)
+        self.assertIn('project_venv / "scripts" / "pythonw.exe"', launcher_content)
+        self.assertIn("subprocess.popen(", launcher_content)
+        self.assertIn('getattr(subprocess, "create_no_window", 0)', launcher_content)
+        self.assertIn('"detached_process"', launcher_content)
+        self.assertIn("stdin=subprocess.devnull", launcher_content)
+        self.assertIn("path(sys.prefix).resolve()", launcher_content)
+        self.assertFalse((PROJECT_ROOT / "start_gui.bat").exists())
+        self.assertFalse((PROJECT_ROOT / "start_gui.vbs").exists())
+
+        shortcut_script = (
+            PROJECT_ROOT / "scripts" / "create_dev_shortcut.ps1"
+        ).read_text(encoding="utf-8").lower()
+        self.assertIn("sacrificial tower starten.lnk", shortcut_script)
+        self.assertIn(".venv\\scripts\\pythonw.exe", shortcut_script)
+        self.assertIn("start_gui.pyw", shortcut_script)
+        self.assertIn("app.ico", shortcut_script)
+        self.assertIn("createshortcut", shortcut_script)
+        self.assertIn("iconlocation", shortcut_script)
+        self.assertIn(
+            "/sacrificial tower starten.lnk",
+            (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8").lower(),
+        )
+
+        icon_payload = (
+            PROJECT_ROOT
+            / "src"
+            / "cooling_tower"
+            / "gui"
+            / "assets"
+            / "app.ico"
+        ).read_bytes()
+        reserved, image_type, image_count = struct.unpack_from(
+            "<HHH", icon_payload
+        )
+        self.assertEqual((reserved, image_type, image_count), (0, 1, 9))
+        icon_sizes = [
+            256 if icon_payload[6 + index * 16] == 0
+            else icon_payload[6 + index * 16]
+            for index in range(image_count)
+        ]
+        self.assertEqual(
+            icon_sizes,
+            [16, 20, 24, 32, 40, 48, 64, 128, 256],
+        )
 
 
 if __name__ == "__main__":

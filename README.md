@@ -23,12 +23,21 @@ python -m pip install -r requirements.txt
 
 ## GUI starten
 
-Für den normalen Windows-Start `start_gui.vbs` doppelklicken. Dieser Launcher
-verwendet `.venv\Scripts\pythonw.exe`; dadurch bleibt ausschließlich das
-Programmfenster sichtbar und es wird kein Konsolenfenster offengehalten.
-`start_gui.pyw` ist der zugehörige GUI-Einstiegspunkt. `start_gui.bat` bleibt
-als kompatibler Aufruf erhalten und delegiert ebenfalls an den unsichtbaren
-Launcher.
+Für den normalen Start im Entwicklungsordner die Verknüpfung
+`Sacrificial Tower starten.lnk` doppelklicken. Sie startet direkt
+`.venv\Scripts\pythonw.exe`, zeigt das Tower-Symbol und öffnet ausschließlich
+das Programmfenster. Die lokale, pfadgebundene Verknüpfung wird einmalig mit
+folgendem Befehl erzeugt und nach einem Verschieben des Projektordners erneut
+erstellt:
+
+```powershell
+.\scripts\create_dev_shortcut.ps1
+```
+
+`start_gui.pyw` bleibt der interne Einstiegspunkt für die Verknüpfung und den
+PyInstaller-Windows-Build. Frühere Batch- und VBScript-Launcher wurden entfernt:
+Batch-Dateien blenden beim Doppelklick kurz eine Konsole ein, während aktuelle
+Windows-Versionen bei `wscript.exe` einen VBScript-Abkündigungshinweis anzeigen.
 
 Für Entwicklung und Diagnose kann die GUI weiterhin bewusst aus einer Konsole
 gestartet werden:

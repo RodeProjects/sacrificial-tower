@@ -96,6 +96,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(
+        source_root / "cooling_tower" / "gui" / "assets" / "app.ico"
+    ),
     version=str(version_info_path),
 )
 

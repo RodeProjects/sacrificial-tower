@@ -51,6 +51,7 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+/Sacrificial Tower starten.lnk
 *.tmp
 *.temp
 *.bak

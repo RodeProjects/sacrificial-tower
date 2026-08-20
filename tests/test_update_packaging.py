@@ -213,13 +213,23 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("console=False", spec)
         self.assertIn("windows_version_info.txt", spec)
         self.assertIn("version=str(version_info_path)", spec)
+        self.assertIn('"assets" / "app.ico"', spec)
         self.assertIn("StringStruct(u'CompanyName', u'RodeProjects')", spec)
+        application = (
+            PROJECT_ROOT / "src" / "cooling_tower" / "application.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("application.setWindowIcon", application)
+        self.assertIn('"assets" / "app.ico"', application)
 
     def test_installer_is_per_user_and_restarts_the_application(self) -> None:
         installer = (
             PROJECT_ROOT / "installer" / "SacrificialTower.iss"
         ).read_text(encoding="utf-8")
         self.assertIn("PrivilegesRequired=lowest", installer)
+        self.assertIn(
+            "SetupIconFile=..\\src\\cooling_tower\\gui\\assets\\app.ico",
+            installer,
+        )
         self.assertIn(
             '#define DefaultInstallDir "{localappdata}\\Programs\\SacrificialTower"',
             installer,

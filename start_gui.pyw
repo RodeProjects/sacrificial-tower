@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -12,9 +13,8 @@ PROJECT_ROOT = (
     if getattr(sys, "frozen", False)
     else Path(__file__).resolve().parent
 )
-SRC_ROOT = PROJECT_ROOT / "src"
-if not getattr(sys, "frozen", False) and str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+PROJECT_VENV = PROJECT_ROOT / ".venv"
+PROJECT_PYTHONW = PROJECT_VENV / "Scripts" / "pythonw.exe"
 
 
 def _fallback_startup_error(details: str) -> None:
@@ -37,6 +37,53 @@ def _fallback_startup_error(details: str) -> None:
         )
     except Exception:
         pass
+
+
+def _ensure_project_venv() -> None:
+    """Replace a file-association interpreter with the project's pythonw."""
+
+    if getattr(sys, "frozen", False):
+        return
+    try:
+        already_in_project_venv = (
+            Path(sys.prefix).resolve() == PROJECT_VENV.resolve()
+        )
+    except OSError:
+        already_in_project_venv = False
+    if already_in_project_venv:
+        return
+    if not PROJECT_PYTHONW.is_file():
+        raise FileNotFoundError(
+            "Die virtuelle Python-Umgebung fehlt. Bitte zuerst .venv "
+            "für dieses Projekt einrichten."
+        )
+    script_path = Path(__file__).resolve()
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess,
+        "DETACHED_PROCESS",
+        0,
+    )
+    subprocess.Popen(
+        [str(PROJECT_PYTHONW), str(script_path), *sys.argv[1:]],
+        cwd=str(PROJECT_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        creationflags=creation_flags,
+    )
+    raise SystemExit(0)
+
+
+try:
+    _ensure_project_venv()
+except Exception:
+    _fallback_startup_error(traceback.format_exc())
+    raise SystemExit(1)
+
+SRC_ROOT = PROJECT_ROOT / "src"
+if not getattr(sys, "frozen", False) and str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
 try:

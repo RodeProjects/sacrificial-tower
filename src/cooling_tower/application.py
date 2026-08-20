@@ -12,7 +12,7 @@ from types import TracebackType
 from typing import TextIO, Type
 
 from PySide6.QtCore import QTimer, QUrl, QtMsgType, qInstallMessageHandler
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.application_mutex import (
@@ -49,6 +49,9 @@ DEFAULT_RUNTIME_LOG = _APPLICATION_LOG_ROOT / "application_runtime.log"
 DEFAULT_JOB_DIAGNOSTIC_LOG = _APPLICATION_LOG_ROOT / "background_jobs.jsonl"
 DEFAULT_DIAGNOSTIC_SESSION_STATE = (
     _APPLICATION_LOG_ROOT / "diagnostic_session.json"
+)
+APPLICATION_ICON_PATH = (
+    Path(__file__).resolve().parent / "gui" / "assets" / "app.ico"
 )
 
 _CRITICAL_QT_MESSAGES = (
@@ -384,6 +387,7 @@ def run_application(
         application = QApplication.instance() or QApplication(sys.argv)
         application.setApplicationName(APP_NAME)
         application.setApplicationVersion(APP_VERSION)
+        application.setWindowIcon(QIcon(str(APPLICATION_ICON_PATH)))
         application.setQuitOnLastWindowClosed(True)
         install_exception_handler(log_path)
         previous_qt_message_handler = install_qt_message_logging(
