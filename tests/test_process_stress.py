@@ -15,6 +15,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cooling_tower.gui.job_stress import SCENARIOS
+from cooling_tower.slicers.process import _terminate_windows_process_tree
+from cooling_tower.windows_process import windows_subprocess_creation_flags
 
 
 class IsolatedProcessStressTests(unittest.TestCase):
@@ -34,25 +36,72 @@ class IsolatedProcessStressTests(unittest.TestCase):
             for scenario in SCENARIOS:
                 with self.subTest(scenario=scenario, seed=seed):
                     artifact_directory = root / scenario
-                    completed = subprocess.run(
-                        (
-                            sys.executable,
-                            "-B",
-                            "-m",
-                            "cooling_tower.gui.job_stress",
-                            "--scenario",
-                            scenario,
-                            "--artifact-directory",
-                            str(artifact_directory),
-                            "--seed",
-                            str(seed),
-                        ),
+                    command = (
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "cooling_tower.gui.job_stress",
+                        "--scenario",
+                        scenario,
+                        "--artifact-directory",
+                        str(artifact_directory),
+                        "--seed",
+                        str(seed),
+                    )
+                    process = subprocess.Popen(
+                        command,
                         cwd=PROJECT_ROOT,
                         env=environment,
-                        capture_output=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        timeout=90,
-                        check=False,
+                        creationflags=windows_subprocess_creation_flags(
+                            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                        ),
+                    )
+                    try:
+                        stdout, stderr = process.communicate(timeout=90)
+                    except subprocess.TimeoutExpired:
+                        if os.name == "nt":
+                            _terminate_windows_process_tree(process.pid)
+                        else:
+                            process.kill()
+                        try:
+                            stdout, stderr = process.communicate(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            stdout = ""
+                            stderr = "process tree did not close after timeout"
+                        result_path = artifact_directory / "result.json"
+                        result = (
+                            result_path.read_text(
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+                            if result_path.exists()
+                            else "result.json missing"
+                        )
+                        native_log = artifact_directory / "native_crash.log"
+                        native_details = (
+                            native_log.read_text(
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+                            if native_log.exists()
+                            else "native_crash.log missing"
+                        )
+                        self.fail(
+                            f"Scenario {scenario!r} timed out with seed {seed}.\n"
+                            f"stdout:\n{stdout}\n"
+                            f"stderr:\n{stderr}\n"
+                            f"result:\n{result}\n"
+                            f"native log:\n{native_details}"
+                        )
+                    completed = subprocess.CompletedProcess(
+                        command,
+                        process.returncode,
+                        stdout,
+                        stderr,
                     )
                     result_path = artifact_directory / "result.json"
                     result = (

@@ -15,6 +15,9 @@ PROJECT_ROOT = (
 )
 PROJECT_VENV = PROJECT_ROOT / ".venv"
 PROJECT_PYTHONW = PROJECT_VENV / "Scripts" / "pythonw.exe"
+SRC_ROOT = PROJECT_ROOT / "src"
+if not getattr(sys, "frozen", False) and str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
 def _fallback_startup_error(details: str) -> None:
@@ -54,11 +57,12 @@ def _ensure_project_venv() -> None:
         return
     if not PROJECT_PYTHONW.is_file():
         return
+    from cooling_tower.windows_process import windows_subprocess_creation_flags
+
     script_path = Path(__file__).resolve()
-    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-        subprocess,
-        "DETACHED_PROCESS",
-        0,
+    creation_flags = windows_subprocess_creation_flags(
+        getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        getattr(subprocess, "DETACHED_PROCESS", 0),
     )
     subprocess.Popen(
         [str(PROJECT_PYTHONW), str(script_path), *sys.argv[1:]],
@@ -77,11 +81,6 @@ try:
 except Exception:
     _fallback_startup_error(traceback.format_exc())
     raise SystemExit(1)
-
-SRC_ROOT = PROJECT_ROOT / "src"
-if not getattr(sys, "frozen", False) and str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 try:
     from cooling_tower.application import run_application

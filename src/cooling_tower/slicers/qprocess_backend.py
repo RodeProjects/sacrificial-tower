@@ -33,6 +33,10 @@ from cooling_tower.slicers.process import (
     _terminate_windows_process_tree,
     isolated_slicer_environment,
 )
+from cooling_tower.windows_process import (
+    configure_windows_process_policy,
+    windows_process_status,
+)
 
 
 DEFAULT_OUTPUT_MEMORY_LIMIT_BYTES = 1024 * 1024
@@ -337,6 +341,7 @@ class _QProcessController(QObject):
         self._timeout_timer.start(max(1, round(self._request.timeout_s * 1000)))
         if cancellation is not None:
             self._cancel_poll_timer.start()
+        configure_windows_process_policy()
         self._process.start()
 
     def dispose(self) -> None:
@@ -490,7 +495,10 @@ class _QProcessController(QObject):
             timed_out=self._timed_out,
             cancelled=self._cancelled,
             process_id=self._process_id,
-            crashed=self._crashed,
+            crashed=(
+                self._crashed
+                or windows_process_status(self._return_code) is not None
+            ),
             backend="qprocess",
             stdout_truncated=self._output.truncated("stdout"),
             stderr_truncated=self._output.truncated("stderr"),
@@ -504,6 +512,7 @@ class _QProcessController(QObject):
             timed_out=outcome.timed_out,
             cancelled=outcome.cancelled,
             crashed=outcome.crashed,
+            windows_status=windows_process_status(outcome.return_code),
             duration_s=outcome.duration_s,
             stdout_truncated=outcome.stdout_truncated,
             stderr_truncated=outcome.stderr_truncated,

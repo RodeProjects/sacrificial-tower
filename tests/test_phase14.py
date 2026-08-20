@@ -677,6 +677,34 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("keine G-Code-Datei", result.failure_reason)
 
+    def test_windows_dll_initialization_failure_remains_visible(self) -> None:
+        outcome = ProcessOutcome(
+            command=("fake-slicer.exe",),
+            return_code=-1073741502,
+            stdout="",
+            stderr="",
+            duration_s=0.01,
+            crashed=True,
+        )
+        with patch("cooling_tower.slicers.process.os.name", "nt"):
+            reason = BaseSlicerAdapter._failure_reason(outcome, ())
+        self.assertIn("nicht initialisieren", reason)
+        self.assertIn("0xC0000142", reason)
+
+    def test_other_known_windows_crash_status_remains_visible(self) -> None:
+        outcome = ProcessOutcome(
+            command=("fake-slicer.exe",),
+            return_code=0xC0000135,
+            stdout="",
+            stderr="",
+            duration_s=0.01,
+            crashed=True,
+        )
+        with patch("cooling_tower.windows_process.os.name", "nt"):
+            reason = BaseSlicerAdapter._failure_reason(outcome, ())
+        self.assertIn("benötigte DLL nicht gefunden", reason)
+        self.assertIn("0xC0000135", reason)
+
     def test_14_temporary_working_directory_is_removed_after_success(self) -> None:
         runner = ConfigurableRunner()
         adapter, request = self.request(runner)

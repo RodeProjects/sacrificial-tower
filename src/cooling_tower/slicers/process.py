@@ -13,6 +13,10 @@ from enum import Enum
 from typing import Callable, Mapping, Protocol, Sequence, runtime_checkable
 
 from cooling_tower.diagnostic_context import record_diagnostic
+from cooling_tower.windows_process import (
+    windows_process_status,
+    windows_subprocess_creation_flags,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +215,9 @@ class SecureSlicerProcessRunner:
         command = (str(executable_path), *(str(value) for value in arguments))
         creation_flags = 0
         if os.name == "nt":
-            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            creation_flags = windows_subprocess_creation_flags(
+                getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
 
         started = time.monotonic()
         with tempfile.TemporaryDirectory(
@@ -315,6 +321,7 @@ class SecureSlicerProcessRunner:
             timed_out=timed_out,
             cancelled=cancelled,
             process_id=process.pid,
+            crashed=windows_process_status(process.returncode) is not None,
             backend=self.backend_name,
         )
         report(
@@ -324,6 +331,8 @@ class SecureSlicerProcessRunner:
             return_code=outcome.return_code,
             timed_out=outcome.timed_out,
             cancelled=outcome.cancelled,
+            crashed=outcome.crashed,
+            windows_status=windows_process_status(outcome.return_code),
             duration_s=outcome.duration_s,
         )
         return outcome
@@ -370,7 +379,9 @@ class SecureSlicerProcessRunner:
                     stderr=subprocess.DEVNULL,
                     timeout=3.0,
                     shell=False,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    creationflags=windows_subprocess_creation_flags(
+                        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    ),
                 )
             except (OSError, subprocess.TimeoutExpired):
                 pass

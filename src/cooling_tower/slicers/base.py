@@ -35,6 +35,11 @@ from cooling_tower.slicers.process import (
     SlicerProcessRunner,
     create_slicer_process_runner,
 )
+from cooling_tower.windows_process import (
+    WINDOWS_DLL_INITIALIZATION_FAILED,
+    windows_process_status,
+    windows_process_status_description,
+)
 
 
 _VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,4})(?!\d)")
@@ -747,6 +752,26 @@ class BaseSlicerAdapter:
         if outcome.timed_out:
             return "Der Slicervorgang hat das Zeitlimit überschritten."
         if outcome.crashed:
+            windows_status = windows_process_status(outcome.return_code)
+            normalized_return_code = (
+                int(outcome.return_code) & 0xFFFFFFFF
+                if outcome.return_code is not None
+                else None
+            )
+            if normalized_return_code == WINDOWS_DLL_INITIALIZATION_FAILED:
+                return (
+                    "Windows konnte den Slicer-Prozess nicht initialisieren "
+                    "(Windows-Status 0xC0000142)."
+                )
+            if windows_status is not None:
+                description = windows_process_status_description(
+                    outcome.return_code
+                )
+                detail = f"{description}; " if description is not None else ""
+                return (
+                    "Der Slicer-Prozess ist abgestürzt "
+                    f"({detail}Windows-Status {windows_status})."
+                )
             return "Der Slicer-Prozess ist abgestürzt."
         if outcome.return_code != 0:
             return f"Der Slicer wurde mit Fehlercode {outcome.return_code} beendet."

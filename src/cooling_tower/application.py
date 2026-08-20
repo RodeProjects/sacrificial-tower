@@ -34,6 +34,7 @@ from cooling_tower.gui import MainWindow
 from cooling_tower.distribution import detect_distribution_channel
 from cooling_tower.runtime_paths import IS_FROZEN, resolve_user_data_root
 from cooling_tower.version import APP_NAME, APP_VERSION
+from cooling_tower.windows_process import configure_windows_process_policy
 
 
 _DISTRIBUTION_CHANNEL = detect_distribution_channel()
@@ -383,6 +384,22 @@ def run_application(
     )
     diagnostic_journal.start_session()
     set_current_diagnostic_journal(diagnostic_journal)
+    process_policy = configure_windows_process_policy()
+    diagnostic_journal.record(
+        "windows_process_policy",
+        active=process_policy.active,
+        process_error_mode=(
+            f"0x{process_policy.process_error_mode:08X}"
+            if process_policy.process_error_mode is not None
+            else None
+        ),
+        wer_flags=(
+            f"0x{process_policy.wer_flags:08X}"
+            if process_policy.wer_flags is not None
+            else None
+        ),
+        configuration_errors=process_policy.errors,
+    )
     try:
         application = QApplication.instance() or QApplication(sys.argv)
         application.setApplicationName(APP_NAME)

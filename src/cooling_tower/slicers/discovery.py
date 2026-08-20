@@ -11,6 +11,7 @@ from cooling_tower.slicers.models import (
     SlicerCandidate,
     SlicerDiscoverySource,
 )
+from cooling_tower.windows_process import windows_subprocess_creation_flags
 
 
 class CandidateDiscovery(Protocol):
@@ -280,7 +281,9 @@ class WindowsSlicerDiscovery:
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($args[0]);"
             "[Console]::Out.Write($s.TargetPath)"
         )
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        creation_flags = windows_subprocess_creation_flags(
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
         try:
             completed = subprocess.run(
                 (

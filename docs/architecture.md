@@ -163,6 +163,31 @@ Ergebnis und die vollständigen Bytes werden in einer Diagnosedatei archiviert.
 Backend-Schalter, Adaptermatrix und Doppelvalidierung sind in
 `docs/slicer_qprocess_compatibility.md` beschrieben.
 
+### Windows-Prozessfehler ohne blockierende Systemdialoge
+
+`cooling_tower.windows_process` installiert beim frühesten Paketstart genau
+eine prozessweite Windows-Richtlinie. Sie ergänzt vorhandene Fehlerflags um
+`SEM_FAILCRITICALERRORS`, `SEM_NOGPFAULTERRORBOX` und
+`SEM_NOOPENFILEERRORBOX` und aktiviert zusätzlich
+`WER_FAULT_REPORTING_NO_UI`. Die Richtlinie wird anschließend nicht wieder
+zurückgesetzt: Dadurch gibt es kein globales Setzen-und-Zurücksetzen zwischen
+Threads, und sämtliche mit `subprocess` oder `QProcess` erzeugten Nachkommen
+erben denselben nichtinteraktiven Fehlermodus.
+
+Im Quell- und Testbetrieb lädt `sitecustomize.py` ausschließlich dieses
+leichtgewichtige Modul, bevor Test-Discovery oder Anwendungsimporte beginnen.
+Der normale Paketimport wiederholt die Einrichtung idempotent; ein zunächst
+unvollständiger WinAPI-Aufruf wird bei der nächsten Sicherungsstelle erneut
+versucht. `CREATE_DEFAULT_ERROR_MODE` ist für programmverwaltete Kindprozesse
+verboten, weil dieses Flag die Vererbung absichtlich umgehen würde.
+
+Unterdrückt wird nur die Windows-Systemoberfläche. Exitcode, signierter oder
+unsignierter NTSTATUS, Crashzustand und Diagnoseereignisse bleiben erhalten.
+Bekannte Loader-, Architektur-, Zugriffs- und Fast-Fail-Statuscodes erhalten
+eine verständliche Beschreibung. Slicerfehler werden im betroffenen
+Programmschritt angezeigt; native Programmabbrüche bleiben über Sitzungsmarker,
+Crashlog und den Hinweis beim nächsten Start erkennbar.
+
 ## Diagnose und Stresstests
 
 `DiagnosticJournal` schreibt pro Sitzung eine rotierende, append-only

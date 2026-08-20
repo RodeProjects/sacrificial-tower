@@ -23,6 +23,7 @@ from cooling_tower.update_manifest import (
     UpdateManifestSignatureError,
     verify_update_manifest_signature,
 )
+from cooling_tower.windows_process import windows_subprocess_creation_flags
 
 
 DEFAULT_UPDATE_MANIFEST_URL = (
@@ -266,8 +267,9 @@ class UpdateService:
             raise UpdateError("Der automatische Installer wird nur unter Windows unterstützt.")
         if not installer.is_file():
             raise UpdateError("Der heruntergeladene Update-Installer fehlt.")
-        creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
+        creation_flags = windows_subprocess_creation_flags(
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            getattr(subprocess, "DETACHED_PROCESS", 0),
         )
         try:
             subprocess.Popen(

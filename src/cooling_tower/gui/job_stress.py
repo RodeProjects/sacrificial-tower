@@ -12,7 +12,15 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QThread,
+    QTimer,
+    Qt,
+    Signal,
+    Slot,
+)
 
 from cooling_tower.application import (
     enable_native_crash_log,
@@ -172,6 +180,14 @@ def _wait_until(
         raise TimeoutError("Timed out while waiting for managed Qt jobs.")
 
 
+def _drain_deferred_deletions(application: QCoreApplication) -> None:
+    """Flush QThread/QObject deleteLater events before interpreter shutdown."""
+
+    for _ in range(3):
+        application.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        application.processEvents()
+
+
 def _start_delay(
     manager: BackgroundJobManager,
     kind: JobKind,
@@ -207,8 +223,18 @@ def _write_fake_slicer(root: Path) -> Path:
                 "elif mode == 'hang':",
                 "    time.sleep(30)",
                 "elif mode == 'child':",
-                "    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])",
-                "    Path(sys.argv[2]).write_text(str(child.pid), encoding='ascii')",
+                "    pid_path = Path(sys.argv[2])",
+                "    ready_path = pid_path.with_suffix('.ready')",
+                "    child_code = \"import sys,time; from pathlib import Path; Path(sys.argv[1]).write_text('ready', encoding='ascii'); time.sleep(30)\"",
+                "    child = subprocess.Popen([sys.executable, '-c', child_code, str(ready_path)])",
+                "    deadline = time.monotonic() + 0.75",
+                "    while not ready_path.exists() and child.poll() is None and time.monotonic() < deadline:",
+                "        time.sleep(0.01)",
+                "    if not ready_path.exists():",
+                "        return_code = child.poll()",
+                "        windows_status = f'0x{(return_code & 0xFFFFFFFF):08X}' if return_code is not None else 'not available'",
+                "        raise RuntimeError(f'Child interpreter did not become ready; returncode={return_code}; windows_status={windows_status}')",
+                "    pid_path.write_text(str(child.pid), encoding='ascii')",
                 "    time.sleep(30)",
                 "elif mode == 'cancel-output':",
                 "    for index in range(10000):",
@@ -274,6 +300,8 @@ def run_scenario(
     )
     child_process_id: int | None = None
     timeout_observed = False
+    parallel_slicer_outcomes: list[object] = []
+    parallel_slicer_failures: list[str] = []
     try:
         if scenario == "hundreds_of_timer_workers":
             for batch_start in range(0, 300, 20):
@@ -375,20 +403,50 @@ def run_scenario(
         elif scenario == "parallel_qprocess_slicers":
             script = _write_fake_slicer(artifact_directory)
             for request_id in range(1, 7):
+                worker = FakeSlicerWorker(
+                    request_id,
+                    Path(sys.executable),
+                    script,
+                    "success",
+                    artifact_directory / f"parallel-{request_id}",
+                    5.0,
+                )
+                worker.succeeded.connect(
+                    lambda _request_id, outcome: (
+                        parallel_slicer_outcomes.append(outcome)
+                    )
+                )
+                worker.failed.connect(
+                    lambda request, message, _details: (
+                        parallel_slicer_failures.append(
+                            f"{request}: {message}"
+                        )
+                    )
+                )
                 manager.start_job(
                     kind=JobKind.PREVIEW,
                     request_id=request_id,
-                    worker=FakeSlicerWorker(
-                        request_id,
-                        Path(sys.executable),
-                        script,
-                        "success",
-                        artifact_directory / f"parallel-{request_id}",
-                        5.0,
-                    ),
+                    worker=worker,
                     parent_operation_id=f"parallel-slicer-{request_id}",
                 )
             _wait_until(application, lambda: not manager.has_active(), 10.0)
+            failed_outcomes = [
+                outcome
+                for outcome in parallel_slicer_outcomes
+                if getattr(outcome, "return_code", None) != 0
+                or getattr(outcome, "crashed", False)
+            ]
+            if (
+                parallel_slicer_failures
+                or len(parallel_slicer_outcomes) != 6
+                or failed_outcomes
+            ):
+                raise AssertionError(
+                    "Parallel fake slicers did not all start successfully: "
+                    f"worker_failures={parallel_slicer_failures}, "
+                    f"outcome_count={len(parallel_slicer_outcomes)}, "
+                    f"failed_outcomes={failed_outcomes}"
+                )
         elif scenario == "close_during_qprocess_slicer":
             script = _write_fake_slicer(artifact_directory)
             job_id = manager.start_job(
@@ -441,7 +499,13 @@ def run_scenario(
                     script,
                     mode,
                     artifact_directory,
-                    0.25 if mode != "large" else 5.0,
+                    (
+                        1.0
+                        if mode == "child"
+                        else 5.0
+                        if mode == "large"
+                        else 0.25
+                    ),
                     pid_file,
                 ),
                 parent_operation_id=f"fake-slicer-{mode}",
@@ -455,7 +519,14 @@ def run_scenario(
                     ),
                 )
             _wait_until(application, lambda: not manager.has_active(), 10.0)
-            if pid_file is not None and pid_file.exists():
+            if pid_file is not None:
+                ready_file = pid_file.with_suffix(".ready")
+                if not pid_file.exists() or not ready_file.exists():
+                    raise AssertionError(
+                        "Fake slicer child interpreter never became ready: "
+                        f"pid_file={pid_file.exists()}, "
+                        f"ready_file={ready_file.exists()}"
+                    )
                 child_process_id = int(
                     pid_file.read_text(encoding="ascii").strip()
                 )
@@ -493,6 +564,7 @@ def run_scenario(
         _wait_until(application, lambda: not manager.has_active())
         if not manager.shutdown(1000).clean:
             raise AssertionError("Final stress shutdown was not clean.")
+        _drain_deferred_deletions(application)
         journal.close_session()
         return {
             "scenario": scenario,
@@ -531,6 +603,7 @@ def run_scenario(
                     active_jobs=manager.diagnostic_snapshot(),
                 )
                 os._exit(70)
+        _drain_deferred_deletions(application)
         journal.close_session()
         if native_crash_handle is not None:
             try:
