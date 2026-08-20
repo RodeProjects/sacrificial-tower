@@ -53,10 +53,7 @@ def _ensure_project_venv() -> None:
     if already_in_project_venv:
         return
     if not PROJECT_PYTHONW.is_file():
-        raise FileNotFoundError(
-            "Die virtuelle Python-Umgebung fehlt. Bitte zuerst .venv "
-            "für dieses Projekt einrichten."
-        )
+        return
     script_path = Path(__file__).resolve()
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess,

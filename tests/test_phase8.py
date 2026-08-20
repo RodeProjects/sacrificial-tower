@@ -515,6 +515,7 @@ class ReportingAndLaunchTests(unittest.TestCase):
         self.assertIn('"detached_process"', launcher_content)
         self.assertIn("stdin=subprocess.devnull", launcher_content)
         self.assertIn("path(sys.prefix).resolve()", launcher_content)
+        self.assertIn("if not project_pythonw.is_file():", launcher_content)
         self.assertFalse((PROJECT_ROOT / "start_gui.bat").exists())
         self.assertFalse((PROJECT_ROOT / "start_gui.vbs").exists())
 
