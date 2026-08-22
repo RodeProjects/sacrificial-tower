@@ -9,21 +9,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from cooling_tower.slicers.detection.base import ActivePresetSchema
+from cooling_tower.slicers.detection.registry import detection_module_for
 from cooling_tower.slicers.models import SlicerInstallation
 
 
 _MAXIMUM_CONFIG_BYTES = 2 * 1024 * 1024
-_ORCA_FAMILY_ADAPTERS = {
-    "anycubic_slicer_next",
-    "bambu_studio",
-    "orca_slicer",
-}
-_CONFIG_NAMES = {
-    "anycubic_slicer_next": ("AnycubicSlicerNext.conf",),
-    "bambu_studio": ("BambuStudio.conf",),
-    "orca_slicer": ("OrcaSlicer.conf",),
-    "prusa_slicer": ("PrusaSlicer.ini",),
-    "cura": ("cura.cfg",),
+_LEGACY_SCHEMAS = {
+    # These formats predate the modular detection registry.  They remain
+    # behavior-compatible until their placeholder module is implemented.
+    "orca_slicer": ActivePresetSchema(("OrcaSlicer.conf",)),
+    "prusa_slicer": ActivePresetSchema(("PrusaSlicer.ini",)),
+    "cura": ActivePresetSchema(
+        ("cura.cfg",),
+        section_names=("cura", "general", "metadata"),
+        printer_keys=("active_machine", "machine", "printer"),
+        process_keys=("quality", "quality_type"),
+        filament_keys=("material", "material_profile"),
+    ),
 }
 
 
@@ -75,23 +78,32 @@ def read_active_presets(
 def _candidate_config_paths(
     installation: SlicerInstallation,
 ) -> tuple[Path, ...]:
-    names = _CONFIG_NAMES.get(installation.adapter_id, ())
-    if not names:
+    schema = _active_preset_schema(installation.adapter_id)
+    if schema is None:
         return ()
-    directories: set[Path] = set()
-    for root in installation.profile_roots:
-        resolved = Path(root).resolve()
-        directories.add(resolved)
-        if resolved.name.casefold() in {
-            "user",
-            "profiles",
-            "system",
-        }:
-            directories.add(resolved.parent)
+    module = detection_module_for(
+        installation.adapter_id,
+        implemented_only=True,
+    )
+    if module is not None:
+        directories = set(
+            module.active_config_directories(installation.profile_roots)
+        )
+    else:
+        directories = set()
+        for root in installation.profile_roots:
+            resolved = Path(root).resolve()
+            directories.add(resolved)
+            if resolved.name.casefold() in {
+                "user",
+                "profiles",
+                "system",
+            }:
+                directories.add(resolved.parent)
 
     result: set[Path] = set()
     for directory in directories:
-        for name in names:
+        for name in schema.config_names:
             direct = directory / name
             if direct.is_file():
                 result.add(direct.resolve())
@@ -109,6 +121,9 @@ def _read_config(
     path: Path,
     adapter_id: str,
 ) -> ActivePresetSelection | None:
+    schema = _active_preset_schema(adapter_id)
+    if schema is None:
+        return None
     try:
         if path.stat().st_size > _MAXIMUM_CONFIG_BYTES:
             return None
@@ -123,9 +138,9 @@ def _read_config(
         except UnicodeDecodeError:
             return None
 
-    values = _parse_ini_values(text, adapter_id)
+    values = _parse_ini_values(text, schema)
     if values is None:
-        values = _parse_json_values(text)
+        values = _parse_json_values(text, schema)
     if values is None:
         return None
     return ActivePresetSelection(
@@ -139,7 +154,7 @@ def _read_config(
 
 def _parse_ini_values(
     text: str,
-    adapter_id: str,
+    schema: ActivePresetSchema,
 ) -> dict[str, tuple[Any, ...]] | None:
     parser = configparser.ConfigParser(
         interpolation=None,
@@ -158,68 +173,45 @@ def _parse_ini_values(
         }
         for section in parser.sections()
     }
-    if adapter_id in _ORCA_FAMILY_ADAPTERS or adapter_id == "prusa_slicer":
-        preferred = tuple(
-            values
-            for name, values in sections.items()
-            if name in {"presets", "preset"}
+    preferred = tuple(
+        values
+        for name, values in sections.items()
+        if name in {item.casefold() for item in schema.section_names}
+    )
+    if not preferred:
+        return None
+    merged = _merge_sections(preferred)
+    filament_values = _split_config_value(
+        _first_present(merged, schema.filament_keys)
+    )
+    if not filament_values:
+        filament_values = tuple(
+            item
+            for key, value in sorted(merged.items())
+            if re.fullmatch(r"filament_(?:preset_)?\d+", key)
+            for item in _split_config_value(value)
         )
-        if not preferred:
-            return None
-        merged = _merge_sections(preferred)
-        filament_values = _split_config_value(
-            merged.get("filament") or merged.get("filament_preset")
-        )
-        if not filament_values:
-            filament_values = tuple(
-                item
-                for key, value in sorted(merged.items())
-                if re.fullmatch(r"filament_(?:preset_)?\d+", key)
-                for item in _split_config_value(value)
-            )
-        return {
-            "printer": _split_config_value(
-                merged.get("printer") or merged.get("printer_preset")
-            ),
-            "process": _split_config_value(
-                merged.get("print")
-                or merged.get("process")
-                or merged.get("print_preset")
-            ),
-            "filament": filament_values,
-            "nozzle": _split_config_value(merged.get("nozzle_diameter")),
-        }
-
-    if adapter_id == "cura":
-        preferred = tuple(
-            values
-            for name, values in sections.items()
-            if name in {"cura", "general", "metadata"}
-        )
-        if not preferred:
-            return None
-        merged = _merge_sections(preferred)
-        return {
-            "printer": _split_config_value(
-                merged.get("active_machine")
-                or merged.get("machine")
-                or merged.get("printer")
-            ),
-            "process": _split_config_value(
-                merged.get("quality") or merged.get("quality_type")
-            ),
-            "filament": _split_config_value(
-                merged.get("material") or merged.get("material_profile")
-            ),
-            "nozzle": _split_config_value(merged.get("nozzle_diameter")),
-        }
-    return None
+    return {
+        "printer": _split_config_value(
+            _first_present(merged, schema.printer_keys)
+        ),
+        "process": _split_config_value(
+            _first_present(merged, schema.process_keys)
+        ),
+        "filament": filament_values,
+        "nozzle": _split_config_value(
+            _first_present(merged, schema.nozzle_keys)
+        ),
+    }
 
 
-def _parse_json_values(text: str) -> dict[str, tuple[Any, ...]] | None:
+def _parse_json_values(
+    text: str,
+    schema: ActivePresetSchema,
+) -> dict[str, tuple[Any, ...]] | None:
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
+        payload = _load_json_with_checksum_footer(text)
+    except (json.JSONDecodeError, ValueError):
         return None
     if not isinstance(payload, Mapping):
         return None
@@ -232,9 +224,7 @@ def _parse_json_values(text: str) -> dict[str, tuple[Any, ...]] | None:
                 for key, value in nested_presets.items()
             }
         )
-    filament_value = normalized.get("filament") or normalized.get(
-        "filament_preset"
-    )
+    filament_value = _first_present(normalized, schema.filament_keys)
     if filament_value is None:
         filament_value = tuple(
             item
@@ -244,18 +234,48 @@ def _parse_json_values(text: str) -> dict[str, tuple[Any, ...]] | None:
         )
     return {
         "printer": _as_values(
-            normalized.get("printer")
-            or normalized.get("printer_preset")
-            or normalized.get("active_machine")
+            _first_present(normalized, schema.printer_keys)
         ),
         "process": _as_values(
-            normalized.get("print")
-            or normalized.get("process")
-            or normalized.get("print_preset")
+            _first_present(normalized, schema.process_keys)
         ),
         "filament": _as_values(filament_value),
-        "nozzle": _as_values(normalized.get("nozzle_diameter")),
+        "nozzle": _as_values(
+            _first_present(normalized, schema.nozzle_keys)
+        ),
     }
+
+
+def _active_preset_schema(adapter_id: str) -> ActivePresetSchema | None:
+    module = detection_module_for(adapter_id, implemented_only=True)
+    if module is not None and module.active_preset_schema is not None:
+        return module.active_preset_schema
+    return _LEGACY_SCHEMAS.get(adapter_id)
+
+
+def _first_present(
+    values: Mapping[str, Any],
+    keys: Iterable[str],
+) -> Any:
+    for key in keys:
+        normalized = str(key).casefold()
+        if normalized in values and values[normalized] is not None:
+            return values[normalized]
+    return None
+
+
+def _load_json_with_checksum_footer(text: str) -> Any:
+    """Accept one JSON document and Bambu's harmless checksum comment only."""
+
+    leading_length = len(text) - len(text.lstrip())
+    payload, end = json.JSONDecoder().raw_decode(text.lstrip())
+    remainder = text[leading_length + end :].strip()
+    if remainder and any(
+        line.strip() and not line.lstrip().startswith("#")
+        for line in remainder.splitlines()
+    ):
+        raise ValueError("Unexpected content after slicer configuration JSON.")
+    return payload
 
 
 def _merge_sections(

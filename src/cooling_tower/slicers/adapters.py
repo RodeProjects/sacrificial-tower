@@ -15,6 +15,8 @@ from cooling_tower.slicers.base import (
     existing_paths,
 )
 from cooling_tower.slicers.errors import SlicerProcessError
+from cooling_tower.slicers.detection.base import SlicerDetectionModule
+from cooling_tower.slicers.detection.registry import detection_module_for
 from cooling_tower.slicers.models import (
     SliceRequest,
     EffectiveProfile,
@@ -49,6 +51,31 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
     vendor_profile_directory: str | None = None
     installation_directories: tuple[str, ...] = ()
     user_directories: tuple[str, ...] = ()
+    detection_module_id: str | None = None
+
+    def __init__(
+        self,
+        runner=None,
+        *,
+        detection_module: SlicerDetectionModule | None = None,
+    ) -> None:
+        super().__init__(runner=runner)
+        module = detection_module or detection_module_for(
+            self.detection_module_id or "",
+            implemented_only=True,
+        )
+        if module is not None:
+            if not module.implemented:
+                raise ValueError("A placeholder detection module cannot be used.")
+            if module.adapter_id != self.adapter_id:
+                raise ValueError(
+                    "The detection module belongs to a different slicer adapter."
+                )
+            self.product_name = module.product_name
+            self.executable_names = module.executable_names
+            self.product_markers = module.product_markers
+            self.installation_directories = module.installation_directories
+        self._profile_detection_module = module
 
     def known_candidates(self) -> tuple[SlicerCandidate, ...]:
         candidates: list[SlicerCandidate] = []
@@ -67,6 +94,14 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         return tuple(candidates)
 
     def profile_roots_for(self, executable: Path) -> tuple[Path, ...]:
+        module = self._profile_detection_module
+        if module is not None:
+            appdata = os.environ.get("APPDATA")
+            return module.profile_roots_for(
+                executable,
+                appdata_root=Path(appdata) if appdata else None,
+            )
+
         roots: list[Path] = []
         resource_profiles = executable.parent / "resources" / "profiles"
         if self.vendor_profile_directory:
@@ -91,6 +126,16 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                     )
                 )
         return existing_paths(roots)
+
+    def discover_profiles(
+        self,
+        installation: SlicerInstallation,
+    ) -> list[ProfileRecord]:
+        records = super().discover_profiles(installation)
+        module = self._profile_detection_module
+        if module is None:
+            return records
+        return list(module.filter_profile_records(records))
 
     def build_slice_command(
         self,
@@ -283,12 +328,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
 
 class AnycubicSlicerNextAdapter(OrcaFamilyAdapter):
     adapter_id = "anycubic_slicer_next"
-    product_name = "Anycubic Slicer Next"
-    executable_names = ("AnycubicSlicerNext.exe",)
-    product_markers = ("AnycubicSlicerNext", "Anycubic Slicer Next")
-    installation_directories = ("AnycubicSlicerNext",)
-    user_directories = ("AnycubicSlicerNext",)
-    vendor_profile_directory = "Anycubic"
+    detection_module_id = "anycubic_slicer_next"
 
 
 class OrcaSlicerAdapter(OrcaFamilyAdapter):
@@ -302,11 +342,7 @@ class OrcaSlicerAdapter(OrcaFamilyAdapter):
 
 class BambuStudioAdapter(OrcaFamilyAdapter):
     adapter_id = "bambu_studio"
-    product_name = "Bambu Studio"
-    executable_names = ("bambu-studio.exe", "BambuStudio.exe")
-    product_markers = ("BambuStudio", "Bambu Studio")
-    installation_directories = ("Bambu Studio", "BambuStudio")
-    user_directories = ("BambuStudio",)
+    detection_module_id = "bambu_studio"
 
 
 class PrusaSlicerAdapter(BaseSlicerAdapter):

@@ -43,6 +43,7 @@ class ProfileCatalogWorker(CancelableWorker):
             str, str | ProfileSelectionReference
         ] | None = None,
         include_all_profiles: bool = False,
+        prefer_active_presets: bool = False,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -53,6 +54,7 @@ class ProfileCatalogWorker(CancelableWorker):
         self.selected_machine = selected_machine
         self.selected_profile_ids = dict(selected_profile_ids or {})
         self.include_all_profiles = include_all_profiles
+        self.prefer_active_presets = prefer_active_presets
 
     @Slot()
     def run(self) -> None:
@@ -79,6 +81,10 @@ class ProfileCatalogWorker(CancelableWorker):
                 if "include_all_profiles" in parameters:
                     optional_filter_arguments["include_all_profiles"] = (
                         self.include_all_profiles
+                    )
+                if "prefer_active_presets" in parameters:
+                    optional_filter_arguments["prefer_active_presets"] = (
+                        self.prefer_active_presets
                     )
                 catalog: ProfileCatalog = catalog_method(
                     self.installation,

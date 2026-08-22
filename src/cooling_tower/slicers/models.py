@@ -249,6 +249,7 @@ class SlicerDiscoveryResult:
     message: str
     source_slicer: SlicerIdentity | None = None
     diagnostics: tuple[str, ...] = ()
+    last_used_key: str | None = None
 
     @property
     def recommended(self) -> SlicerInstallation | None:
@@ -259,6 +260,19 @@ class SlicerDiscoveryResult:
                 installation
                 for installation in self.installations
                 if installation.identity_key == self.recommended_key
+            ),
+            None,
+        )
+
+    @property
+    def last_used(self) -> SlicerInstallation | None:
+        if self.last_used_key is None:
+            return None
+        return next(
+            (
+                installation
+                for installation in self.installations
+                if installation.identity_key == self.last_used_key
             ),
             None,
         )

@@ -155,6 +155,29 @@ class ProfileCatalog:
             and self.filament_options
         )
 
+    @property
+    def missing_roles(self) -> tuple[str, ...]:
+        return tuple(
+            label
+            for label, options in (
+                ("Maschinenprofile", self.machine_options),
+                ("Filamentprofile", self.filament_options),
+                ("Prozessprofile", self.process_options),
+            )
+            if not options
+        )
+
+    @property
+    def blocking_message(self) -> str | None:
+        if self.complete:
+            return None
+        missing = ", ".join(self.missing_roles)
+        return (
+            f"Bestätigung nicht möglich: {missing} wurden im ausgewählten "
+            "Slicer nicht erkannt. Wähle gegebenenfalls ein anderes "
+            "Maschinenprofil oder starte die Erkennung erneut."
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ProfileCatalogConfirmation:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -17,6 +18,7 @@ from cooling_tower.slicers.discovery import (
     WindowsSlicerDiscovery,
     deduplicate_candidates,
 )
+from cooling_tower.slicers.detection.registry import detection_module_for
 from cooling_tower.slicers.errors import SlicerError, UnsupportedSlicerExecutableError
 from cooling_tower.slicers.models import (
     ProfileRecord,
@@ -312,9 +314,11 @@ class SlicerDiscoveryService:
     ) -> SlicerDiscoveryResult:
         preferences = self.preference_store.load() if self.preference_store else None
         last_selected = preferences.last_selected_key if preferences else None
+        last_used = self._last_used_installation(installations)
         recommended = self._recommend(
             installations,
             source_slicer,
+            last_used.identity_key if last_used is not None else None,
             last_selected,
         )
         state, message = self._gui_state(
@@ -331,21 +335,90 @@ class SlicerDiscoveryService:
             message=message,
             source_slicer=source_slicer,
             diagnostics=diagnostics,
+            last_used_key=(
+                last_used.identity_key if last_used is not None else None
+            ),
+        )
+
+    @staticmethod
+    def _last_used_installation(
+        installations: tuple[SlicerInstallation, ...],
+    ) -> SlicerInstallation | None:
+        """Infer actual slicer use from exact module-owned local markers."""
+
+        appdata_value = os.environ.get("APPDATA", "").strip()
+        appdata_root = (
+            Path(appdata_value).expanduser().resolve()
+            if appdata_value
+            else None
+        )
+        evidence: dict[str, int] = {}
+        for installation in installations:
+            module = detection_module_for(
+                installation.adapter_id,
+                implemented_only=True,
+            )
+            if module is None:
+                continue
+            timestamp = module.latest_usage_timestamp_ns(
+                appdata_root=appdata_root,
+            )
+            if timestamp is not None:
+                evidence[installation.adapter_id] = max(
+                    timestamp,
+                    evidence.get(installation.adapter_id, timestamp),
+                )
+        if not evidence:
+            return None
+        latest_timestamp = max(evidence.values())
+        latest_adapters = {
+            adapter_id
+            for adapter_id, timestamp in evidence.items()
+            if timestamp == latest_timestamp
+        }
+        if len(latest_adapters) != 1:
+            # Equal timestamps across different products are ambiguous.  An
+            # absent label is safer than a confidently wrong one.
+            return None
+        latest_adapter = next(iter(latest_adapters))
+        candidates = tuple(
+            item
+            for item in installations
+            if item.adapter_id == latest_adapter
+        )
+        return max(
+            candidates,
+            key=lambda item: (
+                _version_tuple(item.version),
+                str(item.executable_path).casefold(),
+            ),
+            default=None,
         )
 
     @staticmethod
     def _recommend(
         installations: tuple[SlicerInstallation, ...],
         source: SlicerIdentity | None,
+        last_used_key: str | None,
         last_selected_key: str | None,
     ) -> SlicerInstallation | None:
         if not installations:
             return None
 
-        # An explicit selection made in this application is authoritative on
-        # the next start.  G-code metadata still helps choose a sensible
-        # default when no remembered installation exists, but must not make
-        # the Slicer selector jump away from the user's last choice.
+        actually_used = next(
+            (
+                item
+                for item in installations
+                if item.identity_key == last_used_key
+            ),
+            None,
+        )
+        if actually_used is not None:
+            return actually_used
+
+        # A selection made in this application is only a fallback when no
+        # module can establish actual external use.  It is intentionally not
+        # exposed as "zuletzt verwendet".
         remembered = next(
             (
                 item

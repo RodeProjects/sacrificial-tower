@@ -271,18 +271,71 @@ class Phase17Tests(unittest.TestCase):
         self.assertEqual(window.slicer_combo.currentData(), verified.identity_key)
         window.close()
 
-    def test_02_recommended_slicer_is_preselected(self) -> None:
+    def test_02_last_used_slicer_is_preselected_and_labelled(self) -> None:
         window = self.window()
         first = self.installation(self.root, "First")
         second = self.installation(self.root, "Second")
         result = SlicerDiscoveryResult(
             (first, second), second.identity_key,
             SlicerGuiState.AVAILABLE_AND_RECOMMENDED, "Erkennung abgeschlossen",
+            last_used_key=second.identity_key,
         )
         window._slicer_request_id = 1
         window._on_slicer_discovery_succeeded(1, result)
         self.assertEqual(window.slicer_combo.currentData(), second.identity_key)
-        self.assertIn("empfohlen", window.slicer_combo.currentText())
+        self.assertIn("zuletzt verwendet", window.slicer_combo.currentText())
+        self.assertNotIn("empfohlen", window.slicer_combo.currentText())
+        window.close()
+
+    def test_02b_single_slicer_has_no_last_used_suffix(self) -> None:
+        window = self.window()
+        installation = self.installation(self.root, "Only")
+        result = SlicerDiscoveryResult(
+            (installation,),
+            installation.identity_key,
+            SlicerGuiState.AVAILABLE,
+            "Erkennung abgeschlossen",
+            last_used_key=installation.identity_key,
+        )
+        window._slicer_request_id = 1
+        window._on_slicer_discovery_succeeded(1, result)
+        self.assertEqual(
+            window.slicer_combo.currentText(),
+            installation.display_name,
+        )
+        window.close()
+
+    def test_02c_refresh_switches_to_newly_last_used_slicer(self) -> None:
+        window = self.window()
+        first = self.installation(self.root, "First")
+        second = self.installation(self.root, "Second")
+        window._slicer_request_id = 1
+        window._on_slicer_discovery_succeeded(
+            1,
+            SlicerDiscoveryResult(
+                (first, second),
+                first.identity_key,
+                SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
+                "Erkennung abgeschlossen",
+                last_used_key=first.identity_key,
+            ),
+        )
+        self.assertEqual(window.slicer_combo.currentData(), first.identity_key)
+
+        window._slicer_request_id = 2
+        window._on_slicer_discovery_succeeded(
+            2,
+            SlicerDiscoveryResult(
+                (first, second),
+                second.identity_key,
+                SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
+                "Erkennung aktualisiert",
+                last_used_key=second.identity_key,
+            ),
+        )
+
+        self.assertEqual(window.slicer_combo.currentData(), second.identity_key)
+        self.assertIn("zuletzt verwendet", window.slicer_combo.currentText())
         window.close()
 
     def test_03_user_can_select_another_slicer(self) -> None:

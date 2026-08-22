@@ -74,6 +74,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         window.current_source_kind = SourceKind.STL
         window.source_artifact = SimpleNamespace(
             original_path=source,
+            source_kind=SourceKind.STL,
             matches_current_file=lambda: True,
         )
         window.stl_validation_result = SimpleNamespace(valid=True)
@@ -963,6 +964,91 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 self.assertIn(
                     "vorhandenes Maschinen-, Filament- und Prozessprofil",
                     window.profile_confirm_button.toolTip(),
+                )
+        finally:
+            window.close()
+
+    def test_show_all_toggle_reloads_catalog_for_a_source_ready_step(self) -> None:
+        window = self.window()
+        self.mark_valid_source(window)
+        executable = self.root / "slicer-toggle.exe"
+        executable.write_bytes(b"MZ")
+        installation = SimpleNamespace(
+            verified=True,
+            can_slice=True,
+            identity_key="toggle-slicer",
+            executable_path=executable,
+            display_name="Toggle Slicer",
+        )
+
+        def profile(role: str, kind: ProfileKind) -> ProfileRecord:
+            path = self.root / f"toggle-{role}.json"
+            path.write_text("{}", encoding="utf-8")
+            return ProfileRecord(
+                adapter_id="toggle-slicer",
+                profile_id=f"toggle-{role}",
+                name=f"Toggle {role}",
+                kind=kind,
+                path=path,
+                source="system",
+            )
+
+        machine = profile("machine", ProfileKind.MACHINE)
+        filament = profile("filament", ProfileKind.FILAMENT)
+        process = profile("process", ProfileKind.PROCESS)
+        catalog = ProfileCatalog(
+            execution_slicer=installation,
+            inventory_fingerprint="toggle-inventory",
+            machine_options=(machine,),
+            filament_options=(filament,),
+            process_options=(process,),
+            selected_machine=ProfileSelectionReference(
+                machine.profile_id, machine.path
+            ),
+            selected_filament=ProfileSelectionReference(
+                filament.profile_id, filament.path
+            ),
+            selected_process=ProfileSelectionReference(
+                process.profile_id, process.path
+            ),
+        )
+        try:
+            with patch.object(
+                type(window),
+                "selected_slicer_installation",
+                new_callable=PropertyMock,
+                return_value=installation,
+            ):
+                window.profile_catalog = catalog
+                window._populate_profile_combos(catalog)
+                with (
+                    patch.object(
+                        window, "start_profile_catalog_loading"
+                    ) as reload_catalog,
+                    patch.object(window, "start_profile_matching") as match,
+                ):
+                    window._on_show_all_profiles_toggled(True)
+
+                match.assert_not_called()
+                reload_catalog.assert_called_once()
+                arguments = reload_catalog.call_args.kwargs
+                self.assertTrue(arguments["include_all_profiles"])
+                self.assertEqual(
+                    arguments["selected_machine"].profile_id,
+                    machine.profile_id,
+                )
+                self.assertEqual(
+                    set(arguments["selected_profile_ids"]),
+                    {"machine", "process", "filament"},
+                )
+
+                window._profile_request_id = 4
+                window._profile_catalog_match_source_request_id = 4
+                with patch.object(window, "start_profile_matching") as match:
+                    window._on_profile_catalog_succeeded(4, catalog)
+                match.assert_called_once()
+                self.assertIsNone(
+                    window._profile_confirmation_blocking_reason()
                 )
         finally:
             window.close()

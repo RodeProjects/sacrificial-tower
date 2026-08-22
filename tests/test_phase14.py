@@ -369,7 +369,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
         self.assertFalse(result.installations[0].can_slice)
         self.assertIn("nur erkannt", result.installations[0].display_name)
 
-    def test_last_confirmed_selection_remains_authoritative(self) -> None:
+    def test_last_confirmed_selection_is_only_an_unlabelled_fallback(self) -> None:
         adapter = FakeAdapter("choice", "Choice", SlicerFamily.OTHER)
         first = make_executable(self.root / "first", "choice.exe")
         second = make_executable(self.root / "second", "choice.exe")
@@ -397,10 +397,83 @@ class Phase14DiscoveryTests(unittest.TestCase):
         service.remember_selection(selected.identity_key)
         fallback = service.discover_installations()
         self.assertEqual(fallback.recommended_key, selected.identity_key)
+        self.assertIsNone(fallback.last_used_key)
         exact = service.discover_installations(
             source_identity("choice", "Choice", "2.0", SlicerFamily.OTHER)
         )
         self.assertEqual(exact.recommended.version, "1.0")
+
+    def test_newest_module_usage_marker_overrides_internal_selection(self) -> None:
+        appdata = self.root / "appdata"
+        bambu_marker = appdata / "BambuStudio" / "BambuStudio.conf"
+        anycubic_marker = (
+            appdata
+            / "AnycubicSlicerNext"
+            / "AnycubicSlicerNext.conf"
+        )
+        for marker, payload in (
+            (bambu_marker, b"bambu state"),
+            (anycubic_marker, b"anycubic state"),
+        ):
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_bytes(payload)
+        os.utime(bambu_marker, ns=(1_000_000_000, 1_000_000_000))
+        os.utime(anycubic_marker, ns=(2_000_000_000, 2_000_000_000))
+        before = {
+            bambu_marker: bambu_marker.read_bytes(),
+            anycubic_marker: anycubic_marker.read_bytes(),
+        }
+
+        anycubic_adapter = FakeAdapter(
+            "anycubic_slicer_next",
+            "Anycubic Slicer Next",
+            SlicerFamily.ORCA_BAMBU_ANYCUBIC,
+        )
+        bambu_adapter = FakeAdapter(
+            "bambu_studio",
+            "Bambu Studio",
+            SlicerFamily.ORCA_BAMBU_ANYCUBIC,
+        )
+        candidates = (
+            SlicerCandidate(
+                make_executable(self.root / "anycubic", "anycubic.exe"),
+                SlicerDiscoverySource.KNOWN_PATH,
+                "anycubic_slicer_next",
+                version_hint="1.4.1.2",
+            ),
+            SlicerCandidate(
+                make_executable(self.root / "bambu", "bambu.exe"),
+                SlicerDiscoverySource.KNOWN_PATH,
+                "bambu_studio",
+                version_hint="2.8.2.61",
+            ),
+        )
+        service = self.service(
+            (anycubic_adapter, bambu_adapter),
+            candidates,
+        )
+        with patch.dict(os.environ, {"APPDATA": str(appdata)}):
+            initial = service.discover_installations()
+            bambu = next(
+                item
+                for item in initial.installations
+                if item.adapter_id == "bambu_studio"
+            )
+            service.remember_selection(bambu.identity_key)
+            refreshed = service.discover_installations(force=True)
+
+        self.assertEqual(
+            refreshed.last_used.adapter_id,
+            "anycubic_slicer_next",
+        )
+        self.assertEqual(
+            refreshed.recommended.adapter_id,
+            "anycubic_slicer_next",
+        )
+        self.assertEqual(
+            {path: path.read_bytes() for path in before},
+            before,
+        )
 
     def test_profile_choices_survive_sessions_and_remain_isolated_per_slicer(
         self,

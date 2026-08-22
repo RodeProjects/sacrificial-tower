@@ -1134,6 +1134,7 @@ class MainWindow(QMainWindow):
         self._populating_slicer_combo = False
         self._profile_request_id = 0
         self._pending_profile_match: dict[str, object] | None = None
+        self._profile_catalog_match_source_request_id: int | None = None
         self.profile_catalog: ProfileCatalog | None = None
         self.profile_catalog_confirmation: ProfileCatalogConfirmation | None = None
         self._force_profile_catalog_after_discovery = False
@@ -4974,6 +4975,7 @@ class MainWindow(QMainWindow):
             self._slicer_request_id += 1
             self._pending_slicer_discovery = (force, manual_path)
             self._pending_profile_match = None
+            self._profile_catalog_match_source_request_id = None
             self.slicer_refresh_button.setEnabled(False)
             self.slicer_manual_button.setEnabled(False)
             if self.background_job_manager.has_active(
@@ -4990,6 +4992,7 @@ class MainWindow(QMainWindow):
             return
         self._slicer_request_id += 1
         request_id = self._slicer_request_id
+        self._profile_catalog_match_source_request_id = None
         self._force_profile_catalog_after_discovery = bool(
             force or manual_path is not None
         )
@@ -5080,10 +5083,26 @@ class MainWindow(QMainWindow):
                 for installation in result.installations
                 if installation.verified and installation.can_slice
             )
+            preferred_key = (
+                result.last_used_key
+                or (
+                    previous_key
+                    if any(
+                        installation.identity_key == previous_key
+                        for installation in verified_installations
+                    )
+                    else None
+                )
+                or result.recommended_key
+            )
+            show_last_used_suffix = len(verified_installations) > 1
             for index, installation in enumerate(verified_installations):
                 label = installation.display_name
-                if installation.identity_key == result.recommended_key:
-                    label += " – empfohlen"
+                if (
+                    show_last_used_suffix
+                    and installation.identity_key == result.last_used_key
+                ):
+                    label += " – zuletzt verwendet"
                 self.slicer_combo.addItem(
                     label,
                     installation.identity_key,
@@ -5093,12 +5112,7 @@ class MainWindow(QMainWindow):
                     str(installation.executable_path),
                     Qt.ItemDataRole.ToolTipRole,
                 )
-                if installation.identity_key == previous_key:
-                    selected_index = index
-                elif (
-                    selected_index < 0
-                    and installation.identity_key == result.recommended_key
-                ):
+                if installation.identity_key == preferred_key:
                     selected_index = index
             if selected_index >= 0:
                 self.slicer_combo.setCurrentIndex(selected_index)
@@ -5124,7 +5138,11 @@ class MainWindow(QMainWindow):
                 selected is not None
                 and selected.automatically_discovered
                 and selected.identity_key == result.recommended_key
-                and (previous_key is None or retained_automatic_selection)
+                and (
+                    previous_key is None
+                    or retained_automatic_selection
+                    or selected.identity_key == result.last_used_key
+                )
             )
             else None
         )
@@ -5138,9 +5156,15 @@ class MainWindow(QMainWindow):
                     "Automatische Slicer-Verarbeitung verfügbar.",
                 ),
                 (
-                    selected.identity_key == result.recommended_key,
-                    "passendster erkannter slicer",
-                    "Passendster erkannter Slicer wurde vorausgewählt.",
+                    selected.identity_key == result.last_used_key,
+                    "zuletzt verwendeter slicer",
+                    "Zuletzt verwendeter Slicer wurde vorausgewählt.",
+                ),
+                (
+                    result.last_used_key is None
+                    and selected.identity_key == result.recommended_key,
+                    "passender erkannter slicer",
+                    "Passender erkannter Slicer wurde vorausgewählt.",
                 ),
             )
             for applies, marker, text in supplemental_facts:
@@ -5166,7 +5190,8 @@ class MainWindow(QMainWindow):
             self._set_slicer_header_summary(selected)
             self._update_preparation_requirements()
             self.start_profile_catalog_loading(
-                force_inventory=self._force_profile_catalog_after_discovery
+                force_inventory=self._force_profile_catalog_after_discovery,
+                prefer_active_presets=True,
             )
         else:
             self._slicer_header_installation = None
@@ -5232,7 +5257,7 @@ class MainWindow(QMainWindow):
             "pending",
         )
         if selected is not None:
-            self.start_profile_catalog_loading()
+            self.start_profile_catalog_loading(prefer_active_presets=True)
 
     def _update_slicer_detail(self) -> None:
         installation = self.selected_slicer_installation
@@ -5338,6 +5363,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._discard_source_preslice("profile_context_changed")
         self._pending_profile_match = None
+        self._profile_catalog_match_source_request_id = None
         self.profile_match_result = None
         self.confirmed_profile_context = None
         self._reset_profile_filter_controls()
@@ -5472,6 +5498,65 @@ class MainWindow(QMainWindow):
                 return False
         return True
 
+    def _profile_confirmation_blocking_reason(self) -> str | None:
+        """Explain an actionable catalog/profile lock without exposing paths."""
+
+        installation = self.selected_slicer_installation
+        catalog = self.profile_catalog
+        if installation is None:
+            return "Es ist kein verwendbarer Slicer ausgewählt."
+        executable_path = getattr(installation, "executable_path", None)
+        if executable_path is not None and not Path(executable_path).is_file():
+            return "Die ausführbare Datei des ausgewählten Slicers fehlt."
+        if catalog is None:
+            return None
+        if not all(
+            hasattr(catalog, attribute)
+            for attribute in (
+                "machine_options",
+                "filament_options",
+                "process_options",
+            )
+        ):
+            return "Der geladene Profilkatalog enthält nicht alle Profilarten."
+        if not getattr(catalog, "complete", False):
+            return getattr(catalog, "blocking_message", None) or (
+                "Der Profilkatalog enthält nicht alle benötigten Profilarten."
+            )
+        selections_and_options = (
+            (
+                "Maschinenprofil",
+                self._profile_combo_reference(self.machine_profile_combo),
+                catalog.machine_options,
+            ),
+            (
+                "Filamentprofil",
+                self._profile_combo_reference(self.filament_profile_combo),
+                catalog.filament_options,
+            ),
+            (
+                "Prozessprofil",
+                self._profile_combo_reference(self.process_profile_combo),
+                catalog.process_options,
+            ),
+        )
+        for label, reference, records in selections_and_options:
+            if reference is None or reference.path is None:
+                return f"Es ist kein gültiges {label} ausgewählt."
+            if not reference.path.is_file():
+                return f"Die Datei des ausgewählten {label}s ist nicht mehr vorhanden."
+            if not any(
+                record.profile_id.casefold()
+                == reference.profile_id.casefold()
+                and record.path == reference.path
+                for record in records
+            ):
+                return (
+                    f"Das ausgewählte {label} gehört nicht mehr zum aktuellen "
+                    "Profilkatalog."
+                )
+        return None
+
     def _refresh_profile_confirmation_button(self) -> None:
         """Render one persistent action state without changing its geometry."""
 
@@ -5537,11 +5622,30 @@ class MainWindow(QMainWindow):
         elif not source_ready:
             tooltip = _LOCKED_SLICER_STEP_TOOLTIP
         else:
+            blocking_reason = self._profile_confirmation_blocking_reason()
             tooltip = (
-                "Wähle einen validen Slicer sowie je ein vorhandenes "
+                ((blocking_reason + " ") if blocking_reason else "")
+                + "Wähle einen validen Slicer sowie je ein vorhandenes "
                 "Maschinen-, Filament- und Prozessprofil aus."
             )
         self.profile_confirm_button.setToolTip(tooltip)
+        blocking_reason = (
+            self._profile_confirmation_blocking_reason()
+            if source_ready and not inputs_ready
+            else None
+        )
+        current_is_input_blocker = bool(
+            self.profile_status_label.property("inputBlocker")
+        )
+        if blocking_reason and (
+            current_is_input_blocker
+            or not self.profile_status_label.text().strip()
+        ):
+            self._set_profile_notice(blocking_reason, state="error")
+            self.profile_status_label.setProperty("inputBlocker", True)
+        elif current_is_input_blocker and not blocking_reason:
+            self.profile_status_label.setProperty("inputBlocker", False)
+            self._set_profile_notice()
         self._refresh_widget_style(self.profile_confirm_button)
 
     def _set_profile_confirmation_busy(
@@ -5583,6 +5687,8 @@ class MainWindow(QMainWindow):
             str, str | ProfileSelectionReference
         ] | None = None,
         include_all_profiles: bool | None = None,
+        prefer_active_presets: bool = False,
+        match_source_after_loading: bool = False,
     ) -> None:
         """Load the selected slicer's profiles without requiring a source."""
 
@@ -5605,6 +5711,10 @@ class MainWindow(QMainWindow):
                 "selected_machine": selected_machine,
                 "selected_profile_ids": dict(selected_profile_ids or {}),
                 "include_all_profiles": include_all_profiles,
+                "prefer_active_presets": bool(prefer_active_presets),
+                "match_source_after_loading": bool(
+                    match_source_after_loading
+                ),
             }
             return
         restored_profile_ids = dict(selected_profile_ids or {})
@@ -5656,6 +5766,9 @@ class MainWindow(QMainWindow):
 
         self._profile_request_id += 1
         request_id = self._profile_request_id
+        self._profile_catalog_match_source_request_id = (
+            request_id if match_source_after_loading else None
+        )
         self.profile_match_result = None
         self.confirmed_profile_context = None
         self.workflow.begin_profile_matching()
@@ -5679,6 +5792,7 @@ class MainWindow(QMainWindow):
             selected_machine=selected_machine,
             selected_profile_ids=restored_profile_ids,
             include_all_profiles=show_all_profiles,
+            prefer_active_presets=prefer_active_presets,
         )
         self.slicer_refresh_button.setEnabled(False)
         self.slicer_manual_button.setEnabled(False)
@@ -5697,6 +5811,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._profile_request_id:
             return
+        match_source_after_loading = (
+            request_id == self._profile_catalog_match_source_request_id
+        )
+        self._profile_catalog_match_source_request_id = None
         installation = self.selected_slicer_installation
         if (
             installation is None
@@ -5729,8 +5847,8 @@ class MainWindow(QMainWindow):
         if not catalog.complete:
             self.profile_catalog_confirmation = None
             self._set_profile_notice(
-                "Der Profilkatalog ist unvollständig. Für die Bestätigung "
-                "wird je ein Maschinen-, Filament- und Prozessprofil benötigt.",
+                catalog.blocking_message
+                or "Der Profilkatalog ist unvollständig.",
                 state="error",
             )
             self.profile_confirm_button.setEnabled(False)
@@ -5760,9 +5878,17 @@ class MainWindow(QMainWindow):
         self._refresh_slicer_header_profiles()
         self._update_preparation_requirements()
         if (
-            self._catalog_selection_is_confirmed()
+            (
+                match_source_after_loading
+                or self._catalog_selection_is_confirmed()
+            )
             and self._profile_matching_context() is not None
+            and self._profile_confirmation_inputs_ready()
         ):
+            # Matching may prepare a proposal, but cannot confirm it or start
+            # a Pre-Slice.  Running it against the freshly installed catalogue
+            # keeps the confirmation action immediate without ever mixing the
+            # old and new profile scopes.
             self.start_profile_matching()
 
     def _on_profile_catalog_failed(
@@ -5773,6 +5899,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._profile_request_id:
             return
+        if request_id == self._profile_catalog_match_source_request_id:
+            self._profile_catalog_match_source_request_id = None
         self.profile_catalog = None
         self.profile_catalog_confirmation = None
         self._set_profile_notice(
@@ -5914,6 +6042,33 @@ class MainWindow(QMainWindow):
                 selected_profile_ids = (
                     catalog_confirmation.selected_profile_ids()
                 )
+        if selected_profile_ids is None and not stale_check_only:
+            catalog = self.profile_catalog
+            if (
+                catalog is not None
+                and catalog.complete
+                and catalog.execution_slicer.identity_key
+                == installation.identity_key
+            ):
+                current_selections = {
+                    "machine": self._profile_combo_reference(
+                        self.machine_profile_combo
+                    ),
+                    "process": self._profile_combo_reference(
+                        self.process_profile_combo
+                    ),
+                    "filament": self._profile_combo_reference(
+                        self.filament_profile_combo
+                    ),
+                }
+                if all(
+                    isinstance(value, ProfileSelectionReference)
+                    for value in current_selections.values()
+                ):
+                    # The currently displayed catalogue reflects the latest
+                    # active slicer state and therefore outranks an older
+                    # convenience preference from this application.
+                    selected_profile_ids = current_selections
         if selected_profile_ids is None and not stale_check_only:
             remembered = getattr(
                 self.slicer_service,
@@ -6551,34 +6706,33 @@ class MainWindow(QMainWindow):
             if checked
             else "Profilfilter\nDruckerkompatible Profile werden ermittelt …"
         )
-        selected_profile_ids = None
-        if (
-            getattr(self.profile_match_result, "profile_filter_source", None)
-            == "manual"
-        ):
-            machine = self._profile_combo_reference(
+        current_selections = {
+            "machine": self._profile_combo_reference(
                 self.machine_profile_combo
-            )
-            if machine is not None:
-                # Expanding or collapsing the machine catalogue must not undo
-                # a machine the user selected manually just before the toggle.
-                selected_profile_ids = {"machine": machine}
-        if self._profile_matching_context() is None:
-            machine = self._profile_combo_reference(
-                self.machine_profile_combo
-            )
-            self.start_profile_catalog_loading(
-                selected_machine=machine,
-                include_all_profiles=checked,
-            )
-            return
-        if selected_profile_ids is None:
-            self.start_profile_matching(include_all_profiles=checked)
-        else:
-            self.start_profile_matching(
-                selected_profile_ids=selected_profile_ids,
-                include_all_profiles=checked,
-            )
+            ),
+            "process": self._profile_combo_reference(
+                self.process_profile_combo
+            ),
+            "filament": self._profile_combo_reference(
+                self.filament_profile_combo
+            ),
+        }
+        selected_profile_ids = {
+            role: value
+            for role, value in current_selections.items()
+            if isinstance(value, ProfileSelectionReference)
+        }
+        # A scope toggle changes the catalogue itself.  Rebuild that catalogue
+        # before any source matching, so combo references and confirmation
+        # validation can never belong to different inventories.
+        self.start_profile_catalog_loading(
+            selected_machine=selected_profile_ids.get("machine"),
+            selected_profile_ids=selected_profile_ids,
+            include_all_profiles=checked,
+            match_source_after_loading=(
+                self._profile_matching_context() is not None
+            ),
+        )
 
     def confirm_profile_selection(self) -> None:
         if not self._source_step_is_complete():
@@ -7090,6 +7244,15 @@ class MainWindow(QMainWindow):
                             ),
                             include_all_profiles=pending.get(
                                 "include_all_profiles"
+                            ),
+                            prefer_active_presets=bool(
+                                pending.get("prefer_active_presets", False)
+                            ),
+                            match_source_after_loading=bool(
+                                pending.get(
+                                    "match_source_after_loading",
+                                    False,
+                                )
                             ),
                         ),
                     )
@@ -7930,7 +8093,18 @@ class MainWindow(QMainWindow):
         catalog_confirmed = preparation_state.profiles_confirmed
         model_analyzed = preparation_state.model_analyzed
         requirements = preparation_state.requirements()
-        fulfilled = 0
+        progress_requirements = dict(requirements)
+        if not preparation_state.step1_completed:
+            for key in (
+                "slicer_detected",
+                "profiles_loaded",
+                "profiles_confirmed",
+                "model_analyzed",
+            ):
+                progress_requirements[key] = False
+        fulfilled = sum(
+            int(complete) for complete in progress_requirements.values()
+        )
         for key, complete in requirements.items():
             icon_label, text_label = self.preparation_requirement_rows[key]
             icon_label.setText("✓" if complete else "○")
@@ -7939,7 +8113,6 @@ class MainWindow(QMainWindow):
             text_label.setProperty("state", state)
             self._refresh_widget_style(icon_label)
             self._refresh_widget_style(text_label)
-            fulfilled += int(complete)
         preparation_complete = preparation_state.preparation_completed
         preparation_acknowledged = bool(
             getattr(self.workflow, "preparation_acknowledged", False)
@@ -7962,7 +8135,7 @@ class MainWindow(QMainWindow):
             strict=True,
         ):
             step_fulfilled = sum(
-                int(requirements[key]) for key in requirement_keys
+                int(progress_requirements[key]) for key in requirement_keys
             )
             step_percent = round(
                 100 * step_fulfilled / len(requirement_keys)
@@ -7971,9 +8144,8 @@ class MainWindow(QMainWindow):
             selector.setAccessibleDescription(
                 f"{step_percent} Prozent der Voraussetzungen erfüllt"
             )
-        # The shared bar represents actual fulfilled prerequisites, regardless
-        # of which page is currently open or which independent background
-        # discovery happened first.
+        # Background slicer work remains visible in its status rows, but does
+        # not advance progress for a step the user cannot enter yet.
         percent = round(100 * fulfilled / len(requirements))
         self.preparation_progress_bar.setValue(percent)
         self.preparation_progress_bar.setAccessibleDescription(

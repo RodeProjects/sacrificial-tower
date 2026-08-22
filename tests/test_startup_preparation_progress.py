@@ -7,6 +7,7 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.models.source import SourceKind
 from cooling_tower.slicers import (
     ProfileCatalog,
     ProfileCatalogConfirmation,
@@ -81,6 +83,7 @@ class StartupProfileService:
     def __init__(self, catalog: ProfileCatalog) -> None:
         self.result = catalog
         self.catalog_calls = 0
+        self.prefer_active_presets: list[bool] = []
 
     def catalog(
         self,
@@ -91,8 +94,10 @@ class StartupProfileService:
         selected_machine=None,
         selected_profile_ids=None,
         include_all_profiles=False,
+        prefer_active_presets=False,
     ):
         self.catalog_calls += 1
+        self.prefer_active_presets.append(bool(prefer_active_presets))
         if installation.identity_key != self.result.execution_slicer.identity_key:
             raise ValueError("unexpected installation")
         selections = dict(selected_profile_ids or {})
@@ -202,14 +207,15 @@ class StartupPreparationProgressTests(unittest.TestCase):
             )
             self.assertEqual(slicer_service.discovery_calls, 1)
             self.assertEqual(profile_service.catalog_calls, 1)
+            self.assertEqual(profile_service.prefer_active_presets, [True])
             self.assertIsNone(window.current_source_path)
             self.assertTrue(window.slicer_progress_bar.isHidden())
             self.assertTrue(window.source_progress_bar.isHidden())
             self.assertEqual(
                 window.preparation_step_selectors[1].progress_value,
-                50,
+                0,
             )
-            self.assertEqual(window.preparation_progress_bar.value(), 33)
+            self.assertEqual(window.preparation_progress_bar.value(), 0)
             self.assertTrue(
                 window.preparation_step_selectors[1].property("locked")
             )
@@ -228,7 +234,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
             self.assertIsNone(window.profile_catalog_confirmation)
             self.assertEqual(
                 window.preparation_step_selectors[1].progress_value,
-                50,
+                0,
             )
             self.assertTrue(window.ready_grid.isHidden())
 
@@ -243,10 +249,26 @@ class StartupPreparationProgressTests(unittest.TestCase):
             self.assertIsNone(window.profile_catalog_confirmation)
             self.assertEqual(
                 window.preparation_step_selectors[1].progress_value,
-                50,
+                0,
             )
             self.assertFalse(window.profile_confirm_button.isEnabled())
             self.assertNotIn("filament", slicer_service.profile_selections)
+
+            source = self.root / "accepted.stl"
+            source.write_text("solid x\nendsolid x\n", encoding="ascii")
+            window.current_source_path = source.resolve()
+            window.current_source_kind = SourceKind.STL
+            window.source_artifact = SimpleNamespace(
+                original_path=source.resolve(),
+                matches_current_file=lambda: True,
+            )
+            window.stl_validation_result = SimpleNamespace(valid=True)
+            window._update_preparation_requirements()
+            self.assertEqual(
+                window.preparation_step_selectors[1].progress_value,
+                50,
+            )
+            self.assertEqual(window.preparation_progress_bar.value(), 67)
 
             self.assertEqual(
                 {

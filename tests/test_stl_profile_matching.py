@@ -877,7 +877,7 @@ class StlProfileMatchingTests(unittest.TestCase):
                     selector.progress_value
                     for selector in window.preparation_step_selectors
                 ],
-                [0, 75],
+                [0, 0],
             )
             self.assertTrue(window.ready_grid.isHidden())
         finally:

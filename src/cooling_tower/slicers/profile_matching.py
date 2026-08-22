@@ -274,6 +274,7 @@ class ProfileMatchingService:
             str, str | ProfileSelectionReference
         ] | None = None,
         include_all_profiles: bool = False,
+        prefer_active_presets: bool = False,
     ) -> ProfileCatalog:
         """Load selectable profiles without requiring or modifying a source.
 
@@ -300,15 +301,77 @@ class ProfileMatchingService:
             resolved,
             (ProfileRole.FILAMENT,),
         )
+        active = read_active_presets(installation)
+        active_context = ProfileFilterContext(
+            source="slicer",
+            machine_ids=active.printer_ids,
+            process_ids=active.process_ids,
+            filament_ids=active.filament_ids,
+            nozzle_diameters_mm=active.nozzle_diameters_mm,
+            source_path=active.source_path,
+            active_preset_fingerprint=active.fingerprint_sha256,
+        )
         requested_selections = dict(selected_profile_ids or {})
         requested_machine = selected_machine or requested_selections.get(
             "machine"
         )
-        if requested_machine is None and all_machine_options:
-            first_machine = all_machine_options[0]
+        if prefer_active_presets and active.has_printer_context:
+            requested_selections.clear()
+            requested_machine = None
+        elif requested_machine is not None:
+            # A removed or formerly cross-vendor preset must not suppress the
+            # slicer's current machine context and later fall through to the
+            # alphabetically first machine.  Resolve the reference before it
+            # is allowed to become the filtering authority.
+            resolved_requested_machine = _resolve_selected_profile_ids(
+                {"machine": requested_machine},
+                machine_options=all_machine_options,
+                process_options=all_process_options,
+                filament_options=all_filament_options,
+            ).get("machine")
+            if resolved_requested_machine is None:
+                requested_selections.pop("machine", None)
+                requested_machine = None
+        automatic_machine_selection = False
+        if requested_machine is None and active.has_printer_context:
+            scored_active_machines = tuple(
+                (item, self._machine_context_score(item, active_context))
+                for item in resolved
+                if item.valid
+                and _is_selectable_profile(item)
+                and item.role
+                in {ProfileRole.MACHINE_VARIANT, ProfileRole.MACHINE_MODEL}
+            )
+            best_active_score = max(
+                (score for _item, score in scored_active_machines),
+                default=0,
+            )
+            active_machines = tuple(
+                item
+                for item, score in scored_active_machines
+                if best_active_score > 0 and score == best_active_score
+            )
+            if active_machines:
+                selected_active = min(
+                    active_machines,
+                    key=self._option_preference,
+                ).record
+                requested_machine = ProfileSelectionReference(
+                    selected_active.profile_id,
+                    selected_active.path,
+                )
+                automatic_machine_selection = True
+                for role, identifiers in (
+                    ("process", active.process_ids),
+                    ("filament", active.filament_ids),
+                ):
+                    if role not in requested_selections and identifiers:
+                        requested_selections[role] = identifiers[0]
+        if requested_machine is None and len(all_machine_options) == 1:
+            only_machine = all_machine_options[0]
             requested_machine = ProfileSelectionReference(
-                first_machine.profile_id,
-                first_machine.path,
+                only_machine.profile_id,
+                only_machine.path,
             )
         if requested_machine is not None:
             requested_selections["machine"] = requested_machine
@@ -342,21 +405,50 @@ class ProfileMatchingService:
             ),
             None,
         )
-        filter_context = ProfileFilterContext(
-            source="manual",
-            machine_ids=(machine_record.profile_id,) if machine_record else (),
-            printer_model=(
-                str(machine_resolved.effective_values.get("printer_model", ""))
-                or None
-                if machine_resolved is not None
-                else None
-            ),
-            nozzle_diameters_mm=(
-                _profile_nozzle_diameters(machine_resolved)
-                if machine_resolved is not None
-                else ()
-            ),
-        )
+        if automatic_machine_selection:
+            filter_context = replace(
+                active_context,
+                printer_model=(
+                    str(
+                        machine_resolved.effective_values.get(
+                            "printer_model", ""
+                        )
+                    )
+                    or None
+                    if machine_resolved is not None
+                    else None
+                ),
+                nozzle_diameters_mm=(
+                    active.nozzle_diameters_mm
+                    or (
+                        _profile_nozzle_diameters(machine_resolved)
+                        if machine_resolved is not None
+                        else ()
+                    )
+                ),
+            )
+        else:
+            filter_context = ProfileFilterContext(
+                source="manual",
+                machine_ids=(
+                    (machine_record.profile_id,) if machine_record else ()
+                ),
+                printer_model=(
+                    str(
+                        machine_resolved.effective_values.get(
+                            "printer_model", ""
+                        )
+                    )
+                    or None
+                    if machine_resolved is not None
+                    else None
+                ),
+                nozzle_diameters_mm=(
+                    _profile_nozzle_diameters(machine_resolved)
+                    if machine_resolved is not None
+                    else ()
+                ),
+            )
         (
             machine_options,
             process_options,
@@ -522,6 +614,15 @@ class ProfileMatchingService:
             installation,
             resolved,
         )
+        ranked_profile_ids = dict(selected_profile_ids)
+        if filter_context.source == "slicer":
+            for role, identifiers in (
+                ("machine", filter_context.machine_ids),
+                ("process", filter_context.process_ids),
+                ("filament", filter_context.filament_ids),
+            ):
+                if role not in ranked_profile_ids and identifiers:
+                    ranked_profile_ids[role] = identifiers[0]
         (
             machine_options,
             process_options,
@@ -599,9 +700,9 @@ class ProfileMatchingService:
                 source_values,
                 source_critical,
                 source_ids.get(role, ()),
-                selected_profile_ids.get(role.value)
+                ranked_profile_ids.get(role.value)
                 or (
-                    selected_profile_ids.get("machine")
+                    ranked_profile_ids.get("machine")
                     if role
                     in {
                         ProfileRole.MACHINE_VARIANT,
@@ -658,9 +759,9 @@ class ProfileMatchingService:
                     source_values,
                     source_critical,
                     source_ids.get(role, ()),
-                    selected_profile_ids.get(role.value)
+                    ranked_profile_ids.get(role.value)
                     or (
-                        selected_profile_ids.get("machine")
+                        ranked_profile_ids.get("machine")
                         if role
                         in {
                             ProfileRole.MACHINE_VARIANT,
