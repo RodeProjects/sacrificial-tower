@@ -126,7 +126,10 @@ class WindowHintController(QObject):
         if event.type() != QEvent.Type.ToolTip:
             return super().eventFilter(watched, event)
         hint = watched.toolTip().strip()
-        if not hint or not watched.isEnabled():
+        # Locked wizard actions deliberately remain disabled, but still need
+        # the same bounded explanation as their corresponding step selector.
+        # Qt continues to deliver tooltip events for disabled child widgets.
+        if not hint:
             return super().eventFilter(watched, event)
         show_window_hint(watched, hint)
         self._active_target = watched

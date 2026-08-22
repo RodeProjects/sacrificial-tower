@@ -19,7 +19,10 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 from PySide6.QtCore import QEventLoop, QMimeData, QTimer, Qt, QUrl
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.main_window import (
+    INTERNAL_DIALOG_REVEAL_DELAY_MS,
+    MainWindow,
+)
 from cooling_tower.gui.workflow_controller import WorkflowStage
 from cooling_tower.models import SourceKind
 
@@ -118,6 +121,8 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertFalse(result.valid)
             self.assertIs(window.current_source_kind, SourceKind.STL)
             self.assertIs(window.workflow.stage, WorkflowStage.SOURCE_INVALID)
+            self.assertEqual(window.workflow_group.status_icon.text(), "×")
+            self.assertTrue(window.workflow_group.property("sourceError"))
             self.assertTrue(window.source_group.isChecked())
             self.assertFalse(window.source_group.content_widget.isHidden())
             self.assertTrue(window.ready_grid.isHidden())
@@ -187,6 +192,31 @@ class StlValidationGuiTests(unittest.TestCase):
             window.deleteLater()
             self.app.processEvents()
 
+    def test_unreadable_or_empty_stl_never_offers_override(self) -> None:
+        for name, payload in (
+            ("leer.stl", b""),
+            ("defekt.stl", b"dies ist kein STL-Container"),
+        ):
+            with self.subTest(name=name):
+                source = self.root / name
+                source.write_bytes(payload)
+                window = self.window()
+                try:
+                    handed_off = window.drop_zone.set_file(source)
+                    if handed_off:
+                        self.wait_for_stl_result(window)
+                        result = window.stl_validation_result
+                        assert result is not None
+                        self.assertFalse(result.valid)
+                        self.assertEqual(result.face_count, 0)
+                    self.assertTrue(
+                        window.accept_rejected_stl_button.isHidden()
+                    )
+                finally:
+                    window.close()
+                    window.deleteLater()
+                    self.app.processEvents()
+
     def test_rejected_stl_requires_warning_confirmation_before_acceptance(self) -> None:
         source = self.fixture_root / "test_model_non_manifold.stl"
         before = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -221,6 +251,12 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(result.accepted)
             self.assertTrue(window._source_step_is_complete())
             self.assertIs(window.workflow.stage, WorkflowStage.DISCOVERING_SLICER)
+            self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
+            self.assertFalse(window.workflow_group.property("sourceError"))
+            self.assertTrue(window.preparation_next_button.isEnabled())
+            self.assertFalse(
+                window.preparation_step_selectors[1].property("locked")
+            )
             self.assertTrue(window.accept_rejected_stl_button.isHidden())
             self.assertEqual(window.drop_zone.status_value_label.text(), "STL user-bestätigt")
             self.assertEqual(
@@ -242,7 +278,7 @@ class StlValidationGuiTests(unittest.TestCase):
         self.app.processEvents()
         observed: dict[str, object] = {}
 
-        def inspect_and_cancel() -> None:
+        def rejected_dialog() -> QMessageBox:
             dialogs = [
                 widget
                 for widget in self.app.topLevelWidgets()
@@ -250,7 +286,22 @@ class StlValidationGuiTests(unittest.TestCase):
                 and widget.objectName() == "rejectedStlConfirmationDialog"
             ]
             self.assertEqual(len(dialogs), 1)
-            dialog = dialogs[0]
+            return dialogs[0]
+
+        def inspect_concealed_position() -> None:
+            dialog = rejected_dialog()
+            observed["initial_opacity"] = dialog.windowOpacity()
+            observed["initial_center_offset"] = (
+                dialog.frameGeometry().center()
+                - window.frameGeometry().center()
+            )
+            QTimer.singleShot(
+                INTERNAL_DIALOG_REVEAL_DELAY_MS + 20,
+                inspect_and_cancel,
+            )
+
+        def inspect_and_cancel() -> None:
+            dialog = rejected_dialog()
             observed["visible"] = dialog.isVisible()
             observed["opacity"] = dialog.windowOpacity()
             observed["modality"] = dialog.windowModality()
@@ -259,17 +310,28 @@ class StlValidationGuiTests(unittest.TestCase):
                     dialog.screen().availableGeometry()
                 )
             )
+            observed["center_offset"] = (
+                dialog.frameGeometry().center()
+                - window.frameGeometry().center()
+            )
             observed["default"] = dialog.defaultButton().text()
             observed["escape"] = dialog.escapeButton().text()
             dialog._rejected_stl_cancel_button.click()
 
         try:
-            QTimer.singleShot(0, inspect_and_cancel)
+            QTimer.singleShot(0, inspect_concealed_position)
             self.assertFalse(window._ask_rejected_stl_confirmation())
 
+            initial_center_offset = observed.pop("initial_center_offset")
+            self.assertLessEqual(abs(initial_center_offset.x()), 3)
+            self.assertLessEqual(abs(initial_center_offset.y()), 3)
+            center_offset = observed.pop("center_offset")
+            self.assertLessEqual(abs(center_offset.x()), 3)
+            self.assertLessEqual(abs(center_offset.y()), 3)
             self.assertEqual(
                 observed,
                 {
+                    "initial_opacity": 0.0,
                     "visible": True,
                     "opacity": 1.0,
                     "modality": Qt.WindowModality.WindowModal,
@@ -288,8 +350,13 @@ class StlValidationGuiTests(unittest.TestCase):
         before = hashlib.sha256(source.read_bytes()).hexdigest()
         window = self.window()
         try:
+            window.resize(1530, 1392)
+            window.show()
+            self.app.processEvents()
             self.assertTrue(window.drop_zone.set_file(source))
             self.wait_for_stl_result(window)
+            for _ in range(6):
+                self.app.processEvents()
             result = window.stl_validation_result
             assert result is not None
             self.assertTrue(result.valid, result.technical_summary)
@@ -312,13 +379,42 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.property("completed"))
             self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertFalse(window.stl_validation_message.isHidden())
+            self.assertFalse(window.stl_validation_warning_message.isHidden())
             self.assertEqual(
                 window.stl_validation_message.property("severity"),
+                "success",
+            )
+            self.assertEqual(
+                window.stl_validation_warning_message.property("severity"),
                 "warning",
             )
             self.assertIn(
-                "manifold (vollständig geschlossen)",
+                "Das Mesh ist geschlossen und topologisch manifold.",
                 window.stl_validation_message.text(),
+            )
+            self.assertIn(
+                "Es wurden keine offenen Kanten erkannt.",
+                window.stl_validation_message.text(),
+            )
+            success_notice = window.stl_validation_message.text()
+            warning_notice = window.stl_validation_warning_message.text()
+            self.assertIn("✓", success_notice)
+            self.assertIn("<b>STL-Datei akzeptiert.</b>", success_notice)
+            self.assertEqual(success_notice.count("<b>"), 1)
+            self.assertIn("&#x26A0;", warning_notice)
+            self.assertIn("<b>Hinweis:</b>", warning_notice)
+            self.assertEqual(warning_notice.count("<b>"), 1)
+            self.assertIn(
+                "Es wurden geringfügige lokale Flächenüberschneidungen erkannt.",
+                warning_notice,
+            )
+            self.assertIn(
+                "zuverlässig verarbeitbaren G-Code",
+                warning_notice,
+            )
+            self.assertIn(
+                "Im letzten Vorbereitungsschritt prüft ein Pre-Slice zusätzlich",
+                warning_notice,
             )
             margins = window.stl_validation_message.contentsMargins()
             self.assertEqual(
@@ -341,11 +437,46 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.preparation_step_state_labels[0].isHidden())
             self.assertEqual(
                 window.preparation_step_selector_icons[0].text(),
-                "✓",
+                "",
             )
             self.assertEqual(
                 window.preparation_step_selector_icons[0].property("state"),
                 "complete",
+            )
+            drop_zone = window.drop_zone
+            self.assertGreaterEqual(
+                drop_zone.height(),
+                drop_zone.minimumHeight(),
+            )
+            for upper, lower in zip(
+                (drop_zone.info_widget, drop_zone.actions_widget),
+                (drop_zone.actions_widget,),
+            ):
+                self.assertLess(
+                    upper.geometry().bottom(),
+                    lower.geometry().top(),
+                )
+            for upper, lower in zip(
+                (
+                    drop_zone,
+                    window.stl_validation_details_toggle,
+                    window.stl_validation_message,
+                    window.stl_validation_warning_message,
+                ),
+                (
+                    window.stl_validation_details_toggle,
+                    window.stl_validation_message,
+                    window.stl_validation_warning_message,
+                ),
+            ):
+                self.assertLess(
+                    upper.geometry().bottom(),
+                    lower.geometry().top(),
+                )
+            self.assertLessEqual(
+                drop_zone.actions_widget.geometry().bottom(),
+                drop_zone.rect().bottom()
+                - drop_zone.root_layout.contentsMargins().bottom(),
             )
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
         finally:
@@ -395,6 +526,8 @@ class StlValidationGuiTests(unittest.TestCase):
 
             self.assertEqual(window.stl_validation_message.text(), "")
             self.assertTrue(window.stl_validation_message.isHidden())
+            self.assertEqual(window.stl_validation_warning_message.text(), "")
+            self.assertTrue(window.stl_validation_warning_message.isHidden())
             self.assertEqual(window.source_group.summary_note_label.text(), "")
             self.assertTrue(window.source_group.summary_note_label.isHidden())
         finally:

@@ -209,7 +209,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window.preparation_step_selectors[1].progress_value,
                 50,
             )
-            self.assertEqual(window.preparation_progress_bar.value(), 0)
+            self.assertEqual(window.preparation_progress_bar.value(), 33)
             self.assertTrue(
                 window.preparation_step_selectors[1].property("locked")
             )

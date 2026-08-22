@@ -18,7 +18,8 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QEnterEvent, QHelpEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,10 +29,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.widgets import SectionCard, SectionState
 from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
 from cooling_tower.models import SourceKind
+from cooling_tower.slicers import (
+    ProfileCatalog,
+    ProfileKind,
+    ProfileMatchState,
+    ProfileRecord,
+    ProfileSelectionReference,
+)
 
 
 class PreparationWorkflowUiTests(unittest.TestCase):
@@ -100,7 +109,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             margins = window.preparation_overview.layout().contentsMargins()
             self.assertEqual(
                 (margins.left(), margins.top(), margins.right(), margins.bottom()),
-                (24, 14, 24, 14),
+                (24, 14, 24, 0),
             )
             self.assertEqual(window.preparation_overview.maximumWidth(), 748)
             self.assertEqual(
@@ -109,7 +118,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )
             self.assertEqual(
                 window.preparation_requirements.grid.verticalSpacing(),
-                12,
+                0,
             )
             self.assertTrue(window.preparation_step_selectors[0].isChecked())
             self.assertFalse(window.preparation_step_selectors[1].isChecked())
@@ -125,8 +134,24 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )
             self.assertEqual(window.preparation_progress_bar.value(), 0)
             self.assertEqual(window.preparation_step_connector.text(), "›››")
+            self.assertTrue(window.preparation_step_connector.isHidden())
             self.assertTrue(
                 window.preparation_step_selectors[1].property("locked")
+            )
+            self.assertTrue(window.preparation_back_button.isHidden())
+            self.assertEqual(
+                window.preparation_navigation_title_label.text(),
+                "Dateiübergabe",
+            )
+            self.assertEqual(window.preparation_next_button.text(), "Weiter 🔒")
+            self.assertFalse(window.preparation_next_button.isEnabled())
+            self.assertIn(
+                "gültigen STL",
+                window.preparation_next_button.toolTip(),
+            )
+            self.assertEqual(
+                window.preparation_next_button.toolTip(),
+                window.preparation_step_selectors[1].toolTip(),
             )
             self.assertEqual(
                 [label.text() for label in window.preparation_step_selector_titles],
@@ -145,6 +170,32 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(window.slicer_group.header.isHidden())
             self.assertEqual(window.source_group.title(), "Dateiübergabe")
             self.assertEqual(window.slicer_group.title(), "Slicer-Einstellungen")
+        finally:
+            window.close()
+
+    def test_locked_step_and_disabled_continue_use_same_bounded_tooltip(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        try:
+            selector = window.preparation_step_selectors[1]
+            button = window.preparation_next_button
+            self.assertFalse(button.isEnabled())
+            self.assertEqual(selector.toolTip(), button.toolTip())
+
+            for target in (selector, button):
+                local = target.rect().center()
+                event = QHelpEvent(
+                    QEvent.Type.ToolTip,
+                    local,
+                    target.mapToGlobal(local),
+                )
+                QApplication.sendEvent(target, event)
+                self.app.processEvents()
+                popover = getattr(window, "_bounded_hint_popover")
+                self.assertEqual(popover.objectName(), "hintPopover")
+                self.assertEqual(popover.label.text(), selector.toolTip())
+                self.assertFalse(popover.isHidden())
         finally:
             window.close()
 
@@ -296,11 +347,685 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.slicer_group.content_layout.indexOf(window.slicer_columns),
             )
             self.assertLess(
-                window.slicer_group.content_layout.indexOf(window.slicer_columns),
-                window.slicer_group.content_layout.indexOf(
-                    window.profile_confirm_button
+                window.slicer_selectors_layout.indexOf(
+                    window.show_all_profiles_row
+                ),
+                window.slicer_selectors_layout.indexOf(
+                    window.profile_confirmation_stack
                 ),
             )
+        finally:
+            window.close()
+
+    def test_preslice_activity_reuses_confirmation_slot_without_reflow(self) -> None:
+        window = self.window()
+        window.resize(1200, 1000)
+        window.show()
+        self.mark_valid_source(window)
+        window.preparation_tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        try:
+            self.assertTrue(window.slicer_status_label.isHidden())
+            self.assertTrue(window.slicer_analysis_details_toggle.isHidden())
+            self.assertIs(
+                window.profile_confirmation_stack.currentWidget(),
+                window.profile_confirm_button,
+            )
+            self.assertEqual(
+                window.profile_confirm_button.height(),
+                window.profile_confirmation_stack.height(),
+            )
+            self.assertEqual(
+                window.profile_confirm_button.sizeHint().height(),
+                window.profile_confirmation_stack.height(),
+            )
+            height_before = window.preparation_tabs.height()
+            stack_geometry_before = window.profile_confirmation_stack.geometry()
+
+            window._set_preslice_activity(
+                True,
+                "Preslice läuft · Modell wird analysiert …",
+                percent=37,
+            )
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertIs(
+                window.profile_confirmation_stack.currentWidget(),
+                window.profile_confirmation_progress,
+            )
+            self.assertEqual(window.profile_confirmation_progress.minimum(), 0)
+            self.assertEqual(window.profile_confirmation_progress.maximum(), 100)
+            self.assertEqual(window.profile_confirmation_progress.value(), 37)
+            self.assertEqual(
+                window.profile_confirmation_progress.format(),
+                "Slicer und Profile bestätigt, Pre-Slice wird "
+                "durchgeführt... (%p%)",
+            )
+            self.assertFalse(window.profile_confirmation_progress.isTextVisible())
+            self.assertEqual(
+                window.profile_confirmation_progress.text_label.text(),
+                "Slicer und Profile bestätigt, Pre-Slice wird "
+                "durchgeführt... (37%)",
+            )
+            self.assertIn(
+                window.profile_confirmation_progress.activity_label.text(),
+                "◐◓◑◒",
+            )
+            self.assertGreaterEqual(
+                window.profile_confirmation_progress.activity_label.font()
+                .pointSizeF(),
+                17.0,
+            )
+            self.assertEqual(
+                window.profile_confirmation_progress.activity_label.width(),
+                28,
+            )
+            self.assertTrue(window.slicer_progress_bar.isHidden())
+            stylesheet = window.styleSheet()
+            progress_rule = stylesheet.split(
+                "QProgressBar#profileConfirmationProgress {",
+                1,
+            )[1].split("}", 1)[0]
+            progress_chunk_rule = stylesheet.split(
+                "QProgressBar#profileConfirmationProgress::chunk {",
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("color: #28563d;", progress_rule)
+            self.assertIn("background: #edf8f2;", progress_rule)
+            self.assertIn("background: #c9e5d3;", progress_chunk_rule)
+            self.assertEqual(window.preparation_tabs.height(), height_before)
+            self.assertEqual(
+                window.profile_confirmation_stack.geometry(),
+                stack_geometry_before,
+            )
+
+            window._set_preslice_activity(False)
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertIs(
+                window.profile_confirmation_stack.currentWidget(),
+                window.profile_confirm_button,
+            )
+            self.assertEqual(window.preparation_tabs.height(), height_before)
+        finally:
+            window.close()
+
+    def test_preslice_activity_animates_immediately_and_cancel_is_deferred(
+        self,
+    ) -> None:
+        window = self.window()
+        window._preslice_request_id = 12
+        window._start_preslice_runtime_watchdog(12)
+        window._set_preslice_activity(True, percent=35)
+        window.preslice_cancel_button.show()
+        window.preslice_cancel_button.setEnabled(True)
+        try:
+            self.assertEqual(window._preslice_runtime_timer.interval(), 480_000)
+            self.assertTrue(window._preslice_activity_timer.isActive())
+            self.assertEqual(
+                window.profile_confirmation_progress.text_label.text(),
+                "Slicer und Profile bestätigt, Pre-Slice wird "
+                "durchgeführt... (35%)",
+            )
+            first_frame = (
+                window.profile_confirmation_progress.activity_label.text()
+            )
+            self.assertIn(first_frame, "◐◓◑◒")
+            window._advance_preslice_activity_frame()
+            self.assertNotEqual(
+                window.profile_confirmation_progress.activity_label.text(),
+                first_frame,
+            )
+
+            with (
+                patch.object(
+                    window.background_job_manager,
+                    "has_active",
+                    return_value=True,
+                ),
+                patch.object(
+                    window.background_job_manager,
+                    "cancel_jobs",
+                ) as cancel_jobs,
+                patch.object(
+                    window,
+                    "_refresh_dynamic_preparation_layout",
+                ) as refresh_layout,
+            ):
+                cancel_width = window.preslice_cancel_button.width()
+                window.preslice_cancel_button.pressed.emit()
+                self.assertTrue(window.preslice_cancel_button.isEnabled())
+                self.assertFalse(window._preslice_cancel_requested)
+                cancel_jobs.assert_not_called()
+
+                window.preslice_cancel_button.clicked.emit()
+                self.assertFalse(window.preslice_cancel_button.isEnabled())
+                self.assertEqual(
+                    window.preslice_cancel_button.text(),
+                    "Abbruch wird ausgeführt …",
+                )
+                self.assertEqual(
+                    window.preslice_cancel_button.width(),
+                    cancel_width,
+                )
+                refresh_layout.assert_not_called()
+                self.assertTrue(
+                    window.profile_confirmation_progress.format().startswith(
+                        "Pre-Slice wird abgebrochen... ("
+                    )
+                )
+                cancel_jobs.assert_not_called()
+                self.app.processEvents()
+                cancel_jobs.assert_called_once_with(
+                    JobKind.PRESLICE,
+                    reason="preslice_cancelled_by_user",
+                )
+        finally:
+            window._stop_preslice_runtime_watchdog()
+            window.close()
+
+    def test_preslice_timeout_cancels_after_eight_minutes_with_message(
+        self,
+    ) -> None:
+        window = self.window()
+        window._preslice_request_id = 13
+        window._start_preslice_runtime_watchdog(13)
+        window._set_preslice_activity(True, percent=55)
+        window.preslice_cancel_button.show()
+        try:
+            with (
+                patch.object(
+                    window.background_job_manager,
+                    "has_active",
+                    return_value=True,
+                ),
+                patch.object(
+                    window.background_job_manager,
+                    "cancel_jobs",
+                ) as cancel_jobs,
+            ):
+                window._on_preslice_runtime_timeout()
+                self.assertEqual(window._preslice_timeout_request_id, 13)
+                self.assertEqual(
+                    window.preslice_cancel_button.text(),
+                    "Zeitlimit erreicht …",
+                )
+                self.assertTrue(
+                    window.profile_confirmation_progress.format().startswith(
+                        "Zeitlimit von 8 Minuten erreicht, "
+                    )
+                )
+                self.app.processEvents()
+                cancel_jobs.assert_called_once_with(
+                    JobKind.PRESLICE,
+                    reason="preslice_timeout",
+                )
+
+            with (
+                patch.object(window, "_set_slicer_progress"),
+                patch.object(window.workflow, "preslice_failed"),
+                patch.object(
+                    window,
+                    "_reset_preslice_confirmation_for_retry",
+                ) as reset_for_retry,
+                patch.object(window, "_set_main_status"),
+                patch.object(window, "_update_preparation_requirements"),
+                patch.object(window, "validate_form"),
+            ):
+                window._on_source_preslice_cancelled(13)
+            reset_message = reset_for_retry.call_args.args[0]
+            self.assertIn("maximale Laufzeit von 8 Minuten", reset_message)
+        finally:
+            window._stop_preslice_runtime_watchdog()
+            window.close()
+
+    def test_preparation_dividers_and_source_progress_use_constant_gaps(
+        self,
+    ) -> None:
+        window = self.window()
+        window.resize(1200, 1000)
+        window.show()
+        self.app.processEvents()
+        try:
+            self.assertEqual(
+                window.preparation_progress_title_label.text(),
+                "Fortschritt der Vorbereitungen",
+            )
+            source_layout = window.source_group.content_layout
+            slicer_layout = window.slicer_group.content_layout
+            self.assertEqual(source_layout.spacing(), slicer_layout.spacing())
+            expected_gap = source_layout.spacing()
+
+            def gap(upper: QWidget, lower: QWidget) -> int:
+                return lower.geometry().top() - upper.geometry().bottom() - 1
+
+            self.assertEqual(
+                gap(
+                    window.preparation_source_requirements,
+                    window.preparation_source_divider,
+                ),
+                expected_gap,
+            )
+            self.assertEqual(
+                gap(window.preparation_source_divider, window.source_guide_row),
+                expected_gap,
+            )
+
+            window.source_guide_row.hide()
+            window.source_progress_bar.show()
+            window._refresh_dynamic_preparation_layout()
+            self.app.processEvents()
+            self.assertEqual(
+                gap(window.preparation_source_divider, window.source_progress_bar),
+                expected_gap,
+            )
+            self.assertEqual(
+                gap(window.source_progress_bar, window.drop_zone),
+                expected_gap,
+            )
+
+            window.source_progress_bar.hide()
+            window._refresh_dynamic_preparation_layout()
+            self.app.processEvents()
+            self.assertEqual(
+                gap(window.preparation_source_divider, window.drop_zone),
+                expected_gap,
+            )
+
+            self.mark_valid_source(window)
+            window.preparation_tabs.setCurrentIndex(1)
+            window._refresh_dynamic_preparation_layout()
+            self.app.processEvents()
+            self.assertEqual(
+                gap(
+                    window.preparation_slicer_requirements,
+                    window.preparation_slicer_divider,
+                ),
+                expected_gap,
+            )
+            self.assertEqual(
+                gap(window.preparation_slicer_divider, window.slicer_columns),
+                expected_gap,
+            )
+        finally:
+            window.close()
+
+    def test_drag_hover_does_not_reflow_loaded_source_during_analysis(
+        self,
+    ) -> None:
+        window = self.window()
+        source = self.mark_valid_source(window)
+        window.drop_zone.set_file(source)
+        window.drop_zone.set_analysis_state("analyzing")
+        window.source_guide_row.hide()
+        window.source_progress_bar.show()
+        window.resize(1200, 1000)
+        window.show()
+        window._refresh_dynamic_preparation_layout()
+        self.app.processEvents()
+
+        def snapshot() -> tuple[object, ...]:
+            drop_zone = window.drop_zone
+            return (
+                drop_zone.height(),
+                drop_zone.minimumHeight(),
+                drop_zone.sizeHint().height(),
+                window.source_group.content_widget.height(),
+                window.preparation_tabs.height(),
+                tuple(
+                    (
+                        item.widget().objectName(),
+                        item.widget().isHidden(),
+                        item.widget().geometry(),
+                    )
+                    for index in range(drop_zone.root_layout.count())
+                    if (item := drop_zone.root_layout.itemAt(index)).widget()
+                    is not None
+                ),
+            )
+
+        try:
+            stable_snapshot = snapshot()
+            window.drop_zone._set_drag_active(True)
+            self.app.processEvents()
+            self.assertEqual(snapshot(), stable_snapshot)
+
+            window.drop_zone._set_drag_active(False)
+            self.app.processEvents()
+            self.assertEqual(snapshot(), stable_snapshot)
+        finally:
+            window.close()
+
+    def test_preslice_and_profile_notice_never_compress_slicer_controls(
+        self,
+    ) -> None:
+        window = self.window()
+        self.mark_valid_source(window)
+        window.resize(1280, 1000)
+        window.preparation_tabs.setCurrentIndex(1)
+        window.show()
+        self.app.processEvents()
+        try:
+            window.preslice_cancel_button.show()
+            window._set_preslice_activity(True, percent=42)
+            window._set_profile_notice(
+                "Das Modell konnte mit den bestätigten Einstellungen nicht "
+                "sicher analysiert werden.",
+                state="error",
+            )
+            for _ in range(4):
+                self.app.processEvents()
+
+            layout = window.slicer_group.content_layout
+            visible_blocks = [
+                layout.itemAt(index).widget()
+                for index in range(layout.count())
+                if (
+                    layout.itemAt(index).widget() is not None
+                    and not layout.itemAt(index).widget().isHidden()
+                )
+            ]
+            for upper, lower in zip(visible_blocks, visible_blocks[1:]):
+                self.assertGreaterEqual(
+                    lower.geometry().top() - upper.geometry().bottom() - 1,
+                    layout.spacing(),
+                )
+
+            selector_blocks = [
+                window.slicer_selection_label.parentWidget(),
+                window.slicer_combo,
+                (window.slicer_refresh_button, window.slicer_manual_button),
+                window.machine_profile_label,
+                window.machine_profile_combo,
+                window.filament_profile_label,
+                window.filament_profile_combo,
+                window.process_profile_label,
+                window.process_profile_combo,
+                window.show_all_profiles_checkbox,
+                window.profile_confirmation_stack,
+                window.preslice_cancel_button,
+            ]
+
+            def vertical_bounds(block) -> tuple[int, int]:
+                widgets = block if isinstance(block, tuple) else (block,)
+                tops = [
+                    widget.mapTo(window.slicer_selector_column, QPoint(0, 0)).y()
+                    for widget in widgets
+                ]
+                bottoms = [
+                    top + widget.height() - 1
+                    for top, widget in zip(tops, widgets)
+                ]
+                return min(tops), max(bottoms)
+
+            bounds = [vertical_bounds(block) for block in selector_blocks]
+            for upper, lower in zip(bounds, bounds[1:]):
+                self.assertGreater(lower[0], upper[1])
+            self.assertGreater(
+                window.preslice_cancel_button.geometry().top(),
+                window.profile_confirmation_stack.geometry().bottom(),
+            )
+            self.assertEqual(
+                window.preslice_cancel_button.geometry().right(),
+                window.slicer_selector_column.rect().right(),
+            )
+            self.assertEqual(
+                layout.indexOf(window.preslice_cancel_button),
+                -1,
+            )
+            self.assertGreater(
+                window.slicer_selectors_layout.indexOf(
+                    window.preslice_cancel_button
+                ),
+                window.slicer_selectors_layout.indexOf(
+                    window.profile_confirmation_stack
+                ),
+            )
+            selector_parent = window.slicer_selector_column
+
+            def top_in_selector(widget: QWidget) -> int:
+                return widget.mapTo(selector_parent, QPoint(0, 0)).y()
+
+            action_top = min(
+                top_in_selector(window.slicer_refresh_button),
+                top_in_selector(window.slicer_manual_button),
+            )
+            combo_bottom = (
+                top_in_selector(window.slicer_combo)
+                + window.slicer_combo.height()
+                - 1
+            )
+            confirmation_bottom = (
+                top_in_selector(window.profile_confirmation_stack)
+                + window.profile_confirmation_stack.height()
+                - 1
+            )
+            cancel_top = top_in_selector(window.preslice_cancel_button)
+            self.assertEqual(
+                action_top - combo_bottom - 1,
+                cancel_top - confirmation_bottom - 1,
+            )
+            self.assertGreaterEqual(
+                window.slicer_group.content_widget.rect().bottom()
+                - visible_blocks[-1].geometry().bottom(),
+                layout.contentsMargins().bottom(),
+            )
+        finally:
+            window.close()
+
+    def test_profile_checkbox_uses_the_field_gap_above_and_below(self) -> None:
+        window = self.window()
+        self.mark_valid_source(window)
+        window.preparation_tabs.setCurrentIndex(1)
+        window.resize(1200, 1000)
+        window.show()
+        self.app.processEvents()
+        try:
+            def gap(upper: QWidget, lower: QWidget) -> int:
+                parent = window.slicer_selector_column
+                upper_top = upper.mapTo(parent, QPoint(0, 0)).y()
+                lower_top = lower.mapTo(parent, QPoint(0, 0)).y()
+                return lower_top - (upper_top + upper.height() - 1) - 1
+
+            field_gap = gap(
+                window.process_profile_label,
+                window.process_profile_combo,
+            )
+            self.assertEqual(
+                (
+                    gap(
+                        window.process_profile_combo,
+                        window.show_all_profiles_checkbox,
+                    ),
+                    gap(
+                        window.show_all_profiles_checkbox,
+                        window.profile_confirmation_stack,
+                    ),
+                ),
+                (field_gap, field_gap),
+            )
+        finally:
+            window.close()
+
+    def test_ambiguous_profile_match_requires_confirmation_without_notice(
+        self,
+    ) -> None:
+        window = self.window()
+        installation = SimpleNamespace(
+            identity_key="testslicer",
+            display_name="Testslicer",
+        )
+        result = SimpleNamespace(
+            execution_slicer=installation,
+            requires_confirmation=True,
+            state=ProfileMatchState.AMBIGUOUS,
+            profile_filter_summary="",
+            selected=None,
+            source_kind=SourceKind.STL,
+            can_use_stl_mode=True,
+            message="Mehrere passende Profilkombinationen wurden gleich gut bewertet.",
+            user_confirmed=False,
+        )
+        window._profile_request_id = 9
+        try:
+            with (
+                patch.object(
+                    type(window),
+                    "selected_slicer_installation",
+                    new_callable=PropertyMock,
+                    return_value=installation,
+                ),
+                patch.object(window, "_populate_profile_combos"),
+                patch.object(window, "_invalidate_preview"),
+                patch.object(window, "_set_slicer_progress"),
+                patch.object(window, "_refresh_stl_availability"),
+                patch.object(window, "_update_preparation_requirements"),
+                patch.object(window, "update_wall_path_preview"),
+            ):
+                window._on_profile_matching_succeeded(9, result)
+
+            self.assertTrue(window.profile_status_label.isHidden())
+            self.assertTrue(window.slicer_message_divider_host.isHidden())
+            self.assertTrue(window.profile_confirm_button.isEnabled())
+        finally:
+            window.close()
+
+    def test_profile_confirmation_requires_existing_catalog_backed_files(self) -> None:
+        window = self.window()
+        self.mark_valid_source(window)
+        executable = self.root / "slicer.exe"
+        executable.write_bytes(b"MZ")
+        installation = SimpleNamespace(
+            verified=True,
+            can_slice=True,
+            identity_key="testslicer",
+            executable_path=executable,
+            display_name="Testslicer",
+        )
+
+        def profile(role: str, kind: ProfileKind) -> ProfileRecord:
+            path = self.root / f"{role}.json"
+            path.write_text("{}", encoding="utf-8")
+            return ProfileRecord(
+                adapter_id="testslicer",
+                profile_id=role,
+                name=role.title(),
+                kind=kind,
+                path=path,
+                source="user",
+            )
+
+        machine = profile("machine", ProfileKind.MACHINE)
+        filament = profile("filament", ProfileKind.FILAMENT)
+        process = profile("process", ProfileKind.PROCESS)
+        catalog = ProfileCatalog(
+            execution_slicer=installation,
+            inventory_fingerprint="inventory",
+            machine_options=(machine,),
+            filament_options=(filament,),
+            process_options=(process,),
+            selected_machine=ProfileSelectionReference(
+                machine.profile_id, machine.path
+            ),
+            selected_filament=ProfileSelectionReference(
+                filament.profile_id, filament.path
+            ),
+            selected_process=ProfileSelectionReference(
+                process.profile_id, process.path
+            ),
+        )
+        try:
+            with patch.object(
+                type(window),
+                "selected_slicer_installation",
+                new_callable=PropertyMock,
+                return_value=installation,
+            ):
+                window.profile_catalog = catalog
+                window._populate_profile_combos(catalog)
+                window._update_preparation_requirements()
+
+                self.assertTrue(window.profile_confirm_button.isEnabled())
+                self.assertEqual(
+                    window.profile_confirm_button.text(),
+                    "Slicer und Profile bestätigen",
+                )
+                self.assertFalse(
+                    window.profile_confirm_button.property("confirmed")
+                )
+
+                filament.path.unlink()
+                window._update_preparation_requirements()
+                self.assertFalse(window.profile_confirm_button.isEnabled())
+                self.assertTrue(
+                    window.profile_confirm_button.text().endswith("🔒")
+                )
+                self.assertIn(
+                    "vorhandenes Maschinen-, Filament- und Prozessprofil",
+                    window.profile_confirm_button.toolTip(),
+                )
+        finally:
+            window.close()
+
+    def test_slicer_notice_and_divider_are_below_confirmation_slot(self) -> None:
+        window = self.window()
+        try:
+            self.mark_valid_source(window)
+            layout = window.slicer_group.content_layout
+            self.assertLess(
+                layout.indexOf(window.slicer_columns),
+                layout.indexOf(window.slicer_message_divider_host),
+            )
+            self.assertLess(
+                layout.indexOf(window.slicer_message_divider_host),
+                layout.indexOf(window.profile_status_label),
+            )
+            self.assertTrue(window.slicer_message_divider_host.isHidden())
+            window._set_profile_notice(
+                "Die ausgewählten Profile sind nicht kompatibel.",
+                state="error",
+            )
+            window.resize(1200, 1000)
+            window.preparation_tabs.setCurrentIndex(1)
+            window.show()
+            self.app.processEvents()
+            self.assertFalse(window.slicer_message_divider_host.isHidden())
+            self.assertFalse(window.profile_status_label.isHidden())
+            divider_top = (
+                window.slicer_message_divider_host.geometry().top()
+                + window.slicer_message_divider.geometry().top()
+            )
+            divider_bottom = (
+                divider_top + window.slicer_message_divider.height() - 1
+            )
+            reference_gap = (
+                layout.spacing()
+                + window.preparation_slicer_requirements.layout()
+                .contentsMargins()
+                .bottom()
+            )
+            confirmation_top = window.profile_confirmation_stack.mapTo(
+                window.slicer_group.content_widget,
+                QPoint(0, 0),
+            ).y()
+            confirmation_bottom = (
+                confirmation_top
+                + window.profile_confirmation_stack.height()
+                - 1
+            )
+            self.assertEqual(
+                divider_top
+                - confirmation_bottom
+                - 1,
+                reference_gap,
+            )
+            self.assertEqual(
+                window.profile_status_label.geometry().top() - divider_bottom - 1,
+                reference_gap,
+            )
+            window._set_profile_notice()
+            self.assertTrue(window.slicer_message_divider_host.isHidden())
+            self.assertTrue(window.profile_status_label.isHidden())
         finally:
             window.close()
 
@@ -495,25 +1220,35 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertIn("border-top-right-radius: 8px;", selector_rule)
             self.assertIn("border-bottom-left-radius: 0;", selector_rule)
             self.assertIn("border-bottom-right-radius: 0;", selector_rule)
+            pressed_rule = stylesheet.split(
+                "QPushButton#preparationStepSelector:pressed,",
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: qlineargradient(", pressed_rule)
+            self.assertNotIn("border", pressed_rule)
+            locked_pressed_rule = stylesheet.split(
+                'QPushButton#preparationStepSelector[locked="true"]:pressed {',
+                1,
+            )[1].split("}", 1)[0]
+            self.assertIn("background: qlineargradient(", locked_pressed_rule)
+            self.assertNotIn("border", locked_pressed_rule)
 
             self.mark_valid_source(window)
             source, slicer = window.preparation_step_selectors
             source_image = source.grab().toImage()
             slicer_image = slicer.grab().toImage()
-            for y in (8, source.height() - 8):
-                self.assertEqual(
-                    source_image.pixelColor(6, y),
-                    slicer_image.pixelColor(6, y),
-                )
+            self.assertNotEqual(
+                source_image.pixelColor(6, source.height() - 8),
+                slicer_image.pixelColor(6, slicer.height() - 8),
+            )
             slicer.click()
             self.app.processEvents()
             source_image = source.grab().toImage()
             slicer_image = slicer.grab().toImage()
-            for y in (8, source.height() - 8):
-                self.assertEqual(
-                    source_image.pixelColor(6, y),
-                    slicer_image.pixelColor(6, y),
-                )
+            self.assertNotEqual(
+                source_image.pixelColor(6, source.height() - 8),
+                slicer_image.pixelColor(6, slicer.height() - 8),
+            )
         finally:
             window.close()
 
@@ -539,7 +1274,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
 
             self.mark_valid_source(window)
             self.app.processEvents()
-            self.assertEqual(window.preparation_progress_bar.value(), 50)
+            self.assertEqual(window.preparation_progress_bar.value(), 33)
             self.assertEqual(window.preparation_step_connector.text(), "›››")
             self.assertFalse(
                 window.preparation_step_selectors[1].property("locked")
@@ -609,6 +1344,35 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )[1].split("}", 1)[0]
             self.assertIn("background: #f6fafd;", stl_drop_zone_rule)
             self.assertIn("border: 2px dashed #2f6690;", stl_drop_zone_rule)
+            drag_rule_position = stylesheet.rfind(
+                'QFrame#sourceDropZone[dragActive="true"] {'
+            )
+            self.assertGreater(
+                drag_rule_position,
+                stylesheet.rfind('QFrame#sourceDropZone[loaded="true"] {'),
+            )
+            self.assertGreater(
+                drag_rule_position,
+                stylesheet.rfind(
+                    'QFrame#sourceDropZone[completed="true"] {'
+                ),
+            )
+            completed_page_rule_position = stylesheet.rfind(
+                'QWidget#preparationStepPage[stepTone="source"] '
+                'QFrame#sourceDropZone[completed="true"] {'
+            )
+            completed_drag_rule_position = stylesheet.rfind(
+                'QWidget#preparationStepPage[stepTone="source"]\n'
+                'QFrame#sourceDropZone[dragActive="true"] {'
+            )
+            self.assertGreater(
+                completed_drag_rule_position,
+                completed_page_rule_position,
+            )
+            completed_drag_rule = stylesheet[
+                completed_drag_rule_position:
+            ].split("}", 1)[0]
+            self.assertIn("background: #deeff8;", completed_drag_rule)
 
             slicer_combo_rule = stylesheet.split(
                 'QWidget#slicerSelectorColumn QComboBox[important="true"] {',
@@ -693,7 +1457,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_requirements_live_inside_persistent_coloured_step_containers(self) -> None:
+    def test_requirements_live_at_top_of_their_white_step_contents(self) -> None:
         window = self.window()
         window.show()
         self.app.processEvents()
@@ -701,22 +1465,26 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             source_selector, slicer_selector = window.preparation_step_selectors
             self.assertIs(
                 window.preparation_source_requirements.parentWidget(),
-                window.preparation_step_selector_containers[0],
+                window.source_group.content_widget,
             )
             self.assertIs(
                 window.preparation_slicer_requirements.parentWidget(),
-                window.preparation_step_selector_containers[1],
+                window.slicer_group.content_widget,
             )
             self.assertEqual(source_selector.property("stepTone"), "source")
             self.assertEqual(slicer_selector.property("stepTone"), "slicer")
             self.assertLess(
-                window.preparation_step_selector_containers[0]
-                .layout()
-                .indexOf(source_selector),
-                window.preparation_step_selector_containers[0]
-                .layout()
-                .indexOf(
+                window.source_group.content_layout.indexOf(
                     window.preparation_source_requirements
+                ),
+                window.source_group.content_layout.indexOf(window.drop_zone),
+            )
+            self.assertLess(
+                window.slicer_group.content_layout.indexOf(
+                    window.preparation_slicer_requirements
+                ),
+                window.slicer_group.content_layout.indexOf(
+                    window.slicer_columns
                 ),
             )
             self.assertEqual(
@@ -752,6 +1520,44 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 'QWidget#preparationStepPage[stepTone="slicer"]',
                 stylesheet,
             )
+        finally:
+            window.close()
+
+    def test_only_step_selector_hover_changes_the_tab_presentation(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        try:
+            selector = window.preparation_step_selectors[0]
+            requirements = window.preparation_source_requirements
+            content = window.source_group.content_widget
+            window._set_preparation_step_hovered(0, False)
+
+            self.assertEqual(
+                requirements.cursor().shape(),
+                Qt.CursorShape.ArrowCursor,
+            )
+            self.assertEqual(
+                requirements.focusPolicy(),
+                Qt.FocusPolicy.NoFocus,
+            )
+            for white_area in (content, requirements):
+                enter = QEnterEvent(
+                    QPointF(1, 1),
+                    QPointF(1, 1),
+                    QPointF(1, 1),
+                )
+                QApplication.sendEvent(white_area, enter)
+                self.app.processEvents()
+                self.assertFalse(bool(selector.property("groupHovered")))
+
+            selector.hover_changed.emit(True)
+            self.app.processEvents()
+            self.assertTrue(selector.property("groupHovered"))
+            selector.hover_changed.emit(False)
+            QApplication.sendEvent(selector, QEvent(QEvent.Type.Leave))
+            self.app.processEvents()
+            self.assertFalse(selector.property("groupHovered"))
         finally:
             window.close()
 
@@ -897,6 +1703,11 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                     "_profile_matching_context",
                     return_value=object(),
                 ),
+                patch.object(
+                    window,
+                    "_profile_confirmation_inputs_ready",
+                    return_value=True,
+                ),
                 patch.object(window, "start_profile_matching") as start_match,
             ):
                 window._on_stl_validation_succeeded(7, result)
@@ -917,7 +1728,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_completed_steps_use_tab_checks_without_green_content_badges(self) -> None:
+    def test_completed_steps_unlock_finish_without_tab_status_duplication(self) -> None:
         window = self.window()
         window.current_source_path = self.root / "modell.stl"
         window.current_source_kind = SourceKind.STL
@@ -961,13 +1772,26 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                         icon.text()
                         for icon in window.preparation_step_selector_icons
                     ],
-                    ["✓", "✓"],
+                    ["", ""],
                 )
                 self.assertTrue(
                     all(
                         badge.isHidden()
                         for badge in window.preparation_step_state_labels
                     )
+                )
+                window.preparation_tabs.setCurrentIndex(1)
+                self.assertFalse(window.preparation_back_button.isHidden())
+                self.assertEqual(
+                    window.preparation_navigation_title_label.text(),
+                    "Slicer-Einstellungen",
+                )
+                self.assertTrue(window.preparation_next_button.isHidden())
+                self.assertFalse(window.preparation_finish_button.isHidden())
+                self.assertTrue(window.preparation_finish_button.isEnabled())
+                self.assertEqual(
+                    window.preparation_finish_button.text(),
+                    "Fertig",
                 )
                 self.assertEqual(
                     [
@@ -981,12 +1805,17 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.analysis_snapshot = None
                 window._update_preparation_requirements()
                 self.assertFalse(window.workflow_group.isCheckable())
+                self.assertFalse(window.preparation_finish_button.isEnabled())
+                self.assertEqual(
+                    window.preparation_finish_button.text(),
+                    "Fertig 🔒",
+                )
                 self.assertTrue(window.workflow_group.isChecked())
                 self.assertTrue(window.workflow_group.toggle_button.isHidden())
         finally:
             window.close()
 
-    def test_source_success_opens_slicer_with_500_ms_transition(self) -> None:
+    def test_continue_opens_slicer_with_400_ms_transition(self) -> None:
         window = self.window()
         source = self.mark_valid_source(window)
         window._stl_validation_request_id = 7
@@ -997,12 +1826,14 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             )
             self.assertIs(window.source_group.state(), SectionState.SUCCESS)
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
-            window._schedule_slicer_step_open(7, source)
+            self.assertTrue(window.preparation_next_button.isEnabled())
+            self.assertEqual(window.preparation_next_button.text(), "Weiter")
+            window.preparation_next_button.click()
             self.app.processEvents()
             self.assertEqual(window.preparation_tabs.currentIndex(), 1)
             self.assertEqual(
                 window.preparation_tabs.last_transition,
-                (0, 1, 500),
+                (0, 1, 400),
             )
         finally:
             window.close()
@@ -1031,7 +1862,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(
                 window.preparation_step_selectors[1].property("locked")
             )
-            self.assertEqual(window.preparation_progress_bar.value(), 25)
+            self.assertEqual(window.preparation_progress_bar.value(), 17)
             window.preparation_tabs.setCurrentIndex(1)
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
         finally:
@@ -1083,9 +1914,9 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertEqual(
                 transitions,
                 [
-                    (0, 1, 500),
-                    (1, 0, 500),
-                    (0, 1, 500),
+                    (0, 1, 400),
+                    (1, 0, 400),
+                    (0, 1, 400),
                 ],
             )
         finally:
@@ -1140,7 +1971,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_double_success_collapses_preparation_before_revealing_settings(self) -> None:
+    def test_double_success_waits_for_finish_before_revealing_settings(self) -> None:
         window = self.window()
         window.show()
         self.app.processEvents()
@@ -1154,6 +1985,10 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.app.processEvents()
             self.assertIs(window.workflow.stage, WorkflowStage.READY)
             self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.ready_grid.isHidden())
+            self.assertTrue(window.workflow.complete_preparation())
+            self.app.processEvents()
             self.assertFalse(window.workflow_group.isChecked())
             self.assertFalse(window.ready_grid.isHidden())
         finally:

@@ -2214,7 +2214,11 @@ class ProfileMatchingService:
         if user_confirmed:
             return "Bestätigte Profilzuordnung wurde sicher wiederverwendet."
         if state is ProfileMatchState.AMBIGUOUS:
-            return "Mehrere Profilkombinationen sind gleichwertig; Auswahl muss bestätigt werden."
+            return (
+                "Mehrere passende Profilkombinationen wurden gleich gut bewertet. "
+                "Prüfe die vorausgewählte Kombination aus Maschinen-, Filament- "
+                "und Prozessprofil und bestätige sie."
+            )
         if requires_confirmation:
             return "Kompatible Profilkombination gefunden; Auswahl muss bestätigt werden."
         return "Keine verwendbare Profilkombination gefunden."

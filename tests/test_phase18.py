@@ -849,6 +849,7 @@ class Phase18UiTests(unittest.TestCase):
 
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.prediction_frame.set_state(SectionState.SUCCESS)
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         image = window.workflow_group.header.grab().toImage()
@@ -931,6 +932,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
         self.assertEqual(
@@ -1081,13 +1083,9 @@ class Phase18UiTests(unittest.TestCase):
             ["Slicer", "Maschinenprofil", "Prozessprofil", "Filamentprofil"],
         )
         slicer_layout = window.slicer_group.content_layout
-        self.assertLess(
-            slicer_layout.indexOf(window.slicer_progress_bar),
-            slicer_layout.indexOf(window.slicer_progress_status_widget),
-        )
-        self.assertLess(
-            slicer_layout.indexOf(window.slicer_progress_status_widget),
-            slicer_layout.indexOf(window.slicer_analysis_details_toggle),
+        self.assertEqual(slicer_layout.indexOf(window.slicer_progress_bar), -1)
+        self.assertEqual(
+            slicer_layout.indexOf(window.slicer_progress_status_widget), -1
         )
         self.assertLess(
             slicer_layout.indexOf(window.slicer_analysis_details_toggle),
@@ -1099,6 +1097,18 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertLess(
             slicer_layout.indexOf(window.slicer_details_divider),
+            slicer_layout.indexOf(window.slicer_message_divider_host),
+        )
+        self.assertLess(
+            window.slicer_selectors_layout.indexOf(
+                window.show_all_profiles_row
+            ),
+            window.slicer_selectors_layout.indexOf(
+                window.profile_confirmation_stack
+            ),
+        )
+        self.assertLess(
+            slicer_layout.indexOf(window.slicer_message_divider_host),
             slicer_layout.indexOf(window.profile_status_label),
         )
         self.assertFalse(hasattr(window, "profile_group"))
@@ -1474,6 +1484,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
         inline = window._setting_widgets["target_layer_time_s"].message_label.text()
@@ -1603,6 +1614,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
         timing_height = window.timing_group.height()
@@ -1686,6 +1698,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
 
@@ -1735,6 +1748,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
 
@@ -1763,6 +1777,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.reset_button.isHidden())
 
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.assertTrue(window.reset_button.isVisible())
         window.workflow.reset()
         self.assertTrue(window.reset_button.isHidden())
@@ -1787,6 +1802,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         setting = window._setting_widgets["maximum_expansion_angle_deg"]
         line_edit = window.maximum_expansion_angle_spin.lineEdit()
         line_edit.setText(
@@ -1814,6 +1830,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
         window._last_changed_setting_name = "maximum_outer_diameter_mm"
@@ -1828,6 +1845,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.assertEqual(
             window.maximum_expansion_angle_spin.property("validationMaximum"),
             70.0,
@@ -1934,6 +1952,7 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
         geometry = window.geometry_settings_group
@@ -1964,6 +1983,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.footer.maximumHeight(), 350)
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Layoutprüfung")
+        window.workflow.complete_preparation()
         self.assertFalse(window.footer.isHidden())
         window.warning_text.setPlainText(
             "Die Sliceroptimierung hat die Zielzeit noch nicht vollständig "

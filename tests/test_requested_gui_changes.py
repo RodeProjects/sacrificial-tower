@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -200,7 +200,14 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
-        window._set_slicer_header_summary(installation)
+        window._automatically_selected_slicer_key = installation.identity_key
+        with patch.object(
+            type(window),
+            "selected_slicer_installation",
+            new_callable=PropertyMock,
+            return_value=installation,
+        ):
+            window._set_slicer_header_summary(installation)
         self.app.processEvents()
 
         self.assertEqual(
@@ -222,6 +229,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "#176b45",
         )
         self.assertTrue(window.slicer_group.summary_note_label.isHidden())
+        self.assertEqual(
+            window.slicer_auto_detected_label.text(),
+            "(automatisch erkannt)",
+        )
+        self.assertFalse(window.slicer_auto_detected_label.isHidden())
+        self.assertFalse(window.slicer_auto_detected_label.font().bold())
         self.assertTrue(window.slicer_group.header.isHidden())
         self.assertEqual(window.slicer_group.header.height(), 0)
         self.assertEqual(
@@ -230,10 +243,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertEqual(
             window.preparation_step_heading_labels[1].text(),
-            "Slicer und Profile festlegen",
+            "Slicer-Einstellungen",
         )
         self.assertFalse(
-            window.preparation_step_heading_labels[1].isHidden()
+            window.preparation_step_heading_labels[1].isVisibleTo(window)
         )
         accessible = window.slicer_selector_column.accessibleDescription()
         self.assertIn(f"Slicer: {installation.display_name}", accessible)
@@ -251,6 +264,15 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "Slicer-Einstellungen",
         )
         self.assertTrue(window.slicer_group.toggle_button.isHidden())
+        window._automatically_selected_slicer_key = None
+        with patch.object(
+            type(window),
+            "selected_slicer_installation",
+            new_callable=PropertyMock,
+            return_value=installation,
+        ):
+            window._refresh_slicer_auto_detection_label()
+        self.assertTrue(window.slicer_auto_detected_label.isHidden())
         window.close()
 
     def test_regular_card_headers_keep_the_standard_height(self) -> None:
@@ -259,6 +281,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
 
         for card in (
@@ -499,6 +522,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
 
         self.assertFalse(hasattr(window, "slicer_iterations_spin"))
@@ -612,6 +636,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for _ in range(5):
             self.app.processEvents()
 
@@ -668,6 +693,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for _ in range(8):
             self.app.processEvents()
 
@@ -693,6 +719,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for _ in range(8):
             self.app.processEvents()
 
@@ -735,6 +762,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
         expected_units = {
             "target_layer_time_s": "s",
@@ -794,6 +822,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.assertTrue(all(action.isHidden() for action in actions))
         window.workflow.slicer_succeeded("Testslicer")
+        self.assertTrue(all(action.isHidden() for action in actions))
+        window.workflow.complete_preparation()
         self.assertTrue(all(action.isVisible() for action in actions))
         window.close()
 
@@ -821,6 +851,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
 
         window.geometry_settings_group.setChecked(False)
@@ -902,6 +933,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for _ in range(6):
             self.app.processEvents()
 
@@ -991,6 +1023,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for _ in range(5):
             self.app.processEvents()
         height_before = window.geometry_settings_group.height()
@@ -1085,6 +1118,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.error_panel.set_expanded(True)
         extra_error.set_expanded(True)
         for _ in range(8):

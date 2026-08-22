@@ -425,6 +425,7 @@ class GuiCase(unittest.TestCase):
         )
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
         self.app.processEvents()
         self.assertFalse(self.window.footer.isHidden())
         self.assertTrue(self.window.settings_load_notice_panel.isVisible())
@@ -678,6 +679,7 @@ class NumericSettingWidgetTests(GuiCase):
     def test_keyboard_entry_and_tab_navigation_work(self) -> None:
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Tastaturtest")
+        self.window.workflow.complete_preparation()
         QTest.qWait(300)
         editor = self.window.target_time_spin
         editor.setFocus()
@@ -782,6 +784,7 @@ class LiveValidationTests(GuiCase):
     def test_related_settings_do_not_replace_the_changed_error_trigger(self) -> None:
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
             message="Grenze nicht erreichbar.",
@@ -813,6 +816,7 @@ class LiveValidationTests(GuiCase):
     def test_static_invalid_value_is_inline_and_blocks_profile_check(self) -> None:
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
         self.window.minimum_outer_spin.setValue(30)
         self.window.maximum_outer_spin.setValue(10)
         self.assertFalse(bool(self.window.minimum_outer_spin.property("invalid")))
@@ -829,6 +833,7 @@ class LiveValidationTests(GuiCase):
     def test_incomplete_numeric_text_is_safe_and_inline(self) -> None:
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
         line_edit = self.window.target_time_spin.lineEdit()
         line_edit.clear()
         self.app.processEvents()
@@ -911,6 +916,7 @@ class StartupLayoutAndLifecycleTests(GuiCase):
                 "win.workflow.set_slicer_step_visible(True)",
                 "win.workflow.source_validation_succeeded('layout.stl geprüft', analysis_complete=True)",
                 "win.workflow.slicer_succeeded('Layouttest')",
+                "win.workflow.complete_preparation()",
                 "win.show()",
                 "[group.setChecked(True) for group in (win.geometry_group,win.stability_group,win.geometry_settings_group)]",
                 "for width,height in ((720,640),(1024,768),(1280,720),(1920,1080)):",

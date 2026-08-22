@@ -209,8 +209,6 @@ class SourceDropZone(QFrame):
             f"Größe: {_format_size(size)}\nPfad: {self._selected_path}"
         )
         self._apply_display_state("analyzing")
-        self.style().unpolish(self)
-        self.style().polish(self)
         self.source_selected.emit(
             str(self._selected_path), recognized.source_kind.value
         )
@@ -251,6 +249,8 @@ class SourceDropZone(QFrame):
         self.setProperty("completed", bool(completed))
         self.style().unpolish(self)
         self.style().polish(self)
+        if self._display_state != "empty":
+            self._reserve_loaded_content_height()
 
     def clear_file(self) -> None:
         self._selected_path = None
@@ -267,19 +267,30 @@ class SourceDropZone(QFrame):
         self.remove_button.setText("STL entfernen")
         self.reload_button.setText("STL neu einlesen")
         self._apply_display_state("empty")
-        self.style().unpolish(self)
-        self.style().polish(self)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if self._single_supported_url(event.mimeData().urls()) is not None:
             event.acceptProposedAction()
             self._set_drag_active(True)
         else:
+            self._set_drag_active(False)
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        """Keep the visual drop target active for the complete drag gesture."""
+
+        if self._single_supported_url(event.mimeData().urls()) is not None:
+            event.acceptProposedAction()
+            self._set_drag_active(True)
+        else:
+            self._set_drag_active(False)
             event.ignore()
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._sync_prompt_presentation()
+        if self._display_state != "empty":
+            self._reserve_loaded_content_height(event.size().width())
 
     def dragLeaveEvent(self, event) -> None:  # noqa: N802
         self._set_drag_active(False)
@@ -313,9 +324,47 @@ class SourceDropZone(QFrame):
     _first_valid_url = _single_supported_url
 
     def _set_drag_active(self, active: bool) -> None:
+        active = bool(active)
+        if bool(self.property("dragActive")) == active:
+            return
+        reserved_minimum_height = self.minimumHeight()
         self.setProperty("dragActive", active)
         self.style().unpolish(self)
         self.style().polish(self)
+        if (
+            self._display_state != "empty"
+            and self.minimumHeight() != reserved_minimum_height
+        ):
+            # Hover changes only the paint state. Re-polishing must neither
+            # recalculate nor discard the already published content height.
+            self.setMinimumHeight(reserved_minimum_height)
+        self.update()
+
+    def _reserve_loaded_content_height(self, width: int | None = None) -> None:
+        """Reserve every visible loaded-state row, including wrapped paths."""
+
+        self.root_layout.invalidate()
+        self.root_layout.activate()
+        frame_height = self.frameWidth() * 2
+        layout_width = max(
+            1,
+            int(self.width() if width is None else width)
+            - self.frameWidth() * 2,
+        )
+        required_height = max(
+            0,
+            self.root_layout.minimumSize().height(),
+            self.root_layout.sizeHint().height(),
+        )
+        if self.root_layout.hasHeightForWidth():
+            required_height = max(
+                required_height,
+                self.root_layout.heightForWidth(layout_width),
+            )
+        required_height += frame_height
+        if self.minimumHeight() != required_height:
+            self.setMinimumHeight(required_height)
+            self.updateGeometry()
 
     def _apply_display_state(self, state: str) -> None:
         self._display_state = state
@@ -388,19 +437,12 @@ class SourceDropZone(QFrame):
         self.root_layout.invalidate()
         self.style().unpolish(self)
         self.style().polish(self)
-        if failed or preslice_failed or rejected:
-            # Error states use the same file facts and action layout as the
-            # valid state.  Reserve the layout's complete preferred height;
-            # minimumSize() omits the labels' real line heights and lets the
-            # action row overlap the file facts.
-            self.root_layout.activate()
-            self.setMinimumHeight(
-                max(
-                    0,
-                    self.root_layout.sizeHint().height()
-                    + self.frameWidth() * 2,
-                )
-            )
+        if not empty:
+            # Every loaded state must publish the complete preferred height.
+            # In particular, the ready state contains three actions and may
+            # wrap the file path; a stylesheet-only 96 px minimum would let
+            # the parent card compress those rows into each other.
+            self._reserve_loaded_content_height()
         self.updateGeometry()
 
     def _sync_prompt_presentation(self) -> None:

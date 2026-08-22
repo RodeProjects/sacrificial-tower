@@ -61,6 +61,48 @@ _ADDITIONAL_ENGLISH_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
+_VISIBLE_ERROR_CODE_PATTERN = re.compile(
+    r"\b(?:Fehlercode|Fehler-Code|Exitcode|Exit-Code|Returncode)\s*[:=]?\s*"
+    r"(-?(?:0x[0-9a-f]+|\d+))\b",
+    re.IGNORECASE,
+)
+
+_SLICER_CODE_CAUSES = {
+    "-50": (
+        "Der Slicer hat die Modellgeometrie abgelehnt und konnte daraus "
+        "keinen zuverlässig verarbeitbaren G-Code erzeugen."
+    ),
+    "-17": (
+        "Das ausgewählte Prozessprofil ist mit dem Maschinenprofil nicht "
+        "kompatibel."
+    ),
+    "-2": (
+        "Der Slicer konnte mindestens eine übergebene Modell- oder "
+        "Profildatei nicht laden oder nicht mit der gewählten Konfiguration "
+        "verarbeiten."
+    ),
+    "-1": "Der Slicer konnte den übergebenen Auftrag nicht verarbeiten.",
+    "1": "Der Slicer konnte den übergebenen Auftrag nicht verarbeiten.",
+    "2": (
+        "Die installierte Slicer-Version hat mindestens eine benötigte "
+        "Kommandozeilenoption nicht akzeptiert."
+    ),
+}
+
+_WINDOWS_STATUS_PATTERN = re.compile(
+    r"\bWindows-Status\s+(0x[0-9a-f]{8})\b",
+    re.IGNORECASE,
+)
+
+_WINDOWS_STATUS_CAUSES = {
+    "0xc0000005": "eine Zugriffsverletzung im beteiligten Programm",
+    "0xc000001d": "einen vom Prozessor nicht unterstützten Programmbefehl",
+    "0xc000007b": "ein inkompatibles Programm- oder Bibliotheksformat",
+    "0xc0000135": "eine fehlende benötigte Programmbibliothek",
+    "0xc0000142": "eine fehlgeschlagene Initialisierung einer Programmbibliothek",
+    "0xc0000409": "einen internen Sicherheitsabbruch des beteiligten Programms",
+}
+
 
 def german_user_message(message: object) -> str:
     """Return a German-only message suitable for visible GUI feedback."""
@@ -68,6 +110,38 @@ def german_user_message(message: object) -> str:
     text = str(message).strip()
     if not text:
         return "Die angeforderte Aktion konnte nicht abgeschlossen werden."
+
+    windows_status = _WINDOWS_STATUS_PATTERN.search(text)
+    if windows_status is not None:
+        cause = _WINDOWS_STATUS_CAUSES.get(windows_status.group(1).casefold())
+        if cause is not None:
+            return f"Der Vorgang wurde durch {cause} beendet."
+        return (
+            "Ein beteiligtes Programm wurde von Windows wegen eines "
+            "internen Prozessfehlers beendet."
+        )
+
+    error_code = _VISIBLE_ERROR_CODE_PATTERN.search(text)
+    if error_code is not None:
+        folded = text.casefold()
+        if "slicer" in folded:
+            if "unknown config type" in folded:
+                return (
+                    "Mindestens ein ausgewähltes Profil besitzt keinen vom "
+                    "Slicer erkennbaren Profiltyp."
+                )
+            return _SLICER_CODE_CAUSES.get(
+                error_code.group(1).casefold(),
+                (
+                    "Der Slicer hat den Auftrag wegen eines internen oder "
+                    "nicht näher beschriebenen Verarbeitungsfehlers "
+                    "abgebrochen."
+                ),
+            )
+        return (
+            "Ein beteiligtes Programm hat die angeforderte Aktion wegen "
+            "eines internen Verarbeitungsfehlers abgebrochen."
+        )
     translated = _EXACT_TRANSLATIONS.get(text)
     if translated is not None:
         return translated

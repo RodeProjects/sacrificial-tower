@@ -41,6 +41,7 @@ from cooling_tower.services.stl_validation import (
     StlValidationService,
 )
 from cooling_tower.services.source_preslice import (
+    DEFAULT_PRESLICE_TIMEOUT_S,
     PRESLICE_ADAPTER_VERSION,
     SourcePreSliceCancelled,
     SourcePreSliceError,
@@ -69,6 +70,7 @@ __all__ = [
     "StlValidationLimits",
     "StlValidationResult",
     "StlValidationService",
+    "DEFAULT_PRESLICE_TIMEOUT_S",
     "PRESLICE_ADAPTER_VERSION",
     "SourcePreSliceCancelled",
     "SourcePreSliceError",

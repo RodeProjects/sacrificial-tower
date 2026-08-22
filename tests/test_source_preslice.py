@@ -36,6 +36,7 @@ from cooling_tower.preview import (
 )
 from cooling_tower.persistence import PreSliceCache
 from cooling_tower.services import (
+    DEFAULT_PRESLICE_TIMEOUT_S,
     PRESLICE_ADAPTER_VERSION,
     GCodeAnalysisService,
     SourcePreSliceCancelled,
@@ -158,6 +159,10 @@ class FakeSliceAdapter:
 
 
 class SourcePreSliceServiceTests(unittest.TestCase):
+    def test_default_timeout_is_eight_minutes(self) -> None:
+        self.assertEqual(DEFAULT_PRESLICE_TIMEOUT_S, 480.0)
+        self.assertEqual(SourcePreSliceService().timeout_s, 480.0)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

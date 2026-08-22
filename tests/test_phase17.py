@@ -561,6 +561,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.preview_button.isHidden())
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         for width, height in ((720, 640), (1400, 1000)):
             window.resize(width, height)
             self.app.processEvents()
@@ -1094,6 +1095,7 @@ class Phase17Tests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window.reset_button.isHidden())
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
         for button in (
             window.open_stl_button,
@@ -1275,6 +1277,7 @@ class Phase17Tests(unittest.TestCase):
         ready = self.ready_window()
         self.complete_source_step(ready)
         ready.workflow.slicer_succeeded("Testslicer")
+        ready.workflow.complete_preparation()
         ready.show()
         self.app.processEvents()
         self.assertTrue(ready.export_button.isEnabled())
@@ -1291,6 +1294,7 @@ class Phase17Tests(unittest.TestCase):
         window = self.ready_window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.show()
         self.app.processEvents()
 
@@ -1331,6 +1335,7 @@ class Phase17Tests(unittest.TestCase):
         window = self.ready_window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.show()
         self.app.processEvents()
         checkbox = window.validation_bypass_checkbox

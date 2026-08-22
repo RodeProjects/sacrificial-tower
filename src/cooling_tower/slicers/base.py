@@ -44,6 +44,136 @@ from cooling_tower.windows_process import (
 
 _VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,4})(?!\d)")
 
+_SLICER_RETURN_CODE_EXPLANATIONS = {
+    -50: (
+        "Der Slicer hat die Modellgeometrie abgelehnt und konnte daraus "
+        "keinen zuverlässig verarbeitbaren G-Code erzeugen."
+    ),
+    -17: (
+        "Das ausgewählte Prozessprofil ist mit dem Maschinenprofil nicht "
+        "kompatibel."
+    ),
+    -2: (
+        "Der Slicer konnte mindestens eine übergebene Modell- oder "
+        "Profildatei nicht laden oder nicht mit der gewählten Konfiguration "
+        "verarbeiten."
+    ),
+    -1: "Der Slicer konnte den übergebenen Auftrag nicht verarbeiten.",
+    1: "Der Slicer konnte den übergebenen Auftrag nicht verarbeiten.",
+    2: (
+        "Die installierte Slicer-Version hat mindestens eine für den Auftrag "
+        "benötigte Kommandozeilenoption nicht akzeptiert."
+    ),
+}
+
+
+def _slicer_output_failure_explanation(outcome: ProcessOutcome) -> str | None:
+    """Extract a stable user cause while keeping raw output diagnostic-only."""
+
+    output = f"{outcome.stderr}\n{outcome.stdout}".casefold()
+    if not output.strip():
+        return None
+    if "process not compatible with printer" in output or (
+        "not compatible" in output
+        and "process" in output
+        and "printer" in output
+    ):
+        return (
+            "Das ausgewählte Prozessprofil ist mit dem Maschinenprofil nicht "
+            "kompatibel."
+        )
+    if "unknown config type" in output:
+        return (
+            "Mindestens ein ausgewähltes Profil besitzt keinen vom Slicer "
+            "erkennbaren Profiltyp."
+        )
+    if any(
+        marker in output
+        for marker in (
+            "invalid config",
+            "invalid preset",
+            "failed to load config",
+            "cannot load config",
+            "incompatible preset",
+        )
+    ):
+        return (
+            "Mindestens ein ausgewähltes Profil ist ungültig, unvollständig "
+            "oder mit den übrigen Profilen nicht kompatibel."
+        )
+    if any(
+        marker in output
+        for marker in (
+            "nothing to be sliced",
+            "nothing to slice",
+            "no object is fully inside",
+            "no printable object",
+        )
+    ):
+        return (
+            "Der Slicer konnte kein druckbares Modell vollständig auf dem "
+            "Druckbett platzieren."
+        )
+    if ("mesh" in output or "stl" in output or "geometry" in output) and any(
+        marker in output
+        for marker in (
+            "invalid",
+            "corrupt",
+            "not manifold",
+            "non-manifold",
+            "self-intersect",
+            "empty",
+        )
+    ):
+        return (
+            "Der Slicer hat die Modellgeometrie als ungültig oder nicht "
+            "verarbeitbar abgelehnt."
+        )
+    if "out of memory" in output or "bad allocation" in output:
+        return (
+            "Der Slicer hatte nicht genügend Arbeitsspeicher, um das Modell "
+            "zu verarbeiten."
+        )
+    if "permission denied" in output or "access denied" in output:
+        return (
+            "Der Slicer konnte auf eine benötigte Eingabe- oder Ausgabedatei "
+            "nicht zugreifen."
+        )
+    if any(
+        marker in output
+        for marker in (
+            "no such file",
+            "file not found",
+            "cannot open",
+            "failed to open",
+        )
+    ):
+        return (
+            "Der Slicer konnte mindestens eine benötigte Modell- oder "
+            "Profildatei nicht öffnen."
+        )
+    if any(
+        marker in output
+        for marker in (
+            "unknown option",
+            "unrecognized option",
+            "invalid option",
+        )
+    ):
+        return (
+            "Die installierte Slicer-Version unterstützt mindestens eine für "
+            "den Auftrag benötigte Kommandozeilenoption nicht."
+        )
+    if any(
+        marker in output
+        for marker in ("unhandled exception", "assertion failed", "fatal error")
+    ):
+        return (
+            "Der Slicer hat die Verarbeitung wegen eines internen Fehlers "
+            "abgebrochen."
+        )
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedSlice:
@@ -751,6 +881,7 @@ class BaseSlicerAdapter:
             return "Der Slicervorgang wurde abgebrochen."
         if outcome.timed_out:
             return "Der Slicervorgang hat das Zeitlimit überschritten."
+        output_explanation = _slicer_output_failure_explanation(outcome)
         if outcome.crashed:
             windows_status = windows_process_status(outcome.return_code)
             normalized_return_code = (
@@ -760,21 +891,33 @@ class BaseSlicerAdapter:
             )
             if normalized_return_code == WINDOWS_DLL_INITIALIZATION_FAILED:
                 return (
-                    "Windows konnte den Slicer-Prozess nicht initialisieren "
-                    "(Windows-Status 0xC0000142)."
+                    "Windows konnte den Slicer-Prozess nicht initialisieren, "
+                    "weil eine benötigte Programmbibliothek nicht geladen "
+                    "werden konnte."
                 )
             if windows_status is not None:
                 description = windows_process_status_description(
                     outcome.return_code
                 )
-                detail = f"{description}; " if description is not None else ""
-                return (
-                    "Der Slicer-Prozess ist abgestürzt "
-                    f"({detail}Windows-Status {windows_status})."
-                )
-            return "Der Slicer-Prozess ist abgestürzt."
+                if description is not None:
+                    return (
+                        "Der Slicer-Prozess ist abgestürzt. Windows meldete "
+                        f"als Ursache: {description}."
+                    )
+            return output_explanation or (
+                "Der Slicer-Prozess ist aufgrund eines internen Fehlers "
+                "abgestürzt."
+            )
         if outcome.return_code != 0:
-            return f"Der Slicer wurde mit Fehlercode {outcome.return_code} beendet."
+            return (
+                output_explanation
+                or _SLICER_RETURN_CODE_EXPLANATIONS.get(outcome.return_code)
+                or (
+                    "Der Slicer hat den Auftrag wegen eines internen oder "
+                    "nicht näher beschriebenen Verarbeitungsfehlers "
+                    "abgebrochen."
+                )
+            )
         if not any(path.suffix.casefold() in {".gcode", ".gco"} for path in produced):
             return "Der Slicer meldete Erfolg, erzeugte aber keine G-Code-Datei."
         return None

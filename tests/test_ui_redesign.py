@@ -105,6 +105,7 @@ class UiRedesignTests(unittest.TestCase):
             analysis_complete=True,
         )
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
         self.assertTrue(window.error_panel.isHidden())
         window.minimum_outer_spin.setValue(0.0)

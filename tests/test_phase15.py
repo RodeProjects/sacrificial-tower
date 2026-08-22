@@ -485,6 +485,12 @@ class Phase15ProfileTests(unittest.TestCase):
         )
         self.assertEqual(result.state, ProfileMatchState.AMBIGUOUS)
         self.assertTrue(result.requires_confirmation)
+        self.assertEqual(
+            result.message,
+            "Mehrere passende Profilkombinationen wurden gleich gut bewertet. "
+            "Prüfe die vorausgewählte Kombination aus Maschinen-, Filament- "
+            "und Prozessprofil und bestätige sie.",
+        )
 
     def test_11_confirmed_mapping_is_reused(self) -> None:
         self._write_profile(

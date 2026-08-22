@@ -88,6 +88,74 @@ class SourceDropZoneTests(unittest.TestCase):
             self.assertEqual(zone.file_type_label.text(), "Binär-STL")
             self.assertEqual(zone.browse_button.text(), "Andere STL auswählen")
 
+    def test_valid_drag_stays_highlighted_until_leave_or_drop(self) -> None:
+        class UrlStub:
+            def __init__(self, path: Path) -> None:
+                self.path = path
+
+            def isLocalFile(self) -> bool:  # noqa: N802
+                return True
+
+            def toLocalFile(self) -> str:  # noqa: N802
+                return str(self.path)
+
+        class DragEventStub:
+            def __init__(self, path: Path) -> None:
+                self._urls = [UrlStub(path)]
+                self.accepted = False
+
+            def mimeData(self):  # noqa: N802
+                return self
+
+            def urls(self):
+                return self._urls
+
+            def acceptProposedAction(self) -> None:  # noqa: N802
+                self.accepted = True
+
+            def ignore(self) -> None:
+                self.accepted = False
+
+            def accept(self) -> None:
+                self.accepted = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "part.stl"
+            source.write_bytes(binary_stl())
+            zone = SourceDropZone()
+
+            enter_event = DragEventStub(source)
+            zone.dragEnterEvent(enter_event)
+            self.assertTrue(enter_event.accepted)
+            self.assertTrue(zone.property("dragActive"))
+
+            move_event = DragEventStub(source)
+            zone.dragMoveEvent(move_event)
+            self.assertTrue(move_event.accepted)
+            self.assertTrue(zone.property("dragActive"))
+
+            leave_event = DragEventStub(source)
+            zone.dragLeaveEvent(leave_event)
+            self.assertTrue(leave_event.accepted)
+            self.assertFalse(zone.property("dragActive"))
+
+            self.assertTrue(zone.set_file(source))
+            for state in ("analyzing", "ready", "rejected"):
+                zone.set_analysis_state(state)
+                state_event = DragEventStub(source)
+                zone.dragEnterEvent(state_event)
+                self.assertTrue(state_event.accepted)
+                self.assertTrue(zone.property("dragActive"), state)
+                zone.dragLeaveEvent(state_event)
+                self.assertFalse(zone.property("dragActive"), state)
+
+            zone.dragEnterEvent(DragEventStub(source))
+            drop_event = DragEventStub(source)
+            zone.dropEvent(drop_event)
+            self.assertTrue(drop_event.accepted)
+            self.assertFalse(zone.property("dragActive"))
+            zone.close()
+
 
 if __name__ == "__main__":
     unittest.main()

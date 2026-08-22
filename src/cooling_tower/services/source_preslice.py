@@ -49,6 +49,7 @@ from cooling_tower.services.stl_validation import StlValidationResult
 
 
 PRESLICE_ADAPTER_VERSION = 3
+DEFAULT_PRESLICE_TIMEOUT_S = 8 * 60.0
 _WORKSPACE_PREFIX = "cooling_tower_source_preslice_"
 _WORKSPACE_MARKER = ".cooling_tower_preslice_workspace"
 
@@ -93,7 +94,7 @@ class SourcePreSliceService:
         workspace_parent: str | Path | None = None,
         diagnostics_root: str | Path | None = None,
         cache: PreSliceCache | None = None,
-        timeout_s: float = 300.0,
+        timeout_s: float = DEFAULT_PRESLICE_TIMEOUT_S,
     ) -> None:
         if timeout_s <= 0 or not math.isfinite(timeout_s):
             raise ValueError("Das Pre-Slice-Zeitlimit muss positiv und endlich sein.")
@@ -606,7 +607,11 @@ class SourcePreSliceService:
     @staticmethod
     def _slice_failure_details(result: SliceResult) -> str:
         lines = [
-            f"Returncode: {result.return_code}",
+            "Prozessursache: "
+            + (
+                result.failure_reason
+                or "Der Slicer konnte den Auftrag nicht abschließen."
+            ),
             f"Zeitüberschreitung: {result.timed_out}",
             f"Abgebrochen: {result.cancelled}",
             f"Abgestürzt: {result.crashed}",

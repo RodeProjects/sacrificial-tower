@@ -464,6 +464,10 @@ QFrame#sectionCard[state="preview"] QLabel#sectionCardStatusIcon { color: #6f52c
 QFrame#sectionCard QLabel#sectionCardStatusIcon[headerLead="true"] {
     color: #26965f;
 }
+QFrame#sectionCard[role="preparation"][sourceError="true"]
+QLabel#sectionCardStatusIcon[headerLead="true"] {
+    color: #b42318;
+}
 QLabel#sectionCardStatusIcon[state="success"] { color: #176b45; }
 QFrame#sectionCard[role="gcodeSource"][state="success"] QLabel#sectionCardStatusIcon,
 QFrame#sectionCard[role="slicer"][state="success"] QLabel#sectionCardStatusIcon,
@@ -777,6 +781,43 @@ QPushButton#preparationStepSelector:pressed {
     padding: 0;
 }
 
+/* The two selectors are Wizard tabs, not status cards. The active tab meets
+   the page below without a closing bottom edge. */
+QPushButton#preparationStepSelector[active="true"] {
+    color: #183a59;
+    background: #ffffff;
+    border-bottom-color: #ffffff;
+}
+
+QPushButton#preparationStepSelector[active="false"] {
+    color: #5d6f7d;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #edf3f6,
+        stop: 1 #dce5ea
+    );
+}
+
+/* Mouse-down feedback changes only the fill; every established outline stays
+   byte-for-byte governed by the state rules above. */
+QPushButton#preparationStepSelector:pressed,
+QPushButton#preparationStepSelector[active="true"]:pressed,
+QPushButton#preparationStepSelector[active="false"]:pressed {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #cedee7,
+        stop: 1 #b7ccd8
+    );
+}
+
+QPushButton#preparationStepSelector[locked="true"]:pressed {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #d7dde0,
+        stop: 1 #c8d0d4
+    );
+}
+
 QWidget#preparationSourceRequirements,
 QWidget#preparationSlicerRequirements {
     border: 1px solid #aebdc7;
@@ -828,26 +869,6 @@ QWidget#preparationSlicerRequirements[active="true"] {
         stop: 0 #d7eaf5,
         stop: 0.58 #edf6fa,
         stop: 1 #f7fbfd
-    );
-}
-
-QWidget#preparationSourceRequirements[active="false"][groupHovered="true"],
-QWidget#preparationSlicerRequirements[active="false"][groupHovered="true"] {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #d6e5ed,
-        stop: 0.58 #eaf1f4,
-        stop: 1 #f5f8f9
-    );
-}
-
-QWidget#preparationSourceRequirements[active="true"][groupHovered="true"],
-QWidget#preparationSlicerRequirements[active="true"][groupHovered="true"] {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #c9e2f0,
-        stop: 0.58 #e4f1f7,
-        stop: 1 #f4f9fc
     );
 }
 
@@ -1034,6 +1055,125 @@ QLabel#preparationRequirementIcon[state="missing"] {
 
 QLabel#preparationRequirementText[state="missing"] {
     color: #526274;
+}
+
+QFrame#sectionCard[embeddedStep="true"] QWidget#preparationSourceRequirements,
+QFrame#sectionCard[embeddedStep="true"] QWidget#preparationSlicerRequirements {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+QFrame#preparationContentDivider {
+    background: #d6dee8;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QWidget#preparationNavigation,
+QWidget#preparationNextHost,
+QWidget#slicerLabelRow,
+QStackedWidget#profileConfirmationStack {
+    background: transparent;
+    border: none;
+}
+
+QLabel#preparationNavigationTitle {
+    color: #183a59;
+    background: transparent;
+    font-size: 14pt;
+    font-weight: 700;
+}
+
+QPushButton#preparationBackButton {
+    color: #ffffff;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #2f7fb7,
+        stop: 1 #1769aa
+    );
+    border-color: #145b91;
+    font-weight: 650;
+}
+
+QPushButton#preparationBackButton:hover {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #3b8bc1,
+        stop: 1 #1d75b7
+    );
+    border-color: #104e7d;
+}
+
+QPushButton#preparationNextButton[ready="true"],
+QPushButton#preparationFinishButton[ready="true"] {
+    color: #ffffff;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #35a66c,
+        stop: 1 #247f52
+    );
+    border-color: #1f7048;
+    font-weight: 700;
+}
+
+QPushButton#preparationNextButton[ready="true"]:hover,
+QPushButton#preparationFinishButton[ready="true"]:hover {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #40b477,
+        stop: 1 #298b5a
+    );
+    border-color: #195d3c;
+}
+
+QLabel#slicerAutoDetectedLabel {
+    color: #26965f;
+    background: transparent;
+    font-size: 9.5pt;
+    font-weight: 400;
+    padding: 3px 1px 0 1px;
+}
+
+QProgressBar#profileConfirmationProgress {
+    color: #28563d;
+    background: #edf8f2;
+    border: 1px solid #a6cbb4;
+    border-radius: 7px;
+    min-height: 48px;
+    max-height: 48px;
+    text-align: center;
+    font-size: 10pt;
+    font-weight: 650;
+}
+
+QProgressBar#profileConfirmationProgress::chunk {
+    background: #c9e5d3;
+    border-radius: 6px;
+}
+
+QLabel#profileConfirmationProgressText {
+    color: #28563d;
+    background: transparent;
+    border: none;
+    font-size: 10pt;
+    font-weight: 650;
+}
+
+QLabel#profileConfirmationActivity {
+    color: #176b45;
+    background: transparent;
+    border: none;
+    font-size: 17pt;
+    font-weight: 700;
+}
+
+QFrame#slicerMessageDivider {
+    background: #d6dee8;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
 }
 
 QTabWidget#preparationSteps[stepTone="source"]::pane {
@@ -1479,11 +1619,6 @@ QFrame#sourceDropZone {
     min-height: 256px;
 }
 
-QFrame#sourceDropZone[dragActive="true"] {
-    background: #eaf4fa;
-    border-color: #174b73;
-}
-
 QFrame#sourceDropZone[loaded="true"] {
     min-height: 96px;
     background: #f6fafd;
@@ -1495,6 +1630,23 @@ QFrame#sourceDropZone[completed="true"] {
     border-color: #2f6690;
 }
 
+/* This interaction state must win over every persistent loaded/completed
+   state so the drop target always reacts throughout the workflow. */
+QFrame#sourceDropZone[dragActive="true"] {
+    background: #deeff8;
+    border-color: #15527f;
+    border-style: solid;
+}
+
+/* The completed source page has a more specific persistent selector above.
+   Repeat that specificity for drag hover so both frame and fill change. */
+QWidget#preparationStepPage[stepTone="source"]
+QFrame#sourceDropZone[dragActive="true"] {
+    background: #deeff8;
+    border-color: #15527f;
+    border-style: solid;
+}
+
 QFrame#sourceDropZone QLabel[replacementHint="true"] {
     color: #6f7d89;
     font-style: italic;
@@ -1502,21 +1654,24 @@ QFrame#sourceDropZone QLabel[replacementHint="true"] {
     padding: 3px 0 5px 0;
 }
 
-QLabel#stlValidationMessage[severity="error"] {
+QLabel#stlValidationMessage[severity="error"],
+QLabel#stlValidationWarningMessage[severity="error"] {
     background: #fff2f0;
     border: 1px solid #f0b8b2;
     border-radius: 6px;
     color: #8f2118;
 }
 
-QLabel#stlValidationMessage[severity="warning"] {
+QLabel#stlValidationMessage[severity="warning"],
+QLabel#stlValidationWarningMessage[severity="warning"] {
     background: #fff8e8;
     border: 1px solid #e7c875;
     border-radius: 6px;
     color: #76520b;
 }
 
-QLabel#stlValidationMessage[severity="success"] {
+QLabel#stlValidationMessage[severity="success"],
+QLabel#stlValidationWarningMessage[severity="success"] {
     background: #edf8f2;
     border: 1px solid #92c9ad;
     border-radius: 6px;
@@ -1838,6 +1993,12 @@ QPushButton#profileConfirmButton {
     border-color: #a6cbb4;
     font-size: 10pt;
     font-weight: 650;
+}
+
+QPushButton#profileConfirmButton[confirmed="true"] {
+    color: #176b45;
+    background: #edf8f2;
+    border-color: #92c9ad;
 }
 
 QPushButton#sourcePrimaryActionButton:hover,

@@ -172,6 +172,7 @@ class WorkflowController(QObject):
         parent: QWidget,
         duration_ms: int = 0,
         first_success_duration_ms: int | None = None,
+        requires_explicit_completion: bool = False,
     ) -> None:
         super().__init__(parent)
         self.source_card = source_card
@@ -188,6 +189,10 @@ class WorkflowController(QObject):
                 else first_success_duration_ms
             ),
         )
+        self.requires_explicit_completion = bool(
+            requires_explicit_completion
+        )
+        self.preparation_acknowledged = False
         self.stage = WorkflowStage.WAITING_FOR_SOURCE
         self._source_auto_collapsed = False
         self._slicer_auto_collapsed = False
@@ -205,6 +210,7 @@ class WorkflowController(QObject):
         self._source_complete = False
         self._slicer_complete = False
         self._slicer_step_visible = self.workflow_card is None
+        self.preparation_acknowledged = False
         self._deferred_slicer_feedback = None
         self.source_card.setCheckable(False)
         self.source_card.setChecked(True)
@@ -230,6 +236,7 @@ class WorkflowController(QObject):
             self.workflow_card.set_summary("Bitte Vorbereitungen abschließen")
             self.workflow_card.set_summary_note(None)
             self.workflow_card.set_badge(None)
+            self.workflow_card.setProperty("sourceError", False)
             self.workflow_card.set_state(SectionState.ACTIVE, icon="⇧")
         self._hide_downstream()
         self._set_stage(WorkflowStage.WAITING_FOR_SOURCE, force=True)
@@ -587,12 +594,21 @@ class WorkflowController(QObject):
         card = self.workflow_card
         if card is None:
             return
+        self.preparation_acknowledged = False
         self._workflow_auto_collapsed = False
         card.setCheckable(False)
         card.set_summary(summary)
         card.set_summary_note(None)
         card.set_badge(None)
-        card.set_state(state, icon="⇧")
+        # Only an unaccepted source owns the red header error glyph. Slicer
+        # problems keep the normal preparation arrow until they are resolved.
+        icon = (
+            "×"
+            if self.source_card.state() is SectionState.ERROR
+            else "⇧"
+        )
+        card.setProperty("sourceError", icon == "×")
+        card.set_state(state, icon=icon)
         card.set_expanded(True)
 
     def _finish_combined_workflow(self) -> None:
@@ -610,9 +626,17 @@ class WorkflowController(QObject):
         card.set_summary("Vorbereitung abgeschlossen")
         card.set_summary_note(None)
         card.set_badge(None)
-        card.set_state(SectionState.SUCCESS, icon="⇧")
+        card.setProperty("sourceError", False)
+        card.set_state(SectionState.SUCCESS, icon="✓")
+
+        if self.requires_explicit_completion:
+            self.preparation_acknowledged = False
+            self._hide_downstream()
+            self._set_stage(WorkflowStage.READY)
+            return
 
         def reveal_ready_state() -> None:
+            self.preparation_acknowledged = True
             self._set_stage(WorkflowStage.READY)
             self._reveal_downstream()
 
@@ -622,6 +646,23 @@ class WorkflowController(QObject):
             reveal_ready_state()
         else:
             reveal_ready_state()
+
+    def complete_preparation(self) -> bool:
+        """Apply the explicit final Wizard action once both sides are ready."""
+
+        if not (self._source_complete and self._slicer_complete):
+            return False
+        card = self.workflow_card
+        self.preparation_acknowledged = True
+        if card is not None:
+            self._workflow_auto_collapsed = True
+            card.setCheckable(True)
+            card.setProperty("sourceError", False)
+            card.set_state(SectionState.SUCCESS, icon="✓")
+            card.set_expanded(False)
+        self._set_stage(WorkflowStage.READY)
+        self._reveal_downstream()
+        return True
 
     def _hide_downstream(self) -> None:
         if self._reveal_animation is not None:

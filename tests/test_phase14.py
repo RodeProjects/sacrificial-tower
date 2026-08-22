@@ -20,6 +20,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.models import SlicerFamily, SlicerIdentity
 from cooling_tower.slicers import (
     AnycubicSlicerNextAdapter,
@@ -668,7 +669,8 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.return_code, 7)
         self.assertTrue(result.diagnostic_path.is_file())
-        self.assertIn("Fehlercode 7", result.failure_reason)
+        self.assertIn("Verarbeitungsfehler", result.failure_reason)
+        self.assertNotIn("Fehlercode", result.failure_reason)
 
     def test_13_exit_zero_without_output_is_failure(self) -> None:
         runner = ConfigurableRunner(return_code=0, create_gcode=False)
@@ -689,7 +691,8 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         with patch("cooling_tower.slicers.process.os.name", "nt"):
             reason = BaseSlicerAdapter._failure_reason(outcome, ())
         self.assertIn("nicht initialisieren", reason)
-        self.assertIn("0xC0000142", reason)
+        self.assertIn("Programmbibliothek", reason)
+        self.assertNotIn("0xC0000142", reason)
 
     def test_other_known_windows_crash_status_remains_visible(self) -> None:
         outcome = ProcessOutcome(
@@ -703,7 +706,67 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         with patch("cooling_tower.windows_process.os.name", "nt"):
             reason = BaseSlicerAdapter._failure_reason(outcome, ())
         self.assertIn("benötigte DLL nicht gefunden", reason)
-        self.assertIn("0xC0000135", reason)
+        self.assertNotIn("0xC0000135", reason)
+
+    def test_known_slicer_codes_are_rendered_as_causes(self) -> None:
+        geometry = BaseSlicerAdapter._failure_reason(
+            ProcessOutcome(
+                command=("fake-slicer.exe",),
+                return_code=-50,
+                stdout="",
+                stderr="",
+                duration_s=0.01,
+            ),
+            (),
+        )
+        profiles = BaseSlicerAdapter._failure_reason(
+            ProcessOutcome(
+                command=("fake-slicer.exe",),
+                return_code=-2,
+                stdout="",
+                stderr="",
+                duration_s=0.01,
+            ),
+            (),
+        )
+        self.assertIn("Modellgeometrie abgelehnt", geometry)
+        self.assertIn("Modell- oder Profildatei", profiles)
+        self.assertNotIn("-50", geometry)
+        self.assertNotIn("-2", profiles)
+
+    def test_process_output_overrides_numeric_slicer_code_with_exact_cause(self) -> None:
+        reason = BaseSlicerAdapter._failure_reason(
+            ProcessOutcome(
+                command=("fake-slicer.exe",),
+                return_code=9,
+                stdout="process not compatible with printer",
+                stderr="",
+                duration_s=0.01,
+            ),
+            (),
+        )
+        self.assertIn("Prozessprofil", reason)
+        self.assertIn("Maschinenprofil", reason)
+        self.assertNotIn("9", reason)
+
+    def test_general_user_messages_never_expose_bare_error_codes(self) -> None:
+        slicer = german_user_message(
+            "Der Slicer wurde mit Fehlercode -2 beendet."
+        )
+        general = german_user_message(
+            "Die Hilfskomponente wurde mit Fehlercode 123 beendet."
+        )
+        windows = german_user_message(
+            "Der Prozess endete mit Windows-Status 0xC0000135."
+        )
+        self.assertIn("Modell- oder Profildatei", slicer)
+        self.assertIn("internen Verarbeitungsfehlers", general)
+        self.assertIn("fehlende benötigte Programmbibliothek", windows)
+        for rendered in (slicer, general, windows):
+            self.assertNotRegex(
+                rendered,
+                r"Fehlercode|Returncode|Windows-Status|0xC000|-?\d{2,}",
+            )
 
     def test_14_temporary_working_directory_is_removed_after_success(self) -> None:
         runner = ConfigurableRunner()

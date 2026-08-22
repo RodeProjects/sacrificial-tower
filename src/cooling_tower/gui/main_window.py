@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from html import escape
 from pathlib import Path
 from weakref import ref
@@ -135,6 +135,7 @@ from cooling_tower.preview import (
     PreviewState,
 )
 from cooling_tower.services import (
+    DEFAULT_PRESLICE_TIMEOUT_S,
     GCodeAnalysisService,
     SourcePreSliceResult,
     SourcePreSliceService,
@@ -142,6 +143,7 @@ from cooling_tower.services import (
     StlValidationService,
     assess_tower_need,
 )
+from cooling_tower.services.stl_validation import StlIssueCode
 from cooling_tower.slicers import (
     ProfileCatalog,
     ProfileCatalogConfirmation,
@@ -191,6 +193,11 @@ LEGACY_PREVIEW_QUALITY_ITERATIONS = {
     "exact": 5,
 }
 
+
+_LOCKED_SLICER_STEP_TOOLTIP = (
+    "Zuerst Schritt 1 mit einer gültigen STL abschließen."
+)
+
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 MINIMUM_PREVIEW_ITERATIONS = 3
 MAXIMUM_PREVIEW_ITERATIONS = 8
@@ -208,6 +215,16 @@ OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
 SUPPORT_DIALOG_PREFERRED_WIDTH_PX = 700
 SUPPORT_DIALOG_PREFERRED_HEIGHT_PX = 670
 INTERNAL_DIALOG_REVEAL_DELAY_MS = 40
+_PREPARATION_CONTENT_GAP_PX = 8
+PRESLICE_ACTIVITY_FRAME_INTERVAL_MS = 140
+_PRESLICE_PROGRESS_FORMAT = (
+    "Slicer und Profile bestätigt, Pre-Slice wird durchgeführt... (%p%)"
+)
+_PRESLICE_CANCEL_FORMAT = "Pre-Slice wird abgebrochen... (%p%)"
+_PRESLICE_TIMEOUT_FORMAT = (
+    "Zeitlimit von 8 Minuten erreicht, Pre-Slice wird abgebrochen... (%p%)"
+)
+_PRESLICE_ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
 CURRENT_LICENSE_STATUS = "development"
 LICENSE_STATUS_DEFINITIONS = {
     "development": {
@@ -798,6 +815,47 @@ class _SequentialPreparationTabs(QTabWidget):
             viewport.deleteLater()
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparationState:
+    """One immutable snapshot used by every preparation UI affordance."""
+
+    source_selected: bool
+    source_accepted: bool
+    slicer_detected: bool
+    profiles_loaded: bool
+    profiles_confirmed: bool
+    model_analyzed: bool
+
+    @property
+    def step1_completed(self) -> bool:
+        return self.source_selected and self.source_accepted
+
+    @property
+    def step2_completed(self) -> bool:
+        return all(
+            (
+                self.slicer_detected,
+                self.profiles_loaded,
+                self.profiles_confirmed,
+                self.model_analyzed,
+            )
+        )
+
+    @property
+    def preparation_completed(self) -> bool:
+        return self.step1_completed and self.step2_completed
+
+    def requirements(self) -> dict[str, bool]:
+        return {
+            "source_selected": self.source_selected,
+            "source_validated": self.source_accepted,
+            "slicer_detected": self.slicer_detected,
+            "profiles_loaded": self.profiles_loaded,
+            "profiles_confirmed": self.profiles_confirmed,
+            "model_analyzed": self.model_analyzed,
+        }
+
+
 class _PreparationStepSelector(QPushButton):
     """Step selector that exposes its hover state to the complete card."""
 
@@ -861,42 +919,70 @@ class _PreparationStepSelector(QPushButton):
 
 
 class _PreparationRequirementsPanel(QFrame):
-    """Keyboard-accessible prerequisite area that selects its step."""
-
-    activated = Signal()
-    hover_changed = Signal(bool)
+    """Passive prerequisite summary inside one preparation step."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-    def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        self.hover_changed.emit(True)
-        super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        self.hover_changed.emit(False)
-        super().leaveEvent(event)
+class _ConfirmationProgressBar(QProgressBar):
+    """Progress bar with stable, readable text and a larger activity glyph."""
 
-    def mouseReleaseEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self.rect().contains(event.position().toPoint())
-        ):
-            self.activated.emit()
-        super().mouseReleaseEvent(event)
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._display_format = ""
+        self.setTextVisible(False)
+        self.overlay = QWidget(self)
+        self.overlay.setObjectName("profileConfirmationProgressOverlay")
+        self.overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        overlay_layout = QHBoxLayout(self.overlay)
+        overlay_layout.setContentsMargins(8, 0, 8, 0)
+        overlay_layout.setSpacing(6)
+        overlay_layout.addStretch(1)
+        self.text_label = QLabel()
+        self.text_label.setObjectName("profileConfirmationProgressText")
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.activity_label = QLabel()
+        self.activity_label.setObjectName("profileConfirmationActivity")
+        self.activity_label.setFixedWidth(28)
+        self.activity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        activity_font = self.activity_label.font()
+        activity_font.setPointSizeF(max(17.0, activity_font.pointSizeF() + 7.0))
+        activity_font.setBold(True)
+        self.activity_label.setFont(activity_font)
+        overlay_layout.addWidget(self.text_label)
+        overlay_layout.addWidget(self.activity_label)
+        overlay_layout.addStretch(1)
 
-    def keyPressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        if event.key() in (
-            Qt.Key.Key_Return,
-            Qt.Key.Key_Enter,
-            Qt.Key.Key_Space,
-        ):
-            self.activated.emit()
-            event.accept()
+    def setFormat(self, text: str) -> None:  # noqa: N802
+        self._display_format = str(text)
+        super().setFormat(text)
+        self._sync_overlay_text()
+
+    def setValue(self, value: int) -> None:  # noqa: N802
+        super().setValue(value)
+        self._sync_overlay_text()
+
+    def set_activity_frame(self, frame: str) -> None:
+        self.activity_label.setText(str(frame))
+        self.activity_label.update()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.overlay.setGeometry(self.rect())
+
+    def _sync_overlay_text(self) -> None:
+        if not hasattr(self, "text_label"):
             return
-        super().keyPressEvent(event)
+        text = self._display_format
+        if "%p" in text and self.maximum() > self.minimum():
+            text = text.replace("%p", str(self.value()))
+        self.text_label.setText(text)
 
 
 class MainWindow(QMainWindow):
@@ -1044,6 +1130,7 @@ class MainWindow(QMainWindow):
         self._pending_slicer_discovery: tuple[bool, Path | None] | None = None
         self.slicer_discovery_result: SlicerDiscoveryResult | None = None
         self._slicer_header_installation: SlicerInstallation | None = None
+        self._automatically_selected_slicer_key: str | None = None
         self._populating_slicer_combo = False
         self._profile_request_id = 0
         self._pending_profile_match: dict[str, object] | None = None
@@ -1056,6 +1143,12 @@ class MainWindow(QMainWindow):
         self.profile_preview_outdated = False
         self._stl_validation_request_id = 0
         self._preslice_request_id = 0
+        self._preslice_runtime_request_id: int | None = None
+        self._preslice_timeout_request_id: int | None = None
+        self._preslice_cancel_requested = False
+        self._preslice_cancel_dispatch_pending = False
+        self._preslice_progress_base_format = _PRESLICE_PROGRESS_FORMAT
+        self._preslice_activity_frame_index = -1
         self._analysis_failed = False
         self._closing = False
         self.analysis_snapshot: GCodeAnalysisSnapshot | None = None
@@ -1128,6 +1221,18 @@ class MainWindow(QMainWindow):
         self._feasibility_timer.timeout.connect(
             self._start_feasibility_validation
         )
+        self._preslice_activity_timer = QTimer(self)
+        self._preslice_activity_timer.setInterval(
+            PRESLICE_ACTIVITY_FRAME_INTERVAL_MS
+        )
+        self._preslice_activity_timer.timeout.connect(
+            self._advance_preslice_activity_frame
+        )
+        self._preslice_runtime_timer = QTimer(self)
+        self._preslice_runtime_timer.setSingleShot(True)
+        self._preslice_runtime_timer.timeout.connect(
+            self._on_preslice_runtime_timeout
+        )
         self._build_ui()
         for button in self.findChildren(QAbstractButton):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1138,6 +1243,18 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.installEventFilter(self._internal_dialog_reveal_filter)
         self._apply_style()
+        cancel_metrics = QFontMetrics(self.preslice_cancel_button.font())
+        self.preslice_cancel_button.setFixedWidth(
+            max(
+                cancel_metrics.horizontalAdvance(text)
+                for text in (
+                    "Pre-Slice abbrechen",
+                    "Abbruch wird ausgeführt …",
+                    "Zeitlimit erreicht …",
+                )
+            )
+            + 36
+        )
         self.apply_settings(initial_settings)
         self.output_root_edit.setText(
             str(ui_state.get("output_root", self.default_output_root))
@@ -1417,6 +1534,7 @@ class MainWindow(QMainWindow):
         # lets the fixed-height widget protrude into the following row.
         source_layout.setAlignment(Qt.Alignment())
         source_layout.setContentsMargins(20, 20, 20, 20)
+        source_layout.setSpacing(_PREPARATION_CONTENT_GAP_PX)
 
         # Local progress is transient: the persistent state is represented by
         # the shared prerequisite overview above both columns.
@@ -1512,6 +1630,18 @@ class MainWindow(QMainWindow):
             source_layout.indexOf(self.drop_zone) + 1,
             self.stl_validation_message,
         )
+        self.stl_validation_warning_message = QLabel()
+        self.stl_validation_warning_message.setObjectName(
+            "stlValidationWarningMessage"
+        )
+        self.stl_validation_warning_message.setProperty("severity", "neutral")
+        self.stl_validation_warning_message.setWordWrap(True)
+        self.stl_validation_warning_message.setContentsMargins(10, 8, 10, 8)
+        self.stl_validation_warning_message.hide()
+        source_layout.insertWidget(
+            source_layout.indexOf(self.stl_validation_message) + 1,
+            self.stl_validation_warning_message,
+        )
         self.accept_rejected_stl_button = QPushButton("STL trotzdem verwenden")
         self.accept_rejected_stl_button.setObjectName(
             "acceptRejectedStlButton"
@@ -1569,7 +1699,7 @@ class MainWindow(QMainWindow):
             self.stl_validation_details,
         )
         source_layout.insertWidget(
-            source_layout.indexOf(self.stl_validation_message) + 1,
+            source_layout.indexOf(self.stl_validation_warning_message) + 1,
             self.accept_rejected_stl_button,
             0,
             Qt.AlignmentFlag.AlignRight,
@@ -1636,10 +1766,14 @@ class MainWindow(QMainWindow):
         slicer_layout = slicer_group.content_layout
         slicer_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         slicer_layout.setContentsMargins(20, 20, 20, 20)
+        slicer_layout.setSpacing(_PREPARATION_CONTENT_GAP_PX)
 
         # Search progress always forms the first block in the Slicer card, but
         # remains hidden whenever no background calculation is active.
-        self.slicer_progress_bar = QProgressBar()
+        # Compatibility-only handles for existing integrations.  Transient
+        # Slicer activity is rendered later in the stable confirmation slot,
+        # so these widgets never take layout space or shift the selectors.
+        self.slicer_progress_bar = QProgressBar(slicer_group.content_widget)
         self.slicer_progress_bar.setObjectName("slicerDiscoveryProgressBar")
         self.slicer_progress_bar.setRange(0, 100)
         self.slicer_progress_bar.setValue(0)
@@ -1647,7 +1781,9 @@ class MainWindow(QMainWindow):
         self.slicer_progress_bar.setAccessibleName(
             "Fortschritt der Slicer- und Profilprüfung"
         )
-        self.slicer_progress_status_widget = QWidget()
+        self.slicer_progress_status_widget = QWidget(
+            slicer_group.content_widget
+        )
         slicer_progress_status = QHBoxLayout(
             self.slicer_progress_status_widget
         )
@@ -1674,15 +1810,8 @@ class MainWindow(QMainWindow):
             self.slicer_progress_status_label,
             1,
         )
-        slicer_layout.addWidget(self.slicer_progress_bar)
         self.slicer_progress_bar.hide()
-        slicer_layout.addWidget(self.slicer_progress_status_widget)
-        slicer_layout.addWidget(
-            self.preslice_cancel_button,
-            0,
-            Qt.AlignmentFlag.AlignRight,
-        )
-
+        self.slicer_progress_status_widget.hide()
         # Keep the primary controls in one predictable vertical sequence.
         # Supporting evidence is collected in a separate disclosure below.
         self.slicer_columns = ResponsiveCardGrid()
@@ -1747,9 +1876,28 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         self.slicer_selection_label.setBuddy(self.slicer_combo)
-        slicer_selectors_layout.addWidget(self.slicer_selection_label)
+        self.slicer_auto_detected_label = QLabel("(automatisch erkannt)")
+        self.slicer_auto_detected_label.setObjectName(
+            "slicerAutoDetectedLabel"
+        )
+        self.slicer_auto_detected_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.slicer_auto_detected_label.hide()
+        slicer_label_row = QWidget()
+        slicer_label_row.setObjectName("slicerLabelRow")
+        slicer_label_row_layout = QHBoxLayout(slicer_label_row)
+        slicer_label_row_layout.setContentsMargins(0, 0, 0, 0)
+        slicer_label_row_layout.setSpacing(6)
+        slicer_label_row_layout.addWidget(self.slicer_selection_label)
+        slicer_label_row_layout.addWidget(self.slicer_auto_detected_label)
+        slicer_label_row_layout.addStretch(1)
+        slicer_selectors_layout.addWidget(slicer_label_row)
         slicer_selectors_layout.addWidget(self.slicer_combo)
         slicer_actions = QHBoxLayout()
+        # Align the visible combo-to-action gap with the progress-to-cancel
+        # gap at the bottom of this same control column.
+        slicer_actions.setContentsMargins(0, 4, 0, 0)
         slicer_actions.addStretch(1)
         slicer_actions.addWidget(self.slicer_refresh_button)
         slicer_actions.addWidget(self.slicer_manual_button)
@@ -1801,7 +1949,20 @@ class MainWindow(QMainWindow):
             "gewählten Slicers und setzt den Druckerfilter vorübergehend aus."
         )
         self.show_all_profiles_checkbox.setEnabled(False)
-        slicer_selectors_layout.addWidget(self.show_all_profiles_checkbox)
+        self.show_all_profiles_row = QWidget()
+        self.show_all_profiles_row.setObjectName("showAllProfilesRow")
+        show_all_profiles_row_layout = QHBoxLayout(self.show_all_profiles_row)
+        # The check box's own styled padding changes its visual top offset.
+        # These asymmetric row insets produce the same effective 10 px gap
+        # above and below as between every title and its dropdown.
+        show_all_profiles_row_layout.setContentsMargins(0, 8, 0, 4)
+        show_all_profiles_row_layout.setSpacing(0)
+        show_all_profiles_row_layout.addWidget(
+            self.show_all_profiles_checkbox,
+            0,
+            Qt.AlignmentFlag.AlignLeft,
+        )
+        slicer_selectors_layout.addWidget(self.show_all_profiles_row)
 
         self.slicer_columns_divider = QFrame()
         self.slicer_columns_divider.setObjectName("slicerVerticalDivider")
@@ -1815,6 +1976,9 @@ class MainWindow(QMainWindow):
         self.slicer_columns_divider.hide()
         self.slicer_columns.add_full_width(slicer_selectors)
         slicer_layout.addWidget(self.slicer_status_label)
+        # Durable readiness is represented by the status checklist.  The old
+        # prose lines duplicated that information and obscured the selectors.
+        self.slicer_status_label.hide()
         slicer_layout.addWidget(self.slicer_columns)
 
         self.slicer_details_divider = QFrame()
@@ -1836,11 +2000,16 @@ class MainWindow(QMainWindow):
         self.profile_effective_summary_label.setWordWrap(True)
         self.profile_effective_summary_label.hide()
         self.profile_confirm_button = QPushButton(
-            "Slicer und Profile bestätigen"
+            "Slicer und Profile bestätigen 🔒"
         )
         self.profile_confirm_button.setObjectName("profileConfirmButton")
+        self.profile_confirm_button.setProperty("ready", False)
+        self.profile_confirm_button.setProperty("confirmed", False)
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.setToolTip(
+            "Wähle einen validen Slicer sowie je ein vorhandenes Maschinen-, "
+            "Filament- und Prozessprofil aus."
+        )
         self.profile_origin_label = QLabel(
             "Herkunft der Zuordnung wird nach der Profilprüfung angezeigt."
         )
@@ -1852,9 +2021,58 @@ class MainWindow(QMainWindow):
         self.profile_diagnostics.setReadOnly(True)
         self.profile_diagnostics.setMaximumHeight(110)
         self.profile_diagnostics.hide()
+        slicer_selectors_layout.addWidget(self.profile_effective_summary_label)
+        self.profile_confirmation_stack = QStackedWidget()
+        self.profile_confirmation_stack.setObjectName(
+            "profileConfirmationStack"
+        )
+        self.profile_confirmation_stack.setFixedHeight(50)
+        self.profile_confirmation_stack.addWidget(self.profile_confirm_button)
+        self.profile_confirmation_progress = _ConfirmationProgressBar()
+        self.profile_confirmation_progress.setObjectName(
+            "profileConfirmationProgress"
+        )
+        self.profile_confirmation_progress.setRange(0, 100)
+        self.profile_confirmation_progress.setValue(0)
+        self.profile_confirmation_progress.setFormat(
+            "Slicer-Einstellungen werden geprüft · %p %"
+        )
+        self.profile_confirmation_progress.setTextVisible(False)
+        self.profile_confirmation_progress.setAccessibleName(
+            "Fortschritt der Slicer- und Profilprüfung"
+        )
+        self.profile_confirmation_stack.addWidget(
+            self.profile_confirmation_progress
+        )
+        self.profile_confirmation_stack.setCurrentWidget(
+            self.profile_confirm_button
+        )
+        self._profile_confirmation_busy = False
+        slicer_selectors_layout.addWidget(self.profile_confirmation_stack)
+        slicer_selectors_layout.addWidget(
+            self.preslice_cancel_button,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+
+        self.slicer_message_divider_host = QWidget()
+        self.slicer_message_divider_host.setObjectName(
+            "slicerMessageDividerHost"
+        )
+        slicer_message_divider_layout = QVBoxLayout(
+            self.slicer_message_divider_host
+        )
+        slicer_message_divider_layout.setContentsMargins(0, 0, 0, 0)
+        slicer_message_divider_layout.setSpacing(0)
+        self.slicer_message_divider = QFrame()
+        self.slicer_message_divider.setObjectName("slicerMessageDivider")
+        self.slicer_message_divider.setFixedHeight(1)
+        slicer_message_divider_layout.addWidget(self.slicer_message_divider)
+        self.slicer_message_divider_host.hide()
+        slicer_layout.addWidget(self.slicer_message_divider_host)
+        # Actionable messages belong below the primary action.  The divider
+        # appears only together with such a message.
         slicer_layout.addWidget(self.profile_status_label)
-        slicer_layout.addWidget(self.profile_effective_summary_label)
-        slicer_layout.addWidget(self.profile_confirm_button)
 
         self.slicer_analysis_details_toggle = QPushButton(
             "Analyse- und Profildetails anzeigen ▸"
@@ -1934,6 +2152,8 @@ class MainWindow(QMainWindow):
             slicer_details_index + 1,
             self.slicer_analysis_details,
         )
+        self.slicer_analysis_details_toggle.hide()
+        self.slicer_analysis_details.hide()
         self._slicer_width_combos = (
             self.slicer_combo,
             self.machine_profile_combo,
@@ -1951,7 +2171,7 @@ class MainWindow(QMainWindow):
         # top-level card header.  The centred shell uses most of the available
         # width while remaining pleasantly bounded on very wide windows.
         self.preparation_tabs = _SequentialPreparationTabs(
-            transition_duration_ms=500,
+            transition_duration_ms=400,
         )
         self.preparation_tabs.setObjectName("preparationSteps")
         self.preparation_tabs.set_step_guard(
@@ -1984,16 +2204,16 @@ class MainWindow(QMainWindow):
                 1,
                 source_group,
                 "1. Dateiübergabe",
-                "STL-Datei übergeben",
-                "Modell auswählen und Geometrie zuverlässig prüfen",
+                "Dateiübergabe",
+                "",
                 "source",
             ),
             (
                 2,
                 slicer_group,
                 "2. Slicer-Einstellungen",
-                "Slicer und Profile festlegen",
-                "Erkannten Slicer prüfen und passende Profile bestätigen",
+                "Slicer-Einstellungen",
+                "",
                 "slicer",
             ),
         ):
@@ -2005,7 +2225,9 @@ class MainWindow(QMainWindow):
                 QSizePolicy.Policy.Preferred,
             )
             page_layout = QHBoxLayout(page)
-            page_layout.setContentsMargins(24, 18, 24, 20)
+            # The navigation row directly above already contributes the
+            # desired 10 px gap.  Match that value below the buttons as well.
+            page_layout.setContentsMargins(24, 10, 24, 20)
             page_layout.setSpacing(0)
 
             step_shell = QWidget()
@@ -2089,7 +2311,11 @@ class MainWindow(QMainWindow):
                 2,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
             )
+            # The common three-column navigation row owns the visible title.
+            # Keep these handles only for API compatibility with older UI
+            # integrations; the redundant "SCHRITT 1/2" block is not shown.
             step_layout.addWidget(step_intro)
+            step_intro.hide()
 
             card.setProperty("embeddedStep", True)
             card.setProperty("stepTone", step_tone)
@@ -2133,7 +2359,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Maximum,
         )
         preparation_overview_layout = QVBoxLayout(self.preparation_overview)
-        preparation_overview_layout.setContentsMargins(24, 14, 24, 14)
+        preparation_overview_layout.setContentsMargins(24, 14, 24, 0)
         preparation_overview_layout.setSpacing(10)
         preparation_overview_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_progress_header = QWidget()
@@ -2150,7 +2376,7 @@ class MainWindow(QMainWindow):
         preparation_progress_header_layout.setContentsMargins(0, 0, 0, 0)
         preparation_progress_header_layout.setSpacing(12)
         self.preparation_progress_title_label = QLabel(
-            "Vorbereitungsfortschritt"
+            "Fortschritt der Vorbereitungen"
         )
         self.preparation_progress_title_label.setObjectName(
             "preparationProgressTitle"
@@ -2189,9 +2415,11 @@ class MainWindow(QMainWindow):
             self.preparation_progress_bar
         )
         self.preparation_requirements = ResponsiveCardGrid(
-            breakpoint_px=500,
-            horizontal_spacing_px=12,
-            vertical_spacing_px=12,
+            # Wizard tabs always remain one equal-width row, including at the
+            # narrowest supported main-window size.
+            breakpoint_px=0,
+            horizontal_spacing_px=0,
+            vertical_spacing_px=0,
         )
         self.preparation_requirements.setObjectName("preparationRequirements")
         self.preparation_source_requirements = _PreparationRequirementsPanel()
@@ -2220,7 +2448,7 @@ class MainWindow(QMainWindow):
             source_requirements_layout,
             slicer_requirements_layout,
         ):
-            requirements_layout.setContentsMargins(16, 8, 16, 10)
+            requirements_layout.setContentsMargins(0, 0, 0, 0)
             requirements_layout.setHorizontalSpacing(8)
             requirements_layout.setVerticalSpacing(3)
             requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -2259,6 +2487,23 @@ class MainWindow(QMainWindow):
                     text_label,
                 )
             requirements_layout.setColumnStretch(1, 1)
+
+        self.preparation_source_divider = QFrame()
+        self.preparation_source_divider.setObjectName(
+            "preparationContentDivider"
+        )
+        self.preparation_source_divider.setFixedHeight(1)
+        self.preparation_slicer_divider = QFrame()
+        self.preparation_slicer_divider.setObjectName(
+            "preparationContentDivider"
+        )
+        self.preparation_slicer_divider.setFixedHeight(1)
+        # Status belongs to the step it describes: compact checklist first,
+        # separator second, established functional controls underneath.
+        source_layout.insertWidget(0, self.preparation_source_requirements)
+        source_layout.insertWidget(1, self.preparation_source_divider)
+        slicer_layout.insertWidget(0, self.preparation_slicer_requirements)
+        slicer_layout.insertWidget(1, self.preparation_slicer_divider)
         self.preparation_step_selectors: list[_PreparationStepSelector] = []
         self.preparation_step_selector_containers: list[QWidget] = []
         self.preparation_step_selector_icons: list[QLabel] = []
@@ -2348,18 +2593,8 @@ class MainWindow(QMainWindow):
                     self._set_preparation_step_hovered(target, hovered)
                 )
             )
-            requirements_widget.activated.connect(
-                lambda target=index: self.preparation_tabs.setCurrentIndex(
-                    target
-                )
-            )
-            requirements_widget.hover_changed.connect(
-                lambda hovered, target=index: (
-                    self._set_preparation_step_hovered(target, hovered)
-                )
-            )
             requirements_widget.setAccessibleDescription(
-                f"Öffnet {title}"
+                f"Status und Voraussetzungen für {title}"
             )
             for passive_widget in requirements_widget.findChildren(QWidget):
                 passive_widget.setAttribute(
@@ -2367,7 +2602,6 @@ class MainWindow(QMainWindow):
                     True,
                 )
             selector_container_layout.addWidget(selector)
-            selector_container_layout.addWidget(requirements_widget, 1)
             self.preparation_step_selectors.append(selector)
             self.preparation_step_selector_containers.append(
                 selector_container
@@ -2387,15 +2621,96 @@ class MainWindow(QMainWindow):
         self.preparation_step_connector.setAccessibleName(
             "Schrittfolge von Dateiübergabe zu Slicer-Einstellungen"
         )
-        self.preparation_requirements.set_vertical_separator(
-            self.preparation_step_connector
-        )
+        # Compatibility handle for integrations that inspect the former
+        # connector. The new tabs meet directly and need no middle glyph.
+        self.preparation_step_connector.hide()
         self.preparation_requirements.add_pair(
             self.preparation_step_selector_containers[0],
             self.preparation_step_selector_containers[1],
             equal_height=True,
         )
         preparation_overview_layout.addWidget(self.preparation_requirements)
+
+        self.preparation_navigation = QWidget()
+        self.preparation_navigation.setObjectName("preparationNavigation")
+        preparation_navigation_layout = QGridLayout(
+            self.preparation_navigation
+        )
+        preparation_navigation_layout.setContentsMargins(0, 2, 0, 0)
+        preparation_navigation_layout.setHorizontalSpacing(12)
+        preparation_navigation_layout.setVerticalSpacing(0)
+        for column in range(3):
+            preparation_navigation_layout.setColumnStretch(column, 1)
+
+        self.preparation_back_button = QPushButton("Zurück")
+        self.preparation_back_button.setObjectName(
+            "preparationBackButton"
+        )
+        self.preparation_back_button.setProperty("navigationTone", "back")
+        self.preparation_back_button.setAccessibleName(
+            "Zurück zur Dateiübergabe"
+        )
+        self.preparation_back_button.clicked.connect(
+            lambda: self.preparation_tabs.setCurrentIndex(0)
+        )
+        preparation_navigation_layout.addWidget(
+            self.preparation_back_button,
+            0,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        self.preparation_navigation_title_label = QLabel("Dateiübergabe")
+        self.preparation_navigation_title_label.setObjectName(
+            "preparationNavigationTitle"
+        )
+        self.preparation_navigation_title_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        preparation_navigation_layout.addWidget(
+            self.preparation_navigation_title_label,
+            0,
+            1,
+        )
+
+        preparation_next_host = QWidget()
+        preparation_next_host.setObjectName("preparationNextHost")
+        preparation_next_layout = QHBoxLayout(preparation_next_host)
+        preparation_next_layout.setContentsMargins(0, 0, 0, 0)
+        preparation_next_layout.setSpacing(0)
+        preparation_next_layout.addStretch(1)
+        self.preparation_next_button = QPushButton("Weiter 🔒")
+        self.preparation_next_button.setObjectName("preparationNextButton")
+        self.preparation_next_button.setProperty("ready", False)
+        self.preparation_next_button.setEnabled(False)
+        self.preparation_next_button.setToolTip(_LOCKED_SLICER_STEP_TOOLTIP)
+        self.preparation_next_button.clicked.connect(
+            lambda: self.preparation_tabs.setCurrentIndex(1)
+        )
+        preparation_next_layout.addWidget(self.preparation_next_button)
+        self.preparation_finish_button = QPushButton("Fertig 🔒")
+        self.preparation_finish_button.setObjectName(
+            "preparationFinishButton"
+        )
+        self.preparation_finish_button.setProperty("ready", False)
+        self.preparation_finish_button.setEnabled(False)
+        self.preparation_finish_button.setToolTip(
+            "Die Vorbereitung ist noch nicht vollständig abgeschlossen."
+        )
+        self.preparation_finish_button.clicked.connect(
+            self._finish_preparation
+        )
+        self.preparation_finish_button.hide()
+        preparation_next_layout.addWidget(self.preparation_finish_button)
+        preparation_navigation_layout.addWidget(
+            preparation_next_host,
+            0,
+            2,
+        )
+        # Domain-oriented aliases keep the intent obvious to callers.
+        self.preparation_continue_button = self.preparation_next_button
+        self.preparation_title_label = self.preparation_navigation_title_label
+        preparation_overview_layout.addWidget(self.preparation_navigation)
         self.preparation_overview_host = QWidget()
         self.preparation_overview_host.setObjectName(
             "preparationOverviewHost"
@@ -3104,6 +3419,7 @@ class MainWindow(QMainWindow):
             # The accepted card remains visible throughout the slide itself;
             # no additional pause is inserted before the 0.5 s transition.
             first_success_duration_ms=0,
+            requires_explicit_completion=True,
         )
         self.preparation_tabs.currentChanged.connect(
             self._on_preparation_tab_changed
@@ -3504,7 +3820,10 @@ class MainWindow(QMainWindow):
     def _on_workflow_stage_changed(self, stage_value: str) -> None:
         """Show fixed footer actions only after both prerequisites succeeded."""
 
-        actions_visible = stage_value == WorkflowStage.READY.value
+        actions_visible = bool(
+            stage_value == WorkflowStage.READY.value
+            and getattr(self.workflow, "preparation_acknowledged", True)
+        )
         self._set_preparation_viewport_fill(not actions_visible)
         if hasattr(self, "footer"):
             self.footer.setVisible(actions_visible)
@@ -3661,27 +3980,34 @@ class MainWindow(QMainWindow):
         selector = self.preparation_step_selectors[0]
         selector.setFocus(Qt.FocusReason.OtherFocusReason)
 
+    def _finish_preparation(self) -> None:
+        """Acknowledge a fully ready preparation and reveal tower settings."""
+
+        if not self._current_preparation_state().preparation_completed:
+            self._update_preparation_requirements()
+            return
+        if not self.workflow.complete_preparation():
+            return
+        self.workflow_group.setChecked(False)
+        self.ready_grid.show()
+        self._on_workflow_stage_changed(self.workflow.stage.value)
+        self._refresh_preparation_section_layout()
+
     def _set_preparation_step_hovered(
         self,
         index: int,
         hovered: bool,
     ) -> None:
-        """Apply one hover state to the selector and prerequisite panel."""
+        """Apply hover feedback exclusively to the actual step selector."""
 
         selectors = getattr(self, "preparation_step_selectors", ())
-        requirements = (
-            getattr(self, "preparation_source_requirements", None),
-            getattr(self, "preparation_slicer_requirements", None),
-        )
         if not (0 <= index < len(selectors)):
             return
-        for widget in (selectors[index], requirements[index]):
-            if isinstance(widget, QWidget):
-                self._set_boolean_style_property(
-                    widget,
-                    "groupHovered",
-                    hovered,
-                )
+        self._set_boolean_style_property(
+            selectors[index],
+            "groupHovered",
+            hovered,
+        )
         selectors[index].update()
 
     def _schedule_slicer_step_open(self, request_id: int, source: Path) -> None:
@@ -4788,6 +5114,20 @@ class MainWindow(QMainWindow):
             SlicerGuiState.NOT_FOUND: "notFound",
         }
         selected = self.selected_slicer_installation
+        retained_automatic_selection = bool(
+            previous_key is not None
+            and previous_key == self._automatically_selected_slicer_key
+        )
+        self._automatically_selected_slicer_key = (
+            selected.identity_key
+            if (
+                selected is not None
+                and selected.automatically_discovered
+                and selected.identity_key == result.recommended_key
+                and (previous_key is None or retained_automatic_selection)
+            )
+            else None
+        )
         status_messages = [result.message]
         combined_status = result.message.casefold()
         if selected is not None:
@@ -4874,6 +5214,9 @@ class MainWindow(QMainWindow):
     def _on_slicer_selection_changed(self, _index: int) -> None:
         if self._populating_slicer_combo:
             return
+        # A direct combo change is a manual choice, even when its installation
+        # originally came from automatic discovery.
+        self._automatically_selected_slicer_key = None
         identity_key = self.slicer_combo.currentData()
         self.slicer_service.remember_selection(
             identity_key if isinstance(identity_key, str) else None
@@ -4934,7 +5277,22 @@ class MainWindow(QMainWindow):
             ),
             severity="success",
         )
+        self._refresh_slicer_auto_detection_label()
         self._refresh_slicer_header_profiles(installation)
+
+    def _refresh_slicer_auto_detection_label(self) -> None:
+        installation = self.selected_slicer_installation
+        visible = bool(
+            installation is not None
+            and installation.identity_key
+            == self._automatically_selected_slicer_key
+        )
+        self.slicer_auto_detected_label.setVisible(visible)
+        self.slicer_auto_detected_label.setAccessibleDescription(
+            "Der aktuell ausgewählte Slicer wurde automatisch erkannt."
+            if visible
+            else ""
+        )
 
     def _refresh_slicer_header_profiles(
         self,
@@ -4942,6 +5300,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Keep the compact header aligned and expose selections accessibly."""
 
+        self._refresh_slicer_auto_detection_label()
         current = (
             installation
             or self.selected_slicer_installation
@@ -5007,14 +5366,14 @@ class MainWindow(QMainWindow):
             state=state,
         )
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.show()
         if preserve_catalog and self.profile_catalog is not None:
             catalog_confirmed = self._catalog_selection_is_confirmed()
             self._set_profile_notice()
             self.profile_confirm_button.setText(
                 "Slicer und Profile bestätigen"
             )
-            self.profile_confirm_button.setVisible(not catalog_confirmed)
+            self.profile_confirm_button.show()
             self.profile_confirm_button.setEnabled(not catalog_confirmed)
         self.profile_effective_summary_label.clear()
         self.profile_effective_summary_label.hide()
@@ -5051,7 +5410,169 @@ class MainWindow(QMainWindow):
         self.profile_status_label.setText(text)
         self.profile_status_label.setProperty("state", state)
         self.profile_status_label.setVisible(bool(text))
+        if hasattr(self, "slicer_message_divider_host"):
+            self.slicer_message_divider_host.setVisible(bool(text))
         self._refresh_widget_style(self.profile_status_label)
+        self._refresh_dynamic_preparation_layout()
+
+    def _profile_confirmation_inputs_ready(self) -> bool:
+        """Require one existing, catalog-backed file for every profile role."""
+
+        installation = self.selected_slicer_installation
+        catalog = self.profile_catalog
+        if (
+            installation is None
+            or not getattr(installation, "verified", False)
+            or not getattr(installation, "can_slice", True)
+            or catalog is None
+            or not catalog.complete
+            or catalog.execution_slicer.identity_key
+            != installation.identity_key
+        ):
+            return False
+        if not all(
+            hasattr(catalog, attribute)
+            for attribute in (
+                "machine_options",
+                "filament_options",
+                "process_options",
+            )
+        ):
+            return False
+        executable_path = getattr(installation, "executable_path", None)
+        if executable_path is not None and not Path(executable_path).is_file():
+            return False
+
+        selections_and_options = (
+            (
+                self._profile_combo_reference(self.machine_profile_combo),
+                catalog.machine_options,
+            ),
+            (
+                self._profile_combo_reference(self.filament_profile_combo),
+                catalog.filament_options,
+            ),
+            (
+                self._profile_combo_reference(self.process_profile_combo),
+                catalog.process_options,
+            ),
+        )
+        for reference, records in selections_and_options:
+            if reference is None or reference.path is None:
+                return False
+            if not reference.path.is_file():
+                return False
+            if not any(
+                record.profile_id.casefold()
+                == reference.profile_id.casefold()
+                and record.path == reference.path
+                and record.path.is_file()
+                for record in records
+            ):
+                return False
+        return True
+
+    def _refresh_profile_confirmation_button(self) -> None:
+        """Render one persistent action state without changing its geometry."""
+
+        if not hasattr(self, "profile_confirmation_stack"):
+            return
+        self.profile_confirmation_stack.show()
+        if self._profile_confirmation_busy:
+            self.profile_confirmation_stack.setCurrentWidget(
+                self.profile_confirmation_progress
+            )
+            return
+
+        self.profile_confirmation_stack.setCurrentWidget(
+            self.profile_confirm_button
+        )
+        self.profile_confirm_button.show()
+        inputs_ready = self._profile_confirmation_inputs_ready()
+        source_ready = self._source_step_is_complete()
+        catalog_confirmed = self._catalog_selection_is_confirmed()
+        result = self.profile_match_result
+        result_requires_confirmation = bool(
+            result is not None
+            and getattr(result, "requires_confirmation", False)
+        )
+        source_analysis_can_start = bool(
+            result is None
+            and catalog_confirmed
+            and self._profile_matching_context() is not None
+        )
+        confirmation_needed = bool(
+            inputs_ready
+            and source_ready
+            and (
+                result_requires_confirmation
+                or not catalog_confirmed
+                or source_analysis_can_start
+            )
+        )
+        fully_confirmed = bool(
+            inputs_ready
+            and catalog_confirmed
+            and result is not None
+            and getattr(result, "user_confirmed", False)
+            and not result_requires_confirmation
+        )
+
+        if source_analysis_can_start:
+            text = "Modell bestätigen und mit Profilen analysieren"
+        elif fully_confirmed:
+            text = "Slicer und Profile bestätigt ✓"
+        else:
+            text = (
+                "Slicer und Profile bestätigen"
+                if confirmation_needed
+                else "Slicer und Profile bestätigen 🔒"
+            )
+        self.profile_confirm_button.setText(text)
+        self.profile_confirm_button.setEnabled(confirmation_needed)
+        self.profile_confirm_button.setProperty("ready", confirmation_needed)
+        self.profile_confirm_button.setProperty("confirmed", fully_confirmed)
+        if confirmation_needed or fully_confirmed:
+            tooltip = ""
+        elif not source_ready:
+            tooltip = _LOCKED_SLICER_STEP_TOOLTIP
+        else:
+            tooltip = (
+                "Wähle einen validen Slicer sowie je ein vorhandenes "
+                "Maschinen-, Filament- und Prozessprofil aus."
+            )
+        self.profile_confirm_button.setToolTip(tooltip)
+        self._refresh_widget_style(self.profile_confirm_button)
+
+    def _set_profile_confirmation_busy(
+        self,
+        visible: bool,
+        text: str | None = None,
+        *,
+        percent: int | None = None,
+        progress_format: str | None = None,
+    ) -> None:
+        """Use the confirmation slot for progress at an unchanged 50 px."""
+
+        self._profile_confirmation_busy = bool(visible)
+        if visible:
+            if percent is None:
+                self.profile_confirmation_progress.setRange(0, 0)
+                self.profile_confirmation_progress.setFormat(
+                    text or "Slicer-Einstellungen werden geprüft …"
+                )
+            else:
+                bounded = max(0, min(100, int(percent)))
+                self.profile_confirmation_progress.setRange(0, 100)
+                self.profile_confirmation_progress.setValue(bounded)
+                self.profile_confirmation_progress.setFormat(
+                    progress_format
+                    or f"{(text or 'Slicer-Einstellungen werden geprüft').rstrip(' …')} · %p %"
+                )
+            self.profile_confirmation_progress.setAccessibleDescription(
+                text or "Slicer-Einstellungen werden geprüft"
+            )
+        self._refresh_profile_confirmation_button()
 
     def start_profile_catalog_loading(
         self,
@@ -5146,7 +5667,7 @@ class MainWindow(QMainWindow):
         )
         self._set_profile_notice()
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.show()
         self._update_preparation_requirements()
 
         worker = ProfileCatalogWorker(
@@ -5213,14 +5734,14 @@ class MainWindow(QMainWindow):
                 state="error",
             )
             self.profile_confirm_button.setEnabled(False)
-            self.profile_confirm_button.hide()
+            self.profile_confirm_button.show()
             self.workflow.required_slicer_unavailable(
                 "Slicer-Profile sind unvollständig"
             )
         elif self._catalog_selection_is_confirmed():
             self._set_profile_notice()
             self.profile_confirm_button.setEnabled(False)
-            self.profile_confirm_button.hide()
+            self.profile_confirm_button.show()
             self.workflow.slicer_succeeded(installation.display_name)
         else:
             self._set_profile_notice()
@@ -5260,7 +5781,7 @@ class MainWindow(QMainWindow):
             state="error",
         )
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.show()
         self._set_slicer_progress(
             100,
             "Slicer-Profile konnten nicht geladen werden",
@@ -5351,7 +5872,7 @@ class MainWindow(QMainWindow):
         for role, selected_identifier in selections.items():
             self._remember_profile_selection(role, selected_identifier)
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.show()
         self._set_profile_notice()
         installation = self.selected_slicer_installation
         if installation is not None and self.current_source_path is None:
@@ -5547,10 +6068,7 @@ class MainWindow(QMainWindow):
             "Filterangaben vor."
         )
         selected = result.selected
-        if result.state in {
-            ProfileMatchState.AMBIGUOUS,
-            ProfileMatchState.UNAVAILABLE,
-        }:
+        if result.state is ProfileMatchState.UNAVAILABLE:
             profile_message = german_user_message(result.message)
             if (
                 result.source_kind is SourceKind.STL
@@ -5562,18 +6080,14 @@ class MainWindow(QMainWindow):
                 )
             self._set_profile_notice(
                 profile_message,
-                state=(
-                    "error"
-                    if result.state is ProfileMatchState.UNAVAILABLE
-                    else "manual"
-                ),
+                state="error",
             )
         else:
             self._set_profile_notice()
         self.profile_confirm_button.setText(
             "Slicer und Profile bestätigen"
         )
-        self.profile_confirm_button.setVisible(result.requires_confirmation)
+        self.profile_confirm_button.show()
         self.profile_confirm_button.setEnabled(result.requires_confirmation)
         self.profile_origin_label.setText(self._profile_origin_text(result))
         self.profile_origin_label.show()
@@ -5920,7 +6434,7 @@ class MainWindow(QMainWindow):
             if isinstance(value, ProfileSelectionReference)
         }
         self.profile_confirm_button.setText("Slicer und Profile bestätigen")
-        self.profile_confirm_button.setVisible(len(selected_profile_ids) == 3)
+        self.profile_confirm_button.show()
         self.profile_confirm_button.setEnabled(len(selected_profile_ids) == 3)
         self._set_profile_notice()
         self._update_preparation_requirements()
@@ -6127,7 +6641,7 @@ class MainWindow(QMainWindow):
             )
         self._refresh_slicer_header_profiles()
         self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.hide()
+        self.profile_confirm_button.show()
         self._set_profile_notice()
         self.profile_origin_label.setText(self._profile_origin_text(confirmed))
         self.profile_origin_label.show()
@@ -6188,14 +6702,16 @@ class MainWindow(QMainWindow):
         self._preslice_request_id += 1
         request_id = self._preslice_request_id
         self.workflow.begin_preslice()
+        self._start_preslice_runtime_watchdog(request_id)
         self.preslice_cancel_button.setEnabled(True)
+        self.preslice_cancel_button.setText("Pre-Slice abbrechen")
         self.preslice_cancel_button.show()
-        self._set_slicer_progress(
-            0,
-            "Slicer wird vorbereitet …",
-            icon="⏳",
-            state="running",
+        self._set_preslice_activity(
+            True,
+            "Preslice läuft · der Slicer wird im Hintergrund vorbereitet …",
+            percent=0,
         )
+        self._refresh_dynamic_preparation_layout()
         self._set_main_status(
             "Slicer wird vorbereitet …",
             icon="⏳",
@@ -6220,16 +6736,25 @@ class MainWindow(QMainWindow):
         )
 
     def cancel_source_preslice(self) -> None:
-        if not self.background_job_manager.has_active(JobKind.PRESLICE):
+        if (
+            self._preslice_cancel_requested
+            or not self.background_job_manager.has_active(JobKind.PRESLICE)
+        ):
             return
+        request_id = self._preslice_request_id
+        self._preslice_cancel_requested = True
+        self._preslice_progress_base_format = _PRESLICE_CANCEL_FORMAT
+        self.preslice_cancel_button.setText("Abbruch wird ausgeführt …")
         self.preslice_cancel_button.setEnabled(False)
-        self._set_source_progress_status(
-            "Pre-Slice wird kontrolliert abgebrochen …",
-            icon="⏳",
-            state="running",
+        self._set_preslice_activity(
+            True,
+            "Preslice wird kontrolliert abgebrochen …",
+            percent=self.profile_confirmation_progress.value(),
         )
-        self.background_job_manager.cancel_jobs(
-            JobKind.PRESLICE,
+        self.profile_confirmation_progress.update()
+        self.preslice_cancel_button.update()
+        self._queue_preslice_cancellation(
+            request_id,
             reason="preslice_cancelled_by_user",
         )
 
@@ -6238,9 +6763,11 @@ class MainWindow(QMainWindow):
         request_id: int,
         percent: int,
         status: str,
-        busy: bool,
+        _busy: bool,
     ) -> None:
         if request_id != self._preslice_request_id:
+            return
+        if self._preslice_cancel_requested:
             return
         if (
             percent >= 70
@@ -6248,11 +6775,10 @@ class MainWindow(QMainWindow):
         ):
             self.workflow.begin_preslice_analysis()
         rendered = german_user_message(status)
-        self._set_slicer_progress(
-            max(0, min(99, int(percent))),
-            rendered,
-            icon="⏳",
-            state="running",
+        self._set_preslice_activity(
+            True,
+            f"Preslice läuft · {rendered}",
+            percent=percent,
         )
         self._set_main_status(rendered, icon="⏳", state="running")
 
@@ -6289,7 +6815,10 @@ class MainWindow(QMainWindow):
         self.current_gcode_path = result.prepared_source.analysis_gcode_path
         self._analysis_failed = False
         self._workflow_error_message = None
+        self._stop_preslice_runtime_watchdog()
+        self._preslice_timeout_request_id = None
         self.preslice_cancel_button.hide()
+        self._set_preslice_activity(False)
         self._set_slicer_progress(
             100,
             "Modellanalyse mit Slicer abgeschlossen",
@@ -6335,7 +6864,10 @@ class MainWindow(QMainWindow):
         self._analysis_failed = True
         rendered = german_user_message(message)
         self._workflow_error_message = rendered
+        self._stop_preslice_runtime_watchdog()
+        self._preslice_timeout_request_id = None
         self.preslice_cancel_button.hide()
+        self._set_preslice_activity(False)
         self._set_slicer_progress(
             100,
             "Modellanalyse mit Slicer fehlgeschlagen",
@@ -6361,24 +6893,45 @@ class MainWindow(QMainWindow):
     def _on_source_preslice_cancelled(self, request_id: int) -> None:
         if request_id != self._preslice_request_id or self._closing:
             return
+        timed_out = self._preslice_timeout_request_id == request_id
+        self._stop_preslice_runtime_watchdog()
+        self._preslice_timeout_request_id = None
         self.current_gcode_path = None
         self.analysis_snapshot = None
         self.prepared_analysis_source = None
         self.preslice_cancel_button.hide()
+        self._set_preslice_activity(False)
         self._set_slicer_progress(
             0,
-            "Pre-Slice wurde abgebrochen",
-            icon="○",
-            state="pending",
+            (
+                "Pre-Slice nach 8 Minuten automatisch abgebrochen"
+                if timed_out
+                else "Pre-Slice wurde abgebrochen"
+            ),
+            icon="✕" if timed_out else "○",
+            state="error" if timed_out else "pending",
         )
-        self.workflow.preslice_failed("Pre-Slice abgebrochen")
-        self._reset_preslice_confirmation_for_retry(
-            "Der Pre-Slice wurde abgebrochen."
+        cancellation_message = (
+            "Der Pre-Slice wurde automatisch abgebrochen, weil die maximale "
+            "Laufzeit von 8 Minuten überschritten wurde."
+            if timed_out
+            else "Der Pre-Slice wurde abgebrochen."
         )
+        self._workflow_error_message = cancellation_message if timed_out else None
+        self.workflow.preslice_failed(
+            "Zeitlimit des Pre-Slices überschritten"
+            if timed_out
+            else "Pre-Slice abgebrochen"
+        )
+        self._reset_preslice_confirmation_for_retry(cancellation_message)
         self._set_main_status(
-            "Pre-Slice abgebrochen",
-            icon="○",
-            state="idle",
+            (
+                "Pre-Slice wegen Zeitüberschreitung abgebrochen"
+                if timed_out
+                else "Pre-Slice abgebrochen"
+            ),
+            icon="✕" if timed_out else "○",
+            state="error" if timed_out else "idle",
         )
         self._update_preparation_requirements()
         self.validate_form()
@@ -6410,6 +6963,8 @@ class MainWindow(QMainWindow):
     def _discard_source_preslice(self, reason: str) -> None:
         if not hasattr(self, "background_job_manager"):
             return
+        self._stop_preslice_runtime_watchdog()
+        self._preslice_timeout_request_id = None
         had_preslice = bool(
             self.source_preslice_result is not None
             or self.background_job_manager.has_active(JobKind.PRESLICE)
@@ -6429,6 +6984,8 @@ class MainWindow(QMainWindow):
             self._clear_feasibility_issues()
         if hasattr(self, "preslice_cancel_button"):
             self.preslice_cancel_button.hide()
+        if hasattr(self, "profile_confirmation_stack"):
+            self._set_preslice_activity(False)
 
     def _check_profile_inventory_changes(self) -> None:
         if (
@@ -6604,7 +7161,7 @@ class MainWindow(QMainWindow):
                 self.profile_match_result is not None
                 and self.profile_match_result.requires_confirmation
             )
-            self.profile_confirm_button.setVisible(requires_confirmation)
+            self.profile_confirm_button.show()
         elif section == "stability":
             automatic = self.automatic_base_checkbox.isChecked()
             self._setting_widgets["manual_base_width_mm"].setVisible(not automatic)
@@ -6895,6 +7452,14 @@ class MainWindow(QMainWindow):
         self.workflow_group.updateGeometry()
         self._update_slicer_combo_widths()
         self._refresh_settings_content_minimum_height()
+
+    def _refresh_dynamic_preparation_layout(self) -> None:
+        """Publish dynamic preparation content before the next paint frame."""
+
+        if not hasattr(self, "preparation_tabs"):
+            return
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
 
     def _on_settings_scroll_range_changed(
         self,
@@ -7258,6 +7823,7 @@ class MainWindow(QMainWindow):
         self.source_progress_bar.setFormat("%p %")
         self.source_progress_bar.setValue(100 if completed else 0)
         self.source_progress_bar.hide()
+        self._refresh_dynamic_preparation_layout()
 
     def _set_preparation_step_state(
         self,
@@ -7300,15 +7866,11 @@ class MainWindow(QMainWindow):
         layouts[index].setColumnMinimumWidth(0, side_width)
         layouts[index].setColumnMinimumWidth(2, side_width)
 
-    def _update_preparation_requirements(self) -> None:
-        if not hasattr(self, "preparation_step_selectors"):
-            return
+    def _current_preparation_state(self) -> _PreparationState:
+        """Derive all Wizard readiness from the current domain objects."""
+
         source_selected = self.current_source_path is not None
-        guide_visible = not source_selected
-        if (not self.source_guide_row.isHidden()) != guide_visible:
-            self.source_guide_row.setVisible(guide_visible)
-            QTimer.singleShot(0, self._refresh_preparation_section_layout)
-        source_validated = self._source_step_is_complete()
+        source_accepted = self._source_step_is_complete()
         installation = self.selected_slicer_installation
         slicer_detected = bool(
             installation is not None and installation.verified
@@ -7321,11 +7883,11 @@ class MainWindow(QMainWindow):
             and catalog.execution_slicer.identity_key
             == installation.identity_key
         )
-        catalog_confirmed = self._catalog_selection_is_confirmed()
+        profiles_confirmed = self._catalog_selection_is_confirmed()
         source_confirmation = self.confirmed_profile_context
         model_analyzed = bool(
             source_selected
-            and catalog_confirmed
+            and profiles_confirmed
             and self.profile_match_result is not None
             and self.profile_match_result.user_confirmed
             and self.source_artifact is not None
@@ -7336,15 +7898,30 @@ class MainWindow(QMainWindow):
             and self.source_preslice_result is not None
             and self.prepared_analysis_source is not None
         )
+        return _PreparationState(
+            source_selected=source_selected,
+            source_accepted=source_accepted,
+            slicer_detected=slicer_detected,
+            profiles_loaded=profiles_loaded,
+            profiles_confirmed=profiles_confirmed,
+            model_analyzed=model_analyzed,
+        )
 
-        requirements = {
-            "source_selected": source_selected,
-            "source_validated": source_validated,
-            "slicer_detected": slicer_detected,
-            "profiles_loaded": profiles_loaded,
-            "profiles_confirmed": catalog_confirmed,
-            "model_analyzed": model_analyzed,
-        }
+    def _update_preparation_requirements(self) -> None:
+        if not hasattr(self, "preparation_step_selectors"):
+            return
+        preparation_state = self._current_preparation_state()
+        source_selected = preparation_state.source_selected
+        guide_visible = not source_selected
+        if (not self.source_guide_row.isHidden()) != guide_visible:
+            self.source_guide_row.setVisible(guide_visible)
+            QTimer.singleShot(0, self._refresh_preparation_section_layout)
+        source_validated = preparation_state.step1_completed
+        slicer_detected = preparation_state.slicer_detected
+        profiles_loaded = preparation_state.profiles_loaded
+        catalog_confirmed = preparation_state.profiles_confirmed
+        model_analyzed = preparation_state.model_analyzed
+        requirements = preparation_state.requirements()
         fulfilled = 0
         for key, complete in requirements.items():
             icon_label, text_label = self.preparation_requirement_rows[key]
@@ -7355,7 +7932,7 @@ class MainWindow(QMainWindow):
             self._refresh_widget_style(icon_label)
             self._refresh_widget_style(text_label)
             fulfilled += int(complete)
-        preparation_complete = fulfilled == len(requirements)
+        preparation_complete = preparation_state.preparation_completed
         self.workflow_group.setCheckable(preparation_complete)
         step_requirement_keys = (
             ("source_selected", "source_validated"),
@@ -7381,38 +7958,19 @@ class MainWindow(QMainWindow):
             selector.setAccessibleDescription(
                 f"{step_percent} Prozent der Voraussetzungen erfüllt"
             )
-        source_fulfilled = sum(
-            int(requirements[key])
-            for key in ("source_selected", "source_validated")
-        )
-        slicer_fulfilled = sum(
-            int(requirements[key])
-            for key in (
-                "slicer_detected",
-                "profiles_loaded",
-                "profiles_confirmed",
-                "model_analyzed",
-            )
-        )
-        # Later background work must not visually advance the sequence before
-        # its prerequisite step is actually complete.
-        percent = round(
-            50 * source_fulfilled / 2
-            + (50 * slicer_fulfilled / 4 if source_validated else 0)
-        )
+        # The shared bar represents actual fulfilled prerequisites, regardless
+        # of which page is currently open or which independent background
+        # discovery happened first.
+        percent = round(100 * fulfilled / len(requirements))
         self.preparation_progress_bar.setValue(percent)
         self.preparation_progress_bar.setAccessibleDescription(
             f"{percent} Prozent der Vorbereitung abgeschlossen"
         )
-        if preparation_complete:
-            progress_text = "Vorbereitung abgeschlossen"
-            progress_state = "complete"
-        elif self.preparation_tabs.currentIndex() == 1 and source_validated:
+        if self.preparation_tabs.currentIndex() == 1 and source_validated:
             progress_text = "Schritt 2 von 2 · Slicer-Einstellungen"
-            progress_state = "active"
         else:
             progress_text = "Schritt 1 von 2 · Dateiübergabe"
-            progress_state = "active"
+        progress_state = "complete" if preparation_complete else "active"
         self.preparation_progress_status_label.setText(progress_text)
         self.preparation_progress_status_label.setProperty(
             "state", progress_state
@@ -7428,18 +7986,8 @@ class MainWindow(QMainWindow):
             and catalog_confirmed
             and model_analyzed
         )
-        self.preparation_tabs.setTabText(
-            0,
-            "✓ 1. Dateiübergabe"
-            if source_validated
-            else "1. Dateiübergabe",
-        )
-        self.preparation_tabs.setTabText(
-            1,
-            "✓ 2. Slicer-Einstellungen"
-            if slicer_step_complete
-            else "2. Slicer-Einstellungen",
-        )
+        self.preparation_tabs.setTabText(0, "1. Dateiübergabe")
+        self.preparation_tabs.setTabText(1, "2. Slicer-Einstellungen")
         for selector_index, complete in enumerate(
             (source_validated, slicer_step_complete)
         ):
@@ -7453,7 +8001,7 @@ class MainWindow(QMainWindow):
                 else Qt.CursorShape.PointingHandCursor
             )
             selector.setToolTip(
-                "Zuerst Schritt 1 mit einer gültigen STL abschließen."
+                _LOCKED_SLICER_STEP_TOOLTIP
                 if locked
                 else f"Schritt {selector_index + 1} öffnen"
             )
@@ -7469,22 +8017,18 @@ class MainWindow(QMainWindow):
                 self.preparation_slicer_requirements,
             )[selector_index]
             requirements_widget.setProperty("locked", locked)
-            requirements_widget.setCursor(
-                Qt.CursorShape.ForbiddenCursor
-                if locked
-                else Qt.CursorShape.PointingHandCursor
-            )
+            requirements_widget.setCursor(Qt.CursorShape.ArrowCursor)
             requirements_widget.setAccessibleDescription(
-                "Gesperrt, bis eine gültige STL übergeben wurde."
+                "Status: gesperrt, bis eine gültige STL übergeben wurde."
                 if locked
-                else f"Öffnet Schritt {selector_index + 1}"
+                else f"Status und Voraussetzungen für Schritt {selector_index + 1}"
             )
             self._refresh_widget_style(requirements_widget)
             icon = self.preparation_step_selector_icons[selector_index]
-            icon.setText("✓" if complete else ("🔒" if locked else ""))
+            icon.setText("🔒" if locked else "")
             icon.setProperty(
                 "state",
-                "complete" if complete else ("locked" if locked else "pending"),
+                "locked" if locked else ("complete" if complete else "pending"),
             )
             self._refresh_widget_style(icon)
 
@@ -7494,45 +8038,39 @@ class MainWindow(QMainWindow):
         )
         self._refresh_widget_style(self.preparation_step_connector)
 
-        if not source_validated:
-            self.profile_confirm_button.setEnabled(False)
-            self.profile_confirm_button.setToolTip(
-                "Die Bestätigung wird nach einer gültigen STL freigeschaltet."
-            )
-        else:
-            self.profile_confirm_button.setToolTip("")
-            selections_ready = all(
-                self._profile_combo_reference(combo) is not None
-                for combo in (
-                    self.machine_profile_combo,
-                    self.process_profile_combo,
-                    self.filament_profile_combo,
-                )
-            )
-            result_requires_confirmation = bool(
-                self.profile_match_result is not None
-                and getattr(
-                    self.profile_match_result,
-                    "requires_confirmation",
-                    False,
-                )
-            )
-            catalog_requires_confirmation = bool(
-                profiles_loaded
-                and selections_ready
-                and not catalog_confirmed
-            )
-            source_analysis_can_start = bool(
-                self.profile_match_result is None
-                and catalog_confirmed
-                and self._profile_matching_context() is not None
-            )
-            if not self.profile_confirm_button.isHidden():
-                self.profile_confirm_button.setEnabled(
-                    result_requires_confirmation
-                    or catalog_requires_confirmation
-                    or source_analysis_can_start
-                )
+        current_step = self.preparation_tabs.currentIndex()
+        self.preparation_back_button.setVisible(current_step == 1)
+        self.preparation_navigation_title_label.setText(
+            "Slicer-Einstellungen" if current_step == 1 else "Dateiübergabe"
+        )
+        self.preparation_next_button.setVisible(current_step == 0)
+        self.preparation_finish_button.setVisible(current_step == 1)
+        self.preparation_next_button.setEnabled(source_validated)
+        self.preparation_next_button.setText(
+            "Weiter" if source_validated else "Weiter 🔒"
+        )
+        self.preparation_next_button.setToolTip(
+            ""
+            if source_validated
+            else _LOCKED_SLICER_STEP_TOOLTIP
+        )
+        self.preparation_next_button.setProperty("ready", source_validated)
+        self._refresh_widget_style(self.preparation_next_button)
+        self.preparation_finish_button.setEnabled(preparation_complete)
+        self.preparation_finish_button.setText(
+            "Fertig" if preparation_complete else "Fertig 🔒"
+        )
+        self.preparation_finish_button.setToolTip(
+            ""
+            if preparation_complete
+            else "Die Vorbereitung ist noch nicht vollständig abgeschlossen."
+        )
+        self.preparation_finish_button.setProperty(
+            "ready", preparation_complete
+        )
+        self._refresh_widget_style(self.preparation_finish_button)
+
+        self._refresh_profile_confirmation_button()
 
         if not source_validated and self.preparation_tabs.currentIndex() > 0:
             self.preparation_tabs.setCurrentIndex(0)
@@ -7621,16 +8159,163 @@ class MainWindow(QMainWindow):
         state: str,
     ) -> None:
         self.slicer_progress_bar.setValue(max(0, min(100, percent)))
-        self.slicer_progress_bar.setVisible(
-            state == "running" and 0 <= percent < 100
-        )
-        self.slicer_progress_status_widget.show()
+        # Retain the former values for diagnostics and integrations, but never
+        # insert the short-lived blocks into the selector layout.
+        self.slicer_progress_bar.hide()
+        self.slicer_progress_status_widget.hide()
         self._set_status_indicator(
             self.slicer_progress_icon_label,
             self.slicer_progress_status_label,
             icon,
             text,
             state,
+        )
+        if hasattr(self, "profile_confirmation_stack"):
+            self._set_profile_confirmation_busy(
+                state == "running" and 0 <= percent < 100,
+                text,
+                percent=percent,
+            )
+
+    def _set_preslice_activity(
+        self,
+        visible: bool,
+        text: str | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
+        """Show Preslice activity in the fixed-height confirmation slot."""
+
+        was_busy = self._profile_confirmation_busy
+        if visible and percent is None:
+            percent = (
+                self.profile_confirmation_progress.value()
+                if self.profile_confirmation_progress.maximum() == 100
+                else 0
+            )
+        if visible:
+            if not self._preslice_activity_timer.isActive():
+                self._preslice_activity_frame_index = -1
+                self._advance_preslice_activity_frame()
+                self._preslice_activity_timer.start()
+            progress_format = self._preslice_progress_base_format
+        else:
+            self._preslice_activity_timer.stop()
+            self._preslice_activity_frame_index = -1
+            progress_format = None
+        self._set_profile_confirmation_busy(
+            visible,
+            text,
+            percent=percent,
+            progress_format=progress_format,
+        )
+        self.profile_confirmation_progress.set_activity_frame(
+            _PRESLICE_ACTIVITY_FRAMES[
+                max(0, self._preslice_activity_frame_index)
+                % len(_PRESLICE_ACTIVITY_FRAMES)
+            ]
+            if visible
+            else ""
+        )
+        if was_busy != bool(visible):
+            self._refresh_dynamic_preparation_layout()
+
+    def _advance_preslice_activity_frame(self) -> None:
+        self._preslice_activity_frame_index = (
+            self._preslice_activity_frame_index + 1
+        ) % len(_PRESLICE_ACTIVITY_FRAMES)
+        if not getattr(self, "_profile_confirmation_busy", False):
+            return
+        self.profile_confirmation_progress.set_activity_frame(
+            _PRESLICE_ACTIVITY_FRAMES[self._preslice_activity_frame_index]
+        )
+
+    def _start_preslice_runtime_watchdog(self, request_id: int) -> None:
+        configured_timeout = float(
+            getattr(
+                self.preslice_service,
+                "timeout_s",
+                DEFAULT_PRESLICE_TIMEOUT_S,
+            )
+        )
+        maximum_runtime_s = min(
+            DEFAULT_PRESLICE_TIMEOUT_S,
+            max(0.001, configured_timeout),
+        )
+        self._preslice_runtime_request_id = request_id
+        self._preslice_timeout_request_id = None
+        self._preslice_cancel_requested = False
+        self._preslice_cancel_dispatch_pending = False
+        self._preslice_progress_base_format = _PRESLICE_PROGRESS_FORMAT
+        self._preslice_runtime_timer.setInterval(
+            max(1, round(maximum_runtime_s * 1000))
+        )
+        self._preslice_runtime_timer.start()
+
+    def _stop_preslice_runtime_watchdog(self) -> None:
+        self._preslice_runtime_timer.stop()
+        self._preslice_activity_timer.stop()
+        self._preslice_runtime_request_id = None
+        self._preslice_cancel_requested = False
+        self._preslice_cancel_dispatch_pending = False
+        self._preslice_progress_base_format = _PRESLICE_PROGRESS_FORMAT
+        self._preslice_activity_frame_index = -1
+        if hasattr(self, "profile_confirmation_progress"):
+            self.profile_confirmation_progress.set_activity_frame("")
+        if hasattr(self, "preslice_cancel_button"):
+            self.preslice_cancel_button.setText("Pre-Slice abbrechen")
+
+    def _queue_preslice_cancellation(
+        self,
+        request_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        if self._preslice_cancel_dispatch_pending:
+            return
+        self._preslice_cancel_dispatch_pending = True
+
+        def dispatch() -> None:
+            self._preslice_cancel_dispatch_pending = False
+            if request_id != self._preslice_request_id or self._closing:
+                return
+            self.background_job_manager.cancel_jobs(
+                JobKind.PRESLICE,
+                reason=reason,
+            )
+
+        # Returning from the click handler first lets Qt paint the immediate
+        # visual acknowledgement before cancellation reaches the worker.
+        QTimer.singleShot(0, dispatch)
+
+    def _on_preslice_runtime_timeout(self) -> None:
+        request_id = self._preslice_runtime_request_id
+        if (
+            request_id is None
+            or request_id != self._preslice_request_id
+            or not self.background_job_manager.has_active(JobKind.PRESLICE)
+        ):
+            return
+        self._preslice_timeout_request_id = request_id
+        self._preslice_cancel_requested = True
+        self._preslice_progress_base_format = _PRESLICE_TIMEOUT_FORMAT
+        self.preslice_cancel_button.setText("Zeitlimit erreicht …")
+        self.preslice_cancel_button.setEnabled(False)
+        self._set_preslice_activity(
+            True,
+            "Das Zeitlimit von 8 Minuten wurde erreicht.",
+            percent=self.profile_confirmation_progress.value(),
+        )
+        self._set_main_status(
+            "Zeitlimit erreicht – Pre-Slice wird abgebrochen",
+            icon="⏳",
+            state="running",
+        )
+        self.profile_confirmation_progress.update()
+        self.preslice_cancel_button.update()
+        self._queue_preslice_cancellation(
+            request_id,
+            reason="preslice_timeout",
         )
 
     def _toggle_reconstructed_config(self, expanded: bool) -> None:
@@ -8217,6 +8902,8 @@ class MainWindow(QMainWindow):
                 state="pending",
             )
         self._update_preparation_requirements()
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
         self.validate_form()
 
     def reload_source(self) -> None:
@@ -8370,6 +9057,7 @@ class MainWindow(QMainWindow):
             icon="⏳",
             state="running",
         )
+        self._refresh_dynamic_preparation_layout()
         worker = StlValidationWorker(
             request_id,
             path,
@@ -8395,6 +9083,7 @@ class MainWindow(QMainWindow):
         self.source_progress_bar.setValue(max(0, min(100, int(percent))))
         if percent >= 100:
             self.source_progress_bar.hide()
+            self._refresh_dynamic_preparation_layout()
         self._set_source_progress_status(
             status,
             icon="⏳",
@@ -8418,6 +9107,10 @@ class MainWindow(QMainWindow):
             return
         self.stl_validation_result = result
         self.source_artifact = result.source_artifact
+        self.stl_validation_warning_message.clear()
+        self.stl_validation_warning_message.setProperty("severity", "neutral")
+        self._refresh_widget_style(self.stl_validation_warning_message)
+        self.stl_validation_warning_message.hide()
         self.source_progress_bar.setValue(100)
         accepted = bool(getattr(result, "accepted", result.valid))
         self._finish_source_progress(completed=accepted)
@@ -8451,7 +9144,9 @@ class MainWindow(QMainWindow):
             self.stl_validation_message.show()
             self.stl_validation_details.setPlainText(result.technical_summary)
             self.stl_validation_details_toggle.show()
-            self.accept_rejected_stl_button.show()
+            self.accept_rejected_stl_button.setVisible(
+                self._rejected_stl_can_be_overridden(result)
+            )
             self.workflow.source_invalid("STL-Geometrie ist ungültig")
             self._set_main_status(
                 "Die STL ist non-manifold (nicht vollständig geschlossen)",
@@ -8466,6 +9161,61 @@ class MainWindow(QMainWindow):
 
         self._complete_accepted_stl(request_id, result)
 
+    def _rejected_stl_can_be_overridden(
+        self,
+        result: StlValidationResult | None,
+    ) -> bool:
+        """Allow overrides only for parsed geometry that remains processable."""
+
+        if (
+            result is None
+            or bool(
+                getattr(
+                    result,
+                    "accepted",
+                    getattr(result, "valid", False),
+                )
+            )
+            or self.current_source_kind is not SourceKind.STL
+            or self.current_source_path is None
+            or getattr(result, "format", None) is None
+            or getattr(result, "face_count", 0) <= 0
+            or getattr(result, "vertex_count", 0) < 3
+            or getattr(result, "component_count", 0) <= 0
+        ):
+            return False
+        try:
+            if (
+                result.source_artifact.original_path
+                != self.current_source_path.resolve()
+            ):
+                return False
+        except (OSError, TypeError, ValueError):
+            return False
+        overridable_codes = {
+            StlIssueCode.DEGENERATE_FACE,
+            StlIssueCode.DUPLICATE_FACE,
+            StlIssueCode.BOUNDARY_EDGE,
+            StlIssueCode.NON_MANIFOLD_EDGE,
+            StlIssueCode.INCONSISTENT_WINDING,
+            StlIssueCode.NON_POSITIVE_VOLUME,
+            StlIssueCode.SELF_INTERSECTION,
+        }
+        blocking_issues = tuple(
+            getattr(
+                result,
+                "blocking_issues",
+                tuple(
+                    issue
+                    for issue in getattr(result, "issues", ())
+                    if getattr(issue, "blocking", True)
+                ),
+            )
+        )
+        return bool(blocking_issues) and all(
+            issue.code in overridable_codes for issue in blocking_issues
+        )
+
     def _confirm_rejected_stl(self) -> None:
         """Ask for an explicit risk acknowledgement before overriding rejection."""
 
@@ -8473,9 +9223,16 @@ class MainWindow(QMainWindow):
         source_path = self.current_source_path
         if (
             result is None
-            or result.accepted
+            or bool(
+                getattr(
+                    result,
+                    "accepted",
+                    getattr(result, "valid", False),
+                )
+            )
             or source_path is None
             or result.source_artifact.original_path != source_path.resolve()
+            or not self._rejected_stl_can_be_overridden(result)
         ):
             self.accept_rejected_stl_button.hide()
             return
@@ -8544,36 +9301,14 @@ class MainWindow(QMainWindow):
         box = self._create_rejected_stl_message_box()
         box.ensurePolished()
         box.adjustSize()
-        target = QRect(QPoint(0, 0), box.size())
-        target.moveCenter(self.frameGeometry().center())
-        screen = (
-            QApplication.screenAt(self.frameGeometry().center())
-            or self.screen()
-            or QApplication.primaryScreen()
+        # Use the same concealed first-frame lifecycle as the About dialog.
+        # The nested event loop created by exec() still services the delayed
+        # reveal, but Windows never receives a visible frame at its default
+        # top-left position before final centring has settled.
+        self._show_internal_dialog_without_flash(
+            box,
+            lambda: self._place_dialog_centered(box),
         )
-        if screen is not None:
-            available = screen.availableGeometry()
-            target.moveLeft(
-                min(
-                    max(target.left(), available.left()),
-                    max(available.left(), available.right() - target.width() + 1),
-                )
-            )
-            target.moveTop(
-                min(
-                    max(target.top(), available.top()),
-                    max(available.top(), available.bottom() - target.height() + 1),
-                )
-            )
-        box.move(target.topLeft())
-        # The global internal-dialog filter normally conceals the first native
-        # frame for a few milliseconds. This safety-critical modal is already
-        # sized and positioned, so make it visible synchronously before exec()
-        # can block interaction with its parent window.
-        box.show()
-        box.setWindowOpacity(1.0)
-        box.raise_()
-        box.activateWindow()
         box._rejected_stl_cancel_button.setFocus(  # type: ignore[attr-defined]
             Qt.FocusReason.OtherFocusReason
         )
@@ -8627,16 +9362,36 @@ class MainWindow(QMainWindow):
             self.stl_validation_details_toggle.show()
         elif result.warning_issues:
             self.stl_validation_message.setText(
-                "Die STL wurde akzeptiert. Hinweis: Es wurden nur "
-                "geringfügige lokale Flächenüberschneidungen erkannt. "
-                "Die übrige Geometrie ist manifold (vollständig "
-                "geschlossen) und konsistent. "
-                "Der Pre-Slice prüft zusätzlich, ob der ausgewählte Slicer "
-                "einen belastbaren G-Code erzeugt."
+                "<p style='margin:0 0 12px 0; font-weight:400;'>"
+                "<span style='color:#176b45;'>✓</span>&nbsp; "
+                "<b>STL-Datei akzeptiert.</b></p>"
+                "<p style='margin:0; font-weight:400;'>"
+                "- Das Mesh ist geschlossen und topologisch manifold.<br>"
+                "- Es wurden keine offenen Kanten erkannt.</p>"
             )
-            self.stl_validation_message.setProperty("severity", "warning")
+            self.stl_validation_message.setProperty("severity", "success")
             self._refresh_widget_style(self.stl_validation_message)
             self.stl_validation_message.show()
+            self.stl_validation_warning_message.setText(
+                "<p style='margin:0 0 12px 0; font-weight:400;'>"
+                "<span style='color:#a86700;'>&#x26A0;</span>&nbsp; "
+                "<b>Hinweis:</b></p>"
+                "<p style='margin:0 0 12px 0; font-weight:400;'>"
+                "- Es wurden geringfügige lokale Flächenüberschneidungen "
+                "erkannt.<br>"
+                "- Diese beeinträchtigen die weitere Verarbeitung "
+                "voraussichtlich nicht.</p>"
+                "<p style='margin:0; font-weight:400;'>"
+                "Im letzten Vorbereitungsschritt prüft ein Pre-Slice "
+                "zusätzlich, ob der ausgewählte Slicer aus der übergebenen "
+                "STL-Datei einen zuverlässig verarbeitbaren G-Code erzeugen "
+                "kann.</p>"
+            )
+            self.stl_validation_warning_message.setProperty(
+                "severity", "warning"
+            )
+            self._refresh_widget_style(self.stl_validation_warning_message)
+            self.stl_validation_warning_message.show()
             self.stl_validation_details.setPlainText(result.technical_summary)
             self.stl_validation_details_toggle.show()
         else:
@@ -8676,10 +9431,8 @@ class MainWindow(QMainWindow):
             state="warning" if user_confirmed else "success",
         )
         self._update_preparation_requirements()
-        self._schedule_slicer_step_open(
-            request_id,
-            self.current_source_path,
-        )
+        self._refresh_preparation_section_layout()
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
         self.validate_form()
 
     def _on_stl_validation_failed(
@@ -8692,6 +9445,10 @@ class MainWindow(QMainWindow):
             return
         self.stl_validation_result = None
         self.source_artifact = None
+        self.stl_validation_warning_message.clear()
+        self.stl_validation_warning_message.setProperty("severity", "neutral")
+        self._refresh_widget_style(self.stl_validation_warning_message)
+        self.stl_validation_warning_message.hide()
         self._analysis_failed = True
         self._workflow_error_message = german_user_message(message)
         self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
@@ -8731,6 +9488,10 @@ class MainWindow(QMainWindow):
         self.stl_validation_message.setProperty("severity", "neutral")
         self._refresh_widget_style(self.stl_validation_message)
         self.stl_validation_message.hide()
+        self.stl_validation_warning_message.clear()
+        self.stl_validation_warning_message.setProperty("severity", "neutral")
+        self._refresh_widget_style(self.stl_validation_warning_message)
+        self.stl_validation_warning_message.hide()
         self.stl_validation_details.clear()
         self.stl_validation_details.hide()
         self.stl_validation_details_toggle.setChecked(False)

@@ -70,6 +70,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
             analysis_complete=True,
         )
         window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         QTest.qWait(600)
         self.app.processEvents()
         self.assertTrue(grid.is_two_column())
