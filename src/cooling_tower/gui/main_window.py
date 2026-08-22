@@ -7933,7 +7933,12 @@ class MainWindow(QMainWindow):
             self._refresh_widget_style(text_label)
             fulfilled += int(complete)
         preparation_complete = preparation_state.preparation_completed
-        self.workflow_group.setCheckable(preparation_complete)
+        preparation_acknowledged = bool(
+            getattr(self.workflow, "preparation_acknowledged", False)
+        )
+        self.workflow_group.setCheckable(
+            preparation_complete and preparation_acknowledged
+        )
         step_requirement_keys = (
             ("source_selected", "source_validated"),
             (

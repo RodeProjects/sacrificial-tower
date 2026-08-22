@@ -622,18 +622,26 @@ class WorkflowController(QObject):
         self.source_card.set_state(SectionState.SUCCESS)
         self.slicer_card.setCheckable(False)
         self.slicer_card.set_state(SectionState.SUCCESS)
+
+        if self.requires_explicit_completion:
+            self.preparation_acknowledged = False
+            card.setCheckable(False)
+            card.set_summary("Bereit zum Abschließen")
+            card.set_summary_note(None)
+            card.set_badge(None)
+            card.setProperty("sourceError", False)
+            card.set_state(SectionState.ACTIVE, icon="⇧")
+            card.set_expanded(True)
+            self._hide_downstream()
+            self._set_stage(WorkflowStage.READY)
+            return
+
         card.setCheckable(True)
         card.set_summary("Vorbereitung abgeschlossen")
         card.set_summary_note(None)
         card.set_badge(None)
         card.setProperty("sourceError", False)
         card.set_state(SectionState.SUCCESS, icon="✓")
-
-        if self.requires_explicit_completion:
-            self.preparation_acknowledged = False
-            self._hide_downstream()
-            self._set_stage(WorkflowStage.READY)
-            return
 
         def reveal_ready_state() -> None:
             self.preparation_acknowledged = True
@@ -657,6 +665,9 @@ class WorkflowController(QObject):
         if card is not None:
             self._workflow_auto_collapsed = True
             card.setCheckable(True)
+            card.set_summary("Vorbereitung abgeschlossen")
+            card.set_summary_note(None)
+            card.set_badge(None)
             card.setProperty("sourceError", False)
             card.set_state(SectionState.SUCCESS, icon="✓")
             card.set_expanded(False)

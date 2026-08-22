@@ -1738,6 +1738,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             verified=True,
             identity_key="testslicer",
             display_name="Testslicer 1.0",
+            can_slice=True,
         )
         window.profile_catalog = SimpleNamespace(
             complete=True,
@@ -1764,9 +1765,17 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                     return_value=True,
                 ),
             ):
+                window.workflow.set_slicer_step_visible(True)
+                window.workflow.source_validation_succeeded(
+                    "modell.stl · Geometrie gültig",
+                    analysis_complete=True,
+                )
+                window.workflow.slicer_succeeded("Testslicer")
                 window._update_preparation_requirements()
 
-                self.assertTrue(window.workflow_group.isCheckable())
+                self.assertFalse(window.workflow_group.isCheckable())
+                self.assertTrue(window.workflow_group.isChecked())
+                self.assertTrue(window.workflow_group.toggle_button.isHidden())
                 self.assertEqual(
                     [
                         icon.text()
@@ -1800,8 +1809,16 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                     ],
                     ["source", "slicer"],
                 )
-                window.workflow_group.setChecked(False)
+                window.preparation_finish_button.click()
+                self.app.processEvents()
+                self.assertTrue(window.workflow_group.isCheckable())
                 self.assertFalse(window.workflow_group.isChecked())
+                self.assertFalse(window.workflow_group.toggle_button.isHidden())
+                self.assertIs(
+                    window.workflow_group.state(),
+                    SectionState.SUCCESS,
+                )
+                self.assertEqual(window.workflow_group.status_icon.text(), "✓")
                 window.analysis_snapshot = None
                 window._update_preparation_requirements()
                 self.assertFalse(window.workflow_group.isCheckable())
@@ -1984,11 +2001,17 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             window.workflow.slicer_succeeded("Testslicer")
             self.app.processEvents()
             self.assertIs(window.workflow.stage, WorkflowStage.READY)
-            self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
+            self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
             self.assertTrue(window.workflow_group.isChecked())
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.toggle_button.isHidden())
+            self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
             self.assertTrue(window.ready_grid.isHidden())
             self.assertTrue(window.workflow.complete_preparation())
             self.app.processEvents()
+            self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
+            self.assertTrue(window.workflow_group.isCheckable())
+            self.assertEqual(window.workflow_group.status_icon.text(), "✓")
             self.assertFalse(window.workflow_group.isChecked())
             self.assertFalse(window.ready_grid.isHidden())
         finally:
