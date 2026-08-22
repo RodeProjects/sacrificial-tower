@@ -6539,6 +6539,13 @@ class MainWindow(QMainWindow):
     def _on_show_all_profiles_toggled(self, checked: bool) -> None:
         if self.selected_slicer_installation is None:
             return
+        # Changing the visible profile scope is a user decision that can
+        # replace the effective profile bundle. A confirmation belonging to
+        # the previously completed preparation must never authorize the next
+        # Pre-Slice implicitly.
+        self._discard_source_preslice("profile_filter_changed")
+        self.confirmed_profile_context = None
+        self.profile_catalog_confirmation = None
         self.profile_filter_label.setText(
             "Profilfilter\nAlle Maschinenprofile werden geladen …"
             if checked
@@ -6849,6 +6856,7 @@ class MainWindow(QMainWindow):
             state="success",
         )
         self._refresh_stl_availability()
+        self._finish_preparation()
 
     def _on_source_preslice_failed(
         self,

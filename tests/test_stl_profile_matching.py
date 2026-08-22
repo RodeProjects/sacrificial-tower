@@ -783,15 +783,60 @@ class StlProfileMatchingTests(unittest.TestCase):
                     )
                 )
             )
-            self.assertTrue(window.ready_grid.isHidden())
-            self.assertTrue(window.preparation_finish_button.isEnabled())
-            self.assertEqual(window.preparation_finish_button.text(), "Fertig")
-            window.preparation_finish_button.click()
-            app.processEvents()
             self.assertFalse(window.ready_grid.isHidden())
+            self.assertTrue(window.workflow_group.isCheckable())
+            self.assertFalse(window.workflow_group.isChecked())
+            self.assertEqual(window.workflow_group.status_icon.text(), "✓")
             self.assertIsNotNone(window.analysis_snapshot)
             self.assertEqual(window.analysis_snapshot.layer_count, 2)
             self.assertIsNotNone(window.prepared_analysis_source)
+
+            self.adapter.slice_started.clear()
+            window.show_all_profiles_checkbox.setChecked(
+                not window.show_all_profiles_checkbox.isChecked()
+            )
+            deadline = time.monotonic() + 10
+            while (
+                window.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+                and time.monotonic() < deadline
+            ):
+                app.processEvents()
+                QTest.qWait(10)
+            app.processEvents()
+            self.assertFalse(self.adapter.slice_started.is_set())
+            self.assertIsNone(window.confirmed_profile_context)
+            self.assertIsNone(window.source_preslice_result)
+            self.assertIs(
+                window.workflow.stage,
+                WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION,
+            )
+            self.assertTrue(window.ready_grid.isHidden())
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.profile_confirm_button.isEnabled())
+            self.assertEqual(
+                window.profile_confirm_button.text(),
+                "Slicer und Profile bestätigen",
+            )
+
+            window.profile_confirm_button.click()
+            app.processEvents()
+            self.assertIsNotNone(window.confirmed_profile_context)
+            self.assertIsNotNone(window.profile_match_result)
+            assert window.profile_match_result is not None
+            self.assertTrue(window.profile_match_result.user_confirmed)
+            deadline = time.monotonic() + 15
+            while (
+                window.source_preslice_result is None
+                and time.monotonic() < deadline
+            ):
+                app.processEvents()
+                QTest.qWait(10)
+            self.assertIsNotNone(window.source_preslice_result)
+            self.assertIs(window.workflow.stage, WorkflowStage.READY)
+            self.assertFalse(window.ready_grid.isHidden())
+            self.assertTrue(window.workflow_group.isCheckable())
+            self.assertFalse(window.workflow_group.isChecked())
             self.assertIn(
                 "Höhe des automatisch geslicten Modells",
                 window.automatic_base_width_label.text(),
