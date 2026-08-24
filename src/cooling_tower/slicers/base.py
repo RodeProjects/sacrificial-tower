@@ -698,6 +698,11 @@ class BaseSlicerAdapter:
         copied_model = work_input / request.model_path.name
         try:
             shutil.copy2(request.model_path, copied_model)
+            # ``TEMP`` may use an 8.3 alias on Windows runners (for example
+            # ``RUNNER~1``).  Resolve the copied input before constructing the
+            # command so the arguments and the PreparedSlice contract expose
+            # the same canonical path.
+            copied_model = copied_model.resolve()
             executable, arguments = self.build_slice_command(
                 request,
                 copied_model,
