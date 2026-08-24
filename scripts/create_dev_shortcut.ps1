@@ -6,7 +6,7 @@ param(
 
 $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 if (-not $ShortcutPath) {
-    $ShortcutPath = Join-Path $resolvedProjectRoot "Start Sacricicial Tower.lnk"
+    $ShortcutPath = Join-Path $resolvedProjectRoot "Sacrificial Tower.lnk"
 }
 $shortcutFullPath = [IO.Path]::GetFullPath($ShortcutPath)
 $pythonwPath = Join-Path $resolvedProjectRoot ".venv\Scripts\pythonw.exe"

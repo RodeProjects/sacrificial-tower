@@ -522,14 +522,14 @@ class ReportingAndLaunchTests(unittest.TestCase):
         shortcut_script = (
             PROJECT_ROOT / "scripts" / "create_dev_shortcut.ps1"
         ).read_text(encoding="utf-8").lower()
-        self.assertIn("start sacricicial tower.lnk", shortcut_script)
+        self.assertIn("sacrificial tower.lnk", shortcut_script)
         self.assertIn(".venv\\scripts\\pythonw.exe", shortcut_script)
         self.assertIn("start_gui.pyw", shortcut_script)
         self.assertIn("app.ico", shortcut_script)
         self.assertIn("createshortcut", shortcut_script)
         self.assertIn("iconlocation", shortcut_script)
         self.assertIn(
-            "/start sacricicial tower.lnk",
+            "/sacrificial tower.lnk",
             (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8").lower(),
         )
 
