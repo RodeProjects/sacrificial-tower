@@ -428,6 +428,7 @@ class CalibrationService:
                     break
                 candidate_project: Path | None = None
                 slice_model_path = candidate_stl
+                use_cli_assemble_list = False
                 profile_for_slice = isolated_profile
                 overrides_for_slice = isolated_overrides
                 if joint_round:
@@ -460,7 +461,7 @@ class CalibrationService:
                                 purpose="calibration",
                                 calibration_round=number,
                             )
-                            project_factory(
+                            project_result = project_factory(
                                 project_request,
                                 joint_source_stl,
                                 candidate_stl,
@@ -471,6 +472,12 @@ class CalibrationService:
                                     settings.simulate_full_tower_infill
                                 ),
                             )
+                            native_slice_input = getattr(
+                                project_result, "slice_input_path", None
+                            )
+                            if native_slice_input is not None:
+                                slice_model_path = Path(native_slice_input).resolve()
+                                use_cli_assemble_list = True
                         else:
                             build_joint_project(
                                 joint_source_stl,
@@ -489,7 +496,8 @@ class CalibrationService:
                         ))
                         terminal_state = CalibrationState.INVALID_GEOMETRY
                         break
-                    slice_model_path = candidate_project
+                    if not use_cli_assemble_list:
+                        slice_model_path = candidate_project
                 signature = self._profile_signature(solid)
                 repeated_signatures[signature] = repeated_signatures.get(signature, 0) + 1
                 notify(
@@ -523,6 +531,7 @@ class CalibrationService:
                         if placement and candidate_project is None else None
                     ),
                     preserve_model_positions=(candidate_project is not None),
+                    use_cli_assemble_list=use_cli_assemble_list,
                     purpose="calibration",
                     calibration_round=number,
                 )
@@ -579,7 +588,11 @@ class CalibrationService:
                                 "Der gemeinsame Slicer-Lauf lieferte keinen G-Code."
                             )
                         validate_tower_infill_adoption(
-                            slice_result.gcode_path
+                            slice_result.gcode_path,
+                            tower_center_xy_mm=(
+                                (placement.center_x_mm, placement.center_y_mm)
+                                if placement is not None else None
+                            ),
                         )
                     except JointProjectError as error:
                         failures.append(CalibrationFailure(

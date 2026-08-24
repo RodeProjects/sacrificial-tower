@@ -24,12 +24,17 @@ COOLING_OVERRIDE_KEYS: Mapping[str, object] = {
     "fan_cooling_layer_time": 0,
 }
 
-FULL_INFILL_OVERRIDE_BY_ADAPTER: Mapping[str, tuple[str, object]] = {
-    "anycubic_slicer_next": ("sparse_infill_density", "100%"),
-    "orca_slicer": ("sparse_infill_density", "100%"),
-    "bambu_studio": ("sparse_infill_density", "100%"),
-    "prusa_slicer": ("fill_density", "100%"),
-    "cura": ("infill_sparse_density", 100),
+FULL_INFILL_OVERRIDES_BY_ADAPTER: Mapping[
+    str, tuple[tuple[str, object], ...]
+] = {
+    "anycubic_slicer_next": (("sparse_infill_density", "100%"),),
+    "orca_slicer": (("sparse_infill_density", "100%"),),
+    "bambu_studio": (
+        ("sparse_infill_density", "100%"),
+        ("sparse_infill_pattern", "zig-zag"),
+    ),
+    "prusa_slicer": (("fill_density", "100%"),),
+    "cura": (("infill_sparse_density", 100),),
 }
 
 
@@ -72,22 +77,22 @@ def build_calibration_profile(
 
     cooling_applied = dict(applied)
     if simulate_full_tower_infill:
-        override = FULL_INFILL_OVERRIDE_BY_ADAPTER.get(
+        overrides = FULL_INFILL_OVERRIDES_BY_ADAPTER.get(
             profile.installation.adapter_id
         )
-        if override is None:
+        if overrides is None:
             raise ValueError(
                 "Für diesen Slicer ist keine sichere temporäre "
                 "100-%-Füllungsüberschreibung definiert."
             )
-        key, replacement = override
-        serialized = _profile_override_value(
-            replacement,
-            values.get(key),
-            orca_family=orca_family,
-        )
-        values[key] = serialized
-        applied[key] = serialized
+        for key, replacement in overrides:
+            serialized = _profile_override_value(
+                replacement,
+                values.get(key),
+                orca_family=orca_family,
+            )
+            values[key] = serialized
+            applied[key] = serialized
 
     if orca_family:
         working_directory.mkdir(parents=True, exist_ok=True)

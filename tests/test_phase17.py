@@ -908,6 +908,9 @@ class Phase17Tests(unittest.TestCase):
             source_kind=SimpleNamespace(value="stl")
         )
         self.assertTrue(
+            window._calibration_config().perform_joint_final_slice
+        )
+        self.assertTrue(
             window._export_calibration_config().perform_joint_final_slice
         )
         self.assertEqual(

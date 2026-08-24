@@ -24,7 +24,7 @@ python -m pip install -r requirements.txt
 ## GUI starten
 
 Für den normalen Start im Entwicklungsordner die Verknüpfung
-`Sacrificial Tower starten.lnk` doppelklicken. Sie startet direkt
+`Start Sacricicial Tower.lnk` doppelklicken. Sie startet direkt
 `.venv\Scripts\pythonw.exe`, zeigt das Tower-Symbol und öffnet ausschließlich
 das Programmfenster. Die lokale, pfadgebundene Verknüpfung wird einmalig mit
 folgendem Befehl erzeugt und nach einem Verschieben des Projektordners erneut

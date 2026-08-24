@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,8 @@ MODEL_RELATIONSHIP_TYPE = (
 )
 MODEL_SETTINGS_PATH = "Metadata/model_settings.config"
 TOWER_INFILL_KEY = "sparse_infill_density"
+TOWER_INFILL_PATTERN_KEY = "sparse_infill_pattern"
+TOWER_FULL_INFILL_PATTERN = "zig-zag"
 RELATIONSHIP_NAMESPACE = (
     "http://schemas.openxmlformats.org/package/2006/relationships"
 )
@@ -29,6 +32,7 @@ CONTENT_TYPES_NAMESPACE = (
 PRODUCTION_NAMESPACE = (
     "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
 )
+BAMBU_STUDIO_NAMESPACE = "http://schemas.bambulab.com/package/2021"
 
 
 class JointProjectError(RuntimeError):
@@ -44,6 +48,7 @@ class JointProjectResult:
     tower_translation_mm: tuple[float, float, float]
     tower_full_infill: bool
     sha256: str
+    slice_input_path: Path | None = None
 
 
 def _load_mesh(path: Path) -> trimesh.Trimesh:
@@ -154,11 +159,15 @@ def _settings_xml(
         tower, "metadata", {"key": "extruder", "value": "1"}
     )
     if tower_full_infill:
-        ElementTree.SubElement(
-            tower,
-            "metadata",
-            {"key": TOWER_INFILL_KEY, "value": "100%"},
-        )
+        for key, value in (
+            (TOWER_INFILL_KEY, "100%"),
+            (TOWER_INFILL_PATTERN_KEY, TOWER_FULL_INFILL_PATTERN),
+        ):
+            ElementTree.SubElement(
+                tower,
+                "metadata",
+                {"key": key, "value": value},
+            )
     tower_part = ElementTree.SubElement(
         tower,
         "part",
@@ -545,6 +554,12 @@ def validate_joint_project(
         raise JointProjectError(
             "Die objektspezifische Turmfüllung wurde nicht korrekt übernommen."
         )
+    expected_pattern = TOWER_FULL_INFILL_PATTERN if tower_full_infill else None
+    if tower_values.get(TOWER_INFILL_PATTERN_KEY) != expected_pattern:
+        raise JointProjectError(
+            "Das mit vollständiger Turmfüllung kompatible Füllmuster wurde "
+            "nicht korrekt übernommen."
+        )
     return source_id, tower_id
 
 
@@ -645,7 +660,8 @@ def finalize_slicer_project(
                 for item in archive.infolist()
             }
             model_name = _model_path(archive)
-        model = ElementTree.fromstring(entries[model_name][1])
+        original_model_xml = entries[model_name][1]
+        model = ElementTree.fromstring(original_model_xml)
         namespace = {"m": MODEL_NAMESPACE}
         model_ids = set(_object_ids(entries[model_name][1]))
         settings = ElementTree.fromstring(entries[MODEL_SETTINGS_PATH][1])
@@ -707,6 +723,11 @@ def finalize_slicer_project(
             for metadata in tuple(object_element.findall("metadata")):
                 if metadata.get("key") == TOWER_INFILL_KEY:
                     object_element.remove(metadata)
+                elif (
+                    metadata.get("key") == TOWER_INFILL_PATTERN_KEY
+                    and identifier == tower_id
+                ):
+                    object_element.remove(metadata)
                 elif metadata.get("key") == "name" and identifier in {
                     source_id, tower_id
                 }:
@@ -716,19 +737,34 @@ def finalize_slicer_project(
                         if identifier == source_id else "Cooling tower",
                     )
             if identifier == tower_id and tower_full_infill:
-                ElementTree.SubElement(
-                    object_element,
-                    "metadata",
-                    {"key": TOWER_INFILL_KEY, "value": "100%"},
-                )
+                for key, value in (
+                    (TOWER_INFILL_KEY, "100%"),
+                    (TOWER_INFILL_PATTERN_KEY, TOWER_FULL_INFILL_PATTERN),
+                ):
+                    ElementTree.SubElement(
+                        object_element,
+                        "metadata",
+                        {"key": key, "value": value},
+                    )
         ElementTree.register_namespace("", MODEL_NAMESPACE)
         ElementTree.register_namespace("p", PRODUCTION_NAMESPACE)
-        ElementTree.register_namespace(
-            "BambuStudio", "http://schemas.bambulab.com/package/2021"
-        )
+        ElementTree.register_namespace("BambuStudio", BAMBU_STUDIO_NAMESPACE)
         model_xml = ElementTree.tostring(
             model, encoding="utf-8", xml_declaration=True
         )
+        # ElementTree drops namespace declarations that are only referenced in
+        # metadata values. Bambu Studio nevertheless uses this declaration to
+        # recognize its native project metadata. Without it, reopening the
+        # finalized project can abort with "No valid nozzle found" even though
+        # the same profiles sliced the native template successfully.
+        if (
+            b"xmlns:BambuStudio=" in original_model_xml
+            and b"xmlns:BambuStudio=" not in model_xml
+        ):
+            model.set("xmlns:BambuStudio", BAMBU_STUDIO_NAMESPACE)
+            model_xml = ElementTree.tostring(
+                model, encoding="utf-8", xml_declaration=True
+            )
         settings_xml = ElementTree.tostring(
             settings, encoding="utf-8", xml_declaration=True
         )
@@ -769,19 +805,28 @@ def finalize_slicer_project(
     )
 
 
-def validate_tower_infill_adoption(gcode_path: str | Path) -> None:
-    """Verify Orca-family object labels never use sparse infill for the tower."""
+def validate_tower_infill_adoption(
+    gcode_path: str | Path,
+    *,
+    tower_center_xy_mm: tuple[float, float] | None = None,
+) -> None:
+    """Verify Orca-family G-code retains a recognizable full-infill tower."""
 
     path = Path(gcode_path).resolve(strict=True)
     inside_tower = False
     tower_block_count = 0
     sparse_tower_infill = False
+    bambu_object_block = False
+    active_label: int | None = None
+    label_bounds: dict[int, list[float]] = {}
+    sparse_labels: set[int] = set()
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for raw_line in handle:
                 line = raw_line.strip()
                 folded = line.casefold()
                 if folded.startswith("exclude_object_start"):
+                    bambu_object_block = False
                     inside_tower = "cooling_tower" in folded
                     if inside_tower:
                         tower_block_count += 1
@@ -789,13 +834,80 @@ def validate_tower_infill_adoption(gcode_path: str | Path) -> None:
                 if folded.startswith("exclude_object_end"):
                     inside_tower = False
                     continue
+                if folded.startswith("; printing object "):
+                    bambu_object_block = True
+                    inside_tower = "cooling_tower" in folded
+                    if inside_tower:
+                        tower_block_count += 1
+                    continue
+                label_match = re.match(
+                    r";\s*start printing object, unique label id:\s*(\d+)",
+                    folded,
+                )
+                if label_match:
+                    active_label = int(label_match.group(1))
+                    bambu_object_block = True
+                    continue
+                if folded.startswith("; stop printing object"):
+                    inside_tower = False
+                    bambu_object_block = False
+                    active_label = None
+                    continue
+                if active_label is not None:
+                    if folded == ";type:sparse infill":
+                        sparse_labels.add(active_label)
+                    x_match = re.search(
+                        r"(?:^|\s)X(-?\d+(?:\.\d+)?)", line, re.IGNORECASE
+                    )
+                    y_match = re.search(
+                        r"(?:^|\s)Y(-?\d+(?:\.\d+)?)", line, re.IGNORECASE
+                    )
+                    if x_match and y_match:
+                        x_value = float(x_match.group(1))
+                        y_value = float(y_match.group(1))
+                        bounds = label_bounds.setdefault(
+                            active_label,
+                            [x_value, x_value, y_value, y_value],
+                        )
+                        bounds[0] = min(bounds[0], x_value)
+                        bounds[1] = max(bounds[1], x_value)
+                        bounds[2] = min(bounds[2], y_value)
+                        bounds[3] = max(bounds[3], y_value)
                 if inside_tower and folded == ";type:sparse infill":
+                    sparse_tower_infill = True
+                    break
+                # Bambu Studio labels even a 100-% zig-zag fill as
+                # ``FEATURE: Sparse infill``.  The successful slice of the
+                # already validated object override is therefore the usable
+                # adoption evidence; treating that label like Orca's
+                # ``TYPE:Sparse infill`` would reject a genuinely solid tower.
+                if (
+                    inside_tower
+                    and not bambu_object_block
+                    and folded == "; feature: sparse infill"
+                ):
                     sparse_tower_infill = True
                     break
     except OSError as error:
         raise JointProjectError(
             "Der gemeinsame G-Code konnte nicht auf die Turmfüllung geprüft werden."
         ) from error
+    if tower_block_count == 0 and tower_center_xy_mm is not None and label_bounds:
+        center_x, center_y = tower_center_xy_mm
+
+        def distance_to_bounds(bounds: list[float]) -> float:
+            delta_x = max(bounds[0] - center_x, 0.0, center_x - bounds[1])
+            delta_y = max(bounds[2] - center_y, 0.0, center_y - bounds[3])
+            return math.hypot(delta_x, delta_y)
+
+        ranked = sorted(
+            (distance_to_bounds(bounds), label)
+            for label, bounds in label_bounds.items()
+        )
+        if len(ranked) == 1 or ranked[0][0] + 1.0 < ranked[1][0]:
+            tower_label = ranked[0][1]
+            tower_block_count = 1
+            sparse_tower_infill = tower_label in sparse_labels
     if tower_block_count == 0:
         raise JointProjectError(
             "Der Slicer hat den Kühlturm im gemeinsamen G-Code nicht eindeutig "

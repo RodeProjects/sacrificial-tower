@@ -22,8 +22,11 @@ from cooling_tower.calibration.gcode_integration import (
     propose_tower_placement,
 )
 from cooling_tower.calibration.joint_project import (
+    BAMBU_STUDIO_NAMESPACE,
     MODEL_SETTINGS_PATH,
+    TOWER_FULL_INFILL_PATTERN,
     TOWER_INFILL_KEY,
+    TOWER_INFILL_PATTERN_KEY,
     build_joint_project,
     finalize_slicer_project,
     JointProjectError,
@@ -207,6 +210,10 @@ class PlacementAndProjectTests(unittest.TestCase):
         }
         self.assertNotIn(TOWER_INFILL_KEY, values[2])
         self.assertEqual(values[4][TOWER_INFILL_KEY], "100%")
+        self.assertEqual(
+            values[4][TOWER_INFILL_PATTERN_KEY],
+            TOWER_FULL_INFILL_PATTERN,
+        )
 
     def test_slicer_project_finalization_reassigns_positions_by_role(self) -> None:
         source = self.root / "source.stl"
@@ -247,6 +254,73 @@ class PlacementAndProjectTests(unittest.TestCase):
             validate_joint_project(final, tower_full_infill=False),
             (2, 4),
         )
+        with zipfile.ZipFile(final) as archive:
+            config = ElementTree.fromstring(archive.read(MODEL_SETTINGS_PATH))
+        tower_values = {
+            str(metadata.get("key")): str(metadata.get("value"))
+            for item in config.findall("object")
+            if int(str(item.get("id"))) == result.tower_object_id
+            for metadata in item.findall("metadata")
+        }
+        self.assertNotIn(TOWER_INFILL_PATTERN_KEY, tower_values)
+
+    def test_slicer_project_finalization_preserves_bambu_namespace(self) -> None:
+        source = self.root / "source.stl"
+        tower = self.root / "tower.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source)
+        trimesh.creation.cylinder(radius=4, height=5, sections=16).export(tower)
+        template = self.root / "bambu_template.3mf"
+        placement = TowerPlacement(
+            80.0, 80.0, 4.0, BedBounds(0, 200, 0, 200), 25.0
+        )
+        build_joint_project(
+            source,
+            tower,
+            template,
+            occupied=OccupiedBounds(40, 50, 40, 50),
+            placement=placement,
+            tower_full_infill=True,
+        )
+        with zipfile.ZipFile(template, "r") as archive:
+            entries = {
+                item.filename: (item, archive.read(item.filename))
+                for item in archive.infolist()
+            }
+        model_name = "3D/3dmodel.model"
+        item, model_xml = entries[model_name]
+        model_xml = model_xml.replace(
+            b"<model ",
+            (
+                b'<model xmlns:BambuStudio="'
+                + BAMBU_STUDIO_NAMESPACE.encode("ascii")
+                + b'" '
+            ),
+            1,
+        )
+        entries[model_name] = (item, model_xml)
+        with zipfile.ZipFile(template, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, (entry, data) in entries.items():
+                archive.writestr(entry, data)
+
+        finalized = self.root / "bambu_finalized.3mf"
+        finalize_slicer_project(
+            template,
+            source,
+            tower,
+            finalized,
+            occupied=OccupiedBounds(40, 50, 40, 50),
+            placement=placement,
+            tower_full_infill=True,
+        )
+
+        with zipfile.ZipFile(finalized) as archive:
+            finalized_model = archive.read(model_name)
+        self.assertIn(
+            b'xmlns:BambuStudio="'
+            + BAMBU_STUDIO_NAMESPACE.encode("ascii")
+            + b'"',
+            finalized_model,
+        )
 
     def test_tower_infill_validation_accepts_solid_and_rejects_sparse(self) -> None:
         solid = self.root / "solid.gcode"
@@ -271,6 +345,51 @@ class PlacementAndProjectTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(JointProjectError, "Sparse Infill"):
             validate_tower_infill_adoption(sparse)
+
+        bambu = self.root / "bambu_solid.gcode"
+        bambu.write_text(
+            "; start printing object, unique label id: 58\n"
+            "; printing object Cooling_tower_id_0_copy_0\n"
+            "; FEATURE: Sparse infill\n"
+            "; LINE_WIDTH: 0.45\n"
+            "G1 X1 Y1 E1\n"
+            "; stop printing object, unique label id: 58\n",
+            encoding="utf-8",
+        )
+        validate_tower_infill_adoption(bambu)
+
+    def test_bambu_numeric_object_label_is_matched_to_tower_position(self) -> None:
+        positioned = self.root / "bambu_positioned.gcode"
+        positioned.write_text(
+            "; start printing object, unique label id: 45\n"
+            "G1 X120 Y120 E1\n"
+            "G1 X130 Y130 E1\n"
+            "; stop printing object, unique label id: 45\n"
+            "; start printing object, unique label id: 46\n"
+            "G1 X89.5 Y149.5 E1\n"
+            "; FEATURE: Sparse infill\n"
+            "G1 X90.5 Y150.5 E1\n"
+            "; stop printing object, unique label id: 46\n",
+            encoding="utf-8",
+        )
+
+        validate_tower_infill_adoption(
+            positioned,
+            tower_center_xy_mm=(90.0, 150.0),
+        )
+
+        rejected = self.root / "bambu_positioned_sparse.gcode"
+        rejected.write_text(
+            positioned.read_text(encoding="utf-8").replace(
+                "; FEATURE: Sparse infill", ";TYPE:Sparse infill"
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(JointProjectError, "Sparse Infill"):
+            validate_tower_infill_adoption(
+                rejected,
+                tower_center_xy_mm=(90.0, 150.0),
+            )
 
 
 if __name__ == "__main__":

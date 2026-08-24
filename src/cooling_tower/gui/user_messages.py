@@ -110,6 +110,12 @@ def german_user_message(message: object) -> str:
     text = str(message).strip()
     if not text:
         return "Die angeforderte Aktion konnte nicht abgeschlossen werden."
+    folded = text.casefold()
+    if "no valid nozzle found" in folded:
+        return (
+            "Bambu Studio konnte dem gemeinsamen Projekt keine gültige "
+            "Düse zuordnen."
+        )
 
     windows_status = _WINDOWS_STATUS_PATTERN.search(text)
     if windows_status is not None:

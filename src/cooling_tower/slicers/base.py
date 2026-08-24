@@ -73,6 +73,11 @@ def _slicer_output_failure_explanation(outcome: ProcessOutcome) -> str | None:
     output = f"{outcome.stderr}\n{outcome.stdout}".casefold()
     if not output.strip():
         return None
+    if "no valid nozzle found" in output:
+        return (
+            "Bambu Studio konnte dem gemeinsamen Projekt keine gültige "
+            "Düse zuordnen."
+        )
     if "process not compatible with printer" in output or (
         "not compatible" in output
         and "process" in output

@@ -276,6 +276,8 @@ class PreviewExportResult:
     source_sha256: str
     output_sha256: str
     project_path: Path | None = None
+    emergency_fallback_used: bool = False
+    primary_failure_reason: str | None = None
 
     @property
     def technical_report_path(self) -> Path:

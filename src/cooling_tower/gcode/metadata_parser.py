@@ -332,6 +332,8 @@ class GCodeMetadataCollector:
         self.source_path = Path(source_path)
         self._values: list[MetadataValue] = []
         self._typed_config: list[TypedConfigValue] = []
+        self._captured_standalone_config_keys: set[str] = set()
+        self._captured_block_config_keys: set[str] = set()
         self._slicer = SlicerIdentity()
         self._in_config_block = False
         self._acceleration_commands_seen = False
@@ -433,6 +435,25 @@ class GCodeMetadataCollector:
         )
         if not should_capture:
             return
+
+        if self._in_config_block:
+            # A delimited slicer configuration is authoritative. It may occur
+            # after a short standalone header, so block values must still be
+            # allowed to supersede an earlier declaration.
+            self._captured_block_config_keys.add(normalized_key)
+        else:
+            # Standalone keys are header metadata, not a stream of runtime
+            # telemetry. Bambu Studio repeats ``LAYER_HEIGHT`` at every layer
+            # and its accumulated Z arithmetic can render values such as
+            # 0.179993 or 0.180008 for a nominal 0.18 mm profile. Retaining
+            # those repetitions would replace the exact profile value and
+            # corrupt both matching and the post-slice safety check.
+            if (
+                normalized_key in self._captured_standalone_config_keys
+                or normalized_key in self._captured_block_config_keys
+            ):
+                return
+            self._captured_standalone_config_keys.add(normalized_key)
 
         source_kind = (
             MetadataSourceKind.FOOTER_CONFIG

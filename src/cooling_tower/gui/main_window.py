@@ -358,6 +358,50 @@ def _format_footer_notice(messages: list[str]) -> str:
     )
 
 
+def _concise_operation_failure_reason(message: object) -> str:
+    """Return a compact cause for the persistent footer status."""
+
+    raw = " ".join(str(message).split())
+    folded = raw.casefold()
+    if "sparse_infill_pattern" in folded and "100" in folded:
+        return (
+            "Das gewählte Füllmuster ist mit 100 % Turmfüllung nicht "
+            "kompatibel."
+        )
+    rendered = " ".join(german_user_message(raw).split())
+    if not rendered:
+        return "Die Verarbeitung konnte nicht abgeschlossen werden."
+    first_sentence = rendered.split(". ", 1)[0].rstrip(".") + "."
+    if len(first_sentence) <= 150:
+        return first_sentence
+    return "Die Verarbeitung konnte nicht abgeschlossen werden."
+
+
+def _supports_bambu_multinozzle_emergency_fallback(request: object) -> bool:
+    """Whether a failed Bambu joint slice may use the STL emergency path."""
+
+    adapter = getattr(request, "adapter", None)
+    if getattr(adapter, "adapter_id", "") != "bambu_studio":
+        return False
+    profile = getattr(request, "effective_profile", None)
+    values = getattr(profile, "effective_values", {})
+    try:
+        raw_nozzles = values.get("nozzle_diameter")
+    except AttributeError:
+        return False
+    if isinstance(raw_nozzles, (list, tuple)):
+        nozzles = tuple(raw_nozzles)
+    elif isinstance(raw_nozzles, str):
+        nozzles = tuple(
+            item.strip()
+            for item in re.split(r"[,;]", raw_nozzles)
+            if item.strip()
+        )
+    else:
+        nozzles = (raw_nozzles,) if raw_nozzles is not None else ()
+    return len(nozzles) > 1
+
+
 def _format_grouped_footer_notice(
     general_messages: list[str],
     field_groups: list[tuple[str, list[str]]],
@@ -1170,6 +1214,7 @@ class MainWindow(QMainWindow):
         self._slicer_prediction_estimate_s: float | None = None
         self._slicer_prediction_status = ""
         self._export_request_id = 0
+        self._bambu_multinozzle_tower_only_export_active = False
         self.last_export_result: PreviewExportResult | None = None
         self._latest_export_directory: Path | None = None
         self._latest_export_root_text: str | None = None
@@ -3473,12 +3518,23 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.status_label = QLabel("Bitte STL auswählen")
         self.status_label.setObjectName("statusLabel")
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.status_icon_label = QLabel("⇧")
         self.status_icon_label.setObjectName("progressStatusIcon")
         self.status_icon_label.setProperty("prominent", True)
         self.result_label = QLabel("")
         self.result_label.setObjectName("resultLabel")
         self.result_label.setWordWrap(True)
+        self.result_label.setMinimumWidth(0)
+        self.result_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.settings_load_notice_label = QLabel("")
         self.settings_load_notice_label.setObjectName(
             "settingsLoadNoticeLabel"
@@ -3497,7 +3553,7 @@ class MainWindow(QMainWindow):
         self.settings_load_notice_panel.hide()
         self.warning_text = AutoHeightTextEdit(
             minimum_height=24,
-            maximum_height=112,
+            maximum_height=104,
         )
         self.warning_text.setObjectName("warningText")
         self.warning_text.hide()
@@ -3587,11 +3643,11 @@ class MainWindow(QMainWindow):
         self.preview_iteration_slider.setValue(DEFAULT_PREVIEW_ITERATIONS)
         self.preview_iteration_slider.setToolTip(
             "Legt fest, wie viele schnelle Kühlturm-Abgleichläufe die Vorschau "
-            "verwendet. Beim Export wird der aktuelle Kandidat gemeinsam mit "
-            "dem Objekt geslicet; nur bei relevanter Abweichung folgt höchstens "
-            "eine gemeinsame Korrekturprüfung. "
+            "verwendet. Bei STL-Quellen wird der aktuelle Kandidat anschließend "
+            "gemeinsam mit dem Objekt geslicet. Ein aktueller, gemeinsam "
+            "gesliceter Vorschaukandidat wird beim Export unverändert übernommen. "
             "Mehr Durchläufe erhöhen die Vorschauqualität und benötigen etwas mehr "
-            "Zeit, erhöhen aber nicht mehr die Zahl der teuren Objekt-Slices."
+            "Zeit."
         )
         self.preview_iteration_slider.setAccessibleName(
             "Slicer-Durchläufe für Vorschau und Export"
@@ -4652,13 +4708,17 @@ class MainWindow(QMainWindow):
                     section.setChecked(bool(expanded[name]))
 
     def _calibration_config(self) -> CalibrationConfig:
+        joint_slice_available = bool(
+            self.source_artifact is not None
+            and self.source_artifact.source_kind.value == "stl"
+        )
         return CalibrationConfig(
             mode=CalibrationMode.STL,
             maximum_iterations=self.preview_iterations,
             object_clearance_mm=(
                 self.minimum_object_tower_distance_spin.value()
             ),
-            perform_joint_final_slice=False,
+            perform_joint_final_slice=joint_slice_available,
         )
 
     @property
@@ -4690,9 +4750,9 @@ class MainWindow(QMainWindow):
         noun = "Durchlauf" if iterations == 1 else "Durchläufe"
         self.preview_iteration_count_label.setText(f"{iterations} {noun}")
         self.preview_iteration_slider.setAccessibleDescription(
-            f"Aktuell sind {iterations} schnelle Kühlturm-{noun} für die "
-            "Vorschau eingestellt. Der Export ergänzt einen gemeinsamen "
-            "Präzisionsslice."
+            f"Aktuell sind {iterations} Slicer-{noun} eingestellt. Bei STL-"
+            "Quellen schließt die Vorschau mit einem gemeinsamen "
+            "Präzisionsslice von Objekt und Kühlturm ab."
         )
 
     def _on_preview_iterations_changed(self, _value: int) -> None:
@@ -4705,17 +4765,12 @@ class MainWindow(QMainWindow):
         self._update_section_summaries()
 
     def _export_calibration_config(self) -> CalibrationConfig:
-        joint_slice_available = bool(
-            self.source_artifact is not None
-            and self.source_artifact.source_kind.value == "stl"
-        )
-        return CalibrationConfig(
-            mode=CalibrationMode.STL,
-            maximum_iterations=self.preview_iterations,
-            object_clearance_mm=(
-                self.minimum_object_tower_distance_spin.value()
-            ),
-            perform_joint_final_slice=joint_slice_available,
+        return self._calibration_config()
+
+    def _emergency_fallback_calibration_config(self) -> CalibrationConfig:
+        return replace(
+            self._calibration_config(),
+            perform_joint_final_slice=False,
         )
 
     def _profile_origin_text(self, result: ProfileMatchResult) -> str:
@@ -7935,11 +7990,42 @@ class MainWindow(QMainWindow):
             else MAIN_FOOTER_MAX_HEIGHT_PX
         )
         left_width = max(120, self.footer_messages_scroll.viewport().width())
+        status_text_width = max(
+            1,
+            left_width - self.status_icon_label.sizeHint().width() - 6,
+        )
+        for label, available_width in (
+            (self.status_label, status_text_width),
+            (self.result_label, left_width),
+        ):
+            label.setMinimumHeight(0)
+            if label.text():
+                label.setMinimumHeight(
+                    max(
+                        label.minimumSizeHint().height(),
+                        label.heightForWidth(available_width),
+                    )
+                )
+        self.footer_status_widget.setMinimumHeight(0)
+        status_natural_height = max(
+            0,
+            self.footer_status_layout.heightForWidth(left_width)
+            if self.footer_status_layout.hasHeightForWidth()
+            else self.footer_status_layout.sizeHint().height(),
+        )
+        # A word-wrapped QLabel reports its height-for-width correctly, but a
+        # nested QWidget/QVBoxLayout can still be compressed back to one line
+        # by the surrounding scroll-area layout. Keep the calculated status
+        # block height so neither the main status nor its explanation is cut.
+        self.footer_status_widget.setMinimumHeight(status_natural_height)
+        self.footer_messages_layout.invalidate()
+        self.footer_messages_layout.activate()
         left_natural_height = max(
             0,
             self.footer_messages_layout.heightForWidth(left_width)
             if self.footer_messages_layout.hasHeightForWidth()
             else self.footer_messages_layout.sizeHint().height(),
+            self.footer_messages_layout.minimumSize().height(),
         )
         right_natural_height = max(
             0, self.footer_action_layout.sizeHint().height()
@@ -9551,8 +9637,8 @@ class MainWindow(QMainWindow):
                 "<span style='color:#176b45;'>✓</span>&nbsp; "
                 "<b>STL-Datei akzeptiert.</b></p>"
                 "<p style='margin:0; font-weight:400;'>"
-                "- Das Mesh ist geschlossen und topologisch manifold.<br>"
-                "- Es wurden keine offenen Kanten erkannt.</p>"
+                "&#x2022; Das Mesh ist geschlossen und topologisch manifold.<br>"
+                "&#x2022; Es wurden keine offenen Kanten erkannt.</p>"
             )
             self.stl_validation_message.setProperty("severity", "success")
             self._refresh_widget_style(self.stl_validation_message)
@@ -9562,9 +9648,9 @@ class MainWindow(QMainWindow):
                 "<span style='color:#a86700;'>&#x26A0;</span>&nbsp; "
                 "<b>Hinweis:</b></p>"
                 "<p style='margin:0 0 12px 0; font-weight:400;'>"
-                "- Es wurden geringfügige lokale Flächenüberschneidungen "
+                "&#x2022; Es wurden geringfügige lokale Flächenüberschneidungen "
                 "erkannt.<br>"
-                "- Diese beeinträchtigen die weitere Verarbeitung "
+                "&#x2022; Diese beeinträchtigen die weitere Verarbeitung "
                 "voraussichtlich nicht.</p>"
                 "<p style='margin:0; font-weight:400;'>"
                 "Im letzten Vorbereitungsschritt prüft ein Pre-Slice "
@@ -11694,7 +11780,10 @@ class MainWindow(QMainWindow):
         self.progress_bar.setProperty("task", "default")
         self._refresh_widget_style(self.progress_bar)
         self._set_main_status(
-            "Vorschau fehlgeschlagen", icon="✕", state="error"
+            "Vorschau fehlgeschlagen: "
+            f"{_concise_operation_failure_reason(message)}",
+            icon="✕",
+            state="error",
         )
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -11703,14 +11792,26 @@ class MainWindow(QMainWindow):
         self._refresh_phase17_actions()
 
     def start_export(self) -> None:
+        self._bambu_multinozzle_tower_only_export_active = False
         self.validate_form()
         self._refresh_stl_availability()
         if not self.export_button.isEnabled():
             return
         try:
             preview_request = self._current_preview_request()
+            fallback_available = (
+                _supports_bambu_multinozzle_emergency_fallback(preview_request)
+            )
             request = self._current_preview_request(
                 calibration_config=self._export_calibration_config(),
+            )
+            fallback_request = (
+                self._current_preview_request(
+                    calibration_config=(
+                        self._emergency_fallback_calibration_config()
+                    ),
+                )
+                if fallback_available else None
             )
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self.result_label.setText(german_user_message(error))
@@ -11779,6 +11880,15 @@ class MainWindow(QMainWindow):
             self.export_service,
             self.preview_service,
             seed_preview=export_seed,
+            fallback_preview=(
+                preview
+                if fallback_request is not None
+                and preview_matches_current_settings
+                and preview is not None
+                and fallback_request.signature() == preview.request_signature
+                else None
+            ),
+            fallback_request=fallback_request,
         )
         worker.progress.connect(self._on_export_progress)
         worker.succeeded.connect(self._on_export_succeeded)
@@ -11871,7 +11981,23 @@ class MainWindow(QMainWindow):
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(True)
-        if result.slicer_optimized and not result.calibrated:
+        self._bambu_multinozzle_tower_only_export_active = bool(
+            getattr(result, "emergency_fallback_used", False)
+        )
+        if self._bambu_multinozzle_tower_only_export_active:
+            fallback_cause = _concise_operation_failure_reason(
+                getattr(result, "primary_failure_reason", "")
+            )
+            self.warning_text.setPlainText(
+                _format_footer_notice([
+                    "Gemeinsamer Bambu-Slice fehlgeschlagen: "
+                    f"{fallback_cause}",
+                    "Der geprüfte Kühlturm wurde deshalb als STL exportiert; "
+                    "bitte Objekt und Kühlturm in Bambu Studio gemeinsam slicen.",
+                ])
+            )
+            self.warning_text.show()
+        elif result.slicer_optimized and not result.calibrated:
             self.warning_text.setPlainText(
                 _format_footer_notice([
                     "Die Sliceroptimierung hat die Zielzeit nicht vollständig "
@@ -11882,6 +12008,7 @@ class MainWindow(QMainWindow):
             self.warning_text.show()
         self._refresh_issue_panels()
         self._save_user_settings()
+        self._bambu_multinozzle_tower_only_export_active = False
 
     def _on_export_failed(
         self,
@@ -11896,9 +12023,13 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self._set_main_status(
-            "Export fehlgeschlagen", icon="✕", state="error"
+            "Export fehlgeschlagen: "
+            f"{_concise_operation_failure_reason(message)}",
+            icon="✕",
+            state="error",
         )
         self.result_label.setText(german_user_message(message))
+        self._bambu_multinozzle_tower_only_export_active = False
         self._refresh_phase17_actions()
 
     def _write_gui_error_log(

@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import PropertyMock, patch
+from unittest.mock import Mock, PropertyMock, call, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,10 +24,15 @@ from PySide6.QtWidgets import QApplication, QLabel
 
 from cooling_tower.application import append_runtime_diagnostic
 from cooling_tower.gui.design_tokens import METRICS
-from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.main_window import (
+    MainWindow,
+    _concise_operation_failure_reason,
+    _supports_bambu_multinozzle_emergency_fallback,
+)
+from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.widgets import FooterNoticeDropdown
 from cooling_tower.models import SlicerFamily
-from cooling_tower.preview import OutputMode
+from cooling_tower.preview import OutputMode, PreviewExportResult
 from cooling_tower.slicers.base import classify_profile_source
 from cooling_tower.slicers import (
     SlicerCapability,
@@ -63,6 +68,244 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "referenz.stl geprüft",
             analysis_complete=True,
         )
+
+    def test_preview_and_export_failures_have_short_visible_causes(self) -> None:
+        message = (
+            "Das gemeinsame Objekt-/Turm-Projekt konnte nicht sicher geslicet "
+            "werden. Slicer-Ausgabe: sparse_infill_pattern: grid doesn't work "
+            "at 100%% density"
+        )
+        reason = _concise_operation_failure_reason(message)
+        self.assertEqual(
+            reason,
+            "Das gewählte Füllmuster ist mit 100 % Turmfüllung nicht kompatibel.",
+        )
+
+        window = self.window()
+        try:
+            window._preview_request_id = 7
+            window._on_preview_failed(7, message, "Technische Details")
+            self.assertEqual(
+                window.status_label.text(),
+                f"Vorschau fehlgeschlagen: {reason}",
+            )
+
+            window._export_request_id = 8
+            with patch.object(window, "_write_gui_error_log"):
+                window._on_export_failed(8, message, "Technische Details")
+            self.assertEqual(
+                window.status_label.text(),
+                f"Export fehlgeschlagen: {reason}",
+            )
+        finally:
+            window.close()
+
+    def test_bambu_nozzle_failure_has_specific_short_german_cause(self) -> None:
+        message = (
+            "Das gemeinsame Objekt-/Turm-Projekt konnte nicht sicher geslicet "
+            "werden. Slicer-Ausgabe: No valid nozzle found. Please check "
+            "nozzle count."
+        )
+        expected = (
+            "Bambu Studio konnte dem gemeinsamen Projekt keine gültige "
+            "Düse zuordnen."
+        )
+        self.assertEqual(_concise_operation_failure_reason(message), expected)
+
+        window = self.window()
+        try:
+            window._export_request_id = 9
+            with patch.object(window, "_write_gui_error_log"):
+                window._on_export_failed(9, message, "Technische Details")
+            self.assertEqual(
+                window.status_label.text(),
+                f"Export fehlgeschlagen: {expected}",
+            )
+            self.assertEqual(window.result_label.text(), expected)
+        finally:
+            window.close()
+
+    def test_bambu_multinozzle_export_attempts_joint_slice_before_fallback(self) -> None:
+        preview_request = SimpleNamespace(
+            adapter=SimpleNamespace(adapter_id="bambu_studio"),
+            effective_profile=SimpleNamespace(
+                effective_values={"nozzle_diameter": ["0.4", "0.4"]}
+            ),
+            signature=lambda: "current",
+        )
+        export_request = SimpleNamespace(signature=lambda: "export")
+        fallback_request = SimpleNamespace(signature=lambda: "fallback")
+        self.assertTrue(
+            _supports_bambu_multinozzle_emergency_fallback(preview_request)
+        )
+        single_nozzle = SimpleNamespace(
+            adapter=preview_request.adapter,
+            effective_profile=SimpleNamespace(
+                effective_values={"nozzle_diameter": ["0.4"]}
+            ),
+        )
+        self.assertFalse(
+            _supports_bambu_multinozzle_emergency_fallback(single_nozzle)
+        )
+
+        window = self.window()
+        preview = SimpleNamespace(request_signature="current")
+        window.current_preview = preview
+        window.preview_state = window.preview_state.CURRENT
+        window.export_button.setEnabled(True)
+        export_config = object()
+        fallback_config = object()
+        try:
+            with (
+                patch.object(window, "validate_form"),
+                patch.object(window, "_refresh_stl_availability"),
+                patch.object(
+                    window,
+                    "_current_preview_request",
+                    side_effect=[
+                        preview_request,
+                        export_request,
+                        fallback_request,
+                    ],
+                ) as current_request,
+                patch.object(
+                    window,
+                    "_export_calibration_config",
+                    return_value=export_config,
+                ),
+                patch.object(
+                    window,
+                    "_emergency_fallback_calibration_config",
+                    return_value=fallback_config,
+                ),
+                patch.object(
+                    window.background_job_manager,
+                    "start_job",
+                ) as start_job,
+            ):
+                window.start_export()
+
+            self.assertEqual(
+                current_request.call_args_list,
+                [
+                    call(),
+                    call(calibration_config=export_config),
+                    call(calibration_config=fallback_config),
+                ],
+            )
+            worker = start_job.call_args.kwargs["worker"]
+            self.assertIsNone(worker.preview)
+            self.assertIs(worker.request, export_request)
+            self.assertIsNone(worker.fallback_preview)
+            self.assertIs(worker.fallback_request, fallback_request)
+            self.assertFalse(window._bambu_multinozzle_tower_only_export_active)
+            self.assertIn("gemeinsamen Präzisionsslice", window.status_label.text())
+        finally:
+            window.current_preview = None
+            window.close()
+
+    def test_export_worker_uses_stl_fallback_only_after_primary_failure(self) -> None:
+        primary_request = SimpleNamespace()
+        fallback_request = SimpleNamespace()
+        preview = SimpleNamespace()
+        fallback_result = PreviewExportResult(
+            output_mode=OutputMode.STL,
+            run_directory=self.root,
+            output_path=self.root / "tower.stl",
+            report_path=self.root / "report.json",
+            user_report_path=self.root / "summary.txt",
+            calibrated=False,
+            slicer_optimized=True,
+            minimum_verified_layer_time_s=None,
+            source_sha256="source",
+            output_sha256="tower",
+        )
+        export_service = Mock()
+        export_service.export.side_effect = [
+            RuntimeError("No valid nozzle found. Please check nozzle count."),
+            fallback_result,
+        ]
+        worker = ExportWorker(
+            4,
+            preview,
+            primary_request,
+            self.root,
+            export_service,
+            Mock(),
+            fallback_preview=preview,
+            fallback_request=fallback_request,
+        )
+        succeeded: list[PreviewExportResult] = []
+        failed: list[str] = []
+        worker.succeeded.connect(lambda _request_id, result: succeeded.append(result))
+        worker.failed.connect(
+            lambda _request_id, message, _details: failed.append(message)
+        )
+
+        worker.run()
+
+        self.assertFalse(failed)
+        self.assertEqual(len(succeeded), 1)
+        self.assertTrue(succeeded[0].emergency_fallback_used)
+        self.assertIn("No valid nozzle", succeeded[0].primary_failure_reason)
+        self.assertEqual(
+            [item.args[1] for item in export_service.export.call_args_list],
+            [primary_request, fallback_request],
+        )
+
+    def test_footer_status_and_result_wrap_at_wide_layout_boundary(self) -> None:
+        window = self.window()
+        try:
+            window.resize(1182, 900)
+            window.show()
+            long_status = (
+                "Export fehlgeschlagen: Der gemeinsame Präzisionslauf konnte "
+                "die ausgewählten Projekt- und Profildaten nicht übernehmen."
+            )
+            long_result = (
+                "Bambu Studio konnte dem gemeinsamen Projekt keine gültige "
+                "Düse zuordnen; die Quelldatei selbst ist weiterhin gültig."
+            )
+            window._set_main_status(long_status, icon="✕", state="error")
+            window.result_label.setText(long_result)
+            window._schedule_footer_height_update()
+            for _ in range(8):
+                self.app.processEvents()
+
+            for label in (window.status_label, window.result_label):
+                self.assertTrue(label.wordWrap())
+                self.assertGreater(label.width(), 0)
+                required_height = label.heightForWidth(label.width())
+                self.assertGreater(
+                    required_height,
+                    label.fontMetrics().height(),
+                )
+                self.assertGreaterEqual(label.height(), required_height)
+            self.assertLessEqual(
+                window.footer_messages_content.width(),
+                window.footer_messages_scroll.viewport().width(),
+            )
+        finally:
+            window.close()
+
+    def test_step_one_stl_hints_are_unboxed_but_keep_state_colours(self) -> None:
+        stylesheet = (
+            PROJECT_ROOT / "src" / "cooling_tower" / "gui" / "styles.qss"
+        ).read_text(encoding="utf-8")
+        for severity, colour in (
+            ("error", "#8f2118"),
+            ("warning", "#76520b"),
+            ("success", "#145c3c"),
+        ):
+            block_start = stylesheet.index(
+                f'QLabel#stlValidationMessage[severity="{severity}"]'
+            )
+            block = stylesheet[
+                block_start:stylesheet.index("}", block_start)
+            ]
+            self.assertIn("background: transparent;", block)
+            self.assertIn("border: none;", block)
+            self.assertIn(f"color: {colour};", block)
 
     @staticmethod
     def write_export_folder(

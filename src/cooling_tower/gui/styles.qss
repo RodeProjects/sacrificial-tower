@@ -1656,25 +1656,22 @@ QFrame#sourceDropZone QLabel[replacementHint="true"] {
 
 QLabel#stlValidationMessage[severity="error"],
 QLabel#stlValidationWarningMessage[severity="error"] {
-    background: #fff2f0;
-    border: 1px solid #f0b8b2;
-    border-radius: 6px;
+    background: transparent;
+    border: none;
     color: #8f2118;
 }
 
 QLabel#stlValidationMessage[severity="warning"],
 QLabel#stlValidationWarningMessage[severity="warning"] {
-    background: #fff8e8;
-    border: 1px solid #e7c875;
-    border-radius: 6px;
+    background: transparent;
+    border: none;
     color: #76520b;
 }
 
 QLabel#stlValidationMessage[severity="success"],
 QLabel#stlValidationWarningMessage[severity="success"] {
-    background: #edf8f2;
-    border: 1px solid #92c9ad;
-    border-radius: 6px;
+    background: transparent;
+    border: none;
     color: #145c3c;
 }
 

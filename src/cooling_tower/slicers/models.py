@@ -194,6 +194,7 @@ class SliceRequest:
     expected_layer_heights_mm: tuple[float, ...] = ()
     placement_xy_mm: tuple[float, float] | None = None
     preserve_model_positions: bool = False
+    use_cli_assemble_list: bool = False
     purpose: str = "normal"
     calibration_round: int | None = None
     cancellation_event: Event | None = field(

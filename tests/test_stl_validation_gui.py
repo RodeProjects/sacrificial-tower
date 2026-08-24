@@ -401,9 +401,13 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIn("✓", success_notice)
             self.assertIn("<b>STL-Datei akzeptiert.</b>", success_notice)
             self.assertEqual(success_notice.count("<b>"), 1)
+            self.assertIn("&#x2022;", success_notice)
+            self.assertNotIn("- Das Mesh", success_notice)
             self.assertIn("&#x26A0;", warning_notice)
             self.assertIn("<b>Hinweis:</b>", warning_notice)
             self.assertEqual(warning_notice.count("<b>"), 1)
+            self.assertIn("&#x2022;", warning_notice)
+            self.assertNotIn("- Es wurden", warning_notice)
             self.assertIn(
                 "Es wurden geringfügige lokale Flächenüberschneidungen erkannt.",
                 warning_notice,

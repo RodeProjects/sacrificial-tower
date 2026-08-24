@@ -619,6 +619,75 @@ class SourcePreSliceServiceTests(unittest.TestCase):
                 adapter=FakeSliceAdapter(),
             )
 
+    def test_bambu_runtime_layer_rounding_keeps_confirmed_profile_height(self) -> None:
+        selected = self.match.selected
+        assert selected is not None
+        for index, (configured, runtime) in enumerate(
+            (
+                ("0.16", "0.160007"),
+                ("0.17", "0.169998"),
+                ("0.18", "0.180008"),
+                ("0.20", "0.200012"),
+            )
+        ):
+            with self.subTest(configured=configured, runtime=runtime):
+                path = self.root / f"bambu_rounding_{index}.gcode"
+                path.write_text(
+                    printable_gcode(
+                        printer_settings_id=selected.machine.name,
+                    )
+                    + "\n".join(
+                        (
+                            "; CONFIG_BLOCK_START = begin",
+                            f"; layer_height = {configured}",
+                            "; CONFIG_BLOCK_END = end",
+                            "; CHANGE_LAYER",
+                            f"; LAYER_HEIGHT: {runtime}",
+                            "",
+                        )
+                    ),
+                    encoding="utf-8",
+                )
+                snapshot = GCodeAnalysisService().analyze(path, force=True)
+                effective = replace(
+                    selected.effective_profile,
+                    effective_values={
+                        **selected.effective_profile.effective_values,
+                        "layer_height": configured,
+                    },
+                )
+                SourcePreSliceService._verify_generated_metadata(
+                    snapshot,
+                    replace(
+                        self.match,
+                        selected=replace(
+                            selected,
+                            effective_profile=effective,
+                        ),
+                    ),
+                )
+
+    def test_profile_layer_height_mismatch_is_still_rejected(self) -> None:
+        selected = self.match.selected
+        assert selected is not None
+        path = self.root / "bambu_real_mismatch.gcode"
+        path.write_text(
+            printable_gcode()
+            + "\n".join(
+                (
+                    "; CONFIG_BLOCK_START = begin",
+                    "; layer_height = 0.19",
+                    "; CONFIG_BLOCK_END = end",
+                    "; LAYER_HEIGHT: 0.180008",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        snapshot = GCodeAnalysisService().analyze(path, force=True)
+        with self.assertRaisesRegex(SourcePreSliceError, "layer_height"):
+            SourcePreSliceService._verify_generated_metadata(snapshot, self.match)
+
     def test_cancel_failure_outside_output_and_metadata_mismatch_cleanup(self) -> None:
         for mode, pattern in (
             ("cancel", "abgebrochen"),

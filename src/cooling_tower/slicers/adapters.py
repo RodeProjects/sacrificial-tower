@@ -191,7 +191,14 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                     ";".join(str(path) for path in filaments),
                 )
             )
-        if not request.preserve_model_positions:
+        if request.use_cli_assemble_list:
+            if request.purpose != "calibration" or not request.preserve_model_positions:
+                raise SlicerProcessError(
+                    "Eine feste CLI-Objektliste ist nur für den gemeinsamen "
+                    "Kalibrierungsslice zulässig."
+                )
+            arguments.extend(("--load-assemble-list", str(model_path)))
+        elif not request.preserve_model_positions:
             arguments.extend(("--arrange", "1", "--ensure-on-bed"))
         arguments.extend(
             (
@@ -199,9 +206,10 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 "0",
                 "--outputdir",
                 str(output_directory),
-                str(model_path),
             )
         )
+        if not request.use_cli_assemble_list:
+            arguments.append(str(model_path))
         return profile.installation.executable_path, tuple(arguments)
 
     def create_joint_project(
@@ -343,6 +351,75 @@ class OrcaSlicerAdapter(OrcaFamilyAdapter):
 class BambuStudioAdapter(OrcaFamilyAdapter):
     adapter_id = "bambu_studio"
     detection_module_id = "bambu_studio"
+
+    def create_joint_project(
+        self,
+        request: SliceRequest,
+        source_model_path: Path,
+        tower_model_path: Path,
+        destination: Path,
+        *,
+        occupied: object,
+        placement: object,
+        tower_full_infill: bool,
+    ) -> object:
+        """Create the export 3MF plus Bambu's reliable direct joint-slice input."""
+
+        result = super().create_joint_project(
+            request,
+            source_model_path,
+            tower_model_path,
+            destination,
+            occupied=occupied,
+            placement=placement,
+            tower_full_infill=tower_full_infill,
+        )
+        destination_path = Path(destination).resolve()
+        durable_tower = destination_path.with_name("cooling_tower_joint_slice.stl")
+        shutil.copy2(Path(tower_model_path).resolve(), durable_tower)
+        assembly_path = destination_path.with_name(
+            f"{destination_path.stem}.bambu-assemble.json"
+        )
+        tower_params = (
+            {
+                "sparse_infill_density": "100%",
+                "sparse_infill_pattern": "zig-zag",
+            }
+            if tower_full_infill
+            else {}
+        )
+        payload = {
+            "plates": [
+                {
+                    "plate_name": "Cooling tower calibration",
+                    "need_arrange": False,
+                    "objects": [
+                        {
+                            "path": str(Path(source_model_path).resolve()),
+                            "count": 1,
+                            "filaments": [1],
+                            "pos_x": [result.source_translation_mm[0]],
+                            "pos_y": [result.source_translation_mm[1]],
+                            "pos_z": [result.source_translation_mm[2]],
+                        },
+                        {
+                            "path": str(durable_tower.resolve()),
+                            "count": 1,
+                            "filaments": [1],
+                            "pos_x": [result.tower_translation_mm[0]],
+                            "pos_y": [result.tower_translation_mm[1]],
+                            "pos_z": [result.tower_translation_mm[2]],
+                            "print_params": tower_params,
+                        },
+                    ],
+                }
+            ]
+        }
+        assembly_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return replace(result, slice_input_path=assembly_path.resolve())
 
 
 class PrusaSlicerAdapter(BaseSlicerAdapter):

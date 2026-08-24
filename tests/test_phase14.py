@@ -24,6 +24,7 @@ from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.models import SlicerFamily, SlicerIdentity
 from cooling_tower.slicers import (
     AnycubicSlicerNextAdapter,
+    BambuStudioAdapter,
     EffectiveProfile,
     ProfileCandidate,
     ProfileKind,
@@ -899,6 +900,59 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         self.assertNotIn("--arrange", result.command)
         self.assertNotIn("--ensure-on-bed", result.command)
         self.assertIn("--slice", result.command)
+
+    def test_bambu_fixed_assembly_uses_direct_joint_slice_input(self) -> None:
+        runner = ConfigurableRunner()
+        _anycubic, request = self.request(runner)
+        adapter = BambuStudioAdapter(runner=runner)
+        installation = replace(
+            request.profile.installation,
+            adapter_id=adapter.adapter_id,
+            product_name=adapter.product_name,
+        )
+        profile = replace(
+            request.profile,
+            installation=installation,
+            machine=replace(
+                request.profile.machine,
+                metadata={**request.profile.machine.metadata, "temporary": True},
+            ),
+            process=replace(
+                request.profile.process,
+                metadata={**request.profile.process.metadata, "temporary": True},
+            ),
+            filaments=tuple(
+                replace(
+                    record,
+                    metadata={**record.metadata, "temporary": True},
+                )
+                for record in request.profile.filaments
+            ),
+        )
+        assembly = self.root / "joint.bambu-assemble.json"
+        assembly.write_text('{"plates": []}', encoding="utf-8")
+        prepared = adapter.prepare_slice(
+            replace(
+                request,
+                model_path=assembly,
+                profile=profile,
+                preserve_model_positions=True,
+                use_cli_assemble_list=True,
+                purpose="calibration",
+            )
+        )
+        try:
+            self.assertIn("--load-assemble-list", prepared.arguments)
+            option_index = prepared.arguments.index("--load-assemble-list")
+            self.assertEqual(
+                Path(prepared.arguments[option_index + 1]),
+                prepared.copied_model,
+            )
+            self.assertNotIn("--arrange", prepared.arguments)
+            self.assertNotIn("--ensure-on-bed", prepared.arguments)
+            self.assertEqual(prepared.arguments.count(str(prepared.copied_model)), 1)
+        finally:
+            adapter.cleanup_prepared_slice(prepared)
 
     def test_anycubic_cli_receives_typed_isolated_profile_copies(self) -> None:
         for record in (self.machine, self.process, self.filament):

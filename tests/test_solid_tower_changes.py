@@ -334,6 +334,33 @@ class FullInfillProfileTests(unittest.TestCase):
             )
             self.assertEqual(copied["sparse_infill_density"], "100%")
 
+    def test_bambu_full_infill_replaces_incompatible_grid_pattern(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = self._profile(root, "bambu_studio")
+            process_values = json.loads(
+                profile.process.path.read_text(encoding="utf-8")
+            )
+            process_values["sparse_infill_pattern"] = "grid"
+            profile.process.path.write_text(
+                json.dumps(process_values),
+                encoding="utf-8",
+            )
+
+            temporary_profile, overrides = build_calibration_profile(
+                profile,
+                root / "temporary",
+                simulate_full_tower_infill=True,
+            )
+
+            self.assertEqual(overrides["sparse_infill_density"], "100%")
+            self.assertEqual(overrides["sparse_infill_pattern"], "zig-zag")
+            copied = json.loads(
+                temporary_profile.process.path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(copied["sparse_infill_density"], "100%")
+            self.assertEqual(copied["sparse_infill_pattern"], "zig-zag")
+
     def test_non_orca_adapters_receive_their_effective_override(self) -> None:
         expected = {
             "prusa_slicer": ("fill_density", "100%"),
