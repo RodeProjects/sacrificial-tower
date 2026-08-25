@@ -245,14 +245,13 @@ class Phase16Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_path_growth_factor=0.5)
 
-    def test_02_temporary_profile_neutralizes_slowdown_without_source_write(self) -> None:
+    def test_02_temporary_profile_preserves_cooling_and_filament_settings(self) -> None:
         before = {
             path: path.read_bytes()
             for path in (self.machine, self.process, self.filament)
         }
         calibrated, overrides = build_calibration_profile(self.profile, self.root / "temp_profile")
-        self.assertEqual(overrides["slow_down_layer_time"], "0")
-        self.assertEqual(overrides["slow_down_for_layer_cooling"], "0")
+        self.assertEqual(overrides, {})
         self.assertEqual(
             {path: path.read_bytes() for path in before},
             before,
@@ -270,10 +269,57 @@ class Phase16Tests(unittest.TestCase):
             payload = json.loads(record.path.read_text(encoding="utf-8"))
             self.assertEqual(payload["type"], record.kind.value)
             self.assertEqual(payload["from"], "system")
-        for record in (calibrated.process, *calibrated.filaments):
-            payload = json.loads(record.path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["slow_down_layer_time"], "0")
-            self.assertEqual(payload["slow_down_for_layer_cooling"], "0")
+        process_payload = json.loads(
+            calibrated.process.path.read_text(encoding="utf-8")
+        )
+        filament_payload = json.loads(
+            calibrated.filaments[0].path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(process_payload["slow_down_layer_time"], "10")
+        self.assertEqual(process_payload["slow_down_for_layer_cooling"], "1")
+        self.assertEqual(filament_payload["slow_down_layer_time"], "10")
+
+    def test_02a_full_infill_changes_only_process_copy(self) -> None:
+        bambu_installation = replace(
+            self.profile.installation,
+            adapter_id="bambu_studio",
+            product_name="Bambu Studio",
+        )
+        bambu_profile = replace(
+            self.profile,
+            installation=bambu_installation,
+            machine=replace(self.profile.machine, adapter_id="bambu_studio"),
+            process=replace(self.profile.process, adapter_id="bambu_studio"),
+            filaments=tuple(
+                replace(record, adapter_id="bambu_studio")
+                for record in self.profile.filaments
+            ),
+        )
+
+        calibrated, overrides = build_calibration_profile(
+            bambu_profile,
+            self.root / "bambu_full_infill_profile",
+            simulate_full_tower_infill=True,
+        )
+
+        self.assertEqual(
+            overrides,
+            {
+                "sparse_infill_density": "100%",
+                "sparse_infill_pattern": "zig-zag",
+            },
+        )
+        process_payload = json.loads(
+            calibrated.process.path.read_text(encoding="utf-8")
+        )
+        filament_payload = json.loads(
+            calibrated.filaments[0].path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(process_payload["sparse_infill_density"], "100%")
+        self.assertEqual(process_payload["sparse_infill_pattern"], "zig-zag")
+        self.assertNotIn("sparse_infill_density", filament_payload)
+        self.assertNotIn("sparse_infill_pattern", filament_payload)
+        self.assertEqual(filament_payload["slow_down_layer_time"], "10")
 
     def test_02b_profile_guard_detects_any_source_profile_change(self) -> None:
         before = self.filament.read_bytes()
@@ -1362,88 +1408,6 @@ class Phase16RealAnycubicTest(unittest.TestCase):
         self.assertEqual(
             {path: hashlib.sha256(path.read_bytes()).digest() for path in hashes}, hashes
         )
-
-    def test_real_15_second_reference_retains_best_slicer_result(self) -> None:
-        from cooling_tower.slicers import AnycubicSlicerNextAdapter, ProfileCandidate
-
-        source = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
-        executable = Path(r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe")
-        root = executable.parent / "resources" / "profiles" / "Anycubic"
-        machine_path = root / "machine" / "Anycubic Kobra 3 V2 0.4 nozzle.json"
-        process_path = root / "process" / "0.20mm Standard @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        filament_path = root / "filament" / "Anycubic PLA @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        for path in (source, executable, machine_path, process_path, filament_path):
-            self.assertTrue(path.is_file(), path)
-        adapter = AnycubicSlicerNextAdapter()
-        installation = SlicerInstallation(
-            adapter.adapter_id, adapter.product_name, "1.4.1.2", executable, True,
-            adapter.capabilities, SlicerDiscoverySource.KNOWN_PATH,
-            family=adapter.family, support_level=SlicerSupportLevel.FULL,
-            profile_roots=(root,), engine_path=executable,
-        )
-        def record(path, kind):
-            return ProfileRecord(adapter.adapter_id, path.stem, path.stem, kind, path, "system")
-        profile = adapter.resolve_profile_bundle(
-            ProfileCandidate(
-                installation,
-                machine=record(machine_path, ProfileKind.MACHINE),
-                process=record(process_path, ProfileKind.PROCESS),
-                filaments=(record(filament_path, ProfileKind.FILAMENT),),
-            )
-        )
-        snapshot = GCodeAnalysisService().analyze(source)
-        with tempfile.TemporaryDirectory() as temporary:
-            result = CalibrationService().calibrate(
-                snapshot,
-                GenerationSettings(target_layer_time_s=15.0),
-                adapter=adapter,
-                profile=profile,
-                output_directory=Path(temporary) / "result",
-                config=CalibrationConfig(
-                    maximum_iterations=5,
-                    maximum_runtime_s=600,
-                    timeout_per_slice_s=180,
-                ),
-            )
-            self.assertTrue(
-                result.success or result.has_usable_improvement,
-                (
-                    result.failures,
-                    [
-                        (
-                            item.number,
-                            item.maximum_remaining_deficit_s,
-                            item.deficient_layer_count,
-                            item.maximum_profile_change_mm,
-                        )
-                        for item in result.iterations
-                    ],
-                ),
-            )
-            self.assertTrue(result.stl_path.is_file())
-            self.assertTrue(result.has_slicer_evaluated_output)
-            best = result.best_iteration
-            self.assertIsNotNone(best)
-            self.assertLess(
-                best.maximum_remaining_deficit_s,
-                result.iterations[0].maximum_remaining_deficit_s,
-            )
-            self.assertLess(
-                best.deficient_layer_count,
-                result.iterations[0].deficient_layer_count,
-            )
-            if result.success:
-                final_times = best.evaluation.added_time_by_layer
-                for layer in snapshot.layers[: len(final_times)]:
-                    if layer.index in final_times:
-                        self.assertGreaterEqual(
-                            layer.total_time_s + final_times[layer.index],
-                            15.0 - 0.15,
-                        )
-            else:
-                self.assertTrue(result.improved_over_initial_candidate)
-                self.assertEqual(result.best_iteration_number, 5)
-
 
 if __name__ == "__main__":
     unittest.main()

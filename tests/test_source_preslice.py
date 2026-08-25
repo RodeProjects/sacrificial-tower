@@ -335,20 +335,14 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             )
             request = adapter.requests[0]
             self.assertEqual(request.purpose, "source_preslice")
-            self.assertEqual(
-                request.temporary_overrides,
-                {
-                    "slow_down_for_layer_cooling": False,
-                    "slow_down_layer_time": 0,
-                },
+            self.assertEqual(request.temporary_overrides, {})
+            self.assertNotIn(
+                "slow_down_for_layer_cooling",
+                request.profile.effective_values,
             )
-            self.assertEqual(
-                request.profile.effective_values["slow_down_for_layer_cooling"],
-                False,
-            )
-            self.assertEqual(
-                request.profile.effective_values["slow_down_layer_time"],
-                0,
+            self.assertNotIn(
+                "slow_down_layer_time",
+                request.profile.effective_values,
             )
             self.assertEqual(request.timeout_s, 17)
             self.assertEqual(

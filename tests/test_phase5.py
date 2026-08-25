@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -195,16 +194,6 @@ class GenerationServiceTests(unittest.TestCase):
             runs = list((output / "runs").iterdir())
             self.assertEqual(len(runs), 1)
             self.assertTrue((runs[0] / "stl" / "cooling_tower.stl").is_file())
-
-
-class ReferenceRegressionTests(unittest.TestCase):
-    def test_phase4_reference_manifest_matches_reference_gcode(self) -> None:
-        manifest_path = PROJECT_ROOT / "tests" / "references" / "phase4_reference.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        gcode_path = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
-        digest = hashlib.sha256(gcode_path.read_bytes()).hexdigest().upper()
-        self.assertEqual(digest, manifest["gcode_sha256"])
-        self.assertEqual(manifest["layer_count"], 891)
 
 
 if __name__ == "__main__":

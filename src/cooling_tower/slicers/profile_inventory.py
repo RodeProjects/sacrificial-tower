@@ -397,6 +397,22 @@ class ProfileInventoryService:
                 return
 
 
+def _profile_include_references(value: object) -> tuple[str, ...]:
+    """Return normalized Orca/Bambu template references."""
+
+    if isinstance(value, str):
+        candidate = value.strip()
+        return (candidate,) if candidate else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(
+            candidate
+            for item in value
+            if isinstance(item, str)
+            and (candidate := item.strip())
+        )
+    return ()
+
+
 class ProfileInheritanceResolver:
     def __init__(
         self,
@@ -463,6 +479,40 @@ class ProfileInheritanceResolver:
         own_values = self.adapter.profile_values(record)
         if not own_values:
             errors.append(f"Profil '{record.name}' enthält keine lesbaren Werte.")
+
+        # Orca-family catalogues use ``include`` for template fragments which
+        # are applied after the normal inheritance chain but before the
+        # profile's own values.  Treating the key merely as payload made a
+        # flattened Bambu profile promote older base defaults to explicit
+        # overrides.  Variant-specific values from templates (for example the
+        # X2D extruder-change retraction setting) were then lost in exported
+        # projects even though no filament override had been requested.
+        include_references = _profile_include_references(
+            own_values.get("include")
+        )
+        for include_reference in include_references:
+            includes = self._find_parents(include_reference, record)
+            if len(includes) != 1:
+                if not includes:
+                    errors.append(
+                        f"Fehlende Profilvorlage '{include_reference}' für "
+                        f"'{record.name}'."
+                    )
+                else:
+                    errors.append(
+                        f"Mehrdeutige Profilvorlage '{include_reference}' "
+                        f"für '{record.name}'."
+                    )
+                continue
+            included = self._resolve(includes[0], (*stack, key))
+            if not included.valid:
+                errors.extend(included.errors)
+                continue
+            values.update(included.effective_values)
+            for item in included.chain:
+                if item not in chain:
+                    chain.append(item)
+
         values.update(own_values)
         chain.append(record)
         fingerprint = stable_json_fingerprint(values) if values else None

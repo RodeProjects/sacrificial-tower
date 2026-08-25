@@ -61,6 +61,48 @@ class AccelerationCommandTests(unittest.TestCase):
         self.assertEqual(retraction.category, "retraction")
         self.assertEqual(retraction.acceleration_mm_s2, 50.0)
 
+    def test_legacy_m204_s_preserves_retract_acceleration(self) -> None:
+        tracker = MachineStateTracker(bambu_compatible=True)
+        tracker.process_line(parsed("M204 P100 R300 T200"))
+        tracker.process_line(parsed("M204 S25"))
+
+        deposition = movement(tracker, "G1 X10 E1 F600")
+        travel = movement(tracker, "G1 X20 F600")
+        retraction = movement(tracker, "G1 E-1 F600")
+
+        self.assertEqual(deposition.acceleration_mm_s2, 25.0)
+        self.assertEqual(travel.acceleration_mm_s2, 25.0)
+        self.assertEqual(retraction.acceleration_mm_s2, 300.0)
+
+    def test_generic_m204_s_keeps_existing_retract_semantics(self) -> None:
+        tracker = MachineStateTracker()
+        tracker.process_line(parsed("M204 P100 R300 T200"))
+        tracker.process_line(parsed("M204 S25"))
+
+        retraction = movement(tracker, "G1 E-1 F600")
+
+        self.assertEqual(retraction.acceleration_mm_s2, 25.0)
+
+    def test_bambu_machine_envelope_and_extrusion_factor_are_stored(
+        self,
+    ) -> None:
+        tracker = MachineStateTracker(bambu_compatible=True)
+        tracker.process_line(parsed("M203 X100 Y90 Z20 E30"))
+        tracker.process_line(parsed("M205 X9 Z3 E2.5 S2 T4"))
+        tracker.process_line(parsed("M221 S95"))
+
+        result = movement(tracker, "G1 X10 E1 F600")
+
+        self.assertEqual(result.maximum_feedrate_x_mm_s, 100.0)
+        self.assertEqual(result.maximum_feedrate_y_mm_s, 90.0)
+        self.assertEqual(result.maximum_feedrate_z_mm_s, 20.0)
+        self.assertEqual(result.maximum_feedrate_e_mm_s, 30.0)
+        self.assertEqual(result.jerk_x_mm_s, 9.0)
+        self.assertEqual(result.jerk_y_mm_s, 9.0)
+        self.assertEqual(result.minimum_extruding_feedrate_mm_s, 2.0)
+        self.assertEqual(result.minimum_travel_feedrate_mm_s, 4.0)
+        self.assertAlmostEqual(result.extrusion_factor, 0.95)
+
     def test_m201_limits_diagonal_path_acceleration(self) -> None:
         tracker = MachineStateTracker()
         tracker.process_line(parsed("M201 X100 Y100 Z50 E500"))
@@ -228,6 +270,97 @@ class MotionLookaheadTests(unittest.TestCase):
         self.assertAlmostEqual(emitted[0].exit_speed_mm_s, 0.0)
         self.assertAlmostEqual(emitted[1].duration_s, 1.0)
 
+    def test_bambu_planner_retains_classic_jerk_safe_speed(self) -> None:
+        tracker = MachineStateTracker()
+        tracker.process_line(parsed("M204 S10"))
+        tracker.process_line(parsed("M205 X5 Y5"))
+        first = movement(tracker, "G1 X10 F600")
+        second = movement(tracker, "G1 Y10")
+
+        planned = plan_movement_run(
+            [first, second],
+            bambu_compatible=True,
+        )
+
+        self.assertAlmostEqual(planned[0].entry_speed_mm_s, 5.0)
+        self.assertAlmostEqual(planned[0].exit_speed_mm_s, 5.0)
+        self.assertAlmostEqual(planned[1].entry_speed_mm_s, 5.0)
+        self.assertAlmostEqual(planned[1].exit_speed_mm_s, 5.0)
+        self.assertAlmostEqual(
+            sum(event.duration_s or 0.0 for event in planned),
+            2.5,
+        )
+
+    def test_bambu_m203_and_m221_limit_axis_feedrate(self) -> None:
+        tracker = MachineStateTracker(bambu_compatible=True)
+        tracker.process_line(parsed("M204 S10000"))
+        tracker.process_line(parsed("M205 X100 Y100 Z100 E100"))
+        tracker.process_line(parsed("M203 X1000 Y1000 Z1000 E1"))
+        tracker.process_line(parsed("M221 S200"))
+        result = movement(tracker, "G1 X10 E10 F600")
+
+        planned = plan_movement_run(
+            [result],
+            bambu_compatible=True,
+        )[0]
+
+        self.assertAlmostEqual(
+            (planned.effective_feedrate_mm_min or 0.0) / 60.0,
+            0.5,
+        )
+
+    def test_bambu_g1_centripetal_limit_is_not_used_generically(self) -> None:
+        tracker = MachineStateTracker(bambu_compatible=True)
+        tracker.process_line(parsed("M204 S25"))
+        tracker.process_line(parsed("M205 X100 Y100"))
+        first = movement(tracker, "G1 X10 F6000")
+        second = movement(tracker, "G1 X20 Y1 F6000")
+
+        bambu = plan_movement_run(
+            [first, second],
+            bambu_compatible=True,
+        )
+        generic = plan_movement_run([first, second])
+
+        self.assertLess(
+            bambu[1].effective_feedrate_mm_min or 0.0,
+            generic[1].effective_feedrate_mm_min or 0.0,
+        )
+        self.assertAlmostEqual(
+            (generic[1].effective_feedrate_mm_min or 0.0) / 60.0,
+            100.0,
+        )
+
+    def test_bambu_streaming_retains_direction_across_refresh(self) -> None:
+        tracker = MachineStateTracker(bambu_compatible=True)
+        tracker.process_line(parsed("M204 S25"))
+        tracker.process_line(parsed("M205 X100 Y100"))
+        movements = [
+            movement(tracker, "G1 X10 F6000", 1),
+            movement(tracker, "G1 X20 F6000", 2),
+            movement(tracker, "G1 X30 Y1 F6000", 3),
+            movement(tracker, "G1 X40 Y2 F6000", 4),
+        ]
+
+        expected = plan_movement_run(
+            movements,
+            bambu_compatible=True,
+        )
+        planner = MotionTimingPlanner(
+            lookahead_movements=1,
+            refresh_threshold_movements=2,
+            bambu_compatible=True,
+        )
+        actual = []
+        for item in movements:
+            actual.extend(planner.process_event(item))
+        actual.extend(planner.finish())
+
+        self.assertAlmostEqual(
+            actual[2].effective_feedrate_mm_min or 0.0,
+            expected[2].effective_feedrate_mm_min or 0.0,
+        )
+
 
 class AccelerationAnalysisIntegrationTests(unittest.TestCase):
     @staticmethod
@@ -275,6 +408,141 @@ class AccelerationAnalysisIntegrationTests(unittest.TestCase):
                 for layer in accelerated.analysis.layers
             ),
             0,
+        )
+
+    def test_bambu_header_selects_viewer_compatible_timing(self) -> None:
+        body = "\n".join(
+            (
+                "M204 S10",
+                "M205 X5 Y5",
+                "G1 Z0.2 F600",
+                "G1 X10 E1 F600",
+                "G1 Y10 E1",
+            )
+        )
+
+        generic = self._analyze(body)
+        bambu = self._analyze(
+            "; generated by Bambu Studio 02.08\n" + body
+        )
+
+        self.assertLess(
+            bambu.analysis.layers[0].total_time_s,
+            generic.analysis.layers[0].total_time_s,
+        )
+
+    def test_bambu_layer_tags_assign_transition_to_new_layer(self) -> None:
+        snapshot = self._analyze(
+            "\n".join(
+                (
+                    "; BambuStudio 02.08",
+                    "G90",
+                    "M83",
+                    "M204 S1000",
+                    "M205 X5 Y5 Z5 E5",
+                    "; CHANGE_LAYER",
+                    "; Z_HEIGHT: 0.2",
+                    "; LAYER_HEIGHT: 0.2",
+                    "G1 Z0.2 F600",
+                    "G1 X10 E1 F600",
+                    "; CHANGE_LAYER",
+                    "; Z_HEIGHT: 0.4",
+                    "; LAYER_HEIGHT: 0.2",
+                    "G1 X9 E-0.2 F600",
+                    "G1 Z0.4 F600",
+                    "G1 X20 E1 F600",
+                )
+            )
+        )
+
+        self.assertEqual(snapshot.layer_count, 2)
+        self.assertEqual(snapshot.layers[0].z_mm, 0.2)
+        self.assertEqual(snapshot.layers[1].z_mm, 0.4)
+        self.assertEqual(snapshot.layers[0].retraction_time_s, 0.0)
+        self.assertGreater(snapshot.layers[1].travel_time_s, 0.0)
+
+    def test_bambu_arc_tangents_match_smooth_curve_planning(self) -> None:
+        body = "\n".join(
+            (
+                "G90",
+                "M83",
+                "M204 S10000",
+                "M205 X9 Y9 Z3 E2.5",
+                "G1 Z0.2 F600",
+                "G1 X-10 Y10 E1 F12000",
+                "G1 X0 Y10 E1",
+                "G2 X10 Y0 I0 J-10 E1",
+                "G1 X10 Y-10 E1",
+            )
+        )
+
+        generic = self._analyze(body)
+        bambu = self._analyze("; BambuStudio 02.08\n" + body)
+
+        self.assertLess(
+            bambu.layers[0].total_time_s,
+            generic.layers[0].total_time_s,
+        )
+
+    def test_anycubic_header_keeps_generic_timing_unchanged(self) -> None:
+        body = "\n".join(
+            (
+                "G90",
+                "M83",
+                "M201 X1000 Y1000 Z1000 E1000",
+                "M203 X5 Y5 Z5 E1",
+                "M204 P100 R300 T200",
+                "M204 S25",
+                "M205 X9 S20 T20",
+                "M221 S200",
+                "G1 Z0.2 F600",
+                "G1 X10 E10 F6000",
+                "G1 X20 Y1 E10",
+            )
+        )
+
+        generic = self._analyze(body)
+        anycubic = self._analyze(
+            "; generated by Anycubic Slicer Next\n" + body
+        )
+
+        self.assertEqual(anycubic.layer_count, generic.layer_count)
+        for anycubic_layer, generic_layer in zip(
+            anycubic.layers,
+            generic.layers,
+        ):
+            self.assertEqual(
+                replace(
+                    anycubic_layer,
+                    start_line=generic_layer.start_line,
+                    first_deposition_line=(
+                        generic_layer.first_deposition_line
+                    ),
+                    end_line=generic_layer.end_line,
+                ),
+                generic_layer,
+            )
+
+    def test_bambu_m203_machine_speed_limit_changes_timing(self) -> None:
+        body = "\n".join(
+            (
+                "G90",
+                "M83",
+                "M201 X10000 Y10000 Z10000 E10000",
+                "M203 X5 Y1000 Z1000 E1000",
+                "M204 S10000",
+                "M205 X100 Y100 Z100 E100",
+                "G1 Z0.2 F600",
+                "G1 X100 E1 F6000",
+            )
+        )
+
+        generic = self._analyze(body)
+        bambu = self._analyze("; BambuStudio 02.08\n" + body)
+
+        self.assertGreater(
+            bambu.layers[0].total_time_s,
+            generic.layers[0].total_time_s,
         )
 
 

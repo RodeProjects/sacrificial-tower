@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 import json
 import math
 import os
@@ -12,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from collections import Counter
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -23,8 +20,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
-
-import trimesh
 
 from cooling_tower.models import GenerationSettings
 from cooling_tower.services import (
@@ -40,31 +35,6 @@ from cooling_tower.tower.profile import (
     TowerRadiusProfile,
 )
 from cooling_tower.tower.wall_calculator import calculate_wall_path_length
-
-
-REFERENCE_GCODE = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
-MIGRATED = PROJECT_ROOT / "output" / "migrated_legacy"
-LEGACY_LAYER_REFERENCE = (
-    MIGRATED / "analysis" / "rabe_koerper_18cm_layer_analysis.csv"
-)
-LEGACY_PHASE2_REFERENCE = (
-    MIGRATED / "analysis" / "rabe_koerper_18cm_phase2.csv"
-)
-LEGACY_PHASE4_REFERENCE = (
-    MIGRATED / "analysis" / "rabe_koerper_18cm_phase4_analysis.csv"
-)
-LEGACY_STL_REFERENCE = (
-    MIGRATED / "stl" / "rabe_koerper_18cm_cooling_tower.stl"
-)
-MIGRATION_REFERENCES_AVAILABLE = all(
-    path.is_file()
-    for path in (
-        LEGACY_LAYER_REFERENCE,
-        LEGACY_PHASE2_REFERENCE,
-        LEGACY_PHASE4_REFERENCE,
-        LEGACY_STL_REFERENCE,
-    )
-) and any((MIGRATED / "logs").glob("migration_report_*.json"))
 
 
 def base_settings(**changes: object) -> GenerationSettings:
@@ -123,208 +93,6 @@ def make_phase2(
         0.1,
         layers,
     )
-
-
-@unittest.skipUnless(
-    MIGRATION_REFERENCES_AVAILABLE,
-    "Benötigt lokale, absichtlich nicht versionierte Migrationsreferenzen.",
-)
-class MigrationCompletionTests(unittest.TestCase):
-    def test_real_migration_is_complete_hash_preserving_and_reported(self) -> None:
-        expected = {
-            "rabe_koerper_18cm_cooling_tower.stl": (
-                "150CA5CAE2DB067979044736D0AF98363FFD479C07D0491DE28E95DE57119007"
-            ),
-            "rabe_koerper_18cm_layer_analysis.csv": (
-                "470AC8FDF86347363E26E174CEF20FDAFFB168904406A4058773F9E776B7A92F"
-            ),
-            "rabe_koerper_18cm_phase2.csv": (
-                "892B5C445D0E0673D495A49881CA9DB600E34518A590BD84114FC0250800BFC1"
-            ),
-            "rabe_koerper_18cm_phase4_analysis.csv": (
-                "3C5A2B38D86DB639EBE98C0EEA2EC8ABAC39C6AAC9583821A6EECD937D46EB10"
-            ),
-        }
-        payloads = {
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest().upper()
-            for path in MIGRATED.rglob("*")
-            if path.is_file() and not path.name.startswith("migration_report")
-        }
-        self.assertEqual(payloads, expected)
-        self.assertEqual(list((PROJECT_ROOT / "output").glob("*.*")), [])
-        reports = []
-        for path in (MIGRATED / "logs").glob("migration_report_*.json"):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            if payload["moved_file_count"] == 4:
-                reports.append(payload)
-        self.assertTrue(reports)
-        self.assertEqual(len(reports[-1]["moved_files"]), 4)
-
-
-class ReferenceEndToEndTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.result = GenerationService(
-            Path(cls.temporary.name) / "output"
-        ).generate(
-            REFERENCE_GCODE,
-            GenerationSettings(target_layer_time_s=10.0),
-        )
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
-
-    def test_reference_geometry_matches_legacy_and_timing_is_refined(
-        self,
-    ) -> None:
-        if not LEGACY_LAYER_REFERENCE.is_file():
-            self.skipTest("Lokale Layer-Migrationsreferenz fehlt.")
-        with LEGACY_LAYER_REFERENCE.open(
-            encoding="utf-8-sig",
-            newline="",
-        ) as handle:
-            legacy = list(csv.DictReader(handle, delimiter=";"))
-        layers = self.result.analysis.layers
-        self.assertEqual(len(layers), len(legacy), 891)
-        unchanged_fields = (
-            ("z_mm", "z_mm"),
-            ("height_mm", "height_mm"),
-            ("deposition_path_mm", "deposition_path_mm"),
-        )
-        for layer, row in zip(layers, legacy, strict=True):
-            self.assertEqual(layer.index, int(row["layer_index"]))
-            for attribute, column in unchanged_fields:
-                self.assertAlmostEqual(
-                    getattr(layer, attribute), float(row[column]), places=5
-                )
-            self.assertGreaterEqual(
-                layer.total_time_s + 1e-9,
-                float(row["total_time_s"]),
-            )
-            self.assertGreaterEqual(
-                layer.deposition_time_s + 1e-9,
-                float(row["deposition_time_s"]),
-            )
-            self.assertGreaterEqual(
-                layer.travel_time_s + 1e-9,
-                float(row["travel_time_s"]),
-            )
-
-        slicer_estimate_s = 12_513.507
-        analyzed_time_s = sum(layer.total_time_s for layer in layers)
-        self.assertLess(
-            abs(analyzed_time_s - slicer_estimate_s) / slicer_estimate_s,
-            0.03,
-        )
-        self.assertAlmostEqual(layers[0].z_mm, 0.2)
-        self.assertAlmostEqual(layers[-1].z_mm, 160.4)
-        self.assertAlmostEqual(min(layer.height_mm for layer in layers), 0.18)
-        self.assertAlmostEqual(max(layer.height_mm for layer in layers), 0.2)
-
-    def test_reference_time_deficits_use_acceleration_aware_analysis(
-        self,
-    ) -> None:
-        if not LEGACY_PHASE4_REFERENCE.is_file():
-            self.skipTest("Lokale Phase-4-Migrationsreferenz fehlt.")
-        with LEGACY_PHASE4_REFERENCE.open(
-            encoding="utf-8-sig",
-            newline="",
-        ) as handle:
-            legacy = list(csv.DictReader(handle, delimiter=";"))
-        for layer, profile, row in zip(
-            self.result.analysis.layers,
-            self.result.profile,
-            legacy,
-            strict=True,
-        ):
-            expected_deficit_s = max(0.0, 10.0 - layer.total_time_s)
-            self.assertAlmostEqual(
-                profile.time_deficit_s,
-                expected_deficit_s,
-                places=5,
-            )
-            self.assertLessEqual(
-                expected_deficit_s,
-                float(row["time_deficit_s"]) + 1e-6,
-            )
-
-    def test_reference_stl_is_independently_recognized_as_solid_volume(self) -> None:
-        # STL stores independent triangle vertices; normal slicer/import
-        # processing merges coincident coordinates before topology checks.
-        mesh = trimesh.load_mesh(self.result.stl_path, process=True)
-        self.assertTrue(mesh.is_watertight)
-        self.assertTrue(mesh.is_winding_consistent)
-        self.assertTrue(mesh.is_volume)
-        self.assertEqual(mesh.euler_number, 2)
-        self.assertAlmostEqual(mesh.bounds[0][2], 0.0, places=5)
-        self.assertAlmostEqual(
-            mesh.bounds[1][2],
-            self.result.assessment.tower_end_z_mm,
-            places=3,
-        )
-        self.assertEqual(self.result.profile[0].inner_radius_mm, 0.0)
-        self.assertTrue(
-            all(
-                layer.outer_diameter_mm
-                >= self.result.settings.minimum_outer_diameter_mm
-                for layer in self.result.profile
-            )
-        )
-
-    def test_slicer_like_cross_sections_have_one_closed_contour(self) -> None:
-        mesh = trimesh.load_mesh(self.result.stl_path, process=True)
-        for z in (0.1, 1.0, 4.0, 40.0, 80.0, 120.0, 160.0):
-            lines = trimesh.intersections.mesh_plane(
-                mesh,
-                plane_normal=(0.0, 0.0, 1.0),
-                plane_origin=(0.0, 0.0, z),
-            )
-
-            def key(point):
-                return tuple(round(float(value), 5) for value in point[:2])
-
-            edges = [(key(first), key(second)) for first, second in lines]
-            degrees = Counter(node for edge in edges for node in edge)
-            adjacency = {node: set() for node in degrees}
-            for first, second in edges:
-                adjacency[first].add(second)
-                adjacency[second].add(first)
-            seen: set[tuple[float, float]] = set()
-            component_count = 0
-            for node in adjacency:
-                if node in seen:
-                    continue
-                component_count += 1
-                stack = [node]
-                seen.add(node)
-                while stack:
-                    current = stack.pop()
-                    for neighbor in adjacency[current]:
-                        if neighbor not in seen:
-                            seen.add(neighbor)
-                            stack.append(neighbor)
-
-            with self.subTest(z=z):
-                self.assertTrue(lines.size)
-                self.assertEqual(set(degrees.values()), {2})
-                self.assertEqual(component_count, 1)
-
-    def test_reference_run_contains_every_required_artifact(self) -> None:
-        paths = (
-            self.result.stl_path,
-            self.result.analysis_path,
-            self.result.profile_path,
-            self.result.settings_path,
-            self.result.summary_path,
-            self.result.log_path,
-        )
-        self.assertTrue(all(path.is_file() for path in paths))
-        summary = json.loads(self.result.summary_path.read_text(encoding="utf-8"))
-        self.assertEqual(summary["layer_count"], 891)
-        self.assertTrue(summary["mesh"]["watertight"])
-        self.assertIn("maximum_time_deficit_s", summary)
 
 
 class LineWidthPresetTests(unittest.TestCase):

@@ -113,6 +113,13 @@ class _LayerAccumulator:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _ExplicitLayerMarker:
+    start_line: int
+    z_mm: float
+    height_mm: float
+
+
 class LayerDetector:
     """
     Detect printed layers by confirming increased Z positions through
@@ -122,10 +129,12 @@ class LayerDetector:
     new layer or rejected as a Z-hop.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, use_explicit_markers: bool = False) -> None:
         self._completed_layers: list[LayerRecord] = []
         self._current_layer: _LayerAccumulator | None = None
         self._candidate_events: list[TimedEvent] = []
+        self._use_explicit_markers = use_explicit_markers
+        self._explicit_markers: list[_ExplicitLayerMarker] = []
 
         self._confirmed_layer_changes = 0
         self._rejected_z_candidates = 0
@@ -134,10 +143,43 @@ class LayerDetector:
         self._pre_layer_time_s = 0.0
         self._pre_layer_untimed_event_count = 0
 
+    def mark_layer(
+        self,
+        *,
+        start_line: int,
+        z_mm: float,
+        height_mm: float,
+    ) -> None:
+        """Register a slicer-authored layer boundary.
+
+        Bambu Studio assigns wipe, retract and travel movements following its
+        ``CHANGE_LAYER`` tag to the new layer.  Keeping those markers separate
+        from geometric Z-hop detection reproduces the preview's layer-time
+        grouping without changing the motion planner itself.
+        """
+
+        if not self._use_explicit_markers:
+            return
+        marker = _ExplicitLayerMarker(
+            start_line=start_line,
+            z_mm=z_mm,
+            height_mm=height_mm,
+        )
+        if (
+            self._explicit_markers
+            and marker.start_line <= self._explicit_markers[-1].start_line
+        ):
+            raise ValueError("Explicit layer markers must be ordered.")
+        self._explicit_markers.append(marker)
+
     def process_event(self, event: TimedEvent) -> None:
         """
         Process one movement or dwell event.
         """
+        if self._use_explicit_markers:
+            self._process_explicit_event(event)
+            return
+
         if self._current_layer is None:
             self._process_before_first_layer(event)
             return
@@ -153,6 +195,39 @@ class LayerDetector:
         ):
             self._candidate_events.append(event)
             self._evaluate_candidate_event(event)
+            return
+
+        self._add_event_to_layer(
+            layer=self._current_layer,
+            event=event,
+        )
+
+    def _process_explicit_event(self, event: TimedEvent) -> None:
+        while (
+            self._explicit_markers
+            and event.line_number >= self._explicit_markers[0].start_line
+        ):
+            marker = self._explicit_markers.pop(0)
+            if self._current_layer is not None:
+                self._completed_layers.append(
+                    self._current_layer.to_record()
+                )
+                self._confirmed_layer_changes += 1
+            self._current_layer = _LayerAccumulator(
+                index=len(self._completed_layers) + 1,
+                z_mm=marker.z_mm,
+                height_mm=marker.height_mm,
+                start_line=marker.start_line,
+                first_deposition_line=0,
+                end_line=marker.start_line,
+            )
+
+        if self._current_layer is None:
+            self._pre_layer_event_count += 1
+            if event.duration_s is None:
+                self._pre_layer_untimed_event_count += 1
+            else:
+                self._pre_layer_time_s += event.duration_s
             return
 
         self._add_event_to_layer(
@@ -340,6 +415,8 @@ class LayerDetector:
 
         if movement.category == "deposition":
             layer.deposition_count += 1
+            if layer.first_deposition_line <= 0:
+                layer.first_deposition_line = movement.line_number
 
             if movement.path_length_mm is not None:
                 layer.deposition_path_mm += movement.path_length_mm

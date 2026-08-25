@@ -136,7 +136,7 @@ beide Standardwerte betragen 50°.
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python cli_main.py `
-  --gcode ".\input\rabe_koerper_18cm.gcode" `
+  --gcode "D:\Prints\modell.gcode" `
   --target-time 10 `
   --minimum-radius 5 `
   --maximum-radius 40 `
@@ -281,12 +281,13 @@ verändern. Eine direkte G-Code-Ausgabe ist derzeit nicht Bestandteil der
 Benutzeroberfläche; die Entwicklung konzentriert sich auf einen möglichst
 präzisen und weiterhin im Slicer bearbeitbaren STL-Kühlturm.
 
-Kühlungsbedingte Mindestlayerzeit-Verlangsamung wird nur in einer temporären
-Kalibrierungskopie des effektiven Profils neutralisiert. Quellprofile bleiben
-unverändert. Ein Export entsteht erst nach Konvergenz und bestandener Mesh-,
-Profil-, Druckbett-, Modalzustands- und Zeitprüfung. Details einschließlich
-Iterationsergebnissen, Hashwerten und Abbruchursachen stehen im erzeugten
-`calibration_report.json`.
+Profilkopien behalten die ausgewählten Kühlungs- und Filamenteinstellungen bei.
+Wenn die 100-%-Turmfüllung aktiviert ist, werden ausschließlich die dafür
+erforderlichen Füllwerte in einer temporären Prozessprofilkopie beziehungsweise
+objektspezifisch am Kühlturm gesetzt. Quellprofile bleiben unverändert. Ein
+Export entsteht erst nach Konvergenz und bestandener Mesh-, Profil-, Druckbett-,
+Modalzustands- und Zeitprüfung. Details einschließlich Iterationsergebnissen,
+Hashwerten und Abbruchursachen stehen im erzeugten `calibration_report.json`.
 
 ## Phase 18: UI-Update und Verbesserungen
 
@@ -460,19 +461,10 @@ python scripts\migrate_output_structure.py --output-root .\output
 Im aktuellen Projekt wurde die Phase-8-Migration bereits ausgeführt. Der
 Bericht liegt unter `output/migrated_legacy/logs/`.
 
-## Anycubic-Slicer-Nachweis
+## STL-Testdateien
 
-Das reale Referenz-STL wurde zusätzlich mit dem lokal installierten
-AnycubicSlicerNext 1.4.1.2 geprüft und mit dem Systemprofil
-`Anycubic Kobra 3 V2 0.4 nozzle`, dem 0,20-mm-Standardprozess und Anycubic PLA
-vollständig geslict. Der Slicer meldet das STL als manifold und erzeugte 802
-Schichten bis 160,4 mm. G-Code, Metadaten und der maschinenlesbare Prüfbericht
-liegen im Referenz-Run unter `slicer_validation/`.
-
-Nach der Umstellung der Konturkopplung und der automatischen Standfußbreite
-wurde ein weiterer realer Lauf unter
-`output/runs/20260714_123849_rabe_koerper_18cm/` geprüft. Der neue Standfuß ist
-bei 160,4 mm G-Code-Objekthöhe 32,08 mm breit. Das wasserdichte STL mit 178.800
-Dreiecken wurde vom gleichen realen Slicer erfolgreich in 803 Schichten bis
-160,6 mm umgesetzt; G-Code, Metadaten und Prüfbericht liegen wieder im
-Unterordner `slicer_validation/`.
+Unter `input/` liegen zwei reale Testmodelle. `Test-STL (manifold).stl` dient
+als gültige Quelle für den normalen Vorbereitungs- und Slicerablauf.
+`Test-STL (non-manifold).stl` enthält absichtlich Topologiefehler und dient zur
+Prüfung des kontrollierten Validierungsabbruchs. Beide Quelldateien werden in
+allen Prüfungen ausschließlich gelesen.

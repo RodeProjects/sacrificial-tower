@@ -29,6 +29,33 @@ AnalysisProgressCallback = Callable[[int, str], None]
 CancellationCallback = Callable[[], bool]
 
 
+def _uses_bambu_studio_timing(source: Path) -> bool:
+    """Detect Bambu-generated G-code before streaming motion analysis."""
+
+    try:
+        with source.open("rb") as handle:
+            header = handle.read(16 * 1024).lower()
+    except OSError:
+        return False
+    return b"bambustudio" in header or b"bambu studio" in header
+
+
+def _uses_bambu_studio_layer_markers(source: Path) -> bool:
+    """Detect Bambu's authoritative layer tags near the G-code start."""
+
+    try:
+        with source.open("rb") as handle:
+            header = handle.read(1024 * 1024).lower()
+    except OSError:
+        return False
+    return (
+        (b"bambustudio" in header or b"bambu studio" in header)
+        and b"; change_layer" in header
+        and b"; z_height:" in header
+        and b"; layer_height:" in header
+    )
+
+
 class AnalysisCancelled(RuntimeError):
     """Raised when an obsolete background analysis is cancelled."""
 
@@ -106,10 +133,18 @@ class GCodeAnalysisService:
                 return cached
 
         notify(0, "G-Code wird analysiert")
-        tracker = MachineStateTracker()
-        motion_planner = MotionTimingPlanner()
-        detector = LayerDetector()
+        bambu_timing = _uses_bambu_studio_timing(source)
+        explicit_bambu_layers = _uses_bambu_studio_layer_markers(source)
+        tracker = MachineStateTracker(bambu_compatible=bambu_timing)
+        motion_planner = MotionTimingPlanner(
+            bambu_compatible=bambu_timing
+        )
+        detector = LayerDetector(
+            use_explicit_markers=explicit_bambu_layers
+        )
         metadata_collector = GCodeMetadataCollector(source)
+        pending_layer_start_line: int | None = None
+        pending_layer_z_mm: float | None = None
 
         processed_bytes = 0
         last_reported_percent = 0
@@ -126,6 +161,42 @@ class GCodeAnalysisService:
                     last_reported_percent = percent
                     notify(percent, "G-Code-Inhalt wird ausgewertet")
             metadata_collector.consume(parsed_line)
+            if explicit_bambu_layers:
+                comment = (parsed_line.comment or "").strip()
+                if comment == "CHANGE_LAYER":
+                    pending_layer_start_line = parsed_line.number
+                    pending_layer_z_mm = None
+                elif (
+                    pending_layer_start_line is not None
+                    and comment.startswith("Z_HEIGHT:")
+                ):
+                    try:
+                        pending_layer_z_mm = float(
+                            comment.partition(":")[2].strip()
+                        )
+                    except ValueError:
+                        pending_layer_start_line = None
+                        pending_layer_z_mm = None
+                elif (
+                    pending_layer_start_line is not None
+                    and pending_layer_z_mm is not None
+                    and comment.startswith("LAYER_HEIGHT:")
+                ):
+                    try:
+                        layer_height_mm = float(
+                            comment.partition(":")[2].strip()
+                        )
+                    except ValueError:
+                        pending_layer_start_line = None
+                        pending_layer_z_mm = None
+                    else:
+                        detector.mark_layer(
+                            start_line=pending_layer_start_line,
+                            z_mm=pending_layer_z_mm,
+                            height_mm=layer_height_mm,
+                        )
+                        pending_layer_start_line = None
+                        pending_layer_z_mm = None
             event = tracker.process_line(parsed_line)
             if event is not None:
                 for timed_event in motion_planner.process_event(event):

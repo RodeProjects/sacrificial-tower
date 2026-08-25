@@ -314,6 +314,15 @@ class MachineState:
     maximum_acceleration_z_mm_s2: float | None = None
     maximum_acceleration_e_mm_s2: float | None = None
 
+    maximum_feedrate_x_mm_s: float | None = None
+    maximum_feedrate_y_mm_s: float | None = None
+    maximum_feedrate_z_mm_s: float | None = None
+    maximum_feedrate_e_mm_s: float | None = None
+
+    minimum_extruding_feedrate_mm_s: float | None = None
+    minimum_travel_feedrate_mm_s: float | None = None
+    extrusion_factor: float = 1.0
+
     jerk_x_mm_s: float | None = None
     jerk_y_mm_s: float | None = None
     jerk_z_mm_s: float | None = None
@@ -335,6 +344,10 @@ class ArcGeometry:
     radius_mm: float | None
     sweep_degrees: float | None
     error: str | None
+    center_x_mm: float | None = None
+    center_y_mm: float | None = None
+    planar_length_mm: float | None = None
+    start_radius_mm: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +420,18 @@ class Movement:
     jerk_z_mm_s: float | None = None
     jerk_e_mm_s: float | None = None
     square_corner_velocity_mm_s: float | None = None
+    entry_direction_xyz: tuple[float, float, float] | None = None
+    exit_direction_xyz: tuple[float, float, float] | None = None
+    arc_planar_length_mm: float | None = None
+    arc_start_radius_mm: float | None = None
+    maximum_feedrate_x_mm_s: float | None = None
+    maximum_feedrate_y_mm_s: float | None = None
+    maximum_feedrate_z_mm_s: float | None = None
+    maximum_feedrate_e_mm_s: float | None = None
+    minimum_extruding_feedrate_mm_s: float | None = None
+    minimum_travel_feedrate_mm_s: float | None = None
+    extrusion_factor: float = 1.0
+    centripetal_acceleration_mm_s2: float | None = None
 
 
 def normalize_command(command: str) -> str:
@@ -584,6 +609,7 @@ def calculate_movement_timing(
     acceleration_mm_s2: float | None = None,
     entry_speed_mm_s: float = 0.0,
     exit_speed_mm_s: float = 0.0,
+    allow_above_cruise_speeds: bool = False,
 ) -> MovementTiming:
     """
     Calculate the duration of one movement.
@@ -693,14 +719,18 @@ def calculate_movement_timing(
             acceleration_mm_s2=acceleration_mm_s2,
         )
 
-    entry_speed_mm_s = min(
-        max(0.0, entry_speed_mm_s),
-        target_speed_mm_s,
-    )
-    exit_speed_mm_s = min(
-        max(0.0, exit_speed_mm_s),
-        target_speed_mm_s,
-    )
+    if allow_above_cruise_speeds:
+        entry_speed_mm_s = max(0.0, entry_speed_mm_s)
+        exit_speed_mm_s = max(0.0, exit_speed_mm_s)
+    else:
+        entry_speed_mm_s = min(
+            max(0.0, entry_speed_mm_s),
+            target_speed_mm_s,
+        )
+        exit_speed_mm_s = min(
+            max(0.0, exit_speed_mm_s),
+            target_speed_mm_s,
+        )
 
     peak_speed_squared = (
         acceleration_mm_s2 * timing_distance_mm
@@ -739,9 +769,9 @@ def calculate_movement_timing(
     )
 
     duration_s = (
-        (cruise_speed_mm_s - entry_speed_mm_s)
+        max(0.0, cruise_speed_mm_s - entry_speed_mm_s)
         / acceleration_mm_s2
-        + (cruise_speed_mm_s - exit_speed_mm_s)
+        + max(0.0, cruise_speed_mm_s - exit_speed_mm_s)
         / acceleration_mm_s2
         + constant_speed_distance_mm / cruise_speed_mm_s
     )
@@ -860,6 +890,10 @@ def calculate_ij_arc_geometry(
         radius_mm=radius,
         sweep_degrees=math.degrees(sweep),
         error=None,
+        center_x_mm=center_x,
+        center_y_mm=center_y,
+        planar_length_mm=planar_length,
+        start_radius_mm=start_radius,
     )
 
 
@@ -967,12 +1001,12 @@ def calculate_r_arc_geometry(
         )
 
     if radius_parameter >= 0.0:
-        _, _, sweep = min(
+        center_x, center_y, sweep = min(
             candidates,
             key=lambda candidate: candidate[2],
         )
     else:
-        _, _, sweep = max(
+        center_x, center_y, sweep = max(
             candidates,
             key=lambda candidate: candidate[2],
         )
@@ -990,6 +1024,10 @@ def calculate_r_arc_geometry(
         radius_mm=radius,
         sweep_degrees=math.degrees(sweep),
         error=None,
+        center_x_mm=center_x,
+        center_y_mm=center_y,
+        planar_length_mm=planar_length,
+        start_radius_mm=radius,
     )
 
 
@@ -1053,8 +1091,9 @@ class MachineStateTracker:
     Reconstruct the modal machine state while processing parsed G-code lines.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, bambu_compatible: bool = False) -> None:
         self.state = MachineState()
+        self.bambu_compatible = bambu_compatible
 
     def process_line(
         self,
@@ -1082,6 +1121,11 @@ class MachineStateTracker:
             self._apply_maximum_acceleration(parameters)
             return None
 
+        if command == "M203":
+            if self.bambu_compatible:
+                self._apply_maximum_feedrate(parameters)
+            return None
+
         if command == "M204":
             self._apply_movement_acceleration(parameters)
             return None
@@ -1098,6 +1142,15 @@ class MachineStateTracker:
             if "S" in parameters:
                 self.state.speed_factor_percent = parameters["S"]
 
+            return None
+
+        if command == "M221":
+            if (
+                self.bambu_compatible
+                and "S" in parameters
+                and "T" not in parameters
+            ):
+                self.state.extrusion_factor = parameters["S"] / 100.0
             return None
 
         if command == "G90":
@@ -1169,6 +1222,22 @@ class MachineStateTracker:
             if parameter in parameters:
                 setattr(self.state, attribute, parameters[parameter])
 
+    def _apply_maximum_feedrate(
+        self,
+        parameters: dict[str, float],
+    ) -> None:
+        """Apply Bambu/Marlin M203 per-axis maximum speeds in mm/s."""
+        axis_attributes = {
+            "X": "maximum_feedrate_x_mm_s",
+            "Y": "maximum_feedrate_y_mm_s",
+            "Z": "maximum_feedrate_z_mm_s",
+            "E": "maximum_feedrate_e_mm_s",
+        }
+
+        for parameter, attribute in axis_attributes.items():
+            if parameter in parameters:
+                setattr(self.state, attribute, parameters[parameter])
+
     def _apply_movement_acceleration(
         self,
         parameters: dict[str, float],
@@ -1179,7 +1248,16 @@ class MachineStateTracker:
         if shared_acceleration is not None:
             self.state.print_acceleration_mm_s2 = shared_acceleration
             self.state.travel_acceleration_mm_s2 = shared_acceleration
-            self.state.retract_acceleration_mm_s2 = shared_acceleration
+            # In the legacy S form Bambu/Prusa keep the previously configured
+            # retract acceleration unless an explicit T value accompanies S.
+            # Treating every feature-specific M204 S command as a retract
+            # override made the many short retracts appear substantially
+            # slower than in Bambu Studio's own G-code viewer.
+            if self.bambu_compatible and "T" in parameters:
+                self.state.retract_acceleration_mm_s2 = parameters["T"]
+            elif not self.bambu_compatible:
+                self.state.retract_acceleration_mm_s2 = shared_acceleration
+            return
 
         if "P" in parameters:
             self.state.print_acceleration_mm_s2 = parameters["P"]
@@ -1195,16 +1273,24 @@ class MachineStateTracker:
         parameters: dict[str, float],
     ) -> None:
         """Apply M205 classic-jerk limits used at movement junctions."""
-        axis_attributes = {
-            "X": "jerk_x_mm_s",
-            "Y": "jerk_y_mm_s",
-            "Z": "jerk_z_mm_s",
-            "E": "jerk_e_mm_s",
-        }
+        if "X" in parameters:
+            self.state.jerk_x_mm_s = parameters["X"]
+            if self.bambu_compatible:
+                # Bambu treats M205 X as the shared XY jerk unless an
+                # explicit Y value follows it.
+                self.state.jerk_y_mm_s = parameters["X"]
+        if "Y" in parameters:
+            self.state.jerk_y_mm_s = parameters["Y"]
+        if "Z" in parameters:
+            self.state.jerk_z_mm_s = parameters["Z"]
+        if "E" in parameters:
+            self.state.jerk_e_mm_s = parameters["E"]
 
-        for parameter, attribute in axis_attributes.items():
-            if parameter in parameters:
-                setattr(self.state, attribute, parameters[parameter])
+        if self.bambu_compatible:
+            if "S" in parameters:
+                self.state.minimum_extruding_feedrate_mm_s = parameters["S"]
+            if "T" in parameters:
+                self.state.minimum_travel_feedrate_mm_s = parameters["T"]
 
     def _apply_velocity_limit(
         self,
@@ -1371,6 +1457,10 @@ class MachineStateTracker:
         arc_radius_mm: float | None = None
         arc_sweep_degrees: float | None = None
         arc_error: str | None = None
+        arc_planar_length_mm: float | None = None
+        arc_start_radius_mm: float | None = None
+        entry_direction_xyz: tuple[float, float, float] | None = None
+        exit_direction_xyz: tuple[float, float, float] | None = None
 
         if command in LINEAR_MOTION_COMMANDS:
             path_length_mm: float | None = endpoint_distance_xyz_mm
@@ -1394,6 +1484,57 @@ class MachineStateTracker:
             arc_radius_mm = arc_geometry.radius_mm
             arc_sweep_degrees = arc_geometry.sweep_degrees
             arc_error = arc_geometry.error
+            arc_planar_length_mm = arc_geometry.planar_length_mm
+            arc_start_radius_mm = arc_geometry.start_radius_mm
+            if (
+                arc_geometry.center_x_mm is not None
+                and arc_geometry.center_y_mm is not None
+                and arc_geometry.radius_mm is not None
+                and arc_geometry.radius_mm > ARC_EPSILON
+            ):
+                start_radius = math.hypot(
+                    start_x - arc_geometry.center_x_mm,
+                    start_y - arc_geometry.center_y_mm,
+                )
+                end_radius = math.hypot(
+                    end_x - arc_geometry.center_x_mm,
+                    end_y - arc_geometry.center_y_mm,
+                )
+                if end_radius > ARC_EPSILON:
+                    start_radial_x = (
+                        start_x - arc_geometry.center_x_mm
+                    ) / start_radius
+                    start_radial_y = (
+                        start_y - arc_geometry.center_y_mm
+                    ) / start_radius
+                    end_radial_x = (
+                        end_x - arc_geometry.center_x_mm
+                    ) / end_radius
+                    end_radial_y = (
+                        end_y - arc_geometry.center_y_mm
+                    ) / end_radius
+                    if command == "G2":
+                        entry_direction_xyz = (
+                            start_radial_y,
+                            -start_radial_x,
+                            0.0,
+                        )
+                        exit_direction_xyz = (
+                            end_radial_y,
+                            -end_radial_x,
+                            0.0,
+                        )
+                    else:
+                        entry_direction_xyz = (
+                            -start_radial_y,
+                            start_radial_x,
+                            0.0,
+                        )
+                        exit_direction_xyz = (
+                            -end_radial_y,
+                            end_radial_x,
+                            0.0,
+                        )
 
         else:
             arc_plane = self.state.arc_plane
@@ -1505,6 +1646,32 @@ class MachineStateTracker:
             jerk_e_mm_s=self.state.jerk_e_mm_s,
             square_corner_velocity_mm_s=(
                 self.state.square_corner_velocity_mm_s
+            ),
+            entry_direction_xyz=entry_direction_xyz,
+            exit_direction_xyz=exit_direction_xyz,
+            arc_planar_length_mm=arc_planar_length_mm,
+            arc_start_radius_mm=arc_start_radius_mm,
+            maximum_feedrate_x_mm_s=(
+                self.state.maximum_feedrate_x_mm_s
+            ),
+            maximum_feedrate_y_mm_s=(
+                self.state.maximum_feedrate_y_mm_s
+            ),
+            maximum_feedrate_z_mm_s=(
+                self.state.maximum_feedrate_z_mm_s
+            ),
+            maximum_feedrate_e_mm_s=(
+                self.state.maximum_feedrate_e_mm_s
+            ),
+            minimum_extruding_feedrate_mm_s=(
+                self.state.minimum_extruding_feedrate_mm_s
+            ),
+            minimum_travel_feedrate_mm_s=(
+                self.state.minimum_travel_feedrate_mm_s
+            ),
+            extrusion_factor=self.state.extrusion_factor,
+            centripetal_acceleration_mm_s2=(
+                self.state.print_acceleration_mm_s2
             ),
         )
 
@@ -1619,23 +1786,321 @@ def calculate_junction_speed(
     return junction_speed
 
 
+def _bambu_arc_planar_length(movement: Movement) -> float | None:
+    if (
+        not movement.is_arc
+        or movement.arc_start_radius_mm is None
+        or movement.arc_start_radius_mm <= ARC_EPSILON
+        or movement.arc_sweep_degrees is None
+    ):
+        return movement.arc_planar_length_mm
+    return (
+        movement.arc_start_radius_mm
+        * math.radians(movement.arc_sweep_degrees)
+    )
+
+
+def _bambu_timing_distance(movement: Movement) -> float:
+    planar_length = _bambu_arc_planar_length(movement)
+    if movement.is_arc and planar_length is not None:
+        return math.hypot(planar_length, movement.delta_z)
+    return movement.timing_distance_mm or 0.0
+
+
+def _bambu_xy_direction(
+    movement: Movement,
+    *,
+    at_exit: bool,
+) -> tuple[float, float] | None:
+    explicit = (
+        movement.exit_direction_xyz
+        if at_exit
+        else movement.entry_direction_xyz
+    )
+    if explicit is not None:
+        x, y = explicit[:2]
+    else:
+        x, y = movement.delta_x, movement.delta_y
+    length = math.hypot(x, y)
+    if length <= MOVEMENT_EPSILON:
+        return None
+    return x / length, y / length
+
+
+def _bambu_axis_feedrates(
+    movement: Movement,
+    speed_mm_s: float,
+) -> tuple[float, float, float, float]:
+    """Project a Bambu block speed onto its machine axes."""
+
+    distance = _bambu_timing_distance(movement)
+    if distance <= MOVEMENT_EPSILON:
+        return 0.0, 0.0, 0.0, 0.0
+    planar_length = _bambu_arc_planar_length(movement)
+    if movement.is_arc and planar_length is not None:
+        planar_speed = speed_mm_s * planar_length / distance
+        return (
+            planar_speed,
+            planar_speed,
+            speed_mm_s * movement.delta_z / distance,
+            speed_mm_s
+            * movement.delta_e
+            / distance
+            * movement.extrusion_factor,
+        )
+    return (
+        speed_mm_s * movement.delta_x / distance,
+        speed_mm_s * movement.delta_y / distance,
+        speed_mm_s * movement.delta_z / distance,
+        speed_mm_s
+        * movement.delta_e
+        / distance
+        * movement.extrusion_factor,
+    )
+
+
+def _bambu_cruise_feedrate(
+    movement: Movement,
+    previous: Movement | None = None,
+) -> float:
+    """Return Bambu Studio's block cruise speed in mm/s."""
+
+    speed = (movement.effective_feedrate_mm_min or 0.0) / 60.0
+    minimum = (
+        movement.minimum_travel_feedrate_mm_s
+        if abs(movement.delta_e) <= MOVEMENT_EPSILON
+        else movement.minimum_extruding_feedrate_mm_s
+    )
+    if minimum is not None:
+        speed = max(speed, minimum)
+
+    centripetal_acceleration = movement.centripetal_acceleration_mm_s2
+    if (
+        movement.is_arc
+        and movement.arc_start_radius_mm is not None
+        and movement.arc_start_radius_mm > ARC_EPSILON
+        and centripetal_acceleration is not None
+        and centripetal_acceleration > MOVEMENT_EPSILON
+    ):
+        planar_length = _bambu_arc_planar_length(movement)
+        timing_distance = _bambu_timing_distance(movement)
+        if (
+            planar_length is not None
+            and planar_length > ARC_EPSILON
+            and timing_distance > MOVEMENT_EPSILON
+        ):
+            planar_fraction = planar_length / timing_distance
+            centripetal_limit = math.sqrt(
+                centripetal_acceleration
+                * movement.arc_start_radius_mm
+            ) / planar_fraction
+            speed = min(speed, centripetal_limit)
+    elif (
+        previous is not None
+        and not movement.is_arc
+        and centripetal_acceleration is not None
+        and centripetal_acceleration > MOVEMENT_EPSILON
+        and movement.endpoint_distance_xy_mm > MOVEMENT_EPSILON
+    ):
+        previous_direction = _bambu_xy_direction(
+            previous,
+            at_exit=True,
+        )
+        current_direction = _bambu_xy_direction(
+            movement,
+            at_exit=False,
+        )
+        if previous_direction is not None and current_direction is not None:
+            difference = math.hypot(
+                current_direction[0] - previous_direction[0],
+                current_direction[1] - previous_direction[1],
+            )
+            if 0.00001 < difference < 0.5:
+                sin_half_angle = difference * 0.5
+                radius = (
+                    movement.endpoint_distance_xy_mm
+                    * 0.5
+                    / sin_half_angle
+                )
+                speed = min(
+                    speed,
+                    math.sqrt(centripetal_acceleration * radius),
+                )
+
+    axis_feedrates = _bambu_axis_feedrates(movement, speed)
+    axis_maximums = (
+        movement.maximum_feedrate_x_mm_s,
+        movement.maximum_feedrate_y_mm_s,
+        movement.maximum_feedrate_z_mm_s,
+        movement.maximum_feedrate_e_mm_s,
+    )
+    feedrate_factor = 1.0
+    for axis_feedrate, axis_maximum in zip(
+        axis_feedrates,
+        axis_maximums,
+    ):
+        if (
+            abs(axis_feedrate) > MOVEMENT_EPSILON
+            and axis_maximum is not None
+            and axis_maximum > MOVEMENT_EPSILON
+        ):
+            feedrate_factor = min(
+                feedrate_factor,
+                axis_maximum / abs(axis_feedrate),
+            )
+    return speed * feedrate_factor
+
+
+def _bambu_safe_feedrate(
+    movement: Movement,
+    cruise_speed_mm_s: float | None = None,
+) -> float:
+    """Return Bambu Studio's per-block safe (classic-jerk) speed."""
+
+    speed = (
+        _bambu_cruise_feedrate(movement)
+        if cruise_speed_mm_s is None
+        else cruise_speed_mm_s
+    )
+    if speed <= MOVEMENT_EPSILON:
+        return 0.0
+    distance = _bambu_timing_distance(movement)
+    if distance <= MOVEMENT_EPSILON:
+        return 0.0
+    axis_speeds = tuple(
+        abs(value) for value in _bambu_axis_feedrates(movement, speed)
+    )
+    jerk_limits = (
+        movement.jerk_x_mm_s,
+        movement.jerk_y_mm_s,
+        movement.jerk_z_mm_s,
+        movement.jerk_e_mm_s,
+    )
+    safe = speed
+    for axis_speed, jerk in zip(axis_speeds, jerk_limits):
+        if jerk is None:
+            continue
+        if axis_speed > jerk:
+            safe = min(safe, max(0.0, jerk))
+    return safe
+
+
+def calculate_bambu_junction_speed(
+    previous: Movement,
+    current: Movement,
+    *,
+    previous_speed_mm_s: float | None = None,
+    current_speed_mm_s: float | None = None,
+) -> float:
+    """Mirror Bambu Studio's linear-move junction estimate.
+
+    Bambu's G-code viewer uses a slightly different classic-jerk planner than
+    the generic Marlin model.  In particular, its variant-specific safe speed
+    is retained at block boundaries and a direction change may yield an entry
+    limit above the block's nominal feedrate.  Reproducing those semantics is
+    necessary for the layer-time colours shown by Bambu Studio.
+    """
+
+    previous_speed = (
+        _bambu_cruise_feedrate(previous)
+        if previous_speed_mm_s is None
+        else previous_speed_mm_s
+    )
+    current_speed = (
+        _bambu_cruise_feedrate(current, previous)
+        if current_speed_mm_s is None
+        else current_speed_mm_s
+    )
+    if previous_speed <= MOVEMENT_EPSILON:
+        return _bambu_safe_feedrate(current, current_speed)
+
+    maximum_speed = min(previous_speed, current_speed)
+    previous_base_direction = _movement_direction(previous)
+    current_base_direction = _movement_direction(current)
+    if previous_base_direction is None or current_base_direction is None:
+        return _bambu_safe_feedrate(current, current_speed)
+
+    previous_is_extruder_only = abs(previous_base_direction[3]) > 0.0
+    current_is_extruder_only = abs(current_base_direction[3]) > 0.0
+    if previous_is_extruder_only or current_is_extruder_only:
+        return maximum_speed
+
+    previous_direction = (
+        previous.exit_direction_xyz
+        or previous_base_direction[:3]
+    )
+    current_direction = (
+        current.entry_direction_xyz
+        or current_base_direction[:3]
+    )
+
+    direction_change = tuple(
+        current_component - previous_component
+        for previous_component, current_component in zip(
+            previous_direction,
+            current_direction,
+        )
+    )
+    candidates = tuple(
+        max(0.0, jerk) / abs(component)
+        for component, jerk in zip(
+            direction_change,
+            (
+                current.jerk_x_mm_s,
+                current.jerk_y_mm_s,
+                current.jerk_z_mm_s,
+            ),
+        )
+        if abs(component) > MOVEMENT_EPSILON and jerk is not None
+    )
+    if not candidates:
+        return maximum_speed
+
+    junction_speed = min(candidates)
+    previous_safe = _bambu_safe_feedrate(previous, previous_speed)
+    current_safe = _bambu_safe_feedrate(current, current_speed)
+    threshold = junction_speed * 0.99
+    if previous_safe > threshold and current_safe > threshold:
+        junction_speed = current_safe
+    return junction_speed
+
+
 def plan_movement_run(
     movements: list[Movement],
     *,
     start_speed_mm_s: float = 0.0,
     end_speed_mm_s: float = 0.0,
+    bambu_compatible: bool = False,
+    previous_movement: Movement | None = None,
 ) -> list[Movement]:
     """Plan a continuous run with junction and acceleration constraints."""
     if not movements:
         return []
 
     movement_count = len(movements)
-    target_speeds = [
-        (movement.effective_feedrate_mm_min or 0.0) / 60.0
-        for movement in movements
-    ]
+    if bambu_compatible:
+        target_speeds = [
+            _bambu_cruise_feedrate(
+                movement,
+                (
+                    movements[index - 1]
+                    if index > 0
+                    else previous_movement
+                ),
+            )
+            for index, movement in enumerate(movements)
+        ]
+    else:
+        target_speeds = [
+            (movement.effective_feedrate_mm_min or 0.0) / 60.0
+            for movement in movements
+        ]
     distances = [
-        movement.timing_distance_mm or 0.0
+        (
+            _bambu_timing_distance(movement)
+            if bambu_compatible
+            else movement.timing_distance_mm or 0.0
+        )
         for movement in movements
     ]
     accelerations = [
@@ -1644,57 +2109,134 @@ def plan_movement_run(
     ]
 
     boundary_speeds = [0.0] * (movement_count + 1)
-    boundary_speeds[0] = min(
-        max(0.0, start_speed_mm_s),
-        target_speeds[0],
-    )
-    boundary_speeds[-1] = min(
-        max(0.0, end_speed_mm_s),
-        target_speeds[-1],
-    )
-
-    for index in range(1, movement_count):
-        boundary_speeds[index] = calculate_junction_speed(
-            movements[index - 1],
-            movements[index],
-        )
-
-    # Reverse pass: every movement must be long enough to decelerate to its
-    # requested exit speed. This mirrors the essential look-ahead constraint
-    # used by printer motion planners.
-    for index in range(movement_count - 1, -1, -1):
-        maximum_entry_speed = math.sqrt(
-            max(
-                0.0,
-                boundary_speeds[index + 1] ** 2
-                + 2.0
-                * accelerations[index]
-                * distances[index],
+    if bambu_compatible:
+        safe_speeds = [
+            _bambu_safe_feedrate(item, target_speeds[index])
+            for index, item in enumerate(movements)
+        ]
+        maximum_entry_speeds = [0.0] * movement_count
+        nominal_length = [False] * movement_count
+        for index, movement in enumerate(movements):
+            maximum_entry = (
+                (
+                    start_speed_mm_s
+                    if start_speed_mm_s > MOVEMENT_EPSILON
+                    else safe_speeds[index]
+                )
+                if index == 0
+                else calculate_bambu_junction_speed(
+                    movements[index - 1],
+                    movement,
+                    previous_speed_mm_s=target_speeds[index - 1],
+                    current_speed_mm_s=target_speeds[index],
+                )
             )
+            allowable_entry = math.sqrt(
+                max(
+                    0.0,
+                    safe_speeds[index] ** 2
+                    + 2.0 * accelerations[index] * distances[index],
+                )
+            )
+            maximum_entry_speeds[index] = maximum_entry
+            boundary_speeds[index] = min(maximum_entry, allowable_entry)
+            nominal_length[index] = (
+                target_speeds[index] <= allowable_entry
+            )
+        boundary_speeds[-1] = safe_speeds[-1]
+
+        # Bambu Studio applies its forward pass before its reverse pass.  Keep
+        # this order to match the G-code viewer's reported layer durations.
+        for index in range(movement_count - 1):
+            if (
+                not nominal_length[index]
+                and boundary_speeds[index] < boundary_speeds[index + 1]
+            ):
+                boundary_speeds[index + 1] = min(
+                    boundary_speeds[index + 1],
+                    math.sqrt(
+                        max(
+                            0.0,
+                            boundary_speeds[index] ** 2
+                            + 2.0
+                            * accelerations[index]
+                            * distances[index],
+                        )
+                    ),
+                )
+        for index in range(movement_count - 1, -1, -1):
+            maximum_entry = maximum_entry_speeds[index]
+            if boundary_speeds[index] == maximum_entry:
+                continue
+            if (
+                not nominal_length[index]
+                and maximum_entry > boundary_speeds[index + 1]
+            ):
+                boundary_speeds[index] = min(
+                    maximum_entry,
+                    math.sqrt(
+                        max(
+                            0.0,
+                            boundary_speeds[index + 1] ** 2
+                            + 2.0
+                            * accelerations[index]
+                            * distances[index],
+                        )
+                    ),
+                )
+            else:
+                boundary_speeds[index] = maximum_entry
+    else:
+        boundary_speeds[0] = min(
+            max(0.0, start_speed_mm_s),
+            target_speeds[0],
         )
-        boundary_speeds[index] = min(
-            boundary_speeds[index],
-            target_speeds[index],
-            maximum_entry_speed,
+        boundary_speeds[-1] = min(
+            max(0.0, end_speed_mm_s),
+            target_speeds[-1],
         )
 
-    # Forward pass: the exit speed must likewise be reachable from the entry
-    # speed within the available movement distance.
-    for index in range(movement_count):
-        maximum_exit_speed = math.sqrt(
-            max(
-                0.0,
-                boundary_speeds[index] ** 2
-                + 2.0
-                * accelerations[index]
-                * distances[index],
+        for index in range(1, movement_count):
+            boundary_speeds[index] = calculate_junction_speed(
+                movements[index - 1],
+                movements[index],
             )
-        )
-        boundary_speeds[index + 1] = min(
-            boundary_speeds[index + 1],
-            target_speeds[index],
-            maximum_exit_speed,
-        )
+
+        # Reverse pass: every movement must be long enough to decelerate to
+        # its requested exit speed.
+        for index in range(movement_count - 1, -1, -1):
+            maximum_entry_speed = math.sqrt(
+                max(
+                    0.0,
+                    boundary_speeds[index + 1] ** 2
+                    + 2.0
+                    * accelerations[index]
+                    * distances[index],
+                )
+            )
+            boundary_speeds[index] = min(
+                boundary_speeds[index],
+                target_speeds[index],
+                maximum_entry_speed,
+            )
+
+        # Forward pass: the exit speed must likewise be reachable from the
+        # entry speed within the available movement distance.
+        for index in range(movement_count):
+            maximum_exit_speed = math.sqrt(
+                max(
+                    0.0,
+                    boundary_speeds[index] ** 2
+                    + 2.0
+                    * accelerations[index]
+                    * distances[index],
+                )
+            )
+            boundary_speeds[index + 1] = min(
+                boundary_speeds[index + 1],
+                target_speeds[index],
+                maximum_exit_speed,
+            )
 
     planned_movements: list[Movement] = []
 
@@ -1708,13 +2250,22 @@ def plan_movement_run(
                     and movement.path_length_mm > MOVEMENT_EPSILON
                 )
             ),
-            path_length_mm=movement.path_length_mm,
+            path_length_mm=(
+                distances[index]
+                if bambu_compatible and movement.is_arc
+                else movement.path_length_mm
+            ),
             delta_e=movement.delta_e,
-            feedrate_mm_min=movement.effective_feedrate_mm_min,
+            feedrate_mm_min=(
+                target_speeds[index] * 60.0
+                if bambu_compatible
+                else movement.effective_feedrate_mm_min
+            ),
             speed_factor_percent=100.0,
             acceleration_mm_s2=movement.acceleration_mm_s2,
             entry_speed_mm_s=boundary_speeds[index],
             exit_speed_mm_s=boundary_speeds[index + 1],
+            allow_above_cruise_speeds=bambu_compatible,
         )
         # ``dataclasses.replace`` discovers and reads every field dynamically.
         # This function runs more than once per physical G-code movement due
@@ -1742,9 +2293,15 @@ def plan_movement_run(
                 path_length_mm=movement.path_length_mm,
                 feedrate_mm_min=movement.feedrate_mm_min,
                 effective_feedrate_mm_min=(
-                    movement.effective_feedrate_mm_min
+                    target_speeds[index] * 60.0
+                    if bambu_compatible
+                    else movement.effective_feedrate_mm_min
                 ),
-                timing_distance_mm=movement.timing_distance_mm,
+                timing_distance_mm=(
+                    timing.distance_mm
+                    if bambu_compatible
+                    else movement.timing_distance_mm
+                ),
                 duration_s=timing.duration_s,
                 timing_error=timing.error,
                 is_arc=movement.is_arc,
@@ -1764,6 +2321,32 @@ def plan_movement_run(
                 square_corner_velocity_mm_s=(
                     movement.square_corner_velocity_mm_s
                 ),
+                entry_direction_xyz=movement.entry_direction_xyz,
+                exit_direction_xyz=movement.exit_direction_xyz,
+                arc_planar_length_mm=movement.arc_planar_length_mm,
+                arc_start_radius_mm=movement.arc_start_radius_mm,
+                maximum_feedrate_x_mm_s=(
+                    movement.maximum_feedrate_x_mm_s
+                ),
+                maximum_feedrate_y_mm_s=(
+                    movement.maximum_feedrate_y_mm_s
+                ),
+                maximum_feedrate_z_mm_s=(
+                    movement.maximum_feedrate_z_mm_s
+                ),
+                maximum_feedrate_e_mm_s=(
+                    movement.maximum_feedrate_e_mm_s
+                ),
+                minimum_extruding_feedrate_mm_s=(
+                    movement.minimum_extruding_feedrate_mm_s
+                ),
+                minimum_travel_feedrate_mm_s=(
+                    movement.minimum_travel_feedrate_mm_s
+                ),
+                extrusion_factor=movement.extrusion_factor,
+                centripetal_acceleration_mm_s2=(
+                    movement.centripetal_acceleration_mm_s2
+                ),
             )
         )
 
@@ -1773,14 +2356,28 @@ def plan_movement_run(
 class MotionTimingPlanner:
     """Bounded streaming look-ahead for acceleration-aware movement timing."""
 
-    def __init__(self, lookahead_movements: int = 128) -> None:
+    def __init__(
+        self,
+        lookahead_movements: int = 64,
+        *,
+        refresh_threshold_movements: int = 256,
+        bambu_compatible: bool = False,
+    ) -> None:
         if lookahead_movements < 1:
             raise ValueError("lookahead_movements must be at least 1.")
+        if refresh_threshold_movements <= lookahead_movements:
+            raise ValueError(
+                "refresh_threshold_movements must exceed "
+                "lookahead_movements."
+            )
 
         self.lookahead_movements = lookahead_movements
+        self.refresh_threshold_movements = refresh_threshold_movements
+        self.bambu_compatible = bambu_compatible
         self._pending_events: list[Movement] = []
         self._pending_physical_count = 0
         self._start_speed_mm_s = 0.0
+        self._previous_physical_movement: Movement | None = None
 
     def process_event(
         self,
@@ -1803,9 +2400,12 @@ class MotionTimingPlanner:
 
         if (
             self._pending_physical_count
-            >= self.lookahead_movements * 2
+            > self.refresh_threshold_movements
         ):
-            return self._flush_prefix(self.lookahead_movements)
+            return self._flush_prefix(
+                self._pending_physical_count
+                - self.lookahead_movements
+            )
 
         return ()
 
@@ -1840,6 +2440,8 @@ class MotionTimingPlanner:
                 physical_movements,
                 start_speed_mm_s=self._start_speed_mm_s,
                 end_speed_mm_s=0.0,
+                bambu_compatible=self.bambu_compatible,
+                previous_movement=self._previous_physical_movement,
             )
         )
 
@@ -1871,6 +2473,7 @@ class MotionTimingPlanner:
 
         cutoff_event = planned[cutoff_index]
         self._start_speed_mm_s = cutoff_event.exit_speed_mm_s or 0.0
+        self._previous_physical_movement = cutoff_event
         emitted = tuple(planned[:cutoff_index + 1])
         self._pending_events = self._pending_events[cutoff_index + 1:]
         self._pending_physical_count -= physical_count
@@ -1879,10 +2482,12 @@ class MotionTimingPlanner:
     def _flush_all(self) -> tuple[Movement | Dwell, ...]:
         if not self._pending_events:
             self._start_speed_mm_s = 0.0
+            self._previous_physical_movement = None
             return ()
 
         emitted = tuple(self._planned_pending())
         self._pending_events.clear()
         self._pending_physical_count = 0
         self._start_speed_mm_s = 0.0
+        self._previous_physical_movement = None
         return emitted

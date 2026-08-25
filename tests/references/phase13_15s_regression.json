@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "case_id": "phase13_target_15s_observed_11s",
-  "source_gcode": "input/rabe_koerper_18cm.gcode",
+  "source_fixture_status": "removed",
   "evidence_origin": "user-provided slicer layer-time and speed screenshots",
   "target_layer_time_s": 15.0,
   "observed_minimum_layer_time_s": 11.0,

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import io
+import json
 import math
+import os
 import re
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +23,21 @@ MODEL_RELATIONSHIP_TYPE = (
     "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
 )
 MODEL_SETTINGS_PATH = "Metadata/model_settings.config"
+PROJECT_SETTINGS_PATH = "Metadata/project_settings.config"
 TOWER_INFILL_KEY = "sparse_infill_density"
 TOWER_INFILL_PATTERN_KEY = "sparse_infill_pattern"
 TOWER_FULL_INFILL_PATTERN = "zig-zag"
+PROFILE_METADATA_KEYS = frozenset(
+    {
+        "name",
+        "type",
+        "from",
+        "inherits",
+        "compatible_printers",
+        "compatible_printers_condition",
+        "version",
+    }
+)
 RELATIONSHIP_NAMESPACE = (
     "http://schemas.openxmlformats.org/package/2006/relationships"
 )
@@ -803,6 +818,109 @@ def finalize_slicer_project(
         tower_full_infill=tower_full_infill,
         sha256=sha256_file(destination_path),
     )
+
+
+def synchronize_bambu_project_filament_settings(
+    project_3mf: str | Path,
+    filament_profile_paths: tuple[Path, ...],
+) -> str:
+    """Keep exported Bambu filament values identical to the joint-slice copy.
+
+    Bambu's native 3MF exporter occasionally shortens non-scalar filament
+    values even though the CLI joint slice consumed the complete, flattened
+    temporary profile. Only genuine semantic differences are restored here;
+    repeated tool-slot values and equivalent numeric renderings are retained.
+    Slicer-owned source profiles are opened read-only.
+    """
+
+    project_path = Path(project_3mf).resolve(strict=True)
+    paths = tuple(Path(path).resolve(strict=True) for path in filament_profile_paths)
+    if len(paths) != 1:
+        return sha256_file(project_path)
+    try:
+        loaded = json.loads(paths[0].read_text(encoding="utf-8-sig"))
+        if not isinstance(loaded, dict):
+            raise ValueError("Filament profile is not a JSON object")
+        nested = loaded.get("setting")
+        expected = nested if isinstance(nested, dict) else loaded
+        with zipfile.ZipFile(project_path, "r") as archive:
+            entries = {
+                item.filename: (item, archive.read(item.filename))
+                for item in archive.infolist()
+            }
+        project_values = json.loads(
+            entries[PROJECT_SETTINGS_PATH][1].decode("utf-8-sig")
+        )
+        if not isinstance(project_values, dict):
+            raise ValueError("Bambu project settings are not a JSON object")
+        changed = False
+        for key, value in expected.items():
+            if key in PROFILE_METADATA_KEYS or key not in project_values:
+                continue
+            if _equivalent_project_setting(project_values[key], value):
+                continue
+            project_values[key] = value
+            changed = True
+        if not changed:
+            return sha256_file(project_path)
+        entries[PROJECT_SETTINGS_PATH] = (
+            entries[PROJECT_SETTINGS_PATH][0],
+            (
+                json.dumps(project_values, ensure_ascii=False, indent=4) + "\n"
+            ).encode("utf-8"),
+        )
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
+            for _name, (item, data) in entries.items():
+                target.writestr(item, data)
+        with tempfile.NamedTemporaryFile(
+            dir=project_path.parent,
+            prefix=f".{project_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(buffer.getvalue())
+            temporary_path = Path(temporary.name)
+        try:
+            with zipfile.ZipFile(temporary_path, "r") as candidate:
+                if candidate.testzip() is not None:
+                    raise ValueError("Rewritten Bambu project is corrupt")
+            os.replace(temporary_path, project_path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+    except (
+        KeyError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+        zipfile.BadZipFile,
+    ) as error:
+        raise JointProjectError(
+            "Die Filamenteinstellungen des Bambu-3MF konnten nicht sicher "
+            "mit dem gemeinsamen Slice synchronisiert werden."
+        ) from error
+    return sha256_file(project_path)
+
+
+def _equivalent_project_setting(first: object, second: object) -> bool:
+    return _normalise_project_setting(first) == _normalise_project_setting(second)
+
+
+def _normalise_project_setting(value: object) -> tuple[str, ...]:
+    values = value if isinstance(value, (list, tuple)) else (value,)
+    normalised = tuple(_normalise_project_atom(item) for item in values)
+    if normalised and len(set(normalised)) == 1:
+        return (normalised[0],)
+    return normalised
+
+
+def _normalise_project_atom(value: object) -> str:
+    rendered = str(value).strip().casefold()
+    if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", rendered):
+        return f"{float(rendered):g}"
+    return rendered
 
 
 def validate_tower_infill_adoption(

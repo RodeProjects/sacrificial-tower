@@ -375,6 +375,15 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             tower_full_infill=tower_full_infill,
         )
         destination_path = Path(destination).resolve()
+        from cooling_tower.calibration.joint_project import (
+            synchronize_bambu_project_filament_settings,
+        )
+
+        synchronized_sha256 = synchronize_bambu_project_filament_settings(
+            destination_path,
+            tuple(record.path for record in request.profile.filaments),
+        )
+        result = replace(result, sha256=synchronized_sha256)
         durable_tower = destination_path.with_name("cooling_tower_joint_slice.stl")
         shutil.copy2(Path(tower_model_path).resolve(), durable_tower)
         assembly_path = destination_path.with_name(

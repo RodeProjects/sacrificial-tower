@@ -30,6 +30,7 @@ from cooling_tower.calibration.joint_project import (
     build_joint_project,
     finalize_slicer_project,
     JointProjectError,
+    synchronize_bambu_project_filament_settings,
     validate_tower_infill_adoption,
     validate_joint_project,
 )
@@ -321,6 +322,67 @@ class PlacementAndProjectTests(unittest.TestCase):
             + b'"',
             finalized_model,
         )
+
+    def test_bambu_export_restores_only_semantically_changed_filament_values(self) -> None:
+        source = self.root / "source.stl"
+        tower = self.root / "tower.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source)
+        trimesh.creation.cylinder(radius=4, height=5, sections=16).export(tower)
+        project = self.root / "bambu_project.3mf"
+        placement = TowerPlacement(
+            80.0, 80.0, 4.0, BedBounds(0, 200, 0, 200), 25.0
+        )
+        build_joint_project(
+            source,
+            tower,
+            project,
+            occupied=OccupiedBounds(40, 50, 40, 50),
+            placement=placement,
+            tower_full_infill=True,
+        )
+        with zipfile.ZipFile(project, "a", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "Metadata/project_settings.config",
+                json.dumps(
+                    {
+                        "filament_dev_ams_drying_ams_limitations": ["1"],
+                        "slow_down_layer_time": ["12", "12", "12"],
+                    }
+                ),
+            )
+        filament = self.root / "temporary_filament.json"
+        filament.write_text(
+            json.dumps(
+                {
+                    "name": "Temporary filament",
+                    "type": "filament",
+                    "filament_dev_ams_drying_ams_limitations": ["1", "0"],
+                    "slow_down_layer_time": "12.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = filament.read_bytes()
+
+        digest = synchronize_bambu_project_filament_settings(
+            project,
+            (filament,),
+        )
+
+        with zipfile.ZipFile(project) as archive:
+            values = json.loads(
+                archive.read("Metadata/project_settings.config")
+            )
+        self.assertEqual(
+            values["filament_dev_ams_drying_ams_limitations"],
+            ["1", "0"],
+        )
+        self.assertEqual(
+            values["slow_down_layer_time"],
+            ["12", "12", "12"],
+        )
+        self.assertEqual(filament.read_bytes(), before)
+        self.assertEqual(digest, hashlib.sha256(project.read_bytes()).hexdigest())
 
     def test_tower_infill_validation_accepts_solid_and_rejects_sparse(self) -> None:
         solid = self.root / "solid.gcode"

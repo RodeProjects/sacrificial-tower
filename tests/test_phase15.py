@@ -46,6 +46,7 @@ from cooling_tower.slicers import (
     write_profile_match_report,
 )
 from cooling_tower.slicers.process import ProcessOutcome
+from cooling_tower.slicers.profile_inventory import ProfileInheritanceResolver
 
 
 FULL_CAPABILITIES = frozenset(
@@ -385,6 +386,60 @@ class Phase15ProfileTests(unittest.TestCase):
             "Example M5 0.4 nozzle",
         ])
         self.assertEqual(machine.effective_values["gcode_flavor"], "klipper")
+
+    def test_04b_include_template_overrides_parent_before_own_values(self) -> None:
+        self._write_profile(
+            "filament",
+            "Variant template",
+            {
+                "instantiation": "false",
+                "long_retractions_when_ec": ["1", "1"],
+                "retraction_distances_when_ec": ["10", "10"],
+            },
+        )
+        self._write_profile(
+            "filament",
+            "Base filament",
+            {
+                "long_retractions_when_ec": ["0"],
+                "retraction_distances_when_ec": ["0"],
+            },
+        )
+        child_path = self._write_profile(
+            "filament",
+            "Included filament",
+            {
+                "inherits": "Base filament",
+                "include": ["Variant template"],
+                "retraction_distances_when_ec": ["3", "4"],
+            },
+        )
+        inventory = ProfileInventoryService().load(
+            self.adapter,
+            self.installation,
+            force=True,
+        )
+        child = next(
+            item for item in inventory.records if item.path == child_path
+        )
+        resolved = ProfileInheritanceResolver(
+            inventory,
+            self.adapter,
+        ).resolve(child)
+
+        self.assertTrue(resolved.valid, resolved.errors)
+        self.assertEqual(
+            [item.name for item in resolved.chain],
+            ["Base filament", "Variant template", "Included filament"],
+        )
+        self.assertEqual(
+            resolved.effective_values["long_retractions_when_ec"],
+            ["1", "1"],
+        )
+        self.assertEqual(
+            resolved.effective_values["retraction_distances_when_ec"],
+            ["3", "4"],
+        )
 
     def test_05_derived_machine_chain_contains_cli_base(self) -> None:
         result = self.service().match(self._gcode(), self.installation, self.adapter)
@@ -1511,9 +1566,9 @@ class Phase15RealAnycubicProfileTest(unittest.TestCase):
         executable = Path(
             r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"
         )
-        gcode = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
+        source_stl = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
         self.assertTrue(executable.is_file(), executable)
-        self.assertTrue(gcode.is_file(), gcode)
+        self.assertTrue(source_stl.is_file(), source_stl)
         adapter = AnycubicSlicerNextAdapter()
         installation = adapter.verify_installation(
             SlicerCandidate(
@@ -1522,7 +1577,9 @@ class Phase15RealAnycubicProfileTest(unittest.TestCase):
                 adapter_hint=adapter.adapter_id,
             )
         )
-        snapshot = GCodeAnalysisService().analyze(gcode, force=True)
+        context = ProfileMatchingContext.from_stl(
+            SourceArtifact.capture(source_stl)
+        )
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             service = ProfileMatchingService(
@@ -1546,7 +1603,7 @@ class Phase15RealAnycubicProfileTest(unittest.TestCase):
                 for path in profile_root.rglob("*.json")
                 if path.is_file()
             }
-            result = service.match(snapshot, installation, adapter)
+            result = service.match(context, installation, adapter)
             diagnostic = json.dumps(
                 {
                     "result": result.to_report_dict(),
@@ -1559,16 +1616,8 @@ class Phase15RealAnycubicProfileTest(unittest.TestCase):
                 indent=2,
                 default=str,
             )
-            self.assertEqual(
-                result.state,
-                ProfileMatchState.RECONSTRUCTED,
-                diagnostic,
-            )
+            self.assertTrue(result.requires_confirmation, diagnostic)
             self.assertIsNotNone(result.selected)
-            self.assertEqual(
-                result.selected.validation_state,
-                ProfileValidationState.PROBE_VALIDATED,
-            )
             self.assertTrue(result.can_use_stl_mode)
             self.assertTrue(all(
                 hashlib.sha256(path.read_bytes()).digest() == digest

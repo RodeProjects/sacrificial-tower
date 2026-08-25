@@ -330,13 +330,15 @@ class CalibrationService:
                         joint_profile,
                         work_root / "profile_joint",
                     )
-            warnings.append(
-                "Für die Kalibrierung temporär angepasste Prozesswerte: "
-                + ", ".join(
-                    f"{key}={value}"
-                    for key, value in sorted(isolated_overrides.items())
+            if isolated_overrides:
+                warnings.append(
+                    "Für die 100-%-Turmfüllung temporär angepasste "
+                    "Prozesswerte: "
+                    + ", ".join(
+                        f"{key}={value}"
+                        for key, value in sorted(isolated_overrides.items())
+                    )
                 )
-            )
             for number in range(1, iteration_count + 1):
                 if cancellation_event is not None and cancellation_event.is_set():
                     return CalibrationResult(

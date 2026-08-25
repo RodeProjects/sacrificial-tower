@@ -13,11 +13,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from cooling_tower.gcode.metadata_parser import (
-    GCodeMetadataCollector,
-    parse_typed_config_value,
-)
-from cooling_tower.gcode.parser import iter_parsed_gcode_lines
+from cooling_tower.gcode.metadata_parser import parse_typed_config_value
 from cooling_tower.models import (
     AnalysisDiagnosticReport,
     GenerationResult,
@@ -41,7 +37,6 @@ from cooling_tower.services import (
 from cooling_tower.services.generation_service import GenerationService
 
 
-REFERENCE_GCODE = PROJECT_ROOT / "input" / "rabe_koerper_18cm.gcode"
 REFERENCE_CASE = (
     PROJECT_ROOT / "tests" / "references" / "phase13_15s_regression.json"
 )
@@ -556,29 +551,7 @@ class Phase13ReferenceRegressionTests(unittest.TestCase):
             payload["acceptance_rules"]
             ["capacity_must_not_shrink_while_deficit_remains"]
         )
-        self.assertTrue((PROJECT_ROOT / payload["source_gcode"]).is_file())
-
-    def test_real_reference_metadata_is_explicit_and_fingerprinted(self) -> None:
-        collector = GCodeMetadataCollector(REFERENCE_GCODE)
-        for parsed_line in iter_parsed_gcode_lines(REFERENCE_GCODE):
-            collector.consume(parsed_line)
-        metadata, evidence = collector.finish()
-        self.assertEqual(metadata.slicer.product_name, "AnycubicSlicerNext")
-        self.assertEqual(metadata.slicer.version, "1.4.1.2")
-        self.assertEqual(
-            metadata.slicer.confidence,
-            SlicerDetectionConfidence.EXPLICIT,
-        )
-        self.assertEqual(
-            metadata.config_for("printer_model").value,
-            "Anycubic Kobra 3 V2",
-        )
-        self.assertGreater(len(metadata.typed_config), 500)
-        self.assertTrue(metadata.profile_fingerprint.digest_sha256)
-        self.assertEqual(
-            evidence.confidence_state,
-            TimingConfidenceState.DETAILED,
-        )
+        self.assertEqual(payload["source_fixture_status"], "removed")
 
 
 if __name__ == "__main__":

@@ -15,15 +15,6 @@ from cooling_tower.slicers.orca_profile_compatibility import (
 from cooling_tower.slicers.profile_models import ResolvedProfile
 
 
-COOLING_OVERRIDE_KEYS: Mapping[str, object] = {
-    "slow_down_for_layer_cooling": False,
-    "slow_down_layer_time": 0,
-    "slowdown_below_layer_time": 0,
-    "minimum_layer_time": 0,
-    "cool_min_layer_time": 0,
-    "fan_cooling_layer_time": 0,
-}
-
 FULL_INFILL_OVERRIDES_BY_ADAPTER: Mapping[
     str, tuple[tuple[str, object], ...]
 ] = {
@@ -45,7 +36,7 @@ def build_calibration_profile(
     simulate_full_tower_infill: bool = False,
     resolved_profiles: Sequence[ResolvedProfile] | None = None,
 ) -> tuple[EffectiveProfile, Mapping[str, object]]:
-    """Create a disposable effective profile for isolated tower test slices."""
+    """Create disposable copies with only solid-tower process overrides."""
 
     values = dict(profile.effective_values)
     orca_family = profile.installation.adapter_id in {
@@ -54,28 +45,6 @@ def build_calibration_profile(
         "bambu_studio",
     }
     applied: dict[str, object] = {}
-    for key, replacement in COOLING_OVERRIDE_KEYS.items():
-        if key in values:
-            serialized = _profile_override_value(
-                replacement,
-                values[key],
-                orca_family=orca_family,
-            )
-            values[key] = serialized
-            applied[key] = serialized
-    # Orca-family process profiles can omit a key to inherit a non-zero
-    # slowdown.  Write the canonical keys explicitly for calibration.
-    for key in ("slow_down_for_layer_cooling", "slow_down_layer_time"):
-        if key not in values:
-            replacement = _profile_override_value(
-                COOLING_OVERRIDE_KEYS[key],
-                None,
-                orca_family=orca_family,
-            )
-            values[key] = replacement
-            applied[key] = replacement
-
-    cooling_applied = dict(applied)
     if simulate_full_tower_infill:
         overrides = FULL_INFILL_OVERRIDES_BY_ADAPTER.get(
             profile.installation.adapter_id
@@ -160,8 +129,8 @@ def build_calibration_profile(
             _materialize_orca_profile_copy(
                 record,
                 working_directory / f"filament_{index:02d}.json",
-                overrides=cooling_applied,
-                include_missing_overrides=True,
+                overrides={},
+                include_missing_overrides=False,
                 resolved_values=resolved_values.get(record.path),
                 compatible_machine_identity=machine_identity,
             )
