@@ -797,7 +797,12 @@ class StlProfileMatchingTests(unittest.TestCase):
             )
             deadline = time.monotonic() + 10
             while (
-                window.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+                (
+                    window.workflow.stage is WorkflowStage.MATCHING_PROFILES
+                    or window.background_job_manager.has_active(
+                        JobKind.PROFILE_MATCH
+                    )
+                )
                 and time.monotonic() < deadline
             ):
                 app.processEvents()
