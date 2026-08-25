@@ -413,7 +413,7 @@ class Phase15ProfileTests(unittest.TestCase):
                 "include": ["Variant template"],
                 "retraction_distances_when_ec": ["3", "4"],
             },
-        )
+        ).resolve()
         inventory = ProfileInventoryService().load(
             self.adapter,
             self.installation,
