@@ -159,9 +159,9 @@ SETTING_COMPATIBILITY_RULES = (
         "window.height", minimum=100, maximum=100_000,
     ),
     SettingCompatibilityRule(
-        "preview_iterations", "preview-slicer-pass-count-v1",
+        "preview_iterations", "preview-refinement-mode-v2",
         ("preview_iterations",), "int", "preview_iterations",
-        minimum=1, maximum=8,
+        minimum=4, maximum=8,
     ),
     SettingCompatibilityRule(
         "preview_camera.yaw_deg", "camera-yaw-degrees-v1", ("preview_camera", "yaw_deg"),

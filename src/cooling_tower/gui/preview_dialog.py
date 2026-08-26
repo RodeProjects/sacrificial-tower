@@ -23,30 +23,94 @@ from cooling_tower.preview import PreviewResult, PreviewState
 
 
 class PreviewDialog(QDialog):
-    update_requested = Signal()
-    export_requested = Signal()
     closed = Signal()
+    layout_changed = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, embedded: bool = False) -> None:
         super().__init__(parent)
-        self.setObjectName("previewDialog")
-        self.setWindowTitle("Objekt- und Kühlturmvorschau")
-        self.setWindowModality(Qt.WindowModality.NonModal)
-        self.resize(920, 720)
+        self.embedded = bool(embedded)
+        self.setObjectName("embeddedPreviewPanel" if embedded else "previewDialog")
+        if embedded:
+            # A QDialog with widget flags participates in the parent layout and
+            # can never become a separate top-level preview window.
+            self.setWindowFlags(Qt.WindowType.Widget)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
+        else:
+            self.setWindowTitle("Objekt- und Kühlturmvorschau")
+            self.setWindowModality(Qt.WindowModality.NonModal)
+            self.resize(920, 720)
         self.state = PreviewState.EMPTY
 
         layout = QVBoxLayout(self)
+        if embedded:
+            # The surrounding Prognose card already provides its inner inset.
+            # A zero-margin panel therefore reaches that inset on both sides
+            # without introducing a second, visually uneven padding layer.
+            layout.setContentsMargins(0, 0, 0, 0)
+        if embedded:
+            section_title = QLabel("3D-Vorschau")
+            section_title.setObjectName("embeddedPreviewTitle")
+            layout.addWidget(section_title)
         self.state_label = QLabel("Vorschau wurde noch nicht erstellt.")
         self.state_label.setObjectName("previewStateLabel")
         self.state_label.setWordWrap(True)
         layout.addWidget(self.state_label)
+        if embedded:
+            # The empty canvas already carries the initial explanatory text.
+            # Avoid repeating the same information directly above it.
+            self.state_label.hide()
         self.canvas = PreviewCanvas()
-        layout.addWidget(self.canvas, 1)
+        if embedded:
+            self.canvas.setMinimumWidth(0)
+            self.canvas.setFixedHeight(420)
+            self.canvas.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
 
+        self.preview_frame = QWidget()
+        self.preview_frame.setObjectName("previewFrame")
+        preview_frame_layout = QVBoxLayout(self.preview_frame)
+        preview_frame_layout.setContentsMargins(0, 0, 0, 0)
+        preview_frame_layout.setSpacing(0)
+
+        self.preview_info_header = QWidget()
+        self.preview_info_header.setObjectName("previewInfoHeader")
+        preview_info_layout = QGridLayout(self.preview_info_header)
+        preview_info_layout.setContentsMargins(12, 7, 12, 7)
+        preview_info_layout.setHorizontalSpacing(18)
+        preview_info_layout.setVerticalSpacing(4)
+        self.segments_info_label = self._preview_info_label(
+            "previewSegmentsInfo"
+        )
+        self.height_info_label = self._preview_info_label(
+            "previewHeightInfo"
+        )
+        self.layers_info_label = self._preview_info_label(
+            "previewLayersInfo"
+        )
+        self.bed_info_label = self._preview_info_label("previewBedInfo")
+        preview_info_layout.addWidget(self.segments_info_label, 0, 0)
+        preview_info_layout.addWidget(self.height_info_label, 0, 1)
+        preview_info_layout.addWidget(self.layers_info_label, 1, 0)
+        preview_info_layout.addWidget(self.bed_info_label, 1, 1)
+        preview_info_layout.setColumnStretch(0, 1)
+        preview_info_layout.setColumnStretch(1, 1)
+        preview_frame_layout.addWidget(self.preview_info_header)
+        preview_frame_layout.addWidget(self.canvas, 1)
+
+        self.legend_widget = QWidget()
+        self.legend_widget.setObjectName("previewLegendBar")
         legend_layout = QHBoxLayout()
-        legend_title = QLabel("Farben:")
-        legend_title.setObjectName("previewLegendTitle")
-        legend_layout.addWidget(legend_title)
+        legend_layout.setContentsMargins(12, 7, 12, 7)
+        legend_layout.setSpacing(6)
+        self.legend_widget.setLayout(legend_layout)
+        self.legend_title = QLabel("Legende:")
+        self.legend_title.setObjectName("previewLegendTitle")
+        legend_layout.addWidget(self.legend_title)
         self.object_legend = QLabel("■ Objekt")
         self.object_legend.setObjectName("objectLegend")
         self.object_legend.setStyleSheet(f"color: {PreviewCanvas.OBJECT_COLOR};")
@@ -60,51 +124,58 @@ class PreviewDialog(QDialog):
         legend_layout.addWidget(self.tower_legend)
         legend_layout.addWidget(self.bed_legend)
         legend_layout.addStretch(1)
-        layout.addLayout(legend_layout)
+        preview_frame_layout.addWidget(self.legend_widget)
 
-        camera_layout = QGridLayout()
-        self.reset_camera_button = QPushButton("Standardansicht")
-        self.fit_objects_button = QPushButton("Objekt und Kühlturm einpassen")
-        self.fit_button = QPushButton("Gesamte Druckplatte anzeigen")
+        camera_layout = QHBoxLayout()
+        camera_layout.setContentsMargins(0, 0, 0, 0)
+        camera_layout.setSpacing(6)
+        self.three_quarter_button = QPushButton("3/4-Ansicht")
         self.front_button = QPushButton("Vorderansicht")
         self.side_button = QPushButton("Seitenansicht")
         self.top_button = QPushButton("Draufsicht")
-        self.reset_camera_button.clicked.connect(self.canvas.reset_camera)
-        self.fit_objects_button.clicked.connect(self.canvas.fit_objects)
-        self.fit_button.clicked.connect(self.canvas.fit_scene)
+        self.three_quarter_button.clicked.connect(
+            self.canvas.three_quarter_view
+        )
         self.front_button.clicked.connect(self.canvas.front_view)
         self.side_button.clicked.connect(self.canvas.side_view)
         self.top_button.clicked.connect(self.canvas.top_view)
-        for index, button in enumerate((
-            self.reset_camera_button,
-            self.fit_objects_button,
-            self.fit_button,
+        for button in (
+            self.three_quarter_button,
             self.front_button,
             self.side_button,
             self.top_button,
-        )):
+        ):
+            button.setObjectName("previewCameraButton")
             button.setSizePolicy(
-                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.MinimumExpanding,
                 QSizePolicy.Policy.Fixed,
             )
+            button.setMinimumWidth(
+                button.fontMetrics().horizontalAdvance(button.text()) + 28
+            )
             button.setToolTip(button.text())
-            camera_layout.addWidget(button, index // 3, index % 3)
-        for column in range(3):
-            camera_layout.setColumnStretch(column, 1)
-        camera_layout.setColumnStretch(3, 1)
+            camera_layout.addWidget(button, 1)
         layout.addLayout(camera_layout)
-        navigation_hint = QLabel(
-            "Maussteuerung: links ziehen zum Drehen · rechts ziehen zum Verschieben · "
-            "Mausrad zum Zoomen"
+        layout.addWidget(self.preview_frame, 1)
+        self.navigation_hint = QLabel(
+            "Interaktive Maussteuerung über die Schaltfläche oben rechts in der "
+            "Vorschau aktivieren."
         )
-        navigation_hint.setObjectName("helpText")
-        navigation_hint.setWordWrap(True)
-        layout.addWidget(navigation_hint)
+        self.navigation_hint.setObjectName("helpText")
+        self.navigation_hint.setWordWrap(True)
+        layout.addWidget(self.navigation_hint)
 
         self.details_label = QLabel()
         self.details_label.setObjectName("previewDetailsLabel")
         self.details_label.setWordWrap(True)
         layout.addWidget(self.details_label)
+        self.details_label.setVisible(not embedded)
+
+        self.quality_widget = QWidget()
+        self.quality_widget.setObjectName("predictionQualityPanel")
+        quality_layout = QVBoxLayout(self.quality_widget)
+        quality_layout.setContentsMargins(0, 0, 0, 0)
+        quality_layout.setSpacing(3)
         self.quality_label = QLabel()
         self.quality_label.setObjectName("previewQualityLabel")
         self.quality_label.setWordWrap(True)
@@ -118,7 +189,7 @@ class PreviewDialog(QDialog):
         )
         self.quality_label.hide()
         self._last_quality_text = ""
-        layout.addWidget(self.quality_label)
+        quality_layout.addWidget(self.quality_label)
         self.quality_details_toggle = QPushButton(
             "Prüfdetails anzeigen ▸"
         )
@@ -135,7 +206,7 @@ class PreviewDialog(QDialog):
             self._toggle_quality_details
         )
         self.quality_details_toggle.hide()
-        layout.addWidget(self.quality_details_toggle)
+        quality_layout.addWidget(self.quality_details_toggle)
         self.quality_details_label = QLabel()
         self.quality_details_label.setObjectName(
             "previewQualityDetailsLabel"
@@ -145,14 +216,17 @@ class PreviewDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.quality_details_label.hide()
-        layout.addWidget(self.quality_details_label)
+        quality_layout.addWidget(self.quality_details_label)
+        if not embedded:
+            layout.addWidget(self.quality_widget)
         self.progress = QProgressBar()
         self.progress.setObjectName("previewProgressBar")
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setFormat("%p %")
         self.progress.hide()
-        layout.addWidget(self.progress)
+        if not embedded:
+            layout.addWidget(self.progress)
         self.progress_status_label = QLabel()
         self.progress_status_label.setObjectName("previewProgressStatusLabel")
         self.progress_status_label.setWordWrap(True)
@@ -173,43 +247,59 @@ class PreviewDialog(QDialog):
         self.progress_status_widget = QWidget()
         self.progress_status_widget.setLayout(progress_status_layout)
         self.progress_status_widget.hide()
-        layout.addWidget(self.progress_status_widget)
+        if not embedded:
+            layout.addWidget(self.progress_status_widget)
 
-        action_layout = QHBoxLayout()
-        action_layout.addStretch(1)
-        self.update_button = QPushButton("Vorschau erstellen")
-        self.update_button.setObjectName("previewUpdateButton")
-        self.update_button.clicked.connect(self.update_requested)
-        action_layout.addWidget(self.update_button)
-        self.export_button = QPushButton("Kühlturm exportieren")
-        self.export_button.setObjectName("primaryButton")
-        self.export_button.setEnabled(False)
-        self.export_button.clicked.connect(self.export_requested)
-        action_layout.addWidget(self.export_button)
-        layout.addLayout(action_layout)
+        self._preview_only_controls = (
+            self.preview_info_header,
+            self.legend_widget,
+            self.three_quarter_button,
+            self.front_button,
+            self.side_button,
+            self.top_button,
+            self.navigation_hint,
+            self.details_label,
+        )
+        self._preview_controls_visible = True
+        self._set_preview_controls_visible(False)
+
+    @staticmethod
+    def _preview_info_label(object_name: str) -> QLabel:
+        label = QLabel()
+        label.setObjectName(object_name)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        return label
 
     def set_building(self, status: str) -> None:
         self.state = PreviewState.BUILDING
+        self.canvas.set_navigation_enabled(False)
         self.state_label.setText("⏳ Vorschau wird erstellt …")
         self.state_label.setProperty("state", "building")
+        self.state_label.setVisible(not self.embedded or self.canvas.scene is not None)
         self._refresh_state_style()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.progress.show()
+        self.progress.setVisible(not self.embedded)
         self.progress_status_label.setText(german_user_message(status))
-        self.progress_status_widget.show()
+        self.progress_status_widget.setVisible(not self.embedded)
         self._set_quality_text(
-            "Qualitätsprüfung wird für die neue Vorschau aktualisiert …",
+            "Prüfstatus der Prognose\n"
+            "… Wird mit der neuen Vorschau aktualisiert.",
             "building",
         )
         self._set_quality_details("")
-        self.update_button.setText("Vorschau wird erstellt...")
-        self.update_button.setEnabled(False)
-        self.export_button.setEnabled(False)
+        self._set_preview_controls_visible(self.canvas.scene is not None)
 
     def set_progress(self, percent: int, status: str) -> None:
         self.progress_status_label.setText(german_user_message(status))
-        self.progress_status_widget.show()
+        self.progress_status_widget.setVisible(not self.embedded)
         self.progress.setRange(0, 100)
         self.progress.setValue(max(0, min(100, percent)))
 
@@ -224,29 +314,33 @@ class PreviewDialog(QDialog):
             self.canvas.side_view()
         self.state_label.setText("✓ Vorschau ist aktuell")
         self.state_label.setProperty("state", "current")
+        self.state_label.show()
         self._refresh_state_style()
         calibration = "Slicer-gestützte Schätzung"
         bed = result.scene.bed_bounds
         bed_width_mm = bed.maximum_x_mm - bed.minimum_x_mm
         bed_depth_mm = bed.maximum_y_mm - bed.minimum_y_mm
-        self.bed_legend.setText(
-            "■ Druckplatte "
-            f"({self._format_dimension(bed_width_mm)} × "
-            f"{self._format_dimension(bed_depth_mm)} mm)"
+        self.bed_legend.setText("■ Druckplatte")
+        self._set_scene_information(
+            result.scene,
+            bed_width_mm=bed_width_mm,
+            bed_depth_mm=bed_depth_mm,
         )
-        self.details_label.setText(
-            f"Ausgabe: {result.output_mode.value.upper()} · {calibration} · "
-            f"Turmhöhe: {result.scene.tower_height_mm:.2f} mm"
+        if not self.embedded:
+            self.details_label.setText(
+                f"Ausgabe: {result.output_mode.value.upper()} · {calibration} · "
+                f"Turmhöhe: {result.scene.tower_height_mm:.2f} mm"
+            )
+        quality_text, quality_state = self._quality_summary(
+            result,
+            compact=self.embedded,
         )
-        quality_text, quality_state = self._quality_summary(result)
         self._last_quality_text = quality_text
         self._set_quality_text(quality_text, quality_state)
         self._set_quality_details(self._last_iteration_summary(result))
         self.progress.hide()
         self.progress_status_widget.hide()
-        self.update_button.setText("Vorschau aktualisieren")
-        self.update_button.setEnabled(True)
-        self.export_button.setEnabled(True)
+        self._set_preview_controls_visible(True)
 
     @staticmethod
     def _format_dimension(value_mm: float) -> str:
@@ -254,19 +348,113 @@ class PreviewDialog(QDialog):
 
         return f"{value_mm:.2f}".rstrip("0").rstrip(".").replace(".", ",")
 
+    @staticmethod
+    def _segment_height(segments: object) -> float:
+        z_values = tuple(
+            point.z
+            for segment in tuple(segments or ())
+            for point in (segment.start, segment.end)
+        )
+        return max(z_values) - min(z_values) if z_values else 0.0
+
+    @staticmethod
+    def _segment_layer_count(segments: object) -> int:
+        return len(
+            {
+                round(point.z, 6)
+                for segment in tuple(segments or ())
+                for point in (segment.start, segment.end)
+                if point.z > 0.0
+            }
+        )
+
+    @staticmethod
+    def _format_count(value: int) -> str:
+        return f"{max(0, int(value)):,}".replace(",", ".")
+
+    @staticmethod
+    def _colored_value(value: str, color: str) -> str:
+        return f'<span style="color:{color};">{value}</span>'
+
+    def _set_scene_information(
+        self,
+        scene: object,
+        *,
+        bed_width_mm: float,
+        bed_depth_mm: float,
+    ) -> None:
+        object_segments = tuple(getattr(scene, "object_segments", ()) or ())
+        tower_segments = tuple(getattr(scene, "tower_segments", ()) or ())
+        object_height = getattr(scene, "object_height_mm", None)
+        if object_height is None:
+            object_height = self._segment_height(object_segments)
+        object_layers = getattr(scene, "object_layer_count", None)
+        if object_layers is None:
+            object_layers = self._segment_layer_count(object_segments)
+        tower_layers = getattr(scene, "tower_layer_count", None)
+        if tower_layers is None:
+            tower_layers = self._segment_layer_count(tower_segments)
+
+        object_color = PreviewCanvas.OBJECT_COLOR
+        tower_color = PreviewCanvas.TOWER_COLOR
+        bed_color = PreviewCanvas.BED_COLOR
+        self.segments_info_label.setText(
+            "Segmente: "
+            + self._colored_value(
+                self._format_count(
+                    getattr(scene, "source_segment_count", len(object_segments))
+                ),
+                object_color,
+            )
+            + " / "
+            + self._colored_value(
+                self._format_count(len(tower_segments)), tower_color
+            )
+        )
+        self.height_info_label.setText(
+            "Höhe: "
+            + self._colored_value(
+                f"{self._format_dimension(float(object_height))} mm",
+                object_color,
+            )
+            + " / "
+            + self._colored_value(
+                f"{self._format_dimension(float(scene.tower_height_mm))} mm",
+                tower_color,
+            )
+        )
+        self.layers_info_label.setText(
+            "Layer: "
+            + self._colored_value(
+                self._format_count(int(object_layers)), object_color
+            )
+            + " / "
+            + self._colored_value(
+                self._format_count(int(tower_layers)), tower_color
+            )
+        )
+        self.bed_info_label.setText(
+            "Druckplatte: "
+            + self._colored_value(
+                f"{self._format_dimension(bed_width_mm)} x "
+                f"{self._format_dimension(bed_depth_mm)} mm",
+                bed_color,
+            )
+        )
+
     def mark_stale(self) -> None:
         if self.canvas.scene is None:
             self.state = PreviewState.EMPTY
             self.state_label.setText("Vorschau wurde noch nicht erstellt.")
             self.state_label.setProperty("state", "empty")
-            self.update_button.setText("Vorschau erstellen")
+            self.state_label.setVisible(not self.embedded)
         else:
             self.state = PreviewState.STALE
             self.state_label.setText(
                 "⚠ Vorschau nicht mehr aktuell"
             )
             self.state_label.setProperty("state", "stale")
-            self.update_button.setText("Vorschau aktualisieren")
+            self.state_label.show()
             if self._last_quality_text:
                 self._set_quality_text(
                     "Diese Qualitätsauswertung gehört zur nicht mehr aktuellen "
@@ -276,8 +464,7 @@ class PreviewDialog(QDialog):
         self._refresh_state_style()
         self.progress.hide()
         self.progress_status_widget.hide()
-        self.update_button.setEnabled(True)
-        self.export_button.setEnabled(self.canvas.scene is not None)
+        self._set_preview_controls_visible(self.canvas.scene is not None)
 
     def set_failed(self, message: str) -> None:
         self.state = PreviewState.FAILED
@@ -285,27 +472,37 @@ class PreviewDialog(QDialog):
             f"✕ Vorschau fehlgeschlagen: {german_user_message(message)}"
         )
         self.state_label.setProperty("state", "error")
+        self.state_label.show()
         self._refresh_state_style()
         self._last_quality_text = ""
         self._set_quality_details("")
         self._set_quality_text(
-            "Für die fehlgeschlagene neue Vorschau liegt keine aktuelle "
-            "Qualitätsauswertung vor.",
+            "Prüfstatus der Prognose\n"
+            "✕ Keine aktuelle Prüfung verfügbar, da die Vorschau nicht "
+            "erstellt werden konnte.",
             "error",
         )
         self.progress.hide()
         self.progress_status_widget.hide()
-        self.update_button.setText(
-            "Vorschau aktualisieren"
-            if self.canvas.scene is not None
-            else "Vorschau erneut erstellen"
-        )
-        self.update_button.setEnabled(True)
-        self.export_button.setEnabled(self.canvas.scene is not None)
+        self._set_preview_controls_visible(self.canvas.scene is not None)
 
-    def set_export_enabled(self, enabled: bool, reason: str | None = None) -> None:
-        self.export_button.setEnabled(enabled)
-        self.export_button.setToolTip("" if enabled else (reason or "Export derzeit nicht möglich."))
+    def set_cancelled(self) -> None:
+        self.state = (
+            PreviewState.STALE
+            if self.canvas.scene is not None
+            else PreviewState.EMPTY
+        )
+        self.state_label.setText(
+            "⚠ Generierung abgebrochen"
+            if self.canvas.scene is not None
+            else "Generierung abgebrochen."
+        )
+        self.state_label.setProperty("state", "stale")
+        self.state_label.show()
+        self._refresh_state_style()
+        self.progress.hide()
+        self.progress_status_widget.hide()
+        self._set_preview_controls_visible(self.canvas.scene is not None)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.closed.emit()
@@ -315,6 +512,33 @@ class PreviewDialog(QDialog):
         style = self.state_label.style()
         style.unpolish(self.state_label)
         style.polish(self.state_label)
+
+    def _set_preview_controls_visible(self, visible: bool) -> None:
+        """Show interaction and result controls only for an existing scene."""
+
+        visible = bool(visible)
+        changed = visible != self._preview_controls_visible
+        self._preview_controls_visible = visible
+        for widget in self._preview_only_controls:
+            widget.setVisible(visible)
+        if visible:
+            self.details_label.setVisible(not self.embedded)
+            self.quality_label.setVisible(bool(self.quality_label.text().strip()))
+            has_details = bool(self.quality_details_label.text().strip())
+            self.quality_details_toggle.setVisible(has_details)
+            self.quality_details_label.setVisible(
+                has_details and self.quality_details_toggle.isChecked()
+            )
+        if changed:
+            own_layout = self.layout()
+            if own_layout is not None:
+                own_layout.invalidate()
+                own_layout.activate()
+            self.updateGeometry()
+            parent = self.parentWidget()
+            if parent is not None:
+                parent.updateGeometry()
+            self.layout_changed.emit()
 
     def _set_quality_text(self, text: str, state: str) -> None:
         self.quality_label.setText(text)
@@ -342,13 +566,16 @@ class PreviewDialog(QDialog):
         )
 
     @staticmethod
-    def _quality_summary(result: PreviewResult) -> tuple[str, str]:
+    def _quality_summary(
+        result: PreviewResult,
+        *,
+        compact: bool = False,
+    ) -> tuple[str, str]:
         calibration = getattr(result, "calibration", None)
         if calibration is None:
             return (
-                "Qualitätsprüfung\n"
-                "— Keine slicerbasierte Kalibrierung durchgeführt; eine "
-                "wiederholte Messung wurde nicht durchgeführt.",
+                "Prüfstatus der Prognose\n"
+                "— Noch keine slicergestützte Prüfung verfügbar.",
                 "neutral",
             )
 
@@ -376,44 +603,53 @@ class PreviewDialog(QDialog):
             difference is not None
             and abs(difference) <= time_tolerance
         )
-        if target_time_confirmed:
+        if target_time_confirmed and calibrated:
             headline = (
-                "✓ Ziel-Layerzeit innerhalb der Toleranz erreicht "
-                f"(Abweichung: {difference:+.3f} s; zulässig: "
-                f"±{time_tolerance:.3f} s)"
+                "✓ Prognose bestätigt: Die Mindest-Layerzeit liegt innerhalb "
+                "der zulässigen Abweichung."
+                if compact
+                else (
+                    "✓ Prognose bestätigt: Mindest-Layerzeit innerhalb der "
+                    "zulässigen Abweichung "
+                    f"(Abweichung: {difference:+.3f} s; zulässig: "
+                    f"±{time_tolerance:.3f} s)"
+                )
             )
             state = "success"
-        elif calibrated and not joint_sliced:
+        elif target_time_confirmed:
             headline = (
-                f"✓ Ergebnis nach {completed} Durchläufen bestätigt – schnelle "
-                "Vorschau; der gemeinsame Präzisionsslice folgt erst beim Export"
+                "⚠ Mindest-Layerzeit erreicht, aber die Prognose ist noch "
+                "nicht stabil bestätigt."
             )
-            state = "success"
+            state = "warning"
         elif calibrated and configured == 1:
             headline = (
-                "✓ Ein Durchlauf abgeschlossen – eine Wiederholungsstabilität "
-                "kann damit nicht geprüft werden"
+                "✓ Prognose bestätigt: Der einzelne Prüfdurchlauf war "
+                "erfolgreich."
             )
             state = "success"
         elif calibrated:
-            headline = f"✓ Ergebnis nach {completed} Durchläufen bestätigt"
+            headline = (
+                "✓ Prognose bestätigt: Die Prüfdurchläufe liefern ein "
+                "stabiles Ergebnis."
+            )
             state = "success"
         elif slicer_optimized:
             headline = (
-                "⚠ Ergebnis noch nicht bestätigt – bester gemessener "
-                "Zwischenstand wird angezeigt"
+                "⚠ Prognose noch nicht bestätigt: Der beste geprüfte "
+                "Zwischenstand wird angezeigt."
             )
             state = "warning"
         else:
-            headline = "✕ Slicerprüfung nicht erfolgreich abgeschlossen"
+            headline = "✕ Die Prognose konnte nicht bestätigt werden."
             state = "error"
 
         lines = [
-            "Qualitätsprüfung",
+            "Prüfstatus der Prognose",
             headline,
-            f"Ausgeführt: {completed} von {configured} eingestellten Durchläufen",
+            f"Prüfdurchläufe: {completed} von maximal {configured}",
         ]
-        if difference is not None:
+        if difference is not None and not compact:
             relation = (
                 "innerhalb der Toleranz"
                 if abs(difference) <= time_tolerance
@@ -421,8 +657,8 @@ class PreviewDialog(QDialog):
             )
             lines.append(
                 (
-                    "Kleinste angenäherte Layerzeit des schnellen "
-                    "Vorschaukandidaten: "
+                    "Kleinste gemessene Layerzeit des getrennt "
+                    "geslicten Kandidaten: "
                     if not joint_sliced
                     else "Kleinste geprüfte Layerzeit des gemeinsam "
                     "geslicten Kandidaten: "
@@ -436,6 +672,8 @@ class PreviewDialog(QDialog):
 
     @staticmethod
     def _last_iteration_summary(result: PreviewResult) -> str:
+        """Return only unresolved findings from the current verification."""
+
         calibration = getattr(result, "calibration", None)
         iterations = tuple(
             getattr(calibration, "iterations", ()) or ()
@@ -465,62 +703,81 @@ class PreviewDialog(QDialog):
             0,
             int(getattr(last, "deficient_layer_count", 0) or 0),
         )
-        lines = [
-            PreviewDialog._maximum_value_assessment(
-                "Zielzeit-Unterschreitung",
-                getattr(last, "maximum_remaining_deficit_s", None),
-                time_tolerance,
-                "s",
-                suffix=(
-                    f"; {deficient_count} Layer außerhalb der Toleranz"
-                ),
-            ),
-            PreviewDialog._maximum_value_assessment(
-                "Änderung zum vorherigen Slicer-Durchlauf",
-                getattr(last, "maximum_slicer_result_change_s", None),
-                slicer_result_tolerance,
-                "s",
-            ),
-            PreviewDialog._maximum_value_assessment(
-                "Änderung des Geometrieprofils",
-                getattr(last, "maximum_profile_change_mm", None),
-                profile_tolerance,
-                "mm",
-            ),
-        ]
+        lines: list[str] = []
+
+        def add_exceeded(
+            label: str,
+            value: object,
+            tolerance: float,
+            unit: str,
+            *,
+            suffix: str = "",
+            force: bool = False,
+        ) -> None:
+            if not PreviewDialog._is_finite(value):
+                return
+            if force or float(value) > tolerance:
+                lines.append(
+                    PreviewDialog._maximum_value_assessment(
+                        label,
+                        value,
+                        tolerance,
+                        unit,
+                        suffix=suffix,
+                    )
+                )
+
+        add_exceeded(
+            "Mindest-Layerzeit unterschritten",
+            getattr(last, "maximum_remaining_deficit_s", None),
+            time_tolerance,
+            "s",
+            suffix=f"; {deficient_count} betroffene Layer",
+            force=deficient_count > 0,
+        )
+        add_exceeded(
+            "Slicer-Ergebnis noch nicht stabil",
+            getattr(last, "maximum_slicer_result_change_s", None),
+            slicer_result_tolerance,
+            "s",
+        )
+        add_exceeded(
+            "Geometrieprofil noch nicht stabil",
+            getattr(last, "maximum_profile_change_mm", None),
+            profile_tolerance,
+            "mm",
+        )
         failures = tuple(getattr(calibration, "failures", ()) or ())
-        failure_details = PreviewDialog._summarized_failures(failures)
+        failure_details = (
+            PreviewDialog._summarized_failures(failures)
+            if not bool(getattr(result, "calibrated", False))
+            else ()
+        )
         if failure_details:
-            lines.append("Weitere Prüfgründe:")
+            lines.append("Offene Prüfgründe:")
             lines.extend(failure_details)
         metadata_difference = getattr(
             getattr(last, "evaluation", None),
             "maximum_metadata_difference_s",
             None,
         )
-        if metadata_difference is not None:
-            lines.append(
-                PreviewDialog._maximum_value_assessment(
-                    "Slicer-Metadatenabweichung",
-                    metadata_difference,
-                    metadata_tolerance,
-                    "s",
-                )
-            )
+        add_exceeded(
+            "Slicer-Zeitangaben widersprechen sich",
+            metadata_difference,
+            metadata_tolerance,
+            "s",
+        )
         joint_deviation = getattr(
             last,
             "maximum_target_deviation_s",
             None,
         )
-        if joint_deviation is not None:
-            lines.append(
-                PreviewDialog._maximum_value_assessment(
-                    "Größte Zielabweichung im gemeinsamen Slice",
-                    joint_deviation,
-                    time_tolerance,
-                    "s",
-                )
-            )
+        add_exceeded(
+            "Zielabweichung im gemeinsamen Slice",
+            joint_deviation,
+            time_tolerance,
+            "s",
+        )
         return "\n".join(lines)
 
     @staticmethod

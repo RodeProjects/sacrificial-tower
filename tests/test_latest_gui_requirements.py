@@ -113,12 +113,12 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         QTest.qWait(100)
         self.app.processEvents()
 
-        self.assertTrue(window.geometry_split.is_two_column())
         self.assertEqual(
             window.geometry_split.height(),
-            window.geometry_split.content_height_hint(),
+            window.geometry_split_layout.sizeHint().height(),
         )
         sections = (
+            window.geometry_group,
             window.stability_group,
             window.overhang_group,
             window.geometry_calculation_section,
@@ -320,7 +320,14 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             if isinstance(widget, QDialog)
         }
         window = self.window()
-        self.assertIsNone(window._preview_dialog)
+        self.assertIsNotNone(window._preview_dialog)
+        self.assertFalse(window.preview_dialog.isWindow())
+        self.assertEqual(
+            window.preview_dialog.state_label.text(),
+            "Vorschau wurde noch nicht erstellt.",
+        )
+        self.assertTrue(window.preview_dialog.state_label.isHidden())
+        self.assertTrue(window.preview_dialog.three_quarter_button.isHidden())
         self.assertIsNone(window._additional_options_dialog)
         self.assertIsNone(window._about_dialog)
         self.assertIsNone(window._support_report_dialog)
@@ -405,11 +412,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertLessEqual(
             window.additional_options_dialog.width(), window.width()
         )
-        self.assertEqual(
-            window.preview_hint_label.text(),
-            "Beim Export wird der Kühlturm immer mit den aktuellen "
-            "Einstellungen erzeugt.",
-        )
+        self.assertFalse(window.preview_hint_label.text())
+        self.assertTrue(window.preview_hint_label.isHidden())
         self.assertNotIn(
             "Die Vorschau ist optional",
             window.preview_hint_label.text(),
@@ -1343,7 +1347,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertNotIn("40,00 mm", window.validation_label.text())
         window.close()
 
-    def test_tower_need_message_is_above_the_prediction_footnote(self) -> None:
+    def test_tower_need_message_has_no_redundant_prediction_footnote(self) -> None:
         window = self.window()
 
         self.assertEqual(
@@ -1354,11 +1358,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         prediction_layout = window.prediction_frame.content_layout
         tower_index = prediction_layout.indexOf(window.tower_need_label)
-        footnote_index = prediction_layout.indexOf(
-            window.layer_time_check_hint
-        )
         self.assertGreaterEqual(tower_index, 0)
-        self.assertEqual(footnote_index, tower_index + 1)
+        self.assertFalse(hasattr(window, "layer_time_check_hint"))
         self.assertIs(
             window.tower_need_label.parentWidget(),
             window.prediction_frame.content_widget,
@@ -1475,21 +1476,25 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.app.processEvents()
 
         status_top = window.status_label.mapTo(window.footer, window.status_label.rect().topLeft()).y()
-        quality_top = window.preview_quality_panel.mapTo(
+        action_top = window.preview_action_control.mapTo(
             window.footer,
-            window.preview_quality_panel.rect().topLeft(),
+            window.preview_action_control.rect().topLeft(),
         ).y()
         self.assertFalse(window.footer.isHidden())
-        self.assertLessEqual(status_top, quality_top)
+        self.assertLessEqual(status_top, action_top)
         self.assertLessEqual(
-            quality_top + window.preview_action_control.height(),
+            action_top + window.preview_action_control.height(),
             window.footer.height(),
         )
         window.close()
 
-    def test_full_infill_hint_uses_the_calculated_text_style(self) -> None:
+    def test_full_infill_hint_is_bundled_in_an_info_button(self) -> None:
         window = self.window()
-        self.assertEqual(window.full_infill_hint.objectName(), "calculatedHint")
+        self.assertEqual(
+            window.full_infill_info_button.objectName(),
+            "settingInfoButton",
+        )
+        self.assertFalse(hasattr(window, "full_infill_hint"))
         window.close()
 
     def test_non_export_validation_does_not_write_a_gui_error_log(self) -> None:

@@ -18,6 +18,7 @@ class InfoToolButton(QToolButton):
         parent: QWidget | None = None,
         *,
         accessible_name: str = "Weitere Informationen",
+        accessible_hint: str | None = None,
         object_name: str = "stlInfoButton",
         diameter_px: int | None = None,
     ) -> None:
@@ -29,16 +30,20 @@ class InfoToolButton(QToolButton):
             diameter,
             diameter,
         )
-        self.setToolTip(hint)
         self.setToolTipDuration(15_000)
         self.setAccessibleName(accessible_name)
-        self.setAccessibleDescription(hint)
+        self.set_hint(hint, accessible_hint=accessible_hint)
 
-    def set_hint(self, hint: str) -> None:
+    def set_hint(
+        self,
+        hint: str,
+        *,
+        accessible_hint: str | None = None,
+    ) -> None:
         """Update the visible and accessible explanation together."""
 
         self.setToolTip(hint)
-        self.setAccessibleDescription(hint)
+        self.setAccessibleDescription(accessible_hint or hint)
 
     def show_hint(self) -> None:
         hint = self.toolTip().strip()

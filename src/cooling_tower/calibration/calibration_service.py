@@ -238,36 +238,59 @@ class CalibrationService:
         best_project: Path | None = None
         best_iteration_number: int | None = None
         best_score: tuple[int, float, float, float, float, float] | None = None
+        best_is_joint = False
         baseline_score: tuple[int, float, float, float, float, float] | None = None
         previous_added_times_s: dict[int, float] | None = None
         first_joint_round: int | None = None
         if joint_source_stl is not None and config.perform_joint_final_slice:
-            first_joint_round = 1 if reuse_seed else config.maximum_iterations
-            correction_rounds = 1 if config.maximum_iterations > 1 else 0
-            iteration_count = first_joint_round + correction_rounds
+            joint_slice_budget = min(
+                config.maximum_joint_slices,
+                config.maximum_iterations,
+            )
+            if reuse_seed:
+                # The preview already supplied the inexpensive calibration
+                # rounds. Spend only the configured complete-object budget on
+                # validating and, where needed, correcting that measured seed.
+                first_joint_round = 1
+                iteration_count = joint_slice_budget
+            else:
+                # Joint rounds are part of the configured total pass budget.
+                # The GUI configures six isolated rounds followed by up to six
+                # real object/tower rounds.
+                iteration_count = config.maximum_iterations
+                first_joint_round = (
+                    iteration_count - joint_slice_budget + 1
+                )
         else:
             iteration_count = config.maximum_iterations
         minimum_iteration_count = 1 if iteration_count == 1 else 2
         terminal_state = CalibrationState.LIMIT_REACHED
         warnings: list[str] = []
         if joint_source_stl is not None and config.perform_joint_final_slice:
+            normal_slice_count = max(0, (first_joint_round or 1) - 1)
             warnings.append(
-                "Die schnellen Kalibrierungsrunden slicen nur den Kühlturm. "
-                "Der Präzisionslauf slicet Objekt und Kühlturm gemeinsam mit "
-                "festen Positionen. Nur bei einer relevanten Abweichung folgt "
-                "höchstens eine gemeinsame Korrekturprüfung; das exportierte "
-                "3MF reproduziert die geprüfte Anordnung."
+                (
+                    f"Zuerst optimieren {normal_slice_count} getrennte Slices "
+                    "die Turmgeometrie. "
+                    if normal_slice_count
+                    else "Der vorhandene Turmkandidat wird wiederverwendet. "
+                )
+                + "Danach werden Objekt und Kühlturm mit festen Positionen "
+                f"mindestens {config.minimum_joint_slices} und bis zu "
+                f"{config.maximum_joint_slices} Mal gemeinsam geslicet. "
+                "Sobald die Ziel-Layerzeit innerhalb der Toleranz bestätigt ist, "
+                "endet die Generierung vorzeitig. Das exportierte 3MF reproduziert "
+                "die zuletzt verwendete geprüfte Anordnung."
             )
             if reuse_seed:
                 warnings.append(
                     "Der bereits berechnete Vorschaukandidat wird direkt für "
-                    "den gemeinsamen Präzisionsslice wiederverwendet."
+                    "die gemeinsamen Slices wiederverwendet."
                 )
         elif joint_source_stl is not None:
             warnings.append(
-                "Die Vorschau verwendet schnelle, separat geslicte "
-                "Kühlturm-Kandidaten. Beim Export wird der aktuelle Kandidat "
-                "einmal gemeinsam mit dem Objekt präzisionsgeprüft."
+                "Der Kühlturm wird getrennt geslicet, weil für diese "
+                "Slicer-Konfiguration kein gemeinsamer Lauf verfügbar ist."
             )
         elif config.mode is CalibrationMode.GCODE:
             warnings.append(
@@ -361,10 +384,10 @@ class CalibrationService:
                 )
                 use_seed_this_round = reuse_seed and number == 1
                 if joint_round:
-                    round_status = "Gemeinsamer Präzisionsslice wird vorbereitet …"
+                    round_status = "Gemeinsamer Slice wird vorbereitet …"
                 elif first_joint_round is not None:
                     round_status = (
-                        "Kühlturm wird schnell kalibriert – Abgleich "
+                        "Kühlturmgeometrie wird optimiert – getrennter Slice "
                         f"{number}/{first_joint_round - 1}"
                     )
                 else:
@@ -506,15 +529,16 @@ class CalibrationService:
                     round((number - 0.5) / iteration_count * 90),
                     (
                         (
-                            "Gemeinsamer Präzisionsslice von Objekt und "
+                            "Gemeinsamer Slice von Objekt und "
                             "Kühlturm wird ausgeführt …"
                             if number == first_joint_round
-                            else "Gemeinsamer Präzisionsslice zur gezielten "
+                            else "Weiterer gemeinsamer Slice zur gezielten "
                             "Korrekturprüfung wird ausgeführt …"
                         )
                         if joint_round
-                        else f"Schneller Kühlturm-Abgleich "
-                        f"{number}/{iteration_count} wird ausgeführt …"
+                        else f"Getrennter Kühlturm-Slice "
+                        f"{number}/{first_joint_round - 1 if first_joint_round else iteration_count} "
+                        "wird ausgeführt …"
                     ),
                 )
                 slice_request = SliceRequest(
@@ -669,10 +693,18 @@ class CalibrationService:
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                 )
-                target_time_confirmed = bool(
+                minimum_target_reached = bool(
                     math.isfinite(minimum_target_difference_s)
                     and minimum_target_difference_s
                     >= -config.time_tolerance_s
+                )
+                target_time_confirmed = bool(
+                    minimum_target_reached
+                    and (
+                        not joint_round
+                        or minimum_target_difference_s
+                        <= config.time_tolerance_s
+                    )
                 )
                 joint_precision_confirmed = bool(
                     joint_round and target_time_confirmed
@@ -690,9 +722,10 @@ class CalibrationService:
                 )
                 minimum_iterations_reached = number >= minimum_iteration_count
                 if joint_round:
-                    # The expensive joint slice is deliberately performed once.
-                    # Stability of the fast tower-only refinement is not a reason
-                    # to repeat the complete object slice.
+                    # A joint result is direct timing evidence for the exported
+                    # arrangement. Its measured deviation drives the next joint
+                    # correction, so tower-only repetition stability must not
+                    # veto an otherwise valid joint measurement.
                     slicer_result_stable = True
                 elif minimum_iteration_count == 1:
                     # A single requested pass deliberately accepts its only
@@ -763,19 +796,28 @@ class CalibrationService:
                 )
                 if baseline_score is None:
                     baseline_score = candidate_score
-                if not metadata_conflict and (
-                    joint_round
-                    or best_score is None
-                    or candidate_score < best_score
-                ):
+                candidate_is_best = bool(
+                    best_score is None
+                    or (joint_round and not best_is_joint)
+                    or (
+                        joint_round == best_is_joint
+                        and candidate_score < best_score
+                    )
+                )
+                if not metadata_conflict and candidate_is_best:
                     best_score = candidate_score
+                    best_is_joint = joint_round
                     best_profile = solid
                     best_stl = candidate_stl
                     best_gcode = combined_path
                     best_project = candidate_project
                     best_iteration_number = number
                 joint_candidate_accepted = bool(
-                    joint_round and target_time_confirmed
+                    joint_round
+                    and target_time_confirmed
+                    and first_joint_round is not None
+                    and number - first_joint_round + 1
+                    >= config.minimum_joint_slices
                 )
                 isolated_candidate_accepted = bool(
                     not joint_round
@@ -952,7 +994,7 @@ class CalibrationService:
             ):
                 if best_project is not None:
                     warnings.append(
-                        "Der einmalige gemeinsame Präzisionsslice hat die "
+                        "Die gemeinsamen Slices haben die "
                         "Zielzeit nicht vollständig bestätigt. Der gemeinsam "
                         "geslicte Kandidat und sein reproduzierbares 3MF werden "
                         "als sicher prüfbarer Zwischenstand verwendet."

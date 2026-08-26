@@ -91,7 +91,7 @@ class StabilityProfileConfig:
     minimum_base_radius_mm: float = 10.0
     base_height_factor: float = 0.05
     base_margin_mm: float = 2.0
-    base_height_mm: float = 4.0
+    base_height_mm: float = 1.0
     maximum_radius_change_per_mm_z: float = 0.35
 
 

@@ -64,14 +64,31 @@ class CalibrationConfig:
     retraction_speed_mm_s: float = 35.0
     timeout_per_slice_s: float = 300.0
     perform_joint_final_slice: bool = True
+    maximum_joint_slices: int = 1
+    minimum_joint_slices: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.perform_joint_final_slice, bool):
             raise ValueError("perform_joint_final_slice must be a boolean")
-        if not 1 <= self.maximum_iterations <= 8:
+        if not 1 <= self.maximum_iterations <= 12:
             raise ValueError(
                 "Die Kalibrierung benötigt mindestens einen Slicer-Durchlauf "
-                "und erlaubt höchstens acht Durchläufe."
+                "und erlaubt höchstens zwölf Durchläufe."
+            )
+        if not 1 <= self.maximum_joint_slices <= 6:
+            raise ValueError(
+                "Die Kalibrierung erlaubt zwischen einem und sechs gemeinsamen "
+                "Slicer-Durchläufen."
+            )
+        if not 1 <= self.minimum_joint_slices <= self.maximum_joint_slices:
+            raise ValueError(
+                "Die Mindestanzahl gemeinsamer Slicer-Durchläufe muss zwischen "
+                "eins und dem gemeinsamen Durchlauflimit liegen."
+            )
+        if self.maximum_joint_slices > self.maximum_iterations:
+            raise ValueError(
+                "Die Anzahl gemeinsamer Slicer-Durchläufe darf das gesamte "
+                "Durchlaufbudget nicht überschreiten."
             )
         if self.repeated_result_limit < 1:
             raise ValueError("repeated_result_limit must be at least one")

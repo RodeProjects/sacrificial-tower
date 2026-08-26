@@ -62,6 +62,9 @@ class PreviewScene:
     displayed_segment_count: int
     tower_height_mm: float
     notes: tuple[str, ...] = ()
+    object_height_mm: float | None = None
+    object_layer_count: int | None = None
+    tower_layer_count: int | None = None
 
 
 def _json_value(value: Any) -> Any:
@@ -218,6 +221,25 @@ class PreviewRequest:
         payload["calibration"] = calibration
         return self._signature_for_payload(payload)
 
+    def refinement_seed_signature(self) -> str:
+        """Identify geometry-compatible requests independent of pass budgets.
+
+        This compatibility identity is retained for callers that resume a
+        calibration from a previously measured geometry candidate.
+        """
+
+        payload = self.signature_payload()
+        calibration = dict(payload["calibration"])
+        for key in (
+            "maximum_iterations",
+            "maximum_joint_slices",
+            "minimum_joint_slices",
+            "perform_joint_final_slice",
+        ):
+            calibration.pop(key, None)
+        payload["calibration"] = calibration
+        return self._signature_for_payload(payload)
+
     @staticmethod
     def _signature_for_payload(payload: dict[str, Any]) -> str:
         encoded = json.dumps(
@@ -239,6 +261,7 @@ class PreviewResult:
     artifact_sha256: str
     calibrated: bool
     generation_kind: str
+    refinement_seed_signature: str | None = None
     project_path: Path | None = None
     project_sha256: str | None = None
     joint_sliced: bool = False
@@ -278,6 +301,8 @@ class PreviewExportResult:
     project_path: Path | None = None
     emergency_fallback_used: bool = False
     primary_failure_reason: str | None = None
+    target_layer_time_s: float | None = None
+    calibration_time_tolerance_s: float = 0.2
 
     @property
     def technical_report_path(self) -> Path:

@@ -122,7 +122,9 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIs(window.current_source_kind, SourceKind.STL)
             self.assertIs(window.workflow.stage, WorkflowStage.SOURCE_INVALID)
             self.assertEqual(window.workflow_group.status_icon.text(), "×")
-            self.assertTrue(window.workflow_group.property("sourceError"))
+            self.assertTrue(
+                window.workflow_group.property("preparationError")
+            )
             self.assertTrue(window.source_group.isChecked())
             self.assertFalse(window.source_group.content_widget.isHidden())
             self.assertTrue(window.ready_grid.isHidden())
@@ -252,7 +254,9 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window._source_step_is_complete())
             self.assertIs(window.workflow.stage, WorkflowStage.DISCOVERING_SLICER)
             self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
-            self.assertFalse(window.workflow_group.property("sourceError"))
+            self.assertFalse(
+                window.workflow_group.property("preparationError")
+            )
             self.assertTrue(window.preparation_next_button.isEnabled())
             self.assertFalse(
                 window.preparation_step_selectors[1].property("locked")

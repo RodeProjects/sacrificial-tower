@@ -19,6 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui.main_window import MainWindow
@@ -120,12 +121,41 @@ class UxImprovementTests(unittest.TestCase):
 
     def test_01_full_infill_hint_explains_object_specific_joint_project(self) -> None:
         window = self.window()
-        window.full_infill_checkbox.setChecked(True)
-        self.assertEqual(
-            window.full_infill_hint.text(),
-            "Der gemeinsame Testslice und das exportierte 3MF weisen im "
-            "Slicer nur dem Kühlturm objektspezifisch 100 % Fülldichte zu.",
-        )
+        hint = window.full_infill_info_button.toolTip()
+        self.assertIn("<table", hint)
+        self.assertIn("Aktiviert", hint)
+        self.assertIn("Deaktiviert", hint)
+        self.assertIn("nur der Turm", hint)
+        self.assertIn("Bettschubser", hint)
+        self.assertIn("Druckbett bewegt das Modell", hint)
+        self.assertIn("CoreXY", hint)
+        self.assertIn("Druckkopf übernimmt", hint)
+        self.assertIn("Materialverbrauch", hint)
+        self.assertIn('align="center"', hint)
+        self.assertNotIn("bgcolor=\"#e8eef4\"", hint)
+        self.assertEqual(hint.count("border-bottom: 1px solid #91a7bb"), 3)
+        self.assertNotIn("Aktiviert<br>", hint)
+        self.assertNotIn("Deaktiviert<br>", hint)
+        self.assertGreaterEqual(hint.count("&nbsp;&nbsp;&nbsp;&nbsp;&#8226;"), 2)
+        self.assertNotIn("Aktuell aktiviert", hint)
+        self.assertNotIn("Aktuell deaktiviert", hint)
+        self.assertFalse(hasattr(window, "full_infill_hint"))
+        window.close()
+
+    def test_01a_full_infill_checkbox_does_not_move_on_hover(self) -> None:
+        window = self.window()
+        window.resize(900, 800)
+        window.show()
+        self.app.processEvents()
+        checkbox = window.full_infill_checkbox
+        before_geometry = checkbox.geometry()
+        before_hint = checkbox.sizeHint()
+
+        QTest.mouseMove(checkbox, checkbox.rect().center())
+        self.app.processEvents()
+
+        self.assertEqual(checkbox.geometry(), before_geometry)
+        self.assertEqual(checkbox.sizeHint(), before_hint)
         window.close()
 
     def test_02_source_information_rows_remove_action_and_progress(self) -> None:
@@ -352,7 +382,7 @@ class UxImprovementTests(unittest.TestCase):
         window.current_preview = None
         window.close()
 
-    def test_05_preview_has_legend_fit_label_purple_progress_and_stale_state(self) -> None:
+    def test_05_embedded_preview_avoids_duplicate_progress_and_keeps_stale_state(self) -> None:
         window = self.window()
         dialog = window.preview_dialog
         dialog.show()
@@ -360,7 +390,8 @@ class UxImprovementTests(unittest.TestCase):
         self.assertEqual(dialog.object_legend.text(), "■ Objekt")
         self.assertEqual(dialog.tower_legend.text(), "■ Kühlturm")
         self.assertEqual(dialog.bed_legend.text(), "■ Druckplatte")
-        self.assertEqual(dialog.fit_button.text(), "Gesamte Druckplatte anzeigen")
+        self.assertEqual(dialog.three_quarter_button.text(), "3/4-Ansicht")
+        self.assertTrue(dialog.three_quarter_button.isHidden())
 
         dialog.set_building("Geometrie wird vorbereitet …")
         dialog.set_progress(48, "Werkzeugwege werden ausgewertet …")
@@ -369,16 +400,15 @@ class UxImprovementTests(unittest.TestCase):
         self.assertEqual(dialog.progress.value(), 48)
         self.assertEqual(dialog.progress.format(), "%p %")
         self.assertEqual(dialog.progress_status_icon.text(), "⏳")
-        self.assertGreater(
-            dialog.progress_status_widget.mapTo(dialog, QPoint(0, 0)).y(),
-            dialog.progress.mapTo(dialog, QPoint(0, 0)).y(),
-        )
+        self.assertTrue(dialog.progress.isHidden())
+        self.assertTrue(dialog.progress_status_widget.isHidden())
         stylesheet = window.styleSheet().casefold()
         self.assertIn("qprogressbar#previewprogressbar::chunk", stylesheet)
         self.assertIn("#8158c7", stylesheet)
 
         dialog.canvas.set_scene(_preview_scene())
         dialog.mark_stale()
+        self.assertFalse(dialog.three_quarter_button.isHidden())
         self.assertEqual(dialog.state, PreviewState.STALE)
         self.assertIn("Vorschau nicht mehr aktuell", dialog.state_label.text())
         self.assertEqual(dialog.state_label.property("state"), "stale")
@@ -386,19 +416,20 @@ class UxImprovementTests(unittest.TestCase):
         window.current_preview = SimpleNamespace()
         window.preview_state = PreviewState.CURRENT
         window._invalidate_preview("Ein Wert wurde geändert.")
-        self.assertIn("Vorschau nicht mehr aktuell", window.preview_hint_label.text())
+        self.assertIn("nicht mehr aktuell", window.preview_hint_label.text())
         self.assertEqual(window.preview_hint_label.property("state"), "stale")
         window.current_preview = None
         window.close()
 
-    def test_06_stale_preview_dialog_has_exactly_the_three_requested_actions(self) -> None:
+    def test_06_stale_preview_has_only_the_central_update_action(self) -> None:
         window = self.window()
-        box = window._create_stale_preview_message_box()
-        buttons = [button.text() for button in box.buttons()]
-        self.assertCountEqual(buttons, ["Ja", "Vorschau aktualisieren", "Nein"])
-        self.assertEqual(len(buttons), 3)
-        self.assertIs(box.defaultButton(), box._stale_no_button)
-        box.close()
+        window.current_preview = SimpleNamespace()
+        window.preview_state = PreviewState.STALE
+        window._update_responsive_action_labels()
+        self.assertFalse(hasattr(window, "_create_stale_preview_message_box"))
+        self.assertEqual(window.preview_button.text(), "Kühlturm aktualisieren")
+        self.assertTrue(window.export_button.isHidden())
+        window.current_preview = None
         window.close()
 
     def test_07_reset_prompts_only_for_changes_and_has_two_short_actions(self) -> None:

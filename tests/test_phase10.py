@@ -232,6 +232,7 @@ class SplineMathematicsTests(unittest.TestCase):
 class Phase10ProfileTests(unittest.TestCase):
     def test_15_default_minimum_outer_radius_is_five_mm(self) -> None:
         self.assertEqual(GenerationSettings().minimum_outer_radius_mm, 5.0)
+        self.assertEqual(GenerationSettings().base_height_mm, 1.0)
 
     def test_16_automatic_base_width_has_twenty_mm_minimum(self) -> None:
         radius = calculate_phase10_base_outer_radius(

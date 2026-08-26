@@ -19,9 +19,8 @@ SETTING_INFO_TEXTS = {
         "Platz- und Materialbedarf sowie die maximal erreichbare Zusatzzeit."
     ),
     "minimum_object_tower_distance_mm": (
-        "Kleinster Abstand zwischen den belegten Außenkanten von Druckobjekt "
-        "und Kühlturm. Der voranalysierte Brim und Support des Objekts sowie "
-        "Standfuß und Brim des Turms werden dabei berücksichtigt."
+        "Legt den kleinsten freien Abstand zwischen Objekt und Kühlturm fest. "
+        "Brim und Support werden automatisch mitgerechnet."
     ),
     "manual_base_width_mm": (
         "Außendurchmesser des Standfußes bei deaktivierter Automatik. "

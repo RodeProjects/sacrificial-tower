@@ -236,7 +236,7 @@ class WorkflowController(QObject):
             self.workflow_card.set_summary("Bitte Vorbereitungen abschließen")
             self.workflow_card.set_summary_note(None)
             self.workflow_card.set_badge(None)
-            self.workflow_card.setProperty("sourceError", False)
+            self.workflow_card.setProperty("preparationError", False)
             self.workflow_card.set_state(SectionState.ACTIVE, icon="⇧")
         self._hide_downstream()
         self._set_stage(WorkflowStage.WAITING_FOR_SOURCE, force=True)
@@ -600,14 +600,9 @@ class WorkflowController(QObject):
         card.set_summary(summary)
         card.set_summary_note(None)
         card.set_badge(None)
-        # Only an unaccepted source owns the red header error glyph. Slicer
-        # problems keep the normal preparation arrow until they are resolved.
-        icon = (
-            "×"
-            if self.source_card.state() is SectionState.ERROR
-            else "⇧"
-        )
-        card.setProperty("sourceError", icon == "×")
+        has_error = state is SectionState.ERROR
+        icon = "×" if has_error else "⇧"
+        card.setProperty("preparationError", has_error)
         card.set_state(state, icon=icon)
         card.set_expanded(True)
 
@@ -629,7 +624,7 @@ class WorkflowController(QObject):
             card.set_summary("Bereit zum Abschließen")
             card.set_summary_note(None)
             card.set_badge(None)
-            card.setProperty("sourceError", False)
+            card.setProperty("preparationError", False)
             card.set_state(SectionState.ACTIVE, icon="⇧")
             card.set_expanded(True)
             self._hide_downstream()
@@ -640,7 +635,7 @@ class WorkflowController(QObject):
         card.set_summary("Vorbereitung abgeschlossen")
         card.set_summary_note(None)
         card.set_badge(None)
-        card.setProperty("sourceError", False)
+        card.setProperty("preparationError", False)
         card.set_state(SectionState.SUCCESS, icon="✓")
 
         def reveal_ready_state() -> None:
@@ -668,7 +663,7 @@ class WorkflowController(QObject):
             card.set_summary("Vorbereitung abgeschlossen")
             card.set_summary_note(None)
             card.set_badge(None)
-            card.setProperty("sourceError", False)
+            card.setProperty("preparationError", False)
             card.set_state(SectionState.SUCCESS, icon="✓")
             card.set_expanded(False)
         self._set_stage(WorkflowStage.READY)

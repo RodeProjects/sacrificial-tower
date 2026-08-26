@@ -186,17 +186,25 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.timing_group.state(), SectionState.NEUTRAL)
         window.close()
 
-    def test_two_column_rows_keep_collapsible_cards_independently_sized(self) -> None:
+    def test_ready_columns_and_single_geometry_column_are_independently_sized(self) -> None:
         window = self.window()
         window.resize(1400, 1000)
         window.show()
         window.ready_grid.show()
         self.app.processEvents()
         self.assertTrue(window.ready_grid.is_two_column())
-        self.assertTrue(window.geometry_split.is_two_column())
+        self.assertTrue(
+            window.ready_left_column.isAncestorOf(window.geometry_settings_group)
+        )
+        geometry_sections = (
+            window.geometry_group,
+            window.stability_group,
+            window.overhang_group,
+            window.geometry_calculation_section,
+        )
         self.assertEqual(
-            window.geometry_group.height(),
-            window.geometry_right_column.height(),
+            [section.y() for section in geometry_sections],
+            sorted(section.y() for section in geometry_sections),
         )
         for card in (window.timing_group, window.prediction_frame):
             self.assertTrue(card.isCheckable())
@@ -401,13 +409,10 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.show()
         self.app.processEvents()
-        button = window.stl_info_button
+        button = window.full_infill_info_button
         self.assertEqual(
             (button.width(), button.height()),
-            (
-                METRICS.info_button_diameter_px,
-                METRICS.info_button_diameter_px,
-            ),
+            (24, 24),
         )
         self.assertTrue(button.toolTip())
         self.assertIn("border-radius: 16px", window.styleSheet())
@@ -458,7 +463,7 @@ class Phase18UiTests(unittest.TestCase):
             )
         )
         self.assertTrue(
-            window.geometry_right_column.isAncestorOf(
+            window.geometry_split.isAncestorOf(
                 window.geometry_calculation_section
             )
         )
@@ -545,12 +550,12 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertLessEqual(
             window.geometry_calculation_section.geometry().bottom(),
-            window.geometry_right_column.contentsRect().bottom(),
+            window.geometry_split.contentsRect().bottom(),
         )
         stylesheet = window.styleSheet()
         geometry_subsection_selector = (
             'QWidget#geometrySettingsSplit '
-            'QFrame#sectionCard[subsection="left"]'
+            'QFrame#sectionCard[subsection="single"]'
         )
         self.assertIn(geometry_subsection_selector, stylesheet)
         self.assertIn(
@@ -621,8 +626,9 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.options_button.text(), "")
         self.assertFalse(window.options_button.icon().isNull())
         self.assertEqual(window.options_button.iconSize().width(), 18)
+        self.assertFalse(hasattr(window, "stl_info_button"))
         self.assertLess(
-            window.stl_info_button.geometry().left(),
+            window.reset_button.geometry().left(),
             window.options_button.geometry().left(),
         )
         window.close()
@@ -686,7 +692,7 @@ class Phase18UiTests(unittest.TestCase):
         for group in outer_groups:
             self.assertTrue(group.property("outerDropdown"))
         self.assertFalse(window.workflow_group.property("bodyHover"))
-        self.assertTrue(window.geometry_settings_group.property("bodyHover"))
+        self.assertFalse(window.geometry_settings_group.property("bodyHover"))
         self.assertFalse(window.timing_group.property("bodyHover"))
         self.assertFalse(window.prediction_frame.property("bodyHover"))
         self.assertFalse(bool(window.geometry_group.property("outerDropdown")))
@@ -895,38 +901,98 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "profile_group"))
         window.close()
 
-    def test_preview_opening_clears_a_maximized_window_state(self) -> None:
+    def test_preview_is_embedded_visible_and_fixed_before_first_scene(self) -> None:
         window = self.window()
         window.resize(900, 700)
         window.show()
-        self.app.processEvents()
-        main_geometry = window.geometry()
-        main_window_state = window.windowState()
-        window.preview_dialog.setWindowState(Qt.WindowState.WindowMaximized)
-        window._show_preview_dialog()
-        self.assertEqual(window.preview_dialog.windowOpacity(), 0.0)
-        QTest.qWait(220)
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         self.app.processEvents()
         self.assertTrue(window.preview_dialog.isVisible())
-        self.assertEqual(window.preview_dialog.windowOpacity(), 1.0)
-        self.assertFalse(window.preview_dialog.isMaximized())
-        self.assertFalse(window.preview_dialog.isFullScreen())
-        self.assertEqual(window.geometry(), main_geometry)
-        self.assertEqual(window.windowState(), main_window_state)
+        self.assertFalse(window.preview_dialog.isWindow())
+        self.assertTrue(
+            window.prediction_frame.isAncestorOf(window.preview_dialog)
+        )
         self.assertEqual(
-            window.preview_dialog.geometry(),
-            window._preview_target_geometry,
+            window.preview_dialog.canvas.height(),
+            420,
+        )
+        self.assertEqual(
+            window.preview_dialog.state_label.text(),
+            "Vorschau wurde noch nicht erstellt.",
+        )
+        self.assertTrue(window.preview_dialog.state_label.isHidden())
+        self.assertTrue(window.preview_dialog.three_quarter_button.isHidden())
+        self.assertFalse(hasattr(window.preview_dialog, "update_button"))
+        self.assertFalse(hasattr(window.preview_dialog, "export_button"))
+        self.assertTrue(window.preview_dialog.progress.isHidden())
+        window.close()
+
+    def test_preview_result_reflows_without_overlapping_the_canvas(self) -> None:
+        window = self.window()
+        window.resize(1200, 1000)
+        window.show()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        self.app.processEvents()
+        dialog = window.preview_dialog
+        empty_height = dialog.height()
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(0, 0, 0.2), Point3D(10, 10, 5)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(20, 20, 0), Point3D(20, 20, 8)),
+            ),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(20, 20),
+            source_segment_count=1234,
+            displayed_segment_count=1,
+            tower_height_mm=8,
+            object_height_mm=5,
+            object_layer_count=25,
+            tower_layer_count=25,
+        )
+        dialog.set_preview(
+            SimpleNamespace(
+                scene=scene,
+                calibrated=False,
+                slicer_optimized=False,
+                output_mode=SimpleNamespace(value="stl"),
+            )
+        )
+        self.app.processEvents()
+
+        self.assertGreater(dialog.height(), empty_height)
+        self.assertEqual(
+            dialog.preview_info_header.geometry().bottom() + 1,
+            dialog.canvas.geometry().top(),
+        )
+        self.assertEqual(
+            dialog.canvas.geometry().bottom() + 1,
+            dialog.legend_widget.geometry().top(),
+        )
+        self.assertFalse(
+            dialog.canvas.geometry().intersects(
+                dialog.preview_info_header.geometry()
+            )
+        )
+        self.assertFalse(
+            dialog.canvas.geometry().intersects(dialog.legend_widget.geometry())
+        )
+        self.assertLess(
+            dialog.three_quarter_button.geometry().bottom(),
+            dialog.preview_frame.geometry().top(),
         )
         self.assertLessEqual(
-            abs(
-                window.preview_dialog.frameGeometry().top()
-                - window.frameGeometry().top()
-            ),
-            1,
+            dialog.navigation_hint.geometry().bottom(),
+            dialog.contentsRect().bottom(),
         )
         window.close()
 
-    def test_prediction_method_colours_and_short_two_line_action(self) -> None:
+    def test_prediction_method_colours_and_embedded_preview(self) -> None:
         window = self.window()
         window.resize(1200, 900)
         window.show()
@@ -935,10 +1001,7 @@ class Phase18UiTests(unittest.TestCase):
         window.workflow.complete_preparation()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
-        self.assertEqual(
-            window.slicer_prediction_button.text(),
-            "Slicer-Schätzung\ndurchführen",
-        )
+        self.assertFalse(hasattr(window, "slicer_prediction_button"))
         window.prediction_method_label.setText("Slicer-gestützte Schätzung")
         window.prediction_method_label.setProperty("mode", "slicer")
         window._refresh_widget_style(window.prediction_method_label)
@@ -950,85 +1013,13 @@ class Phase18UiTests(unittest.TestCase):
             'QLabel#predictionMethodBadge[mode="slicer"]',
             window.styleSheet(),
         )
-        primary_position_before = window.prediction_primary_widget.mapTo(
-            window.prediction_frame,
-            QPoint(0, 0),
-        )
-        with (
-            patch.object(
-                window,
-                "_slicer_prediction_is_offered",
-                return_value=True,
-            ),
-            patch.object(
-                window,
-                "_slicer_prediction_can_start",
-                return_value=True,
-            ),
-        ):
-            window._refresh_prediction_advice("Slicer-gestützte Schätzung")
-            self.app.processEvents()
-            self.app.processEvents()
-        self.assertEqual(
-            window.prediction_advice_label.text(),
-            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
-            "und den ausgewählten Profilen ermittelt.",
-        )
-        self.assertEqual(
-            window.prediction_primary_widget.mapTo(
-                window.prediction_frame,
-                QPoint(0, 0),
-            ),
-            primary_position_before,
-        )
-        self.assertEqual(
-            window.prediction_advice_frame.y(),
-            window.prediction_primary_widget.y(),
-        )
-        self.assertEqual(
-            window.prediction_advice_frame.height(),
-            window.prediction_advice_frame.layout().sizeHint().height(),
+        self.assertTrue(
+            window.prediction_frame.isAncestorOf(window.preview_dialog)
         )
         self.assertLess(
-            window.prediction_advice_frame.height(),
-            window.prediction_primary_widget.height(),
+            window.prediction_preview_divider.y(),
+            window.preview_dialog.y(),
         )
-        self.assertTrue(window.slicer_prediction_button.isVisible())
-        self.assertEqual(
-            window.prediction_advice_frame.layout().contentsMargins().left(),
-            0,
-        )
-        self.assertEqual(
-            window.prediction_advice_content.layout().contentsMargins().left(),
-            8,
-        )
-        self.assertTrue(
-            window.prediction_advice_label.alignment()
-            & Qt.AlignmentFlag.AlignHCenter
-        )
-        self.assertEqual(window.slicer_prediction_button.x(), 0)
-        self.assertEqual(
-            window.slicer_prediction_button.width(),
-            window.prediction_advice_frame.width(),
-        )
-        self.assertEqual(
-            window.prediction_advice_content.geometry().bottom() + 1,
-            window.slicer_prediction_button.geometry().top(),
-        )
-        self.assertEqual(
-            window.slicer_prediction_button.geometry().bottom(),
-            window.prediction_advice_frame.rect().bottom(),
-        )
-        stylesheet = window.styleSheet()
-        button_selector = "QPushButton#slicerPredictionButton {"
-        button_rule = stylesheet[
-            stylesheet.index(button_selector):
-            stylesheet.index(
-                "QPushButton#slicerPredictionButton:hover",
-            )
-        ]
-        self.assertIn("border: 1px solid #b9aae9;", button_rule)
-        self.assertIn("background: #f3f0ff;", button_rule)
         window.close()
 
     def test_followup_copy_headers_dropdown_widths_and_prediction_columns(self) -> None:
@@ -1113,19 +1104,14 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(window, "profile_group"))
 
-        item = window.prediction_content_grid.indexOf(
-            window.prediction_advice_frame
-        )
-        self.assertEqual(
-            window.prediction_content_grid.getItemPosition(item)[1],
-            1,
-        )
-        primary_item = window.prediction_content_grid.indexOf(
-            window.prediction_primary_widget
-        )
-        self.assertEqual(
-            window.prediction_content_grid.getItemPosition(primary_item)[1],
-            0,
+        self.assertFalse(hasattr(window, "prediction_content_grid"))
+        self.assertLess(
+            window.prediction_frame.content_layout.indexOf(
+                window.prediction_primary_widget
+            ),
+            window.prediction_frame.content_layout.indexOf(
+                window.prediction_preview_divider
+            ),
         )
         widths = {combo.width() for combo in window._slicer_width_combos}
         self.assertEqual(len(widths), 1)
@@ -1213,6 +1199,9 @@ class Phase18UiTests(unittest.TestCase):
             source_segment_count=1,
             displayed_segment_count=1,
             tower_height_mm=10,
+            object_height_mm=1,
+            object_layer_count=7,
+            tower_layer_count=8,
         )
         result = SimpleNamespace(
             scene=scene,
@@ -1224,8 +1213,40 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.preview_dialog.canvas.yaw_deg, 0.0)
         self.assertEqual(
             window.preview_dialog.bed_legend.text(),
-            "■ Druckplatte (100 × 100 mm)",
+            "■ Druckplatte",
         )
+        self.assertIn("Segmente:", window.preview_dialog.segments_info_label.text())
+        self.assertIn("Höhe:", window.preview_dialog.height_info_label.text())
+        self.assertIn("Layer:", window.preview_dialog.layers_info_label.text())
+        self.assertIn("7", window.preview_dialog.layers_info_label.text())
+        self.assertIn("8", window.preview_dialog.layers_info_label.text())
+        self.assertIn(
+            "100 x 100 mm",
+            window.preview_dialog.bed_info_label.text(),
+        )
+        self.assertEqual(
+            window.preview_dialog.legend_title.text(),
+            "Legende:",
+        )
+        self.assertFalse(hasattr(window.preview_dialog, "reset_camera_button"))
+        self.assertFalse(hasattr(window.preview_dialog, "fit_objects_button"))
+        self.assertFalse(hasattr(window.preview_dialog, "fit_button"))
+        camera_buttons = (
+            window.preview_dialog.three_quarter_button,
+            window.preview_dialog.front_button,
+            window.preview_dialog.side_button,
+            window.preview_dialog.top_button,
+        )
+        self.assertEqual(
+            tuple(button.text() for button in camera_buttons),
+            ("3/4-Ansicht", "Vorderansicht", "Seitenansicht", "Draufsicht"),
+        )
+        self.assertEqual(len({button.y() for button in camera_buttons}), 1)
+        for button in camera_buttons:
+            self.assertGreaterEqual(
+                button.width(),
+                button.fontMetrics().horizontalAdvance(button.text()) + 28,
+            )
         self.assertAlmostEqual(
             window.preview_dialog.canvas.zoom,
             PreviewCanvas.SIDE_VIEW_ZOOM,
@@ -1236,14 +1257,8 @@ class Phase18UiTests(unittest.TestCase):
             window.preview_dialog.canvas.zoom,
             PreviewCanvas.SIDE_VIEW_ZOOM,
         )
-        exported = QSignalSpy(window.preview_dialog.export_requested)
-        window.preview_dialog.export_button.setEnabled(True)
-        window.preview_dialog.export_button.click()
-        self.assertEqual(exported.count(), 1)
-        self.assertEqual(
-            window.preview_dialog.export_button.text(),
-            "Kühlturm exportieren",
-        )
+        self.assertFalse(hasattr(window.preview_dialog, "export_requested"))
+        self.assertFalse(hasattr(window.preview_dialog, "export_button"))
         window.close()
 
     def test_side_view_selects_an_axis_that_keeps_both_objects_apart(self) -> None:
@@ -1263,6 +1278,7 @@ class Phase18UiTests(unittest.TestCase):
             tower_height_mm=12,
         )
         canvas.set_scene(scene)
+        canvas.resize(520, 420)
         canvas.side_view()
 
         self.assertEqual(canvas.yaw_deg, -90.0)
@@ -1439,7 +1455,11 @@ class Phase18UiTests(unittest.TestCase):
 
         self.assertEqual(
             window.preview_dialog.bed_legend.text(),
-            "■ Druckplatte (254,5 × 200 mm)",
+            "■ Druckplatte",
+        )
+        self.assertIn(
+            "254,5 x 200 mm",
+            window.preview_dialog.bed_info_label.text(),
         )
         window.close()
 
@@ -1755,7 +1775,6 @@ class Phase18UiTests(unittest.TestCase):
         geometry.toggle()
         QTest.qWait(METRICS.animation_duration_ms + 50)
         self.app.processEvents()
-        self.assertFalse(window.geometry_split.is_two_column())
         self.assertFalse(body.isHidden())
         self.assertGreaterEqual(body.height(), body.sizeHint().height() - 2)
         self.assertTrue(window.mesh_segments_spin.isVisible())
@@ -1907,11 +1926,7 @@ class Phase18UiTests(unittest.TestCase):
     def test_preview_actions_are_disabled_while_a_preview_job_exists(self) -> None:
         window = self.window()
         window.preview_button.setEnabled(True)
-        window.preview_dialog.update_button.setEnabled(True)
         window.prediction_method_label.setText("Slicer-gestützte Schätzung")
-        window._slicer_prediction_is_offered = lambda: True
-        window.slicer_prediction_button.setVisible(True)
-        window.slicer_prediction_button.setEnabled(True)
         window.preview_state = PreviewState.BUILDING
         actual_has_active = window.background_job_manager.has_active
 
@@ -1925,24 +1940,10 @@ class Phase18UiTests(unittest.TestCase):
         ):
             window._refresh_phase17_actions()
             window._update_responsive_action_labels()
-            self.assertFalse(window.preview_button.isEnabled())
-            self.assertFalse(window.preview_dialog.update_button.isEnabled())
-            self.assertFalse(window.slicer_prediction_button.isEnabled())
-            self.assertEqual(
-                window.slicer_prediction_button.text(),
-                "Schätzung wird durchgeführt...",
-            )
-            self.assertIn(
-                "Während die Vorschau erstellt wird",
-                window.slicer_prediction_button.toolTip(),
-            )
+            self.assertTrue(window.preview_button.isEnabled())
             self.assertEqual(
                 window.preview_button.text(),
-                "Vorschau wird erstellt...",
-            )
-            self.assertEqual(
-                window.preview_dialog.update_button.text(),
-                "Vorschau wird erstellt...",
+                "Generierung abbrechen",
             )
         window.close()
 
@@ -2012,7 +2013,6 @@ class Phase18UiTests(unittest.TestCase):
             window.open_output_button,
             window.open_stl_button,
             window.preview_action_control,
-            window.export_button,
         ):
             self.assertTrue(button.isVisible())
             self.assertTrue(window.footer.isAncestorOf(button))
@@ -2027,85 +2027,18 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
         window.close()
 
-    def test_one_off_slicer_prediction_uses_selected_iterations(self) -> None:
-        class FakePreviewService:
-            def __init__(self) -> None:
-                self.iterations: list[int] = []
-
-            def prepare(self, request, *, cancellation_event, progress_callback):
-                self.iterations.append(request.calibration_config.maximum_iterations)
-                progress_callback(50, "Slicer wird ausgewertet")
-                return SimpleNamespace(
-                    minimum_verified_layer_time_s=12.5,
-                    dispose=lambda: None,
-                )
-
-        service = FakePreviewService()
-        window = MainWindow(
-            user_settings_path=self.root / "settings.json",
-            preview_service=service,
-        )
-        window.preview_iteration_slider.setValue(8)
-        installation = SlicerInstallation(
-            adapter_id="test",
-            product_name="Testslicer",
-            version="1.0",
-            executable_path=self.root / "slicer.exe",
-            verified=True,
-            capabilities=frozenset({SlicerCapability.CLI_SLICE}),
-            discovery_source=SlicerDiscoverySource.KNOWN_PATH,
-            support_level=SlicerSupportLevel.FULL,
-        )
-        window.slicer_discovery_result = SlicerDiscoveryResult(
-            installations=(installation,),
-            recommended_key=installation.identity_key,
-            gui_state=SlicerGuiState.AVAILABLE,
-            message="verfügbar",
-        )
-        window.slicer_combo.addItem("Testslicer", installation.identity_key)
-        selected = SimpleNamespace(
-            effective_profile=object(),
-            bundle_id="bundle",
-        )
-        window.profile_match_result = SimpleNamespace(
-            selected=selected,
-            can_use_stl_mode=True,
-            execution_slicer=installation,
-            inventory_fingerprint="inventory",
-            user_confirmed=True,
-        )
-        window.analysis_snapshot = SimpleNamespace(maximum_print_z_mm=20.0)
-        window.tower_assessment = SimpleNamespace(
-            tower_required=True,
-            target_layer_time_s=15.0,
-            deficit_layer_count=4,
-            tower_end_z_mm=20.0,
-        )
-        window.profile_feasibility = ProfileFeasibilityAssessment(
-            tower_required=True,
-            feasible=True,
-            estimated_minimum_combined_layer_time_s=9.0,
-        )
-        with patch.object(window.slicer_service, "adapter_for", return_value=object()):
-            window.start_slicer_prediction()
-        for _ in range(100):
-            self.app.processEvents()
-            if not window.background_job_manager.has_active(
-                JobKind.SLICER_PREDICTION
-            ):
-                break
-            QTest.qWait(10)
-        self.assertEqual(service.iterations, [8])
-        self.assertEqual(window.preview_iterations, 8)
-        self.assertEqual(
-            window.prediction_method_label.text(),
-            "Slicer-gestützte Schätzung",
-        )
-        self.assertEqual(window.prediction_value_labels["minimum"].text(), "12,50 s")
+    def test_manual_slicer_prediction_action_is_removed(self) -> None:
+        window = self.window()
+        self.assertFalse(hasattr(window, "slicer_prediction_button"))
+        self.assertFalse(hasattr(window, "prediction_advice_label"))
+        self.assertFalse(hasattr(window, "preview_precise_button"))
+        self.assertEqual(window.preview_iterations, 12)
+        self.assertEqual(window.preview_joint_slices, 6)
         window.close()
 
     def test_left_drag_rotation_directions_are_inverted(self) -> None:
         canvas = PreviewCanvas()
+        canvas.set_navigation_enabled(True)
         canvas._last_mouse = QPoint(100, 100)
         canvas._drag_button = Qt.MouseButton.LeftButton
         yaw = canvas.yaw_deg
@@ -2118,6 +2051,82 @@ class Phase18UiTests(unittest.TestCase):
         self.assertLess(canvas.yaw_deg, yaw)
         self.assertGreater(canvas.pitch_deg, pitch)
         canvas.close()
+
+    def test_preview_navigation_is_locked_until_explicitly_enabled(self) -> None:
+        canvas = PreviewCanvas()
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(0, 0, 0), Point3D(1, 1, 1)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(5, 0, 0), Point3D(6, 1, 8)),
+            ),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(5.5, 0.5),
+            source_segment_count=1,
+            displayed_segment_count=1,
+            tower_height_mm=8,
+        )
+        canvas.set_scene(scene)
+        ignored: list[bool] = []
+        accepted: list[bool] = []
+        event = SimpleNamespace(
+            angleDelta=lambda: QPoint(0, 120),
+            ignore=lambda: ignored.append(True),
+            accept=lambda: accepted.append(True),
+        )
+        initial_zoom = canvas.zoom
+
+        canvas.wheelEvent(event)
+        self.assertEqual(canvas.zoom, initial_zoom)
+        self.assertTrue(ignored)
+        self.assertFalse(canvas.navigation_enabled)
+        self.assertFalse(canvas.navigation_toggle.isChecked())
+        self.assertIn("aktivieren", canvas.navigation_toggle.accessibleName())
+        self.assertEqual(canvas.navigation_toggle.x(), 10)
+        self.assertGreater(
+            canvas.navigation_status_label.x(),
+            canvas.navigation_toggle.geometry().right(),
+        )
+        self.assertEqual(
+            canvas.navigation_status_label.text(),
+            "Navigation deaktiviert",
+        )
+        self.assertEqual(
+            canvas.navigation_status_label.property("state"),
+            "disabled",
+        )
+
+        canvas.navigation_toggle.click()
+        canvas.wheelEvent(event)
+        self.assertGreater(canvas.zoom, initial_zoom)
+        self.assertTrue(accepted)
+        self.assertTrue(canvas.navigation_enabled)
+        self.assertTrue(canvas.navigation_toggle.isChecked())
+        self.assertIn("deaktivieren", canvas.navigation_toggle.accessibleName())
+        self.assertEqual(
+            canvas.navigation_status_label.text(),
+            "Navigation aktiviert",
+        )
+        self.assertEqual(
+            canvas.navigation_status_label.property("state"),
+            "enabled",
+        )
+
+        canvas.set_scene(scene, preserve_view=True)
+        self.assertFalse(canvas.navigation_enabled)
+        self.assertFalse(canvas.navigation_toggle.isChecked())
+        canvas.close()
+
+    def test_quality_panel_belongs_to_prediction_and_geometry_has_no_body_hover(self) -> None:
+        window = self.window()
+        self.assertTrue(
+            window.prediction_primary_widget.isAncestorOf(
+                window.preview_dialog.quality_widget
+            )
+        )
+        self.assertFalse(window.geometry_settings_group.property("bodyHover"))
+        window.close()
 
 
 if __name__ == "__main__":

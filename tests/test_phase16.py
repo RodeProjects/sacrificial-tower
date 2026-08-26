@@ -237,9 +237,11 @@ class Phase16Tests(unittest.TestCase):
             CalibrationConfig(maximum_iterations=0)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=-1)
-        self.assertEqual(CalibrationConfig(maximum_iterations=8).maximum_iterations, 8)
+        self.assertEqual(CalibrationConfig(maximum_iterations=12).maximum_iterations, 12)
         with self.assertRaises(ValueError):
-            CalibrationConfig(maximum_iterations=9)
+            CalibrationConfig(maximum_iterations=13)
+        with self.assertRaises(ValueError):
+            CalibrationConfig(maximum_joint_slices=6, minimum_joint_slices=7)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_runtime_s=float("inf"))
         with self.assertRaises(ValueError):
@@ -965,7 +967,10 @@ class Phase16Tests(unittest.TestCase):
                 adapter=adapter,
                 profile=self.profile,
                 output_directory=self.root / "joint_result",
-                config=CalibrationConfig(maximum_iterations=1),
+                config=CalibrationConfig(
+                    maximum_iterations=1,
+                    time_tolerance_s=1_000.0,
+                ),
                 source_artifact=artifact,
             )
 
@@ -1019,7 +1024,7 @@ class Phase16Tests(unittest.TestCase):
         )
         self.assertIsNone(result.project_path)
 
-    def test_joint_export_reuses_preview_candidate_for_at_most_two_complete_slices(self) -> None:
+    def test_calibration_can_resume_a_candidate_for_bounded_joint_slices(self) -> None:
         source_stl = self.root / "seed_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
         artifact = SourceArtifact.capture(source_stl)
@@ -1057,8 +1062,10 @@ class Phase16Tests(unittest.TestCase):
                 profile=self.profile,
                 output_directory=self.root / "seed_export",
                 config=CalibrationConfig(
-                    maximum_iterations=8,
+                    maximum_iterations=12,
                     perform_joint_final_slice=True,
+                    minimum_joint_slices=2,
+                    maximum_joint_slices=6,
                 ),
                 source_artifact=artifact,
                 seed_profile=preview.profile,
@@ -1067,7 +1074,8 @@ class Phase16Tests(unittest.TestCase):
 
         self.assertTrue(exported.has_usable_improvement, exported.failures)
         self.assertGreaterEqual(len(export_adapter.requests), 1)
-        self.assertLessEqual(len(export_adapter.requests), 2)
+        self.assertGreaterEqual(len(export_adapter.requests), 2)
+        self.assertLessEqual(len(export_adapter.requests), 6)
         self.assertTrue(
             all(request.model_path.suffix == ".3mf" for request in export_adapter.requests)
         )
@@ -1075,10 +1083,10 @@ class Phase16Tests(unittest.TestCase):
             all(request.preserve_model_positions for request in export_adapter.requests)
         )
         self.assertIsNotNone(exported.project_path)
-        self.assertEqual(exported.configured_iteration_count, 8)
+        self.assertEqual(exported.configured_iteration_count, 12)
         self.assertEqual(build_profile.call_count, 1)
 
-    def test_joint_export_limits_complete_object_slices_to_two(self) -> None:
+    def test_generation_uses_six_normal_and_two_to_six_joint_slices(self) -> None:
         source_stl = self.root / "bounded_joint_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
         adapter = FakeAdapter(
@@ -1095,16 +1103,18 @@ class Phase16Tests(unittest.TestCase):
             profile=self.profile,
             output_directory=self.root / "bounded_joint_export",
             config=CalibrationConfig(
-                maximum_iterations=4,
+                maximum_iterations=12,
                 perform_joint_final_slice=True,
+                minimum_joint_slices=2,
+                maximum_joint_slices=6,
             ),
             source_artifact=SourceArtifact.capture(source_stl),
         )
 
         suffixes = [request.model_path.suffix for request in adapter.requests]
-        self.assertEqual(suffixes[:3], [".stl", ".stl", ".stl"])
-        self.assertGreaterEqual(suffixes.count(".3mf"), 1)
-        self.assertLessEqual(suffixes.count(".3mf"), 2)
+        self.assertEqual(suffixes[:6], [".stl"] * 6)
+        self.assertGreaterEqual(suffixes.count(".3mf"), 2)
+        self.assertLessEqual(suffixes.count(".3mf"), 6)
         self.assertIsNotNone(result.project_path)
 
     def test_25_gcode_mode_rejects_unknown_bed_before_slicing(self) -> None:

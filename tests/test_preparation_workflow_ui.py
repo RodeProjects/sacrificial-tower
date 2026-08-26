@@ -19,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QEnterEvent, QHelpEvent
+from PySide6.QtGui import QEnterEvent, QHelpEvent, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -2034,10 +2034,36 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
             self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
             self.assertIs(window.slicer_group.state(), SectionState.ERROR)
+            self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
+            icon_size = window.workflow_group.status_icon.size()
             window.preparation_tabs.setCurrentIndex(1)
             self.app.processEvents()
             self.assertIs(window.workflow_group.state(), SectionState.ERROR)
+            self.assertEqual(window.workflow_group.status_icon.text(), "×")
+            self.assertTrue(
+                window.workflow_group.property("preparationError")
+            )
+            self.assertEqual(
+                window.workflow_group.status_icon.palette()
+                .color(QPalette.ColorRole.WindowText)
+                .name(),
+                "#b42318",
+            )
+            self.assertEqual(window.workflow_group.status_icon.size(), icon_size)
             self.assertIs(window.workflow.stage, WorkflowStage.ERROR)
+            window.workflow.begin_slicer_search()
+            self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
+            self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
+            self.assertFalse(
+                window.workflow_group.property("preparationError")
+            )
+            self.assertEqual(
+                window.workflow_group.status_icon.palette()
+                .color(QPalette.ColorRole.WindowText)
+                .name(),
+                "#26965f",
+            )
+            self.assertEqual(window.workflow_group.status_icon.size(), icon_size)
         finally:
             window.close()
 

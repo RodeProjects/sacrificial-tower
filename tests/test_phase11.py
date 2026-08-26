@@ -278,7 +278,7 @@ class SettingsSchemaTests(unittest.TestCase):
 
         self.assertEqual(settings.minimum_outer_radius_mm, 7.5)
         self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
-        self.assertEqual(state["preview_iterations"], 5)
+        self.assertEqual(state["preview_iterations"], 8)
         self.assertNotIn("preview_quality", state)
         self.assertNotIn("output_mode", state)
         self.assertIsNotNone(self.store.last_migration_backup)
@@ -753,7 +753,11 @@ class LiveValidationTests(GuiCase):
         self.assertFalse(bool(target.editor.property("invalid")))
         self.assertFalse(bool(expansion.editor.property("invalid")))
         self.assertFalse(target.message_label.text())
-        self.assertNotIn("Layer", self.window.tower_need_label.text())
+        self.assertEqual(
+            self.window.tower_need_label.text(),
+            "Kühlturm erforderlich - 2 Layer unterschreiten die gewünschte "
+            "Mindest-Layerzeit.",
+        )
         self.assertFalse(self.window.validation_label.text())
         self.assertFalse(self.window.preview_button.isEnabled())
 

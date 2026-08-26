@@ -75,7 +75,7 @@ class GenerationSettings:
         minimum_object_tower_distance_mm: float = 25.0,
         simulate_full_tower_infill: bool = False,
         minimum_base_radius_mm: float = 10.0,
-        base_height_mm: float = 4.0,
+        base_height_mm: float = 1.0,
         base_margin_mm: float = 2.0,
         base_height_factor: float = 0.05,
         automatic_base_width: bool = True,

@@ -124,7 +124,7 @@ class SolidSettingsMigrationTests(unittest.TestCase):
                 payload["settings_schema_version"],
                 SETTINGS_SCHEMA_VERSION,
             )
-            self.assertEqual(payload["preview_iterations"], 3)
+            self.assertEqual(payload["preview_iterations"], 4)
             self.assertIsNotNone(store.last_migration_backup)
             self.assertTrue(store.last_migration_backup.is_file())
 
@@ -158,10 +158,49 @@ class SolidSettingsMigrationTests(unittest.TestCase):
                 payload["settings_schema_version"],
                 SETTINGS_SCHEMA_VERSION,
             )
-            self.assertEqual(payload["preview_iterations"], 5)
+            self.assertEqual(payload["preview_iterations"], 8)
             self.assertNotIn("preview_quality", payload)
             self.assertIsNotNone(store.last_migration_backup)
             self.assertEqual(store.last_migration_backup.read_bytes(), original)
+
+    def test_schema_9_pass_count_migrates_to_fast_or_precise_mode(self) -> None:
+        for legacy_iterations, expected in ((1, 4), (4, 4), (5, 8), (8, 8)):
+            with self.subTest(legacy_iterations=legacy_iterations):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    defaults = root / "defaults.json"
+                    defaults.write_text(
+                        json.dumps(
+                            {
+                                "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+                                **GenerationSettings().to_dict(),
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    user = root / "user.json"
+                    original = json.dumps(
+                        {
+                            "settings_schema_version": 9,
+                            "generation": GenerationSettings().to_dict(),
+                            "preview_iterations": legacy_iterations,
+                        }
+                    ).encode("utf-8")
+                    user.write_bytes(original)
+
+                    store = UserSettingsStore(user, defaults)
+                    _settings, payload = store.load()
+
+                    self.assertEqual(payload["preview_iterations"], expected)
+                    self.assertEqual(
+                        payload["settings_schema_version"],
+                        SETTINGS_SCHEMA_VERSION,
+                    )
+                    self.assertIsNotNone(store.last_migration_backup)
+                    self.assertEqual(
+                        store.last_migration_backup.read_bytes(),
+                        original,
+                    )
 
     def test_schema_7_pass_count_is_clamped_to_new_eight_pass_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

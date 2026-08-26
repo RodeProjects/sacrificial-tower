@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, PropertyMock, call, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,6 @@ from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.main_window import (
     MainWindow,
     _concise_operation_failure_reason,
-    _supports_bambu_multinozzle_emergency_fallback,
 )
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.widgets import FooterNoticeDropdown
@@ -125,36 +124,13 @@ class RequestedGuiChangesTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_bambu_multinozzle_export_attempts_joint_slice_before_fallback(self) -> None:
-        preview_request = SimpleNamespace(
-            adapter=SimpleNamespace(adapter_id="bambu_studio"),
-            effective_profile=SimpleNamespace(
-                effective_values={"nozzle_diameter": ["0.4", "0.4"]}
-            ),
-            signature=lambda: "current",
-        )
-        export_request = SimpleNamespace(signature=lambda: "export")
-        fallback_request = SimpleNamespace(signature=lambda: "fallback")
-        self.assertTrue(
-            _supports_bambu_multinozzle_emergency_fallback(preview_request)
-        )
-        single_nozzle = SimpleNamespace(
-            adapter=preview_request.adapter,
-            effective_profile=SimpleNamespace(
-                effective_values={"nozzle_diameter": ["0.4"]}
-            ),
-        )
-        self.assertFalse(
-            _supports_bambu_multinozzle_emergency_fallback(single_nozzle)
-        )
-
+    def test_export_reuses_the_current_generation_without_slicer_work(self) -> None:
+        request = SimpleNamespace(signature=lambda: "current")
         window = self.window()
         preview = SimpleNamespace(request_signature="current")
         window.current_preview = preview
         window.preview_state = window.preview_state.CURRENT
         window.export_button.setEnabled(True)
-        export_config = object()
-        fallback_config = object()
         try:
             with (
                 patch.object(window, "validate_form"),
@@ -162,22 +138,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 patch.object(
                     window,
                     "_current_preview_request",
-                    side_effect=[
-                        preview_request,
-                        export_request,
-                        fallback_request,
-                    ],
+                    return_value=request,
                 ) as current_request,
-                patch.object(
-                    window,
-                    "_export_calibration_config",
-                    return_value=export_config,
-                ),
-                patch.object(
-                    window,
-                    "_emergency_fallback_calibration_config",
-                    return_value=fallback_config,
-                ),
                 patch.object(
                     window.background_job_manager,
                     "start_job",
@@ -185,55 +147,32 @@ class RequestedGuiChangesTests(unittest.TestCase):
             ):
                 window.start_export()
 
-            self.assertEqual(
-                current_request.call_args_list,
-                [
-                    call(),
-                    call(calibration_config=export_config),
-                    call(calibration_config=fallback_config),
-                ],
-            )
+            current_request.assert_called_once_with()
             worker = start_job.call_args.kwargs["worker"]
-            self.assertIsNone(worker.preview)
-            self.assertIs(worker.request, export_request)
-            self.assertIsNone(worker.fallback_preview)
-            self.assertIs(worker.fallback_request, fallback_request)
+            self.assertIs(worker.preview, preview)
+            self.assertIs(worker.request, request)
+            self.assertFalse(hasattr(worker, "preview_service"))
+            self.assertFalse(hasattr(worker, "fallback_request"))
             self.assertFalse(window._bambu_multinozzle_tower_only_export_active)
-            self.assertIn("gemeinsamen Präzisionsslice", window.status_label.text())
+            self.assertIn(
+                "ohne erneute Slicer-Läufe",
+                window.status_label.text(),
+            )
         finally:
             window.current_preview = None
             window.close()
 
-    def test_export_worker_uses_stl_fallback_only_after_primary_failure(self) -> None:
+    def test_export_worker_never_regenerates_or_falls_back(self) -> None:
         primary_request = SimpleNamespace()
-        fallback_request = SimpleNamespace()
         preview = SimpleNamespace()
-        fallback_result = PreviewExportResult(
-            output_mode=OutputMode.STL,
-            run_directory=self.root,
-            output_path=self.root / "tower.stl",
-            report_path=self.root / "report.json",
-            user_report_path=self.root / "summary.txt",
-            calibrated=False,
-            slicer_optimized=True,
-            minimum_verified_layer_time_s=None,
-            source_sha256="source",
-            output_sha256="tower",
-        )
         export_service = Mock()
-        export_service.export.side_effect = [
-            RuntimeError("No valid nozzle found. Please check nozzle count."),
-            fallback_result,
-        ]
+        export_service.export.side_effect = RuntimeError("write failed")
         worker = ExportWorker(
             4,
             preview,
             primary_request,
             self.root,
             export_service,
-            Mock(),
-            fallback_preview=preview,
-            fallback_request=fallback_request,
         )
         succeeded: list[PreviewExportResult] = []
         failed: list[str] = []
@@ -244,14 +183,128 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         worker.run()
 
-        self.assertFalse(failed)
-        self.assertEqual(len(succeeded), 1)
-        self.assertTrue(succeeded[0].emergency_fallback_used)
-        self.assertIn("No valid nozzle", succeeded[0].primary_failure_reason)
-        self.assertEqual(
-            [item.args[1] for item in export_service.export.call_args_list],
-            [primary_request, fallback_request],
+        self.assertEqual(succeeded, [])
+        self.assertEqual(failed, ["write failed"])
+        export_service.export.assert_called_once_with(
+            preview,
+            primary_request,
+            self.root,
         )
+
+    def test_successful_export_offers_the_folder_without_opening_it(self) -> None:
+        window = self.window()
+        window.show()
+        output = self.root / "tower.stl"
+        result = PreviewExportResult(
+            output_mode=OutputMode.STL,
+            run_directory=self.root,
+            output_path=output,
+            report_path=self.root / "report.json",
+            user_report_path=self.root / "summary.txt",
+            calibrated=True,
+            slicer_optimized=True,
+            minimum_verified_layer_time_s=14.9,
+            source_sha256="source",
+            output_sha256="output",
+            target_layer_time_s=15.0,
+            calibration_time_tolerance_s=0.2,
+            project_path=self.root / "druckprojekt.3mf",
+        )
+        window._export_request_id = 3
+        window.warning_text.setPlainText("• Veralteter technischer Hinweis")
+        window._refresh_issue_panels()
+        with patch(
+            "cooling_tower.gui.main_window.open_directory"
+        ) as open_export_directory:
+            window._on_export_succeeded(3, result)
+            self.app.processEvents()
+            open_export_directory.assert_not_called()
+            self.assertTrue(window.export_success_dialog.isVisible())
+            self.assertEqual(
+                window.export_success_deviation_label.text(),
+                "Abweichung: -0,1 Sekunden\n"
+                "innerhalb der Toleranz von ±0,2 Sekunden",
+            )
+            self.assertEqual(
+                window.export_success_achieved_label.text(),
+                "Erreichte Layerzeit: 14,9 von 15 Sekunden",
+            )
+            self.assertIn(
+                "innerhalb der Toleranz von ±0,2 Sekunden",
+                window.export_success_deviation_label.text(),
+            )
+            self.assertNotIn(
+                "(innerhalb der Toleranz",
+                window.export_success_deviation_label.text(),
+            )
+            self.assertFalse(window.warning_text.toPlainText())
+            self.assertTrue(window.notice_panel.isHidden())
+            self.assertFalse(window.result_label.text())
+            self.assertFalse(window.result_label.toolTip())
+            saved = window.export_success_summary_label.text().splitlines()
+            self.assertEqual(
+                saved,
+                ["Gespeichert:", "• tower.stl", "• druckprojekt.3mf"],
+            )
+            usage = window.export_success_usage_label.text()
+            self.assertIn("Turm-STL manuell", usage)
+            self.assertIn(".3MF-Datei", usage)
+            self.assertNotIn("druckprojekt.3mf", usage)
+            self.assertIn("Druckobjekt und Kühlturm", usage)
+            self.assertIn("gewählte Turmfüllung", usage)
+            self.assertIn(
+                "<b>Wichtig:</b>",
+                window.export_success_check_hint.text(),
+            )
+            self.assertIn(
+                "Nachträgliche Änderungen",
+                window.export_success_check_hint.text(),
+            )
+            self.assertIn(
+                "größeren Abweichungen",
+                window.export_success_check_hint.text(),
+            )
+            window.export_success_open_button.click()
+            open_export_directory.assert_called_once_with(self.root.resolve())
+        self.assertFalse(window.export_success_dialog.isVisible())
+        window.close()
+
+    def test_export_dialog_reports_amount_outside_layer_time_tolerance(self) -> None:
+        window = self.window()
+        try:
+            result = PreviewExportResult(
+                output_mode=OutputMode.STL,
+                run_directory=self.root,
+                output_path=self.root / "tower.stl",
+                report_path=self.root / "report.json",
+                user_report_path=self.root / "summary.txt",
+                calibrated=True,
+                slicer_optimized=True,
+                minimum_verified_layer_time_s=14.5,
+                source_sha256="source",
+                output_sha256="output",
+                target_layer_time_s=15.0,
+                calibration_time_tolerance_s=0.2,
+            )
+            with patch.object(
+                window,
+                "_show_internal_dialog_without_flash",
+            ):
+                window._show_export_success_dialog(result)
+            self.assertEqual(
+                window.export_success_deviation_label.text(),
+                "Abweichung: -0,5 Sekunden\n"
+                "0,3 Sekunden außerhalb der Toleranz von ±0,2 Sekunden",
+            )
+            dialog_layout = window.export_success_dialog.layout()
+            self.assertEqual(dialog_layout.contentsMargins().top(), 11)
+            self.assertEqual(window.export_success_header_layout.spacing(), 7)
+            self.assertEqual(
+                window.export_success_summary_label.text().splitlines(),
+                ["Gespeichert:", "• tower.stl"],
+            )
+        finally:
+            window.close()
 
     def test_footer_status_and_result_wrap_at_wide_layout_boundary(self) -> None:
         window = self.window()
@@ -760,7 +813,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             {"project", "session", "temporary"},
         )
 
-    def test_preview_iteration_slider_and_expansion_warning_use_fixed_values(self) -> None:
+    def test_generation_uses_one_fixed_high_quality_slice_budget(self) -> None:
         window = self.window()
         window.show()
         self.complete_source_step(window)
@@ -769,57 +822,19 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertFalse(hasattr(window, "slicer_iterations_spin"))
+        self.assertFalse(hasattr(window, "preview_iteration_slider"))
         self.assertNotIn("slicer_iterations", window._setting_widgets)
-        for iterations in (3, 5, 8):
-            window.preview_iteration_slider.setValue(iterations)
-            self.assertEqual(
-                window._calibration_config().maximum_iterations,
-                iterations,
-            )
-        self.assertEqual(
-            window._export_calibration_config().maximum_iterations,
-            8,
-        )
-        self.assertTrue(
-            window.preview_action_control.isAncestorOf(
-                window.preview_quality_panel
-            )
-        )
+        self.assertFalse(hasattr(window, "preview_fast_button"))
+        self.assertFalse(hasattr(window, "preview_precise_button"))
+        self.assertFalse(hasattr(window, "preview_quality_panel"))
+        config = window._calibration_config()
+        self.assertEqual(config.maximum_iterations, 12)
+        self.assertEqual(config.minimum_joint_slices, 2)
+        self.assertEqual(config.maximum_joint_slices, 6)
         self.assertTrue(
             window.preview_action_control.isAncestorOf(
                 window.preview_button
             )
-        )
-        self.assertLess(
-            window.preview_quality_panel.mapTo(window, window.preview_quality_panel.rect().topLeft()).y(),
-            window.preview_button.mapTo(window, window.preview_button.rect().topLeft()).y(),
-        )
-        panel_left = window.preview_quality_panel.mapTo(
-            window,
-            window.preview_quality_panel.rect().topLeft(),
-        ).x()
-        panel_right = window.preview_quality_panel.mapTo(
-            window,
-            window.preview_quality_panel.rect().topRight(),
-        ).x()
-        preview_left = window.preview_button.mapTo(
-            window,
-            window.preview_button.rect().topLeft(),
-        ).x()
-        preview_right = window.preview_button.mapTo(
-            window,
-            window.preview_button.rect().topRight(),
-        ).x()
-        export_left = window.export_button.mapTo(
-            window,
-            window.export_button.rect().topLeft(),
-        ).x()
-        self.assertEqual(panel_left, preview_left)
-        self.assertLessEqual(panel_right, preview_right)
-        self.assertLess(panel_right, export_left)
-        self.assertEqual(
-            window.preview_quality_panel.geometry().bottom() + 1,
-            window.preview_button.geometry().top(),
         )
         self.assertLessEqual(
             window.preview_action_control.width(),
@@ -829,31 +844,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.preview_action_control.width(),
             176,
         )
-        self.assertEqual(window.preview_quality_panel.height(), 48)
-        self.assertEqual(window.preview_iteration_slider.minimum(), 3)
-        self.assertEqual(window.preview_iteration_slider.maximum(), 8)
-        self.assertEqual(window.preview_iteration_slider.singleStep(), 1)
-        self.assertEqual(window.preview_faster_label.text(), "Schneller")
-        self.assertEqual(window.preview_precise_label.text(), "Präziser")
-        self.assertEqual(
-            window.preview_iteration_count_label.text(),
-            "8 Durchläufe",
-        )
-        self.assertFalse(hasattr(window, "preview_quality_label"))
-        quality_margins = window.preview_quality_panel.layout().contentsMargins()
-        self.assertEqual(
-            (
-                quality_margins.left(),
-                quality_margins.top(),
-                quality_margins.right(),
-                quality_margins.bottom(),
-            ),
-            (2, 0, 2, 3),
-        )
-        self.assertIn(
-            "Mehr Durchläufe",
-            window.preview_iteration_slider.toolTip(),
-        )
+        self.assertEqual(window.preview_button.text(), "Kühlturm generieren")
 
         self.assertEqual(
             window.maximum_expansion_angle_spin.property("validationMaximum"),
@@ -883,34 +874,19 @@ class RequestedGuiChangesTests(unittest.TestCase):
         for _ in range(5):
             self.app.processEvents()
 
-        with (
-            patch.object(
-                window,
-                "_slicer_prediction_is_offered",
-                return_value=True,
-            ),
-            patch.object(
-                window,
-                "_slicer_prediction_can_start",
-                return_value=True,
-            ),
-        ):
-            window._refresh_prediction_advice("Slicer-gestützte Schätzung")
-        for _ in range(3):
-            self.app.processEvents()
-        self.assertEqual(
-            window.prediction_advice_label.text(),
-            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
-            "und den ausgewählten Profilen ermittelt.",
+        self.assertFalse(hasattr(window, "prediction_advice_label"))
+        self.assertFalse(hasattr(window, "slicer_prediction_button"))
+        self.assertTrue(
+            window.prediction_frame.isAncestorOf(window.preview_dialog)
         )
+        self.assertFalse(window.preview_dialog.isWindow())
 
         header = window.geometry_calculation_header
-        right_column = window.geometry_right_column
         self.assertEqual(
-            header.mapTo(right_column, header.rect().topLeft()).x(),
+            header.mapTo(window.geometry_split, header.rect().topLeft()).x(),
             0,
         )
-        self.assertEqual(header.width(), right_column.width())
+        self.assertEqual(header.width(), window.geometry_split.width())
         self.assertEqual(
             window.geometry_calculation_title.geometry().bottom() + 1,
             window.geometry_calculation_header_divider.geometry().top(),
@@ -946,7 +922,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         self.assertEqual(
             window.ready_grid.height(),
-            window.geometry_settings_group.geometry().bottom() + 1,
+            max(
+                window.ready_left_column.height(),
+                window.prediction_frame.height(),
+            ),
         )
         self.assertEqual(
             window.settings_content.height()
@@ -982,21 +961,18 @@ class RequestedGuiChangesTests(unittest.TestCase):
             2,
         )
 
-        left_header = window.geometry_group.header
-        right_header = window.stability_group.header
-        divider = window.geometry_vertical_divider
-        self.assertEqual(left_header.mapTo(split, left_header.rect().topLeft()).x(), 0)
-        self.assertEqual(
-            left_header.mapTo(split, left_header.rect().topRight()).x() + 1,
-            divider.x(),
+        subsections = (
+            window.geometry_group,
+            window.stability_group,
+            window.overhang_group,
+            window.geometry_calculation_section,
+        )
+        self.assertTrue(
+            all(subsection.width() == split.width() for subsection in subsections)
         )
         self.assertEqual(
-            divider.geometry().right() + 1,
-            right_header.mapTo(split, right_header.rect().topLeft()).x(),
-        )
-        self.assertEqual(
-            right_header.mapTo(split, right_header.rect().topRight()).x(),
-            split.rect().right(),
+            [subsection.y() for subsection in subsections],
+            sorted(subsection.y() for subsection in subsections),
         )
         window.close()
 
@@ -1030,6 +1006,15 @@ class RequestedGuiChangesTests(unittest.TestCase):
                     setting.unit_label.geometry().right() + 1,
                     setting.editor.width() - 24,
                 )
+
+        distance = window._setting_widgets[
+            "minimum_object_tower_distance_mm"
+        ]
+        self.assertFalse(bool(distance.editor.property("warning")))
+        self.assertFalse(distance.message_label.text())
+        self.assertTrue(distance.message_container.isHidden())
+        self.assertIn("Brim und Support", distance.info_button.toolTip())
+        self.assertLess(len(distance.info_button.toolTip()), 160)
 
         target = window._setting_widgets["target_layer_time_s"]
         target.editor.setFocus()
@@ -1067,7 +1052,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         self.assertTrue(all(action.isHidden() for action in actions))
         window.workflow.complete_preparation()
-        self.assertTrue(all(action.isVisible() for action in actions))
+        self.assertTrue(all(action.isVisible() for action in actions[:-1]))
+        self.assertTrue(window.export_button.isHidden())
         window.close()
 
     def test_stl_guide_is_an_icon_hint_without_a_box(self) -> None:
@@ -1152,7 +1138,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 )
             )
         self.assertTrue(
-            window.geometry_right_column.isAncestorOf(
+            window.geometry_split.isAncestorOf(
                 window.geometry_calculation_section
             )
         )
@@ -1184,7 +1170,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertTrue(grid.is_two_column())
         self.assertEqual(
             grid.grid.getItemPosition(
-                grid.grid.indexOf(window.timing_group)
+                grid.grid.indexOf(window.ready_left_column)
             )[:2],
             (0, 0),
         )
@@ -1208,13 +1194,17 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertEqual(
             grid.grid.getItemPosition(
-                grid.grid.indexOf(window.timing_group)
+                grid.grid.indexOf(window.ready_left_column)
             )[:2],
             (1, 0),
         )
         self.assertLess(
-            window.prediction_frame.y(),
-            window.timing_group.y(),
+            window.prediction_frame.mapTo(
+                window.settings_content, QPoint(0, 0)
+            ).y(),
+            window.timing_group.mapTo(
+                window.settings_content, QPoint(0, 0)
+            ).y(),
         )
         self.assertGreater(
             grid.mapTo(window.settings_content, QPoint(0, 0)).y(),
@@ -1247,7 +1237,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertTrue(grid.is_two_column())
         self.assertEqual(
             grid.grid.getItemPosition(
-                grid.grid.indexOf(window.timing_group)
+                grid.grid.indexOf(window.ready_left_column)
             )[:2],
             (0, 0),
         )

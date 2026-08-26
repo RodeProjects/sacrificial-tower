@@ -77,11 +77,18 @@ class SettingsAndValidationTests(GuiTestCase):
         self.window.apply_settings(expected)
         self.assertEqual(self.window.collect_settings(), expected)
 
-    def test_full_infill_simulation_hint_updates_live(self) -> None:
+    def test_full_infill_simulation_hint_compares_both_modes(self) -> None:
+        before = self.window.full_infill_info_button.toolTip()
         self.window.full_infill_checkbox.setChecked(True)
-        text = self.window.full_infill_hint.text()
-        self.assertIn("100 % Fülldichte", text)
-        self.assertIn("im Slicer", text)
+        text = self.window.full_infill_info_button.toolTip()
+        self.assertEqual(text, before)
+        self.assertIn("100 % Turmfüllung", text)
+        self.assertIn("Aktiviert", text)
+        self.assertIn("Deaktiviert", text)
+        self.assertNotIn("Aktuell aktiviert", text)
+
+    def test_default_base_height_is_one_millimetre(self) -> None:
+        self.assertEqual(self.window.base_height_spin.value(), 1.0)
 
     def test_user_settings_are_persisted_and_restored(self) -> None:
         path = self.root / "user_settings.json"

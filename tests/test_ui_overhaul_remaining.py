@@ -52,7 +52,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.assertTrue(zone.file_path_label.wordWrap())
         self.assertEqual(zone.remove_button.text(), "STL entfernen")
         self.assertEqual(window.source_progress_bar.format(), "%p %")
-        self.assertIn("STL-Dateien bleiben", window.stl_info_button.toolTip())
+        self.assertFalse(hasattr(window, "stl_info_button"))
         window.close()
 
     def test_ready_view_has_the_requested_responsive_card_order(self) -> None:
@@ -75,43 +75,35 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(grid.is_two_column())
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.timing_group))[:2],
+            grid.grid.getItemPosition(grid.grid.indexOf(window.ready_left_column))[:2],
             (0, 0),
         )
         self.assertEqual(
             grid.grid.getItemPosition(grid.grid.indexOf(window.prediction_frame))[:2],
             (0, 1),
         )
+        self.assertTrue(
+            window.ready_left_column.isAncestorOf(window.timing_group)
+        )
+        self.assertTrue(
+            window.ready_left_column.isAncestorOf(window.geometry_settings_group)
+        )
         self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.geometry_settings_group)
+            [
+                window.geometry_group.y(),
+                window.stability_group.y(),
+                window.overhang_group.y(),
+                window.geometry_calculation_section.y(),
+            ],
+            sorted(
+                [
+                    window.geometry_group.y(),
+                    window.stability_group.y(),
+                    window.overhang_group.y(),
+                    window.geometry_calculation_section.y(),
+                ]
             ),
-            (1, 0, 1, 2),
         )
-        self.assertTrue(window.geometry_split.is_two_column())
-        self.assertEqual(
-            window.geometry_split.grid.getItemPosition(
-                window.geometry_split.grid.indexOf(window.geometry_group)
-            )[:2],
-            (0, 0),
-        )
-        self.assertEqual(
-            window.geometry_split.grid.getItemPosition(
-                window.geometry_split.grid.indexOf(
-                    window.geometry_right_column
-                )
-            )[:2],
-            (0, 2),
-        )
-        self.assertEqual(
-            window.geometry_split.grid.getItemPosition(
-                window.geometry_split.grid.indexOf(
-                    window.geometry_vertical_divider
-                )
-            )[:2],
-            (0, 1),
-        )
-        self.assertTrue(window.geometry_vertical_divider.isVisible())
         window.resize(800, 900)
         QTest.qWait(30)
         self.app.processEvents()
@@ -121,17 +113,9 @@ class RemainingUiOverhaulTests(unittest.TestCase):
             (0, 0),
         )
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.timing_group))[:2],
+            grid.grid.getItemPosition(grid.grid.indexOf(window.ready_left_column))[:2],
             (1, 0),
         )
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.geometry_settings_group)
-            )[:2],
-            (2, 0),
-        )
-        self.assertFalse(window.geometry_split.is_two_column())
-        self.assertTrue(window.geometry_vertical_divider.isHidden())
         window.close()
 
     def test_card_headers_expose_compact_key_values(self) -> None:
@@ -230,7 +214,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.assertAlmostEqual(dialog.canvas.zoom, dialog.canvas.SIDE_VIEW_ZOOM)
         window.close()
 
-    def test_footer_labels_stay_compact_and_export_result_avoids_path_dump(self) -> None:
+    def test_footer_labels_stay_compact_and_success_clears_export_result(self) -> None:
         window = self.window()
         window.resize(760, 760)
         window._update_responsive_action_labels()
@@ -239,10 +223,12 @@ class RemainingUiOverhaulTests(unittest.TestCase):
             "Standardwerte wiederherstellen",
         )
         self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
-        self.assertEqual(window.export_button.text(), "Exportieren")
+        self.assertEqual(window.export_button.text(), "Kühlturm exportieren")
+        window.current_preview = SimpleNamespace()
         window.preview_state = PreviewState.CURRENT
         window._update_responsive_action_labels()
-        self.assertEqual(window.preview_button.text(), "Aktualisieren")
+        self.assertEqual(window.preview_button.text(), "Kühlturm aktualisieren")
+        window.current_preview = None
 
         output = self.root / "lauf" / "turm.stl"
         window._export_request_id = 7
@@ -255,10 +241,8 @@ class RemainingUiOverhaulTests(unittest.TestCase):
             technical_report_path=self.root / "lauf" / "export_report.json",
         )
         window._on_export_succeeded(7, result)
-        visible = window.result_label.text()
-        self.assertIn("Datei: turm.stl", visible)
-        self.assertNotIn(str(self.root), visible)
-        self.assertNotIn("export_report.json", visible)
+        self.assertFalse(window.result_label.text())
+        self.assertFalse(window.result_label.toolTip())
         window.close()
 
 

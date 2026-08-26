@@ -88,8 +88,8 @@ class PreviewBuildController(QObject):
         normalized = status.casefold()
         if (
             "slicer-auftrag" in normalized
-            or "präzisionsslice" in normalized
-            or "kühlturm-abgleich" in normalized
+            or "gemeinsamer slice" in normalized
+            or "kühlturm-slice" in normalized
         ):
             target = PreviewBuildState.SLICER_RUNNING
         elif "slicer-ergebnis" in normalized:

@@ -82,12 +82,13 @@ class PlacementAndProjectTests(unittest.TestCase):
         store = UserSettingsStore(user, defaults)
         settings, payload = store.load()
 
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 9)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 10)
         self.assertEqual(settings.minimum_object_tower_distance_mm, 25.0)
         self.assertEqual(
             payload["generation"]["minimum_object_tower_distance_mm"],
             25.0,
         )
+        self.assertEqual(payload["preview_iterations"], 4)
         self.assertEqual(
             payload["setting_compatibility"]
             ["generation.minimum_object_tower_distance_mm"],

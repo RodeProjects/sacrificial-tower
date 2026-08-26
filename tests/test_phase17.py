@@ -443,6 +443,18 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(result.scene.object_segments)
         self.assertTrue(result.scene.tower_segments)
         self.assertGreater(result.scene.tower_height_mm, 0)
+        self.assertEqual(
+            result.scene.object_height_mm,
+            self.snapshot.maximum_print_z_mm,
+        )
+        self.assertEqual(
+            result.scene.object_layer_count,
+            self.snapshot.layer_count,
+        )
+        self.assertEqual(
+            result.scene.tower_layer_count,
+            len(result.calibration.profile.layers),
+        )
         result.dispose()
 
     def test_13_large_toolpath_is_strictly_bounded(self) -> None:
@@ -480,7 +492,9 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("nicht mehr aktuell", window.preview_hint_label.text())
         window.profile_feasibility = ProfileFeasibilityAssessment(True, True)
         window.validate_form()
-        self.assertTrue(window.export_button.isEnabled())
+        self.assertFalse(window.export_button.isEnabled())
+        self.assertTrue(window.preview_button.isEnabled())
+        self.assertEqual(window.preview_button.text(), "Kühlturm aktualisieren")
         window.current_preview = None
         window.close()
 
@@ -696,43 +710,36 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(exported.output_path.name.endswith("_mit_kuehlturm.gcode"))
         preview.dispose()
 
-    def test_25_export_without_preview_generates_current_result(self) -> None:
+    def test_25_export_requires_a_current_generation(self) -> None:
         window = self.ready_window()
         output = self.root / "direct_output"
         window.output_root_edit.setText(str(output))
         window.validate_form()
         self.assertIsNone(window.current_preview)
-        self.assertTrue(window.export_button.isEnabled())
+        self.assertFalse(window.export_button.isEnabled())
+        self.assertTrue(window.preview_button.isEnabled())
+        self.assertEqual(window.preview_button.text(), "Kühlturm generieren")
         window.start_export()
-        deadline = time.monotonic() + 10.0
-        while (
-            window.background_job_manager.has_active(JobKind.EXPORT)
-            and time.monotonic() < deadline
-        ):
-            self.app.processEvents()
-            time.sleep(0.01)
         self.assertFalse(
             window.background_job_manager.has_active(JobKind.EXPORT)
         )
-        self.assertIsNotNone(window.last_export_result)
-        self.assertTrue(window.last_export_result.output_path.is_file())
-        report = json.loads(
-            window.last_export_result.report_path.read_text(encoding="utf-8")
-        )
-        self.assertEqual(
-            report["calibration"]["configured_iteration_count"],
-            3,
-        )
+        self.assertIsNone(window.last_export_result)
         self.assertIsNone(window.current_preview)
-        self.assertTrue(window.open_run_button.isEnabled())
         self.assertTrue(window.open_run_button.isHidden())
         self.assertFalse(hasattr(window, "open_technical_report_button"))
         window.close()
 
-    def test_25a_selected_preview_pass_count_is_reused_for_export(self) -> None:
+    def test_25a_generation_is_exported_without_a_second_calibration(self) -> None:
         window = self.ready_window()
-        window.preview_iteration_slider.setValue(3)
+        window.warning_text.setPlainText("• Hinweis des vorherigen Kühlturms")
+        window.result_label.setText("Veraltetes technisches Ergebnis")
+        window.result_label.setToolTip("C:/old/result.stl")
+        window._refresh_issue_panels()
         window.start_preview()
+        self.assertFalse(window.warning_text.toPlainText())
+        self.assertTrue(window.notice_panel.isHidden())
+        self.assertFalse(window.result_label.text())
+        self.assertFalse(window.result_label.toolTip())
         deadline = time.monotonic() + 10.0
         while (
             window.background_job_manager.has_active(JobKind.PREVIEW)
@@ -741,13 +748,17 @@ class Phase17Tests(unittest.TestCase):
             self.app.processEvents()
             time.sleep(0.01)
         self.assertIsNotNone(window.current_preview)
-        self.assertEqual(window._calibration_config().maximum_iterations, 3)
+        self.assertFalse(window.warning_text.toPlainText())
+        self.assertTrue(window.notice_panel.isHidden())
+        self.assertFalse(window.result_label.text())
+        self.assertFalse(window.result_label.toolTip())
+        self.assertEqual(window._calibration_config().maximum_iterations, 12)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 2)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 6)
 
         window.output_root_edit.setText(str(self.root / "exact_output"))
         window.validate_form()
-        with patch.object(window, "_ask_stale_preview_action") as question:
-            window.start_export()
-        question.assert_not_called()
+        window.start_export()
         deadline = time.monotonic() + 10.0
         while (
             window.background_job_manager.has_active(JobKind.EXPORT)
@@ -762,41 +773,28 @@ class Phase17Tests(unittest.TestCase):
         )
         self.assertEqual(
             report["calibration"]["configured_iteration_count"],
-            3,
+            12,
         )
+        self.assertFalse(window.warning_text.toPlainText())
+        self.assertTrue(window.notice_panel.isHidden())
+        self.assertFalse(window.result_label.text())
+        self.assertFalse(window.result_label.toolTip())
         window.close()
 
-    def test_26_stale_preview_requires_confirmation_but_does_not_block(self) -> None:
+    def test_26_stale_preview_blocks_export_and_offers_update(self) -> None:
         window = self.ready_window()
         window.output_root_edit.setText(str(self.root / "confirmed_output"))
         window.current_preview = SimpleNamespace(request_signature="outdated")
         window.preview_state = PreviewState.STALE
         window.validate_form()
-        with patch.object(
-            window,
-            "_ask_stale_preview_action",
-            return_value="no",
-        ) as question:
-            window.start_export()
-        question.assert_called_once()
+        self.assertFalse(window.export_button.isEnabled())
+        self.assertTrue(window.preview_button.isEnabled())
+        self.assertEqual(window.preview_button.text(), "Kühlturm aktualisieren")
+        window.start_export()
         self.assertFalse(
             window.background_job_manager.has_active(JobKind.EXPORT)
         )
-
-        with patch.object(
-            window,
-            "_ask_stale_preview_action",
-            return_value="yes",
-        ):
-            window.start_export()
-        deadline = time.monotonic() + 10.0
-        while (
-            window.background_job_manager.has_active(JobKind.EXPORT)
-            and time.monotonic() < deadline
-        ):
-            self.app.processEvents()
-            time.sleep(0.01)
-        self.assertIsNotNone(window.last_export_result)
+        self.assertIsNone(window.last_export_result)
         window.current_preview = None
         window.close()
 
@@ -874,35 +872,23 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("keinen erkennbaren Profiltyp", summary)
         preview.dispose()
 
-    def test_29_preview_iterations_use_a_three_to_eight_slider(self) -> None:
+    def test_29_generation_has_one_fixed_quality_budget(self) -> None:
         window = self.window()
         self.assertEqual(
             Path(window.output_root_edit.text()),
             (PROJECT_ROOT / "output").resolve(),
         )
         self.assertNotIn("slicer_iterations", window._setting_widgets)
-        self.assertEqual(window.preview_iteration_slider.minimum(), 3)
-        self.assertEqual(window.preview_iteration_slider.maximum(), 8)
-        self.assertEqual(window.preview_iteration_slider.singleStep(), 1)
-        self.assertEqual(window.preview_iterations, 3)
-        self.assertEqual(window._calibration_config().maximum_iterations, 3)
-        window.preview_iteration_slider.setValue(1)
-        self.assertEqual(window._calibration_config().maximum_iterations, 3)
-        window._slicer_prediction_estimate_s = 14.75
-        window._slicer_prediction_status = "Alte Schätzung"
-        window.preview_iteration_slider.setValue(8)
-        self.assertIsNone(window._slicer_prediction_estimate_s)
-        self.assertEqual(window._slicer_prediction_status, "")
-        self.assertEqual(window._calibration_config().maximum_iterations, 8)
+        self.assertFalse(hasattr(window, "preview_iteration_slider"))
+        self.assertFalse(hasattr(window, "preview_fast_button"))
+        self.assertFalse(hasattr(window, "preview_precise_button"))
+        self.assertFalse(hasattr(window, "preview_quality_panel"))
+        self.assertEqual(window.preview_iterations, 12)
+        self.assertEqual(window._calibration_config().maximum_iterations, 12)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 2)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 6)
         self.assertFalse(
             window._calibration_config().perform_joint_final_slice
-        )
-        self.assertEqual(
-            window._export_calibration_config().maximum_iterations,
-            8,
-        )
-        self.assertFalse(
-            window._export_calibration_config().perform_joint_final_slice
         )
         window.source_artifact = SimpleNamespace(
             source_kind=SimpleNamespace(value="stl")
@@ -910,36 +896,28 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(
             window._calibration_config().perform_joint_final_slice
         )
-        self.assertTrue(
-            window._export_calibration_config().perform_joint_final_slice
-        )
-        self.assertEqual(
-            window.preview_iteration_count_label.text(),
-            "8 Durchläufe",
-        )
-        self.assertEqual(window.preview_faster_label.text(), "Schneller")
-        self.assertEqual(window.preview_precise_label.text(), "Präziser")
-        self.assertIn("mehr Zeit", window.preview_iteration_slider.toolTip())
         window.close()
 
     def test_joint_export_signature_accepts_matching_fast_preview_seed(self) -> None:
         fast = self.request(
             calibration_config=CalibrationConfig(
-                maximum_iterations=8,
-                perform_joint_final_slice=False,
+                maximum_iterations=4,
+                perform_joint_final_slice=True,
+                maximum_joint_slices=1,
             )
         )
         exact = self.request(
             calibration_config=CalibrationConfig(
                 maximum_iterations=8,
                 perform_joint_final_slice=True,
+                maximum_joint_slices=5,
             )
         )
 
         self.assertNotEqual(fast.signature(), exact.signature())
         self.assertEqual(
-            fast.signature(),
-            exact.signature_for_joint_slice(False),
+            fast.refinement_seed_signature(),
+            exact.refinement_seed_signature(),
         )
 
     def test_exact_preview_build_reuses_matching_fast_preview_artifact(self) -> None:
@@ -997,8 +975,9 @@ class Phase17Tests(unittest.TestCase):
         service = PreviewService(calibrator)
         fast_request = self.request(
             calibration_config=CalibrationConfig(
-                maximum_iterations=8,
-                perform_joint_final_slice=False,
+                maximum_iterations=4,
+                perform_joint_final_slice=True,
+                maximum_joint_slices=1,
             ),
             adapter=object(),
             effective_profile=profile,
@@ -1009,6 +988,7 @@ class Phase17Tests(unittest.TestCase):
             calibration_config=CalibrationConfig(
                 maximum_iterations=8,
                 perform_joint_final_slice=True,
+                maximum_joint_slices=5,
             ),
             adapter=object(),
             effective_profile=profile,
@@ -1157,9 +1137,9 @@ class Phase17Tests(unittest.TestCase):
             window.open_stl_button,
             window.reset_button,
             window.preview_button,
-            window.export_button,
         ):
             self.assertTrue(button.isVisible())
+        self.assertTrue(window.export_button.isHidden())
         self.assertTrue(window.open_run_button.isHidden())
         self.assertFalse(hasattr(window, "open_technical_report_button"))
         self.assertEqual(
@@ -1173,7 +1153,6 @@ class Phase17Tests(unittest.TestCase):
                 window.open_output_button,
                 window.open_stl_button,
                 window.preview_action_control,
-                window.export_button,
             )
         }
         self.assertLess(
@@ -1184,35 +1163,21 @@ class Phase17Tests(unittest.TestCase):
             action_x[window.open_stl_button],
             action_x[window.preview_action_control],
         )
-        self.assertLess(
-            action_x[window.preview_action_control],
-            action_x[window.export_button],
-        )
         self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
         self.assertEqual(
             window.reset_button.height(),
-            window.stl_info_button.height(),
+            window.options_button.height(),
         )
+        self.assertFalse(hasattr(window, "stl_info_button"))
         button_bottoms = {
             button.mapTo(window, button.rect().bottomLeft()).y()
             for button in (
                 window.open_output_button,
                 window.open_stl_button,
                 window.preview_action_control,
-                window.export_button,
             )
         }
         self.assertEqual(len(button_bottoms), 1)
-        self.assertLessEqual(
-            window.preview_quality_panel.mapTo(
-                window,
-                window.preview_quality_panel.rect().topRight(),
-            ).x(),
-            window.preview_button.mapTo(
-                window,
-                window.preview_button.rect().topRight(),
-            ).x(),
-        )
         window.close()
 
     def test_34_output_folder_button_uses_compact_label_when_needed(self) -> None:
@@ -1336,7 +1301,8 @@ class Phase17Tests(unittest.TestCase):
         ready.workflow.complete_preparation()
         ready.show()
         self.app.processEvents()
-        self.assertTrue(ready.export_button.isEnabled())
+        self.assertFalse(ready.export_button.isEnabled())
+        self.assertTrue(ready.preview_button.isEnabled())
         self.assertFalse(ready.action_availability_widget.isVisible())
         ready.maximum_outer_spin.setValue(1.0)
         ready.validate_form()
@@ -1377,7 +1343,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(window.validation_label.text().strip())
         self.assertTrue(window.error_panel.isHidden())
         self.assertFalse(window.action_availability_widget.isVisible())
-        self.assertTrue(window.export_button.isEnabled())
+        self.assertFalse(window.export_button.isEnabled())
         self.assertFalse(window.preview_button.isEnabled())
 
         window.validation_bypass_checkbox.setChecked(False)
@@ -1477,8 +1443,8 @@ class Phase17Tests(unittest.TestCase):
 
         dialog.set_preview(first)
         summary = dialog.quality_label.text()
-        self.assertIn("Ergebnis noch nicht bestätigt", summary)
-        self.assertIn("Ausgeführt: 5 von 5 eingestellten Durchläufen", summary)
+        self.assertIn("Prognose noch nicht bestätigt", summary)
+        self.assertIn("Prüfdurchläufe: 5 von maximal 5", summary)
         self.assertNotIn("Messwerte des letzten Durchlaufs", summary)
         self.assertNotIn("Ergebnisse blieben instabil", summary)
         self.assertNotIn("Grund", summary)
@@ -1489,7 +1455,7 @@ class Phase17Tests(unittest.TestCase):
         details = dialog.quality_details_label.text()
         self.assertIn("0.420 s > 0.200 s", details)
         self.assertIn("0.310 s > 0.250 s", details)
-        self.assertIn("0.060 mm ≤ 0.100 mm", details)
+        self.assertNotIn("0.060 mm", details)
         self.assertIn("0.900 s > 0.750 s", details)
         self.assertIn("Ergebnisse blieben instabil", details)
         dialog.quality_details_toggle.click()
@@ -1503,10 +1469,10 @@ class Phase17Tests(unittest.TestCase):
         )
         dialog.set_preview(tolerated)
         tolerated_summary = dialog.quality_label.text()
-        self.assertIn("Ziel-Layerzeit innerhalb der Toleranz", tolerated_summary)
-        self.assertIn("Abweichung: -0.180 s", tolerated_summary)
+        self.assertIn("Mindest-Layerzeit erreicht", tolerated_summary)
+        self.assertIn("-0.180 s", tolerated_summary)
         self.assertNotIn("Ergebnisse blieben instabil", tolerated_summary)
-        self.assertEqual(dialog.quality_label.property("state"), "success")
+        self.assertEqual(dialog.quality_label.property("state"), "warning")
         self.assertIn(
             "Ergebnisse blieben instabil",
             dialog.quality_details_label.text(),
@@ -1539,23 +1505,20 @@ class Phase17Tests(unittest.TestCase):
 
         dialog.set_preview(second)
         refreshed = dialog.quality_label.text()
-        self.assertIn("Ziel-Layerzeit innerhalb der Toleranz", refreshed)
-        self.assertIn("Ausgeführt: 2 von 2 eingestellten Durchläufen", refreshed)
+        self.assertIn("Prognose bestätigt", refreshed)
+        self.assertIn("Prüfdurchläufe: 2 von maximal 2", refreshed)
         self.assertNotIn("0.040 s ≤ 0.150 s", refreshed)
         self.assertNotIn("0.310 s", refreshed)
         self.assertNotIn("Ergebnisse blieben instabil", refreshed)
         self.assertEqual(dialog.quality_label.property("state"), "success")
-        self.assertIn(
-            "0.040 s ≤ 0.250 s",
-            dialog.quality_details_label.text(),
-        )
+        self.assertEqual(dialog.quality_details_label.text(), "")
         self.assertNotIn("0.310 s", dialog.quality_details_label.text())
         self.assertFalse(dialog.quality_details_toggle.isChecked())
         self.assertTrue(dialog.quality_details_label.isHidden())
 
         dialog.set_building("Neue Vorschau wird erstellt")
-        self.assertIn("wird für die neue Vorschau aktualisiert", dialog.quality_label.text())
-        self.assertNotIn("Ergebnis nach 2 Durchläufen bestätigt", dialog.quality_label.text())
+        self.assertIn("mit der neuen Vorschau aktualisiert", dialog.quality_label.text())
+        self.assertNotIn("Prognose bestätigt", dialog.quality_label.text())
         self.assertTrue(dialog.quality_details_toggle.isHidden())
         dialog.close()
 

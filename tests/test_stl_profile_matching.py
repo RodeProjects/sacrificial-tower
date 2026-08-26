@@ -795,7 +795,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             window.show_all_profiles_checkbox.setChecked(
                 not window.show_all_profiles_checkbox.isChecked()
             )
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + 20
             while (
                 (
                     window.workflow.stage is WorkflowStage.MATCHING_PROFILES

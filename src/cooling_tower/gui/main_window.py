@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 from collections.abc import Callable
@@ -51,7 +52,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -187,21 +187,17 @@ from cooling_tower.tower.base_calculator import (
 )
 
 
-LEGACY_PREVIEW_QUALITY_ITERATIONS = {
-    "fast": 3,
-    "balanced": 3,
-    "exact": 5,
-}
-
-
 _LOCKED_SLICER_STEP_TOOLTIP = (
     "Zuerst Schritt 1 mit einer gültigen STL abschließen."
 )
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-MINIMUM_PREVIEW_ITERATIONS = 3
-MAXIMUM_PREVIEW_ITERATIONS = 8
-DEFAULT_PREVIEW_ITERATIONS = 3
+GENERATION_NORMAL_SLICES = 6
+GENERATION_MINIMUM_JOINT_SLICES = 2
+GENERATION_MAXIMUM_JOINT_SLICES = 6
+GENERATION_MAXIMUM_ITERATIONS = (
+    GENERATION_NORMAL_SLICES + GENERATION_MAXIMUM_JOINT_SLICES
+)
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 120.0
@@ -212,6 +208,7 @@ ABOUT_DIALOG_PREFERRED_WIDTH_PX = 720
 ABOUT_DIALOG_MAXIMUM_NATURAL_HEIGHT_PX = 720
 OPTIONAL_DIALOG_PARENT_MARGIN_PX = 80
 OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
+EXPORT_SUCCESS_DIALOG_PREFERRED_WIDTH_PX = 540
 SUPPORT_DIALOG_PREFERRED_WIDTH_PX = 700
 SUPPORT_DIALOG_PREFERRED_HEIGHT_PX = 670
 INTERNAL_DIALOG_REVEAL_DELAY_MS = 40
@@ -276,6 +273,42 @@ SETTING_UNITS = {
     "local_reference_window": "Layer",
 }
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
+
+FULL_INFILL_HINT_HTML = """
+<p align="center" style="margin-bottom: 8px;"><b>100 % Turmfüllung im Vergleich</b></p>
+<table width="100%" cellspacing="0" cellpadding="5" border="0">
+  <tr>
+    <th style="border-bottom: 1px solid #91a7bb;" align="left">Modus</th>
+    <th style="border-bottom: 1px solid #91a7bb;" align="left">Vorteile</th>
+    <th style="border-bottom: 1px solid #91a7bb;" align="left">Nachteile</th>
+  </tr>
+  <tr>
+    <td valign="top"><b>Aktiviert</b></td>
+    <td valign="top">&#8226; meist schmalerer Turm<br>&#8226; bei Bettschubsern tendenziell sicherer, weil der Turm durch Bettbewegungen weniger stark zum Schwingen angeregt wird<br>&#8226; nur der Turm erhält objektspezifisch 100 % Füllung; das Druckobjekt bleibt unverändert</td>
+    <td valign="top">&#8226; meist etwas höherer Materialverbrauch</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Deaktiviert</b></td>
+    <td valign="top">&#8226; verwendet Fülldichte und Füllmuster des Prozessprofils<br>&#8226; meist geringerer Materialverbrauch</td>
+    <td valign="top">&#8226; meist breiterer Turm<br>&#8226; bei Bettschubsern anfälliger für Schwingungen</td>
+  </tr>
+</table>
+<p><b>Welchen Druckertyp habe ich?</b><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell während des Drucks horizontal vor und zurück – je nach Bauart entlang der X-, meist jedoch der Y-Achse.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die schnellen X/Y-Bewegungen; das Druckbett wird nicht horizontal hin- und hergeschoben. Hier ist 100 % Turmfüllung meist optional.</p>
+""".strip()
+
+FULL_INFILL_HINT_ACCESSIBLE = (
+    "100 Prozent Turmfüllung im Vergleich. Aktiviert: meist schmalerer Turm "
+    "und bei Bettschubsern tendenziell sicherer, aber meist etwas mehr "
+    "Material. Deaktiviert: Füllung aus dem Prozessprofil und meist weniger "
+    "Material, aber ein meist breiterer und bei Bettschubsern stärker "
+    "schwingungsanfälliger Turm. Ein Bettschubser bewegt das Druckbett mit "
+    "dem Modell horizontal vor und zurück, je nach Bauart entlang der X-, "
+    "meist jedoch der Y-Achse. Bei CoreXY übernimmt der Druckkopf "
+    "die schnellen X- und Y-Bewegungen; das Bett wird nicht horizontal "
+    "hin- und hergeschoben."
+)
 
 
 def open_path(path: str | Path) -> None:
@@ -375,31 +408,6 @@ def _concise_operation_failure_reason(message: object) -> str:
     if len(first_sentence) <= 150:
         return first_sentence
     return "Die Verarbeitung konnte nicht abgeschlossen werden."
-
-
-def _supports_bambu_multinozzle_emergency_fallback(request: object) -> bool:
-    """Whether a failed Bambu joint slice may use the STL emergency path."""
-
-    adapter = getattr(request, "adapter", None)
-    if getattr(adapter, "adapter_id", "") != "bambu_studio":
-        return False
-    profile = getattr(request, "effective_profile", None)
-    values = getattr(profile, "effective_values", {})
-    try:
-        raw_nozzles = values.get("nozzle_diameter")
-    except AttributeError:
-        return False
-    if isinstance(raw_nozzles, (list, tuple)):
-        nozzles = tuple(raw_nozzles)
-    elif isinstance(raw_nozzles, str):
-        nozzles = tuple(
-            item.strip()
-            for item in re.split(r"[,;]", raw_nozzles)
-            if item.strip()
-        )
-    else:
-        nozzles = (raw_nozzles,) if raw_nozzles is not None else ()
-    return len(nozzles) > 1
 
 
 def _format_grouped_footer_notice(
@@ -1172,6 +1180,7 @@ class MainWindow(QMainWindow):
         self._update_download_request_id = 0
         self._slicer_request_id = 0
         self._pending_slicer_discovery: tuple[bool, Path | None] | None = None
+        self._slicer_step_auto_discovery_attempted = False
         self.slicer_discovery_result: SlicerDiscoveryResult | None = None
         self._slicer_header_installation: SlicerInstallation | None = None
         self._automatically_selected_slicer_key: str | None = None
@@ -1208,6 +1217,7 @@ class MainWindow(QMainWindow):
         self.prepared_analysis_source: PreparedAnalysisSource | None = None
         self._feasibility_request_id = 0
         self._preview_request_id = 0
+        self._preview_cancel_requested = False
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
@@ -1244,6 +1254,7 @@ class MainWindow(QMainWindow):
         self._pending_preview_camera_state: object = None
         self._additional_options_dialog: QDialog | None = None
         self._about_dialog: QDialog | None = None
+        self._export_success_dialog: QDialog | None = None
         self._support_report_dialog: SupportReportDialog | None = None
 
         self.settings_store = UserSettingsStore(
@@ -1433,16 +1444,10 @@ class MainWindow(QMainWindow):
         self.validation_bypass_checkbox.toggled.connect(
             self._on_validation_bypass_toggled
         )
-        self.stl_info_button = InfoToolButton(
-            "STL-Dateien bleiben allgemein anpassbar. Die endgültige "
-            "Layerzeit sollte nach dem gemeinsamen Slicen von Objekt und "
-            "Kühlturm kontrolliert werden."
-        )
         title_row.addWidget(title)
         title_row.addStretch(1)
         title_row.addWidget(self.validation_bypass_checkbox)
         title_row.addWidget(self.reset_button)
-        title_row.addWidget(self.stl_info_button)
         self.options_button = QToolButton()
         self.options_button.setObjectName("optionsButton")
         self.options_button.setText("")
@@ -1910,7 +1915,9 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Fixed,
         )
         self.slicer_combo.setEnabled(False)
-        self.slicer_refresh_button = QPushButton("Erneut erkennen")
+        self.slicer_refresh_button = QPushButton(
+            "Slicer und Profile erneut erkennen"
+        )
         self.slicer_refresh_button.setObjectName("slicerRefreshButton")
         self.slicer_manual_button = QPushButton(
             "Anderen Slicer auswählen …"
@@ -2854,33 +2861,35 @@ class MainWindow(QMainWindow):
             "minimum_object_tower_distance_mm",
             "Mindestabstand zu Objekt",
             self.minimum_object_tower_distance_spin,
-            helper_text=(
-                "Kleinster Abstand zwischen den belegten Außenkanten von "
-                "Druckobjekt und Kühlturm; Brim und Support werden über den "
-                "intern erzeugten und analysierten Slicer-Werkzeugweg berücksichtigt."
-            ),
         )
         self.full_infill_checkbox = QCheckBox(
             "100 % Turmfüllung simulieren"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
-        self.full_infill_checkbox.setToolTip(
-            "Weist im gemeinsamen temporären 3MF ausschließlich dem Kühlturm "
-            "objektspezifisch 100 % Fülldichte zu."
+        full_infill_row = QWidget()
+        full_infill_layout = QHBoxLayout(full_infill_row)
+        full_infill_layout.setContentsMargins(0, 2, 0, 2)
+        full_infill_layout.setSpacing(6)
+        self.full_infill_info_button = InfoToolButton(
+            FULL_INFILL_HINT_HTML,
+            full_infill_row,
+            accessible_name="Informationen zur 100-%-Turmfüllung",
+            accessible_hint=FULL_INFILL_HINT_ACCESSIBLE,
+            object_name="settingInfoButton",
+            diameter_px=24,
         )
-        geometry_layout.addWidget(self.full_infill_checkbox)
-        geometry_hint = QLabel(
-            "Der Turm ist ein geschlossener Vollkörper. Seine tatsächliche "
-            "Füllung folgt dem ausgewählten Prozessprofil und wird in den "
-            "Testslices einschließlich Wänden und Infill mitgemessen."
+        full_infill_layout.addWidget(
+            self.full_infill_checkbox,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
         )
-        geometry_hint.setWordWrap(True)
-        geometry_hint.setObjectName("helpText")
-        geometry_layout.addWidget(geometry_hint)
-        self.full_infill_hint = QLabel()
-        self.full_infill_hint.setWordWrap(True)
-        self.full_infill_hint.setObjectName("calculatedHint")
-        geometry_layout.addWidget(self.full_infill_hint)
+        full_infill_layout.addWidget(
+            self.full_infill_info_button,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        full_infill_layout.addStretch(1)
+        geometry_layout.addWidget(full_infill_row)
         geometry_group.refresh_collapsed_state()
         self.content_layout.addWidget(geometry_group)
 
@@ -3225,62 +3234,6 @@ class MainWindow(QMainWindow):
             prediction_grid.addWidget(caption_widget, row, 0)
             prediction_grid.addWidget(value_label, row, 1)
 
-        self.prediction_advice_frame = QFrame()
-        self.prediction_advice_frame.setObjectName("predictionAdviceFrame")
-        self.prediction_advice_frame.setMinimumWidth(190)
-        self.prediction_advice_frame.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,
-        )
-        advice_layout = QVBoxLayout(self.prediction_advice_frame)
-        advice_layout.setContentsMargins(0, 0, 0, 0)
-        advice_layout.setSpacing(0)
-        self.prediction_advice_content = QWidget(
-            self.prediction_advice_frame
-        )
-        self.prediction_advice_content.setObjectName(
-            "predictionAdviceContent"
-        )
-        advice_content_layout = QVBoxLayout(
-            self.prediction_advice_content
-        )
-        advice_content_layout.setContentsMargins(8, 8, 8, 8)
-        advice_content_layout.setSpacing(5)
-        self.prediction_advice_label = QLabel()
-        self.prediction_advice_label.setObjectName("predictionAdviceText")
-        self.prediction_advice_label.setWordWrap(True)
-        self.prediction_advice_label.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
-        self.prediction_advice_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.slicer_prediction_button = QPushButton(
-            "Slicer-Schätzung\ndurchführen"
-        )
-        self.slicer_prediction_button.setObjectName("slicerPredictionButton")
-        self.slicer_prediction_button.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.slicer_prediction_button.setVisible(False)
-        self.slicer_prediction_button.clicked.connect(
-            self.start_slicer_prediction
-        )
-        self.slicer_prediction_status_label = QLabel()
-        self.slicer_prediction_status_label.setObjectName(
-            "slicerPredictionStatus"
-        )
-        self.slicer_prediction_status_label.setWordWrap(True)
-        self.slicer_prediction_status_label.hide()
-        advice_content_layout.addWidget(self.prediction_advice_label)
-        advice_content_layout.addWidget(
-            self.slicer_prediction_status_label
-        )
-        advice_layout.addWidget(self.prediction_advice_content)
-        advice_layout.addWidget(self.slicer_prediction_button)
-
         prediction_grid.setColumnStretch(0, 3)
         prediction_grid.setColumnStretch(1, 2)
         self.prediction_grid = prediction_grid
@@ -3301,40 +3254,33 @@ class MainWindow(QMainWindow):
         prediction_primary_layout.addWidget(self.prediction_label)
         prediction_primary_layout.addLayout(prediction_grid)
 
-        self.prediction_content_grid = QGridLayout()
-        self.prediction_content_grid.setContentsMargins(0, 0, 0, 0)
-        self.prediction_content_grid.setHorizontalSpacing(10)
-        self.prediction_content_grid.setVerticalSpacing(0)
-        self.prediction_content_grid.addWidget(
-            self.prediction_primary_widget,
-            0,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        self.prediction_content_grid.addWidget(
-            self.prediction_advice_frame,
-            0,
-            1,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        self.prediction_content_grid.setColumnStretch(0, 5)
-        self.prediction_content_grid.setColumnStretch(1, 4)
-        prediction_layout.addLayout(self.prediction_content_grid)
-        self.layer_time_check_hint = QLabel(
-            "Bitte überprüfen Sie die endgültige Layerzeit nach dem gemeinsamen "
-            "Slicen von Objekt und Kühlturm."
-        )
-        self.layer_time_check_hint.setObjectName("predictionFootnote")
-        self.layer_time_check_hint.setWordWrap(True)
+        prediction_layout.addWidget(self.prediction_primary_widget)
         prediction_layout.addWidget(self.tower_need_label)
-        prediction_layout.addWidget(self.layer_time_check_hint)
-        self.preview_hint_label = QLabel(
-            "Beim Export wird der Kühlturm immer mit den aktuellen "
-            "Einstellungen erzeugt."
-        )
+        self.prediction_preview_divider = QFrame()
+        self.prediction_preview_divider.setObjectName("predictionPreviewDivider")
+        self.prediction_preview_divider.setFrameShape(QFrame.Shape.HLine)
+        self.prediction_preview_divider.setFixedHeight(1)
+        prediction_layout.addWidget(self.prediction_preview_divider)
+        self.preview_hint_label = QLabel()
         self.preview_hint_label.setObjectName("previewHintLabel")
         self.preview_hint_label.setWordWrap(True)
-        options_layout.addWidget(self.preview_hint_label)
+        self.preview_hint_label.hide()
+        prediction_layout.addWidget(self.preview_hint_label)
+        self._preview_dialog = PreviewDialog(
+            self.prediction_frame.content_widget,
+            embedded=True,
+        )
+        self._preview_dialog.layout_changed.connect(
+            self._refresh_ready_grid_layout
+        )
+        self._preview_dialog.canvas.apply_camera_state(
+            self._pending_preview_camera_state
+        )
+        prediction_primary_layout.addWidget(
+            self._preview_dialog.quality_widget
+        )
+        prediction_layout.addWidget(self._preview_dialog)
+        self._preview_dialog.show()
         options_actions = QHBoxLayout()
         options_actions.addStretch(1)
         self.additional_options_close_button = QPushButton("Schließen")
@@ -3343,9 +3289,8 @@ class MainWindow(QMainWindow):
         )
         options_actions.addWidget(self.additional_options_close_button)
         options_layout.addLayout(options_actions)
-        # Abmessungen remain in the left geometry column. Standfuß,
-        # Überhänge and the calculation controls form independent subsections
-        # in the right column.
+        # All geometry subsections remain grouped, but now follow one another
+        # in one column so the outer card can share the timing-card width.
         self.geometry_settings_group = SectionCard(
             "Turmgeometrie",
             collapsible=True,
@@ -3354,47 +3299,22 @@ class MainWindow(QMainWindow):
         )
         self.geometry_settings_group.setProperty("role", "geometrySettings")
         self.geometry_settings_group.setProperty("outerDropdown", True)
-        self.geometry_settings_group.setProperty("bodyHover", True)
+        self.geometry_settings_group.setProperty("bodyHover", False)
         self.geometry_settings_group.content_layout.setContentsMargins(
             0, 0, 0, 0
         )
         geometry_group.setCheckable(False)
         stability_group.setCheckable(False)
         overhang_group.setCheckable(False)
-        geometry_group.setProperty("subsection", "left")
-        stability_group.setProperty("subsection", "right")
-        overhang_group.setProperty("subsection", "right")
-        self.geometry_right_column = QWidget()
-        self.geometry_right_column.setObjectName("geometryRightColumn")
-        self.geometry_right_column.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,
-        )
-        self.geometry_right_layout = QVBoxLayout(
-            self.geometry_right_column
-        )
-        self.geometry_right_layout.setContentsMargins(0, 0, 0, 0)
-        self.geometry_right_layout.setSpacing(0)
-        self.geometry_right_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.geometry_right_layout.addWidget(stability_group)
-        self.geometry_right_layout.addWidget(overhang_group)
-        self.geometry_right_layout.addWidget(
-            self.geometry_calculation_section
-        )
-        self.geometry_split = ResponsiveCardGrid()
+        geometry_group.setProperty("subsection", "single")
+        stability_group.setProperty("subsection", "single")
+        overhang_group.setProperty("subsection", "single")
+        self.geometry_split = QWidget()
         self.geometry_split.setObjectName("geometrySettingsSplit")
-        self.geometry_vertical_divider = QFrame()
-        self.geometry_vertical_divider.setObjectName(
-            "geometryVerticalDivider"
-        )
-        self.geometry_vertical_divider.setFixedWidth(1)
-        self.geometry_vertical_divider.setSizePolicy(
-            QSizePolicy.Policy.Fixed,
-            QSizePolicy.Policy.Expanding,
-        )
-        self.geometry_split.set_vertical_separator(
-            self.geometry_vertical_divider
-        )
+        self.geometry_split_layout = QVBoxLayout(self.geometry_split)
+        self.geometry_split_layout.setContentsMargins(0, 0, 0, 0)
+        self.geometry_split_layout.setSpacing(0)
+        self.geometry_split_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Nach Dateiübergabe und Slicer folgt die eigentliche Arbeitsfläche: bei
         # genügend Platz zweispaltig, in schmalen Fenstern sauber gestapelt.
@@ -3405,10 +3325,10 @@ class MainWindow(QMainWindow):
             overhang_group,
         ):
             self.content_layout.removeWidget(card)
-        self.geometry_split.add_pair(
-            geometry_group,
-            self.geometry_right_column,
-        )
+        self.geometry_split_layout.addWidget(geometry_group)
+        self.geometry_split_layout.addWidget(stability_group)
+        self.geometry_split_layout.addWidget(overhang_group)
+        self.geometry_split_layout.addWidget(self.geometry_calculation_section)
         self.geometry_settings_group.content_layout.addWidget(self.geometry_split)
         self.geometry_settings_group.toggled.connect(
             lambda expanded: self._sync_collapsible_content(
@@ -3417,13 +3337,20 @@ class MainWindow(QMainWindow):
         )
         self.ready_grid = ResponsiveCardGrid()
         self.ready_grid.setObjectName("readySettingsGrid")
+        self.ready_left_column = QWidget()
+        self.ready_left_column.setObjectName("readyLeftColumn")
+        ready_left_layout = QVBoxLayout(self.ready_left_column)
+        ready_left_layout.setContentsMargins(0, 0, 0, 0)
+        ready_left_layout.setSpacing(METRICS.card_spacing_px)
+        ready_left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        ready_left_layout.addWidget(timing_group)
+        ready_left_layout.addWidget(self.geometry_settings_group)
         self.ready_grid.add_pair(
-            timing_group,
+            self.ready_left_column,
             self.prediction_frame,
             equal_height=False,
             stacked_right_first=True,
         )
-        self.ready_grid.add_full_width(self.geometry_settings_group)
         self.content_layout.addWidget(self.ready_grid)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
@@ -3471,9 +3398,11 @@ class MainWindow(QMainWindow):
             self._on_preparation_tab_changed
         )
 
-        self.preview_button = QPushButton("Vorschau erstellen")
+        self.preview_button = QPushButton("Kühlturm generieren")
         self.preview_button.setObjectName("previewButton")
-        self.preview_button.clicked.connect(self.start_preview)
+        self.preview_button.clicked.connect(
+            self._on_generation_button_clicked
+        )
         self.export_button = QPushButton("Kühlturm exportieren")
         self.export_button.setObjectName("primaryButton")
         self.export_button.setSizePolicy(
@@ -3613,69 +3542,6 @@ class MainWindow(QMainWindow):
         self.open_run_button.clicked.connect(self.open_run_directory)
         self.open_run_button.hide()
 
-        self.preview_quality_panel = QWidget()
-        self.preview_quality_panel.setObjectName("previewQualityPanel")
-        self.preview_quality_panel.setAccessibleName(
-            "Anzahl der Slicer-Durchläufe auswählen"
-        )
-        preview_quality_layout = QVBoxLayout(self.preview_quality_panel)
-        preview_quality_layout.setContentsMargins(2, 0, 2, 3)
-        preview_quality_layout.setSpacing(0)
-        self.preview_iteration_count_label = QLabel()
-        self.preview_iteration_count_label.setObjectName(
-            "previewIterationCountLabel"
-        )
-        self.preview_iteration_count_label.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
-        self.preview_iteration_slider = QSlider(Qt.Orientation.Horizontal)
-        self.preview_iteration_slider.setObjectName("previewIterationSlider")
-        self.preview_iteration_slider.setRange(
-            MINIMUM_PREVIEW_ITERATIONS,
-            MAXIMUM_PREVIEW_ITERATIONS,
-        )
-        self.preview_iteration_slider.setSingleStep(1)
-        self.preview_iteration_slider.setPageStep(1)
-        self.preview_iteration_slider.setTickInterval(1)
-        self.preview_iteration_slider.setTickPosition(
-            QSlider.TickPosition.TicksBelow
-        )
-        self.preview_iteration_slider.setValue(DEFAULT_PREVIEW_ITERATIONS)
-        self.preview_iteration_slider.setToolTip(
-            "Legt fest, wie viele schnelle Kühlturm-Abgleichläufe die Vorschau "
-            "verwendet. Bei STL-Quellen wird der aktuelle Kandidat anschließend "
-            "gemeinsam mit dem Objekt geslicet. Ein aktueller, gemeinsam "
-            "gesliceter Vorschaukandidat wird beim Export unverändert übernommen. "
-            "Mehr Durchläufe erhöhen die Vorschauqualität und benötigen etwas mehr "
-            "Zeit."
-        )
-        self.preview_iteration_slider.setAccessibleName(
-            "Slicer-Durchläufe für Vorschau und Export"
-        )
-        endpoint_row = QWidget()
-        endpoint_layout = QHBoxLayout(endpoint_row)
-        endpoint_layout.setContentsMargins(0, 0, 0, 0)
-        endpoint_layout.setSpacing(0)
-        self.preview_faster_label = QLabel("Schneller")
-        self.preview_faster_label.setObjectName("previewIterationEndpoint")
-        self.preview_precise_label = QLabel("Präziser")
-        self.preview_precise_label.setObjectName("previewIterationEndpoint")
-        self.preview_precise_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        endpoint_layout.addWidget(self.preview_faster_label)
-        endpoint_layout.addStretch(1)
-        endpoint_layout.addSpacing(6)
-        endpoint_layout.addWidget(self.preview_iteration_count_label)
-        endpoint_layout.addSpacing(6)
-        endpoint_layout.addStretch(1)
-        endpoint_layout.addWidget(self.preview_precise_label)
-        preview_quality_layout.addWidget(self.preview_iteration_slider)
-        preview_quality_layout.addWidget(endpoint_row)
-        self.preview_iteration_slider.valueChanged.connect(
-            self._on_preview_iterations_changed
-        )
-        self._update_preview_iteration_label()
-        self.preview_quality_panel.setFixedHeight(48)
-
         self.preview_action_control = QFrame()
         self.preview_action_control.setObjectName("previewActionControl")
         self.preview_action_control.setFixedWidth(
@@ -3684,7 +3550,6 @@ class MainWindow(QMainWindow):
         preview_action_layout = QVBoxLayout(self.preview_action_control)
         preview_action_layout.setContentsMargins(0, 0, 0, 0)
         preview_action_layout.setSpacing(0)
-        preview_action_layout.addWidget(self.preview_quality_panel)
         preview_action_layout.addWidget(self.preview_button)
 
         main_actions = QGridLayout()
@@ -3987,8 +3852,32 @@ class MainWindow(QMainWindow):
             self._refresh_preparation_section_layout()
             return
         self.workflow.set_slicer_step_visible(index == 1)
+        if index == 1:
+            self._ensure_slicer_profiles_on_first_step_entry()
         self._update_preparation_requirements()
         self._refresh_preparation_section_layout()
+
+    def _ensure_slicer_profiles_on_first_step_entry(self) -> None:
+        """Retry one missing automatic Slicer/profile load per session."""
+
+        if (
+            self._slicer_step_auto_discovery_attempted
+            or not self._startup_slicer_discovery_enabled
+        ):
+            return
+        selections = (
+            self.slicer_combo.currentData(),
+            self.machine_profile_combo.currentData(),
+            self.filament_profile_combo.currentData(),
+            self.process_profile_combo.currentData(),
+        )
+        if all(selection not in (None, "") for selection in selections):
+            return
+        self._slicer_step_auto_discovery_attempted = True
+        # The discovery entry point serializes itself behind any startup
+        # discovery/profile worker that is still finishing. This guarantees
+        # one real retry even when the user reaches step 2 during startup.
+        self.start_slicer_discovery(force=True)
 
     def _source_step_is_complete(self) -> bool:
         """Return whether the currently selected STL owns a valid result."""
@@ -4330,21 +4219,10 @@ class MainWindow(QMainWindow):
 
     @property
     def preview_dialog(self) -> PreviewDialog:
-        """Create the optional preview window only when it is first needed."""
+        """Return the preview panel embedded at the end of Prognose."""
 
-        if self._preview_dialog is None:
-            dialog = PreviewDialog(self)
-            self._preview_dialog = dialog
-            dialog.update_requested.connect(self.start_preview)
-            dialog.export_requested.connect(self.start_export)
-            dialog.closed.connect(self._restore_main_after_preview)
-            dialog.canvas.apply_camera_state(
-                self._pending_preview_camera_state
-            )
-            dialog.set_export_enabled(
-                self.export_button.isEnabled(),
-                self._export_block_reason(),
-            )
+        if self._preview_dialog is None:  # pragma: no cover - construction guard
+            raise RuntimeError("Die eingebettete Vorschau wurde nicht aufgebaut.")
         return self._preview_dialog
 
     @property
@@ -4366,6 +4244,137 @@ class MainWindow(QMainWindow):
             self.additional_options_content.show()
             self._additional_options_dialog = dialog
         return self._additional_options_dialog
+
+    @property
+    def export_success_dialog(self) -> QDialog:
+        """Create the compact export confirmation dialog lazily."""
+
+        if self._export_success_dialog is None:
+            dialog = QDialog(self)
+            dialog.setObjectName("exportSuccessDialog")
+            dialog.setWindowTitle("Export erfolgreich")
+            dialog.setModal(True)
+            dialog.setSizeGripEnabled(False)
+
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(24, 11, 24, 20)
+            layout.setSpacing(13)
+
+            self.export_success_header_layout = QVBoxLayout()
+            self.export_success_header_layout.setContentsMargins(0, 0, 0, 0)
+            self.export_success_header_layout.setSpacing(7)
+
+            self.export_success_title_label = QLabel(
+                "✓ Kühlturm erfolgreich exportiert"
+            )
+            self.export_success_title_label.setObjectName(
+                "exportSuccessTitle"
+            )
+            self.export_success_header_layout.addWidget(
+                self.export_success_title_label
+            )
+
+            self.export_success_summary_label = QLabel()
+            self.export_success_summary_label.setObjectName(
+                "exportSuccessSummary"
+            )
+            self.export_success_summary_label.setWordWrap(True)
+            self.export_success_header_layout.addWidget(
+                self.export_success_summary_label
+            )
+            layout.addLayout(self.export_success_header_layout)
+
+            metrics_frame = QFrame()
+            metrics_frame.setObjectName("exportSuccessMetrics")
+            metrics_layout = QVBoxLayout(metrics_frame)
+            metrics_layout.setContentsMargins(14, 12, 14, 12)
+            metrics_layout.setSpacing(6)
+            self.export_success_target_label = QLabel()
+            self.export_success_target_label.setObjectName(
+                "exportSuccessMetric"
+            )
+            self.export_success_target_label.hide()
+            self.export_success_achieved_label = QLabel()
+            self.export_success_achieved_label.setObjectName(
+                "exportSuccessMetric"
+            )
+            self.export_success_achieved_label.setWordWrap(True)
+            self.export_success_deviation_label = QLabel()
+            self.export_success_deviation_label.setObjectName(
+                "exportSuccessTolerance"
+            )
+            self.export_success_deviation_label.setWordWrap(True)
+            metrics_layout.addWidget(self.export_success_achieved_label)
+            metrics_layout.addWidget(self.export_success_deviation_label)
+            layout.addWidget(metrics_frame)
+
+            usage_frame = QFrame()
+            usage_frame.setObjectName("exportSuccessUsage")
+            usage_layout = QVBoxLayout(usage_frame)
+            usage_layout.setContentsMargins(14, 12, 14, 12)
+            usage_layout.setSpacing(6)
+            self.export_success_usage_title = QLabel(
+                "So können Sie die exportierten Dateien verwenden"
+            )
+            self.export_success_usage_title.setObjectName(
+                "exportSuccessUsageTitle"
+            )
+            self.export_success_usage_label = QLabel()
+            self.export_success_usage_label.setObjectName(
+                "exportSuccessUsageText"
+            )
+            self.export_success_usage_label.setTextFormat(
+                Qt.TextFormat.RichText
+            )
+            self.export_success_usage_label.setWordWrap(True)
+            usage_layout.addWidget(self.export_success_usage_title)
+            usage_layout.addWidget(self.export_success_usage_label)
+            layout.addWidget(usage_frame)
+
+            self.export_success_check_hint = QLabel(
+                "<b>Wichtig:</b> Prüfen Sie die Layerzeit vor dem Druck noch einmal "
+                "im Slicer. Nachträgliche Änderungen im Slicer an Modell, "
+                "Turm, Anordnung oder Druckprofil können zu deutlich "
+                "größeren Abweichungen von der hier erreichten Layerzeit "
+                "führen."
+            )
+            self.export_success_check_hint.setObjectName(
+                "exportSuccessCheckHint"
+            )
+            self.export_success_check_hint.setTextFormat(
+                Qt.TextFormat.RichText
+            )
+            self.export_success_check_hint.setWordWrap(True)
+            layout.addWidget(self.export_success_check_hint)
+
+            self.export_success_error_label = QLabel()
+            self.export_success_error_label.setObjectName(
+                "exportSuccessError"
+            )
+            self.export_success_error_label.setWordWrap(True)
+            self.export_success_error_label.hide()
+            layout.addWidget(self.export_success_error_label)
+
+            actions = QHBoxLayout()
+            actions.setContentsMargins(0, 2, 0, 0)
+            actions.setSpacing(8)
+            actions.addStretch(1)
+            self.export_success_cancel_button = QPushButton("Abbrechen")
+            self.export_success_cancel_button.clicked.connect(dialog.reject)
+            actions.addWidget(self.export_success_cancel_button)
+            self.export_success_open_button = QPushButton(
+                "Exportordner öffnen"
+            )
+            self.export_success_open_button.setObjectName("primaryButton")
+            self.export_success_open_button.setDefault(True)
+            self.export_success_open_button.clicked.connect(
+                self._open_export_directory_from_success_dialog
+            )
+            actions.addWidget(self.export_success_open_button)
+            layout.addLayout(actions)
+
+            self._export_success_dialog = dialog
+        return self._export_success_dialog
 
     @property
     def about_dialog(self) -> QDialog:
@@ -4669,28 +4678,6 @@ class MainWindow(QMainWindow):
             self._additional_options_dialog.close()
 
     def _restore_phase17_ui_state(self, ui_state: dict[str, object]) -> None:
-        try:
-            iterations = int(ui_state.get("preview_iterations", 0))
-        except (TypeError, ValueError):
-            iterations = 0
-        if not (
-            MINIMUM_PREVIEW_ITERATIONS
-            <= iterations
-            <= MAXIMUM_PREVIEW_ITERATIONS
-        ):
-            quality = str(ui_state.get("preview_quality", "")).casefold()
-            iterations = LEGACY_PREVIEW_QUALITY_ITERATIONS.get(quality, 0)
-        if not iterations:
-            try:
-                iterations = int(
-                    ui_state.get(
-                        "slicer_iterations",
-                        DEFAULT_PREVIEW_ITERATIONS,
-                    )
-                )
-            except (TypeError, ValueError):
-                iterations = DEFAULT_PREVIEW_ITERATIONS
-        self._set_preview_iterations(iterations, invalidate=False)
         self._pending_preview_camera_state = ui_state.get("preview_camera")
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.apply_camera_state(
@@ -4714,64 +4701,22 @@ class MainWindow(QMainWindow):
         )
         return CalibrationConfig(
             mode=CalibrationMode.STL,
-            maximum_iterations=self.preview_iterations,
+            maximum_iterations=GENERATION_MAXIMUM_ITERATIONS,
             object_clearance_mm=(
                 self.minimum_object_tower_distance_spin.value()
             ),
             perform_joint_final_slice=joint_slice_available,
+            maximum_joint_slices=GENERATION_MAXIMUM_JOINT_SLICES,
+            minimum_joint_slices=GENERATION_MINIMUM_JOINT_SLICES,
         )
 
     @property
     def preview_iterations(self) -> int:
-        return int(self.preview_iteration_slider.value())
+        return GENERATION_MAXIMUM_ITERATIONS
 
-    def _set_preview_iterations(
-        self,
-        iterations: int,
-        *,
-        invalidate: bool,
-    ) -> None:
-        normalized = min(
-            MAXIMUM_PREVIEW_ITERATIONS,
-            max(MINIMUM_PREVIEW_ITERATIONS, int(iterations)),
-        )
-        changed = normalized != self.preview_iterations
-        self.preview_iteration_slider.blockSignals(True)
-        try:
-            self.preview_iteration_slider.setValue(normalized)
-        finally:
-            self.preview_iteration_slider.blockSignals(False)
-        self._update_preview_iteration_label()
-        if changed and invalidate:
-            self._on_preview_iterations_changed(normalized)
-
-    def _update_preview_iteration_label(self) -> None:
-        iterations = self.preview_iterations
-        noun = "Durchlauf" if iterations == 1 else "Durchläufe"
-        self.preview_iteration_count_label.setText(f"{iterations} {noun}")
-        self.preview_iteration_slider.setAccessibleDescription(
-            f"Aktuell sind {iterations} Slicer-{noun} eingestellt. Bei STL-"
-            "Quellen schließt die Vorschau mit einem gemeinsamen "
-            "Präzisionsslice von Objekt und Kühlturm ab."
-        )
-
-    def _on_preview_iterations_changed(self, _value: int) -> None:
-        self._update_preview_iteration_label()
-        if self._loading_phase17_state:
-            return
-        self._invalidate_preview(
-            "Die Anzahl der Slicer-Durchläufe wurde geändert.",
-        )
-        self._update_section_summaries()
-
-    def _export_calibration_config(self) -> CalibrationConfig:
-        return self._calibration_config()
-
-    def _emergency_fallback_calibration_config(self) -> CalibrationConfig:
-        return replace(
-            self._calibration_config(),
-            perform_joint_final_slice=False,
-        )
+    @property
+    def preview_joint_slices(self) -> int:
+        return GENERATION_MAXIMUM_JOINT_SLICES
 
     def _profile_origin_text(self, result: ProfileMatchResult) -> str:
         if result.state is ProfileMatchState.RECONSTRUCTED:
@@ -4885,26 +4830,18 @@ class MainWindow(QMainWindow):
         )
         if self._preview_dialog is not None:
             self._preview_dialog.mark_stale()
-        self.preview_button.setText(
-            "Vorschau aktualisieren"
-            if had_preview
-            else "Vorschau erstellen"
-        )
         if had_preview:
             self.preview_hint_label.setProperty("state", "stale")
             self.preview_hint_label.setText(
-                f"Vorschau nicht mehr aktuell: {reason} Der Export ist weiterhin "
-                "möglich; vorher erscheint eine Sicherheitsabfrage."
+                "⚠ Der angezeigte Kühlturm ist nicht mehr aktuell und kann nicht "
+                f"exportiert werden. {reason}"
             )
+            self.preview_hint_label.show()
             self._set_main_status(
                 "Vorschau ist nicht mehr aktuell", icon="⚠", state="warning"
             )
         else:
-            self.preview_hint_label.setProperty("state", "current")
-            self.preview_hint_label.setText(
-                "Beim Export wird der Kühlturm immer mit den aktuellen "
-                "Einstellungen erzeugt."
-            )
+            self.preview_hint_label.hide()
         self._refresh_widget_style(self.preview_hint_label)
         self._refresh_prediction()
         self._refresh_phase17_actions()
@@ -4913,18 +4850,45 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "preview_button"):
             return
         block_reason = self._export_block_reason()
-        export_enabled = block_reason is None
+        generation_active = self.background_job_manager.has_active(
+            JobKind.PREVIEW
+        )
         preview_enabled = (
-            self._export_block_reason(allow_validation_bypass=False) is None
+            generation_active and not self._preview_cancel_requested
+        ) or (
+            not generation_active
+            and self._export_block_reason(allow_validation_bypass=False) is None
         )
         self.preview_button.setEnabled(preview_enabled)
-        if self._preview_dialog is not None:
-            self._preview_dialog.update_button.setEnabled(preview_enabled)
-        self.preview_quality_panel.setEnabled(
-            not self.background_job_manager.has_active(JobKind.PREVIEW)
-            and not self.background_job_manager.has_active(JobKind.EXPORT)
+        preview_is_current = bool(
+            self.current_preview is not None
+            and self.preview_state is PreviewState.CURRENT
         )
-        self._set_export_button_state(export_enabled, block_reason)
+        export_reason = block_reason
+        if export_reason is None and not preview_is_current:
+            export_reason = (
+                "Bitte zuerst einen aktuellen Kühlturm generieren."
+            )
+        self._set_export_button_state(
+            export_reason is None,
+            export_reason,
+        )
+        if block_reason is None and not preview_is_current:
+            self.export_availability_label.clear()
+            self.action_availability_widget.hide()
+            self._refresh_footer_auxiliary_visibility()
+            self._schedule_footer_height_update()
+        actions_available = bool(
+            hasattr(self, "footer") and not self.footer.isHidden()
+        )
+        show_generation = generation_active or not preview_is_current
+        self.preview_action_control.setVisible(
+            actions_available and show_generation
+        )
+        self.preview_button.setVisible(actions_available and show_generation)
+        self.export_button.setVisible(
+            actions_available and not show_generation
+        )
         if hasattr(self, "slicer_prediction_button"):
             self._refresh_prediction_advice(
                 self.prediction_method_label.text()
@@ -4974,8 +4938,6 @@ class MainWindow(QMainWindow):
         reason: str | None = None,
     ) -> None:
         self.export_button.setEnabled(enabled)
-        if self._preview_dialog is not None:
-            self._preview_dialog.set_export_enabled(enabled, reason)
         if not self._setting_feedback_is_available():
             self.export_availability_label.clear()
             self.action_availability_widget.hide()
@@ -5773,11 +5735,8 @@ class MainWindow(QMainWindow):
             }
             return
         restored_profile_ids = dict(selected_profile_ids or {})
-        if selected_machine is None:
-            selected_machine = self._profile_combo_reference(
-                self.machine_profile_combo
-            )
-        if selected_machine is None and not restored_profile_ids:
+        restored_confirmed_profiles = False
+        if not restored_profile_ids:
             remembered = getattr(
                 self.slicer_service,
                 "remembered_profile_selections",
@@ -5788,10 +5747,15 @@ class MainWindow(QMainWindow):
                     restored_profile_ids = dict(
                         remembered(installation.identity_key)
                     )
+                    restored_confirmed_profiles = bool(restored_profile_ids)
                 except (OSError, TypeError, ValueError, RuntimeError):
                     restored_profile_ids = {}
         if selected_machine is None:
             selected_machine = restored_profile_ids.get("machine")
+        if selected_machine is None:
+            selected_machine = self._profile_combo_reference(
+                self.machine_profile_combo
+            )
         show_all_profiles = (
             self.show_all_profiles_checkbox.isChecked()
             if include_all_profiles is None
@@ -5847,7 +5811,9 @@ class MainWindow(QMainWindow):
             selected_machine=selected_machine,
             selected_profile_ids=restored_profile_ids,
             include_all_profiles=show_all_profiles,
-            prefer_active_presets=prefer_active_presets,
+            prefer_active_presets=(
+                prefer_active_presets and not restored_confirmed_profiles
+            ),
         )
         self.slicer_refresh_button.setEnabled(False)
         self.slicer_manual_button.setEnabled(False)
@@ -7403,18 +7369,14 @@ class MainWindow(QMainWindow):
         self,
         expanded: bool,
     ) -> None:
-        """Publish the complete immediate geometry-card size to the scroll area."""
+        """Publish the complete single-column geometry-card size."""
 
-        # Recalculate from both responsive columns instead of retaining a
-        # stretched geometry from a former arrangement.
         self.geometry_settings_group.setMinimumHeight(0)
         self.geometry_settings_group.setMaximumHeight(16777215)
         self.geometry_settings_group.content_widget.setMinimumHeight(0)
         self.geometry_settings_group.content_widget.setMaximumHeight(16777215)
         self.geometry_split.setMinimumHeight(0)
         self.geometry_split.setMaximumHeight(16777215)
-        self.geometry_right_column.setMinimumHeight(0)
-        self.geometry_right_column.setMaximumHeight(16777215)
         for subsection in (
             self.geometry_group,
             self.stability_group,
@@ -7423,37 +7385,23 @@ class MainWindow(QMainWindow):
         ):
             subsection.setMinimumHeight(0)
             subsection.setMaximumHeight(16777215)
-        self.geometry_split.refresh_layout()
-        if self.geometry_split.is_two_column():
-            self.geometry_fields_layout.setContentsMargins(20, 10, 15, 10)
-            self.stability_fields_layout.setContentsMargins(15, 10, 20, 10)
-            self.overhang_fields_layout.setContentsMargins(15, 10, 20, 10)
-            self.geometry_calculation_body_layout.setContentsMargins(
-                15, 4, 20, 10
-            )
-        else:
-            self.geometry_fields_layout.setContentsMargins(20, 10, 20, 10)
-            self.stability_fields_layout.setContentsMargins(20, 10, 20, 10)
-            self.overhang_fields_layout.setContentsMargins(20, 10, 20, 10)
-            self.geometry_calculation_body_layout.setContentsMargins(
-                20, 4, 20, 10
-            )
-        # Apply responsive inset changes before returning to the event loop.
-        # Otherwise the next unrelated hover/input event becomes the trigger
-        # for a visible two-pixel control shift.
+        self.geometry_fields_layout.setContentsMargins(20, 10, 20, 10)
+        self.stability_fields_layout.setContentsMargins(20, 10, 20, 10)
+        self.overhang_fields_layout.setContentsMargins(20, 10, 20, 10)
+        self.geometry_calculation_body_layout.setContentsMargins(
+            20, 4, 20, 10
+        )
         for nested_layout in (
             self.geometry_fields_layout,
             self.stability_fields_layout,
             self.overhang_fields_layout,
             self.geometry_calculation_body_layout,
-            self.geometry_right_layout,
+            self.geometry_split_layout,
         ):
             nested_layout.invalidate()
             nested_layout.activate()
-        self.geometry_split.grid.invalidate()
-        split_height = self.geometry_split.content_height_hint()
+        split_height = self.geometry_split_layout.sizeHint().height()
         self.geometry_split.setFixedHeight(max(0, split_height))
-        self.geometry_split.grid.activate()
         self.geometry_split.updateGeometry()
         self.geometry_settings_group.content_layout.invalidate()
         self.geometry_settings_group.content_layout.activate()
@@ -7477,9 +7425,7 @@ class MainWindow(QMainWindow):
             )
         self.ready_grid.refresh_layout()
         self._refresh_ready_grid_layout()
-        # All subsection heights are calculated from their current responsive
-        # widths above; a deferred duplicate pass would only expose a transient
-        # first geometry to hover and input events.
+        # All subsection heights are calculated from their one-column layout.
 
     def _refresh_slicer_section_layout(self, _expanded: bool | None = None) -> None:
         """Publish the current Slicer height without retaining stale minima."""
@@ -8711,79 +8657,14 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_prediction_advice(self, _estimate_kind: str = "") -> None:
-        offered = self._slicer_prediction_is_offered()
-        running = self.background_job_manager.has_active(
-            JobKind.SLICER_PREDICTION
-        )
-        preview_running = bool(
-            self.preview_state is PreviewState.BUILDING
-            or self.background_job_manager.has_active(JobKind.PREVIEW)
-        )
-        self.prediction_advice_frame.setProperty("active", offered)
-        self.prediction_advice_label.setVisible(offered)
-        self.prediction_advice_label.setText(
-            "Die Prognose wird ausschließlich mit dem bestätigten Slicer "
-            "und den ausgewählten Profilen ermittelt."
-            if offered else ""
-        )
-        self.slicer_prediction_button.setVisible(offered)
-        self.slicer_prediction_button.setEnabled(
-            offered and self._slicer_prediction_can_start()
-        )
-        self.slicer_prediction_button.setText(
-            "Slicer-Schätzung läuft …"
-            if running
-            else "Schätzung wird durchgeführt..."
-            if preview_running
-            else "Slicer-Schätzung\ndurchführen"
-        )
-        if offered and not running and not self._slicer_prediction_can_start():
-            if (
-                self.preview_state is PreviewState.BUILDING
-                or self.background_job_manager.has_active(JobKind.PREVIEW)
-            ):
-                tooltip = (
-                    "Während die Vorschau erstellt wird, kann keine separate "
-                    "Slicer-Schätzung gestartet werden."
-                )
-            else:
-                tooltip = (
-                    "Die Schätzung ist verfügbar, sobald Modellanalyse, "
-                    "Profilzuordnung und Geometrieprüfung abgeschlossen sind."
-                )
-            self.slicer_prediction_button.setToolTip(tooltip)
-        else:
-            self.slicer_prediction_button.setToolTip("")
-        status = self._slicer_prediction_status
-        self.slicer_prediction_status_label.setText(status)
-        self.slicer_prediction_status_label.setVisible(bool(status))
-        self._refresh_widget_style(self.prediction_advice_frame)
-        advice_layout = self.prediction_advice_frame.layout()
-        if advice_layout is not None:
-            advice_layout.invalidate()
-            advice_layout.activate()
-        self.prediction_advice_frame.updateGeometry()
-        self.prediction_content_grid.invalidate()
-        self.prediction_content_grid.activate()
-        QTimer.singleShot(0, self._fit_prediction_advice_height)
+        # The former manually triggered Slicer estimate was intentionally
+        # removed. Preview generation now owns all Slicer-backed feedback.
+        return
 
     def _fit_prediction_advice_height(self) -> None:
-        """Keep the advice panel at its current content's natural height."""
+        """Compatibility no-op after removing the prediction advice panel."""
 
-        if not hasattr(self, "prediction_advice_frame"):
-            return
-        layout = self.prediction_advice_frame.layout()
-        if layout is None:
-            return
-        layout.invalidate()
-        layout.activate()
-        natural_height = max(0, layout.sizeHint().height())
-        if self.prediction_advice_frame.height() != natural_height:
-            self.prediction_advice_frame.setFixedHeight(natural_height)
-        self.prediction_advice_frame.updateGeometry()
-        self.prediction_content_grid.invalidate()
-        self.prediction_content_grid.activate()
-        self._refresh_ready_grid_layout()
+        return
 
     def start_slicer_prediction(self) -> None:
         """Run a slicer estimate with the selected number of passes."""
@@ -9844,21 +9725,15 @@ class MainWindow(QMainWindow):
         self,
         assessment: TowerNeedAssessment,
     ) -> None:
-        synthetic_text = (
-            " Für den Abschluss wird eine synthetische Schichthöhe verwendet."
-            if assessment.synthetic_final_layer_used
-            else ""
-        )
-        tower_height = (
-            f"{assessment.tower_end_z_mm:.3f}"
-            if assessment.tower_end_z_mm is not None
-            else "-"
+        verb = (
+            "unterschreitet"
+            if assessment.deficit_layer_count == 1
+            else "unterschreiten"
         )
         self._set_tower_need_message(
-            "Kühlturm erforderlich. Die eingestellte Zielzeit erfordert "
-            "zusätzliche Kühlzeit; berechnete "
-            f"Turmhöhe: {tower_height} mm."
-            f"{synthetic_text}",
+            "Kühlturm erforderlich - "
+            f"{assessment.deficit_layer_count} Layer {verb} die gewünschte "
+            "Mindest-Layerzeit.",
             "required",
         )
 
@@ -10438,6 +10313,163 @@ class MainWindow(QMainWindow):
             self._resize_about_to_content,
         )
 
+    def _show_export_success_dialog(
+        self,
+        result: PreviewExportResult,
+    ) -> None:
+        dialog = self.export_success_dialog
+        target = getattr(result, "target_layer_time_s", None)
+        achieved = getattr(result, "minimum_verified_layer_time_s", None)
+        tolerance = float(
+            getattr(result, "calibration_time_tolerance_s", 0.2) or 0.2
+        )
+        values_are_known = bool(
+            target is not None
+            and achieved is not None
+            and math.isfinite(float(target))
+            and math.isfinite(float(achieved))
+        )
+
+        saved_files = [f"• {result.output_path.name}"]
+        project_path = getattr(result, "project_path", None)
+        if project_path is not None:
+            saved_files.append(f"• {Path(project_path).name}")
+        self.export_success_summary_label.setText(
+            "Gespeichert:\n" + "\n".join(saved_files)
+        )
+        if values_are_known:
+            target_value = float(target)
+            achieved_value = float(achieved)
+            difference = achieved_value - target_value
+            within_tolerance = abs(difference) <= tolerance
+            self.export_success_target_label.clear()
+            self.export_success_achieved_label.setText(
+                "Erreichte Layerzeit: "
+                f"{self._format_export_number(achieved_value)} von "
+                f"{self._format_export_number(target_value)} Sekunden"
+            )
+            deviation_text = (
+                "Abweichung: "
+                f"{self._format_export_seconds(difference, signed=True)}\n"
+            )
+            if within_tolerance:
+                deviation_text += (
+                    "innerhalb der Toleranz von "
+                    f"±{self._format_export_number(tolerance)} Sekunden"
+                )
+            else:
+                outside_tolerance = abs(difference) - tolerance
+                deviation_text += (
+                    f"{self._format_export_number(outside_tolerance)} "
+                    "Sekunden außerhalb der Toleranz von "
+                    f"±{self._format_export_number(tolerance)} Sekunden"
+                )
+            self.export_success_deviation_label.setText(deviation_text)
+            self.export_success_deviation_label.setProperty(
+                "status",
+                "within" if within_tolerance else "outside",
+            )
+        else:
+            self.export_success_target_label.clear()
+            self.export_success_achieved_label.setText(
+                "Erreichte Layerzeit: nicht verfügbar"
+            )
+            self.export_success_deviation_label.setText(
+                "Die Abweichung konnte nicht bestimmt werden."
+            )
+            self.export_success_deviation_label.setProperty(
+                "status", "unknown"
+            )
+        if self.full_infill_checkbox.isChecked():
+            manual_infill = (
+                "Stellen Sie für die Turm-STL objektspezifisch 100 % "
+                "Fülldichte ein. Das Druckobjekt behält seine eigene Füllung."
+            )
+        else:
+            manual_infill = (
+                "Die Turm-STL verwendet wie vorgesehen die Füllung des "
+                "ausgewählten Prozessprofils."
+            )
+        if project_path is not None:
+            project_intro = (
+                "Öffnen Sie alternativ die ebenfalls exportierte .3MF-Datei."
+            )
+        else:
+            project_intro = (
+                "Falls der Exportordner zusätzlich eine .3MF-Datei enthält, "
+                "können Sie diese alternativ öffnen."
+            )
+        self.export_success_usage_label.setText(
+            "<b>1. Turm-STL manuell zum Druckobjekt hinzufügen</b><br>"
+            "Importieren Sie die exportierte Turm-STL zusammen mit Ihrem "
+            "Druckobjekt auf dieselbe Druckplatte. "
+            f"{escape(manual_infill)}<br><br>"
+            "<b>2. Optional die vorbereitete .3MF-Datei verwenden</b><br>"
+            f"{project_intro} Sie enthält Druckobjekt und Kühlturm bereits "
+            "gemeinsam angeordnet und übernimmt die beim Export gewählte "
+            "Turmfüllung."
+        )
+        self._refresh_widget_style(self.export_success_deviation_label)
+        self.export_success_error_label.clear()
+        self.export_success_error_label.hide()
+        dialog.setWindowState(Qt.WindowState.WindowNoState)
+        self._show_internal_dialog_without_flash(
+            dialog,
+            self._resize_export_success_dialog,
+        )
+
+    @staticmethod
+    def _format_export_number(value: float) -> str:
+        return f"{float(value):.3f}".rstrip("0").rstrip(".").replace(".", ",")
+
+    @classmethod
+    def _format_export_seconds(
+        cls,
+        value: float,
+        *,
+        signed: bool = False,
+    ) -> str:
+        prefix = "+" if signed and value >= 0.0 else ""
+        return f"{prefix}{cls._format_export_number(value)} Sekunden"
+
+    def _resize_export_success_dialog(self) -> None:
+        dialog = self.export_success_dialog
+        if not dialog.isVisible():
+            return
+        screen = dialog.screen() or self.screen()
+        target_width = EXPORT_SUCCESS_DIALOG_PREFERRED_WIDTH_PX
+        if screen is not None:
+            target_width = min(
+                target_width,
+                max(420, screen.availableGeometry().width() - 40),
+            )
+        dialog.setFixedWidth(target_width)
+        dialog.layout().invalidate()
+        dialog.layout().activate()
+        dialog.setFixedHeight(dialog.sizeHint().height())
+        self._place_dialog_centered(dialog)
+
+    def _open_export_directory_from_success_dialog(self) -> None:
+        directory = self._latest_export_directory
+        if directory is None:
+            self.export_success_error_label.setText(
+                "Der Exportordner ist nicht mehr verfügbar."
+            )
+            self.export_success_error_label.show()
+            self._resize_export_success_dialog()
+            return
+        try:
+            open_directory(directory)
+        except OSError as error:
+            self.export_success_error_label.setText(
+                "Der Exportordner konnte nicht geöffnet werden: "
+                f"{german_user_message(error)}"
+            )
+            self.export_success_error_label.show()
+            self._resize_export_success_dialog()
+            return
+        self.export_success_dialog.accept()
+
     def show_support_report_dialog(self) -> None:
         """Show the local report composer without transmitting any data."""
 
@@ -10619,6 +10651,11 @@ class MainWindow(QMainWindow):
             and self._support_report_dialog.isVisible()
         ):
             self._resize_support_report_dialog()
+        if (
+            self._export_success_dialog is not None
+            and self._export_success_dialog.isVisible()
+        ):
+            self._resize_export_success_dialog()
 
     def _support_diagnostic_context(self) -> dict[str, object]:
         """Return a bounded, non-file-content snapshot for local support."""
@@ -10864,55 +10901,6 @@ class MainWindow(QMainWindow):
         self.maximum_expansion_angle_setting.set_warning(warning)
 
     def update_wall_path_preview(self) -> None:
-        if self.full_infill_checkbox.isChecked():
-            self.full_infill_hint.setText(
-                "Der gemeinsame Testslice und das exportierte 3MF weisen im "
-                "Slicer nur dem Kühlturm objektspezifisch 100 % Fülldichte zu."
-            )
-        else:
-            density = None
-            pattern = None
-            selected = (
-                self.profile_match_result.selected
-                if self.profile_match_result is not None
-                else None
-            )
-            if selected is not None:
-                values = selected.effective_profile.effective_values
-                density = next(
-                    (
-                        values[key]
-                        for key in (
-                            "sparse_infill_density",
-                            "fill_density",
-                            "infill_sparse_density",
-                        )
-                        if values.get(key) not in (None, "")
-                    ),
-                    None,
-                )
-                pattern = next(
-                    (
-                        values[key]
-                        for key in (
-                            "sparse_infill_pattern",
-                            "fill_pattern",
-                            "infill_pattern",
-                        )
-                        if values.get(key) not in (None, "")
-                    ),
-                    None,
-                )
-            details = []
-            if density is not None:
-                details.append(f"Fülldichte {density}")
-            if pattern is not None:
-                details.append(f"Füllmuster {pattern}")
-            suffix = f" ({' · '.join(details)})" if details else ""
-            self.full_infill_hint.setText(
-                "Testslices verwenden die globale Füllung des ausgewählten "
-                f"Prozessprofils{suffix}."
-            )
         self._update_section_summaries()
 
     def _update_section_summaries(self) -> None:
@@ -11542,104 +11530,18 @@ class MainWindow(QMainWindow):
             self._refresh_ready_grid_layout()
 
     def _show_preview_dialog(self) -> None:
-        if not self.preview_dialog.isVisible():
-            self.preview_dialog.setWindowState(Qt.WindowState.WindowNoState)
-            self._place_preview_beside_main_window()
-            self._show_internal_dialog_without_flash(
-                self.preview_dialog,
-                self._enforce_preview_window_geometry,
-            )
-            QTimer.singleShot(80, self._enforce_preview_window_geometry)
-        else:
-            self._enforce_preview_window_geometry()
-            self.preview_dialog.raise_()
-            self.preview_dialog.activateWindow()
+        self.prediction_frame.setChecked(True)
+        self.preview_dialog.show()
+        self.settings_scroll.ensureWidgetVisible(self.preview_dialog, 0, 18)
 
     def _place_preview_beside_main_window(self) -> None:
-        screen = self.screen()
-        if screen is None:
-            self._preview_target_geometry = None
-            return
-        available = screen.availableGeometry()
-        margin = 8
-        gap = 12
-        preview_minimum_width = max(
-            520,
-            self.preview_dialog.minimumWidth(),
-            self.preview_dialog.minimumSizeHint().width(),
-        )
-        preview_width = min(
-            920,
-            max(620, preview_minimum_width, available.width() // 2),
-        )
-        preview_height = min(720, max(520, available.height() - 2 * margin))
-        main_frame = self.frameGeometry()
-        direct_x = main_frame.right() + gap + 1
-        if direct_x + preview_width <= available.right() + 1:
-            # Align the top-level window frames. A post-show correction in
-            # _enforce_preview_window_geometry() compensates for platform-
-            # specific title-bar and frame margins.
-            y = main_frame.top()
-            target = QRect(
-                direct_x,
-                y,
-                preview_width,
-                preview_height,
-            )
-            self._preview_target_geometry = target
-            self.preview_dialog.setGeometry(target)
-            return
-
-        direct_left_x = main_frame.left() - gap - preview_width
-        if direct_left_x >= available.left():
-            x = direct_left_x
-        else:
-            # There is no non-overlapping slot on this screen. Keep the main
-            # window completely untouched and clamp only the non-modal preview
-            # to the available desktop. Overlap is preferable to resizing or
-            # moving the user's working window.
-            x = min(
-                max(direct_x, available.left() + margin),
-                available.right() - preview_width - margin + 1,
-            )
-        y = min(
-            max(main_frame.top(), available.top() + margin),
-            available.bottom() - preview_height - margin + 1,
-        )
-        target = QRect(
-            x,
-            y,
-            preview_width,
-            preview_height,
-        )
-        self._preview_target_geometry = target
-        self.preview_dialog.setGeometry(target)
+        return
 
     def _enforce_preview_window_geometry(self) -> None:
-        """Keep the first preview opening normal-sized and beside the main window."""
-
-        if self._closing or not self.preview_dialog.isVisible():
-            return
-        if self.preview_dialog.isMaximized() or self.preview_dialog.isFullScreen():
-            self.preview_dialog.setWindowState(Qt.WindowState.WindowNoState)
-        if self._preview_target_geometry is not None:
-            self.preview_dialog.setGeometry(self._preview_target_geometry)
-            frame_delta_y = (
-                self.frameGeometry().top()
-                - self.preview_dialog.frameGeometry().top()
-            )
-            if frame_delta_y:
-                corrected = self.preview_dialog.geometry().translated(
-                    0, frame_delta_y
-                )
-                self.preview_dialog.setGeometry(corrected)
-            # Qt may enlarge the requested rectangle by a pixel to satisfy a
-            # platform-specific minimum size. Preserve that actual normal
-            # geometry instead of repeatedly forcing an impossible rectangle.
-            self._preview_target_geometry = self.preview_dialog.geometry()
+        return
 
     def _restore_main_after_preview(self) -> None:
-        self._preview_target_geometry = None
+        return
 
     def start_preview(self) -> None:
         self.validate_form()
@@ -11656,24 +11558,27 @@ class MainWindow(QMainWindow):
             self.preview_dialog.set_failed(german_user_message(error))
             return
 
+        self._clear_result_notices()
         self.background_job_manager.cancel_jobs(
             JobKind.PREVIEW,
             reason="preview_replaced",
         )
         self._preview_request_id += 1
         request_id = self._preview_request_id
+        self._preview_cancel_requested = False
         self.preview_state = PreviewState.BUILDING
-        self.preview_button.setEnabled(False)
-        self.preview_quality_panel.setEnabled(False)
+        self.preview_button.setEnabled(True)
         self._update_responsive_action_labels()
         self._set_export_button_state(
             False,
             "Die Vorschau wird gerade erstellt.",
         )
         self.preview_hint_label.setText(
-            "Vorschau wird im Hintergrund erstellt. Die Oberfläche bleibt bedienbar."
+            "Der Kühlturm wird vollständig generiert. Die bisherige Vorschau "
+            "bleibt bis zum Abschluss sichtbar."
         )
         self.preview_hint_label.setProperty("state", "building")
+        self.preview_hint_label.show()
         self._refresh_widget_style(self.preview_hint_label)
         self.progress_bar.setProperty("task", "preview")
         self._refresh_widget_style(self.progress_bar)
@@ -11681,15 +11586,16 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self._set_main_status(
-            "Vorschau wird vorbereitet …", icon="⏳", state="running"
+            "Kühlturm wird vorbereitet …", icon="⏳", state="running"
         )
-        self.preview_dialog.set_building("Vorschau wird vorbereitet …")
+        self.preview_dialog.set_building("Kühlturm wird vorbereitet …")
 
         worker = PreviewWorker(request_id, request, self.preview_service)
         self._refresh_phase17_actions()
         worker.progress.connect(self._on_preview_progress)
         worker.succeeded.connect(self._on_preview_succeeded)
         worker.failed.connect(self._on_preview_failed)
+        worker.finished.connect(self._on_preview_finished)
         self.background_job_manager.start_job(
             kind=JobKind.PREVIEW,
             request_id=request_id,
@@ -11736,13 +11642,11 @@ class MainWindow(QMainWindow):
         previous = self.current_preview
         self.current_preview = result
         self.preview_state = PreviewState.CURRENT
+        self._preview_cancel_requested = False
         self.last_export_result = None
         self.preview_dialog.set_preview(result)
-        self.preview_button.setText("Vorschau aktualisieren")
         self.preview_hint_label.setProperty("state", "current")
-        self.preview_hint_label.setText(
-            "Vorschau ist aktuell. Der Export kann diesen Stand verwenden."
-        )
+        self.preview_hint_label.hide()
         self._refresh_widget_style(self.preview_hint_label)
         self.progress_bar.setProperty("task", "default")
         self._refresh_widget_style(self.progress_bar)
@@ -11752,10 +11656,20 @@ class MainWindow(QMainWindow):
         self._set_main_status(
             "Vorschau ist aktuell", icon="✓", state="success"
         )
+        self._clear_result_notices()
         if previous is not None and previous is not result:
             previous.dispose()
         self._refresh_prediction()
         self._refresh_phase17_actions()
+
+    def _clear_result_notices(self) -> None:
+        """Remove non-error notices left by an earlier generation or export."""
+
+        self.result_label.clear()
+        self.result_label.setToolTip("")
+        self.warning_text.clear()
+        self.warning_text.hide()
+        self._refresh_issue_panels()
 
     def _on_preview_failed(
         self,
@@ -11770,12 +11684,14 @@ class MainWindow(QMainWindow):
             if self.current_preview is not None
             else PreviewState.FAILED
         )
+        self._preview_cancel_requested = False
         self.preview_dialog.set_failed(german_user_message(message))
         self.preview_hint_label.setProperty("state", "warning")
         self.preview_hint_label.setText(
-            "Vorschau konnte nicht aktualisiert werden. Der Export kann trotzdem "
-            "mit den aktuellen Einstellungen gestartet werden."
+            "Die Generierung ist fehlgeschlagen. Es liegt kein aktueller, "
+            "exportfähiger Kühlturm vor."
         )
+        self.preview_hint_label.show()
         self._refresh_widget_style(self.preview_hint_label)
         self.progress_bar.setProperty("task", "default")
         self._refresh_widget_style(self.progress_bar)
@@ -11791,6 +11707,62 @@ class MainWindow(QMainWindow):
         self._refresh_prediction()
         self._refresh_phase17_actions()
 
+    def _on_generation_button_clicked(self) -> None:
+        if self.background_job_manager.has_active(JobKind.PREVIEW):
+            self.cancel_generation()
+            return
+        self.start_preview()
+
+    def cancel_generation(self) -> None:
+        if self._preview_cancel_requested:
+            return
+        cancelled = self.background_job_manager.cancel_jobs(
+            JobKind.PREVIEW,
+            reason="user_request",
+        )
+        if not cancelled:
+            return
+        self._preview_cancel_requested = True
+        self.preview_button.setText("Abbruch wird ausgeführt …")
+        self.preview_button.setEnabled(False)
+        self._set_main_status(
+            "Generierung wird sicher abgebrochen …",
+            icon="⏳",
+            state="running",
+        )
+
+    def _on_preview_finished(self, request_id: int) -> None:
+        if request_id != self._preview_request_id or self._closing:
+            return
+        if self.preview_state is not PreviewState.BUILDING:
+            return
+        self._preview_cancel_requested = False
+        self.preview_state = (
+            PreviewState.STALE
+            if self.current_preview is not None
+            else PreviewState.EMPTY
+        )
+        self.preview_dialog.set_cancelled()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.hide()
+        if self.current_preview is not None:
+            self.preview_hint_label.setProperty("state", "stale")
+            self.preview_hint_label.setText(
+                "⚠ Die Aktualisierung wurde abgebrochen. Der angezeigte "
+                "Kühlturm ist nicht exportfähig."
+            )
+            self.preview_hint_label.show()
+        else:
+            self.preview_hint_label.hide()
+        self._set_main_status(
+            "Generierung abgebrochen",
+            icon="⚠",
+            state="warning",
+        )
+        for delay_ms in (0, 50):
+            QTimer.singleShot(delay_ms, self._refresh_phase17_actions)
+
     def start_export(self) -> None:
         self._bambu_multinozzle_tower_only_export_active = False
         self.validate_form()
@@ -11798,53 +11770,21 @@ class MainWindow(QMainWindow):
         if not self.export_button.isEnabled():
             return
         try:
-            preview_request = self._current_preview_request()
-            fallback_available = (
-                _supports_bambu_multinozzle_emergency_fallback(preview_request)
-            )
-            request = self._current_preview_request(
-                calibration_config=self._export_calibration_config(),
-            )
-            fallback_request = (
-                self._current_preview_request(
-                    calibration_config=(
-                        self._emergency_fallback_calibration_config()
-                    ),
-                )
-                if fallback_available else None
-            )
+            request = self._current_preview_request()
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self.result_label.setText(german_user_message(error))
             return
         preview = self.current_preview
-        preview_matches_current_settings = bool(
+        if not (
             preview is not None
             and self.preview_state is PreviewState.CURRENT
-            and preview_request.signature() == preview.request_signature
-        )
-        if preview is not None and not preview_matches_current_settings:
-            action = self._ask_stale_preview_action()
-            if action == "preview":
-                self.start_preview()
-                return
-            if action != "yes":
-                return
-        preview_is_current = bool(
-            preview_matches_current_settings
-            and preview is not None
             and request.signature() == preview.request_signature
-        )
-        export_preview = preview if preview_is_current else None
-        export_seed = (
-            preview
-            if preview_matches_current_settings
-            and preview is not None
-            and export_preview is None
-            and getattr(preview, "calibration", None) is not None
-            and self.source_artifact is not None
-            and self.source_artifact.source_kind.value == "stl"
-            else None
-        )
+        ):
+            self._invalidate_preview(
+                "Die Einstellungen stimmen nicht mit der Generierung überein."
+            )
+            return
+        self._clear_result_notices()
         self._export_request_id += 1
         request_id = self._export_request_id
         self._set_export_button_state(
@@ -11852,18 +11792,11 @@ class MainWindow(QMainWindow):
             "Ein Export wird bereits ausgeführt.",
         )
         self.preview_button.setEnabled(False)
-        self.preview_quality_panel.setEnabled(False)
         self.drop_zone.remove_button.setEnabled(False)
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(False)
         self._set_main_status(
-            "Aktueller Vorschaukandidat wird gemeinsam mit dem Objekt "
-            "präzisionsgeslicet und bei Bedarf einmal korrigiert …"
-            if export_seed is not None
-            else "Kühlturm wird mit schnellen Abgleichläufen und einem "
-            "gemeinsamen Präzisionsslice erzeugt und exportiert …"
-            if export_preview is None
-            else "Aktuelle Vorschau wird exportiert …",
+            "Aktuelle Generierung wird ohne erneute Slicer-Läufe exportiert …",
             icon="⏳",
             state="running",
         )
@@ -11874,63 +11807,21 @@ class MainWindow(QMainWindow):
         self.progress_bar.show()
         worker = ExportWorker(
             request_id,
-            export_preview,
+            preview,
             request,
             Path(self.output_root_edit.text()).expanduser(),
             self.export_service,
-            self.preview_service,
-            seed_preview=export_seed,
-            fallback_preview=(
-                preview
-                if fallback_request is not None
-                and preview_matches_current_settings
-                and preview is not None
-                and fallback_request.signature() == preview.request_signature
-                else None
-            ),
-            fallback_request=fallback_request,
         )
         worker.progress.connect(self._on_export_progress)
         worker.succeeded.connect(self._on_export_succeeded)
         worker.failed.connect(self._on_export_failed)
+        worker.finished.connect(self._on_export_finished)
         self.background_job_manager.start_job(
             kind=JobKind.EXPORT,
             request_id=request_id,
             worker=worker,
             parent_operation_id=f"export-{request_id}",
         )
-
-    def _create_stale_preview_message_box(self) -> QMessageBox:
-        box = QMessageBox(self)
-        box.setWindowTitle("Vorschau ist nicht aktuell")
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
-            "Die zuletzt erstellte Vorschau entspricht nicht mehr den "
-            "aktuellen Einstellungen. Beim Export wird der Kühlturm mit "
-            "den aktuellen Werten neu erzeugt.\n\nMöchten Sie den "
-            "Kühlturm trotzdem generieren und exportieren?"
-        )
-        yes_button = box.addButton("Ja", QMessageBox.ButtonRole.AcceptRole)
-        preview_button = box.addButton(
-            "Vorschau aktualisieren", QMessageBox.ButtonRole.ActionRole
-        )
-        no_button = box.addButton("Nein", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(no_button)
-        box.setEscapeButton(no_button)
-        box._stale_yes_button = yes_button  # type: ignore[attr-defined]
-        box._stale_preview_button = preview_button  # type: ignore[attr-defined]
-        box._stale_no_button = no_button  # type: ignore[attr-defined]
-        return box
-
-    def _ask_stale_preview_action(self) -> str:
-        box = self._create_stale_preview_message_box()
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is box._stale_yes_button:  # type: ignore[attr-defined]
-            return "yes"
-        if clicked is box._stale_preview_button:  # type: ignore[attr-defined]
-            return "preview"
-        return "no"
 
     def _on_export_progress(
         self,
@@ -11942,11 +11833,8 @@ class MainWindow(QMainWindow):
             return
         status = german_user_message(status)
         self._set_main_status(status, icon="⏳", state="running")
-        if "präzisionsslice" in status.casefold():
-            self.progress_bar.setRange(0, 0)
-        else:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(max(0, min(100, percent)))
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_bar.show()
 
     def _on_export_succeeded(
@@ -11981,34 +11869,10 @@ class MainWindow(QMainWindow):
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
         self.open_run_button.setEnabled(True)
-        self._bambu_multinozzle_tower_only_export_active = bool(
-            getattr(result, "emergency_fallback_used", False)
-        )
-        if self._bambu_multinozzle_tower_only_export_active:
-            fallback_cause = _concise_operation_failure_reason(
-                getattr(result, "primary_failure_reason", "")
-            )
-            self.warning_text.setPlainText(
-                _format_footer_notice([
-                    "Gemeinsamer Bambu-Slice fehlgeschlagen: "
-                    f"{fallback_cause}",
-                    "Der geprüfte Kühlturm wurde deshalb als STL exportiert; "
-                    "bitte Objekt und Kühlturm in Bambu Studio gemeinsam slicen.",
-                ])
-            )
-            self.warning_text.show()
-        elif result.slicer_optimized and not result.calibrated:
-            self.warning_text.setPlainText(
-                _format_footer_notice([
-                    "Die Sliceroptimierung hat die Zielzeit nicht vollständig "
-                    "erreicht.",
-                    "Der beste gültige Zwischenstand wurde exportiert.",
-                ])
-            )
-            self.warning_text.show()
-        self._refresh_issue_panels()
+        self._clear_result_notices()
         self._save_user_settings()
         self._bambu_multinozzle_tower_only_export_active = False
+        self._show_export_success_dialog(result)
 
     def _on_export_failed(
         self,
@@ -12031,6 +11895,13 @@ class MainWindow(QMainWindow):
         self.result_label.setText(german_user_message(message))
         self._bambu_multinozzle_tower_only_export_active = False
         self._refresh_phase17_actions()
+
+    def _on_export_finished(self, request_id: int) -> None:
+        if request_id != self._export_request_id or self._closing:
+            return
+        self.drop_zone.remove_button.setEnabled(True)
+        for delay_ms in (0, 50):
+            QTimer.singleShot(delay_ms, self._refresh_phase17_actions)
 
     def _write_gui_error_log(
         self,
@@ -12145,32 +12016,17 @@ class MainWindow(QMainWindow):
             "Letzter Export" if compact else "Letzten Export öffnen"
         )
         self.reset_button.setText("Standardwerte wiederherstellen")
-        preview_is_repeat = self.preview_state in {
-            PreviewState.CURRENT,
-            PreviewState.STALE,
-        } or (
-            self.preview_state is PreviewState.BUILDING
-            and self.current_preview is not None
-        )
         if self.preview_state is PreviewState.BUILDING:
-            self.preview_button.setText("Vorschau wird erstellt...")
-            if self._preview_dialog is not None:
-                self._preview_dialog.update_button.setText(
-                    "Vorschau wird erstellt..."
-                )
-        else:
             self.preview_button.setText(
-                ("Aktualisieren" if preview_is_repeat else "Vorschau")
-                if compact
-                else (
-                    "Vorschau aktualisieren"
-                    if preview_is_repeat
-                    else "Vorschau erstellen"
-                )
+                "Abbruch wird ausgeführt …"
+                if self._preview_cancel_requested
+                else "Generierung abbrechen"
             )
-        self.export_button.setText(
-            "Exportieren" if compact else "Kühlturm exportieren"
-        )
+        elif self.current_preview is not None:
+            self.preview_button.setText("Kühlturm aktualisieren")
+        else:
+            self.preview_button.setText("Kühlturm generieren")
+        self.export_button.setText("Kühlturm exportieren")
         self._fit_export_button_width()
 
     def _fit_export_button_width(self) -> None:
@@ -12219,8 +12075,6 @@ class MainWindow(QMainWindow):
     def _has_non_default_settings(self) -> bool:
         if self.collect_settings() != self.settings_store.load_defaults():
             return True
-        if self.preview_iterations != DEFAULT_PREVIEW_ITERATIONS:
-            return True
         try:
             selected_output = Path(
                 self.output_root_edit.text()
@@ -12256,10 +12110,6 @@ class MainWindow(QMainWindow):
 
     def reset_defaults(self) -> None:
         self.apply_settings(self.settings_store.load_defaults())
-        self._set_preview_iterations(
-            DEFAULT_PREVIEW_ITERATIONS,
-            invalidate=False,
-        )
         self.output_root_edit.setText(
             str(self.settings_store.load_default_output_root())
         )
@@ -12329,6 +12179,8 @@ class MainWindow(QMainWindow):
             self._additional_options_dialog.close()
         if self._about_dialog is not None:
             self._about_dialog.close()
+        if self._export_success_dialog is not None:
+            self._export_success_dialog.close()
         if self._support_report_dialog is not None:
             self._support_report_dialog.close()
         self._hint_controller.dispose()

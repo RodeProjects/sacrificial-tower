@@ -271,14 +271,15 @@ class PreviewService:
         seed_profile = None
         seed_stl_path = None
         if seed_preview is not None:
-            expected_seed_signature = request.signature_for_joint_slice(False)
+            expected_seed_signature = request.refinement_seed_signature()
             seed_calibration = getattr(seed_preview, "calibration", None)
             if (
                 request.output_mode is not OutputMode.STL
                 or not request.calibration_config.perform_joint_final_slice
                 or request.source_artifact is None
                 or request.source_artifact.source_kind.value != "stl"
-                or seed_preview.request_signature != expected_seed_signature
+                or seed_preview.refinement_seed_signature
+                != expected_seed_signature
                 or seed_preview.output_mode is not request.output_mode
                 or seed_calibration is None
                 or getattr(seed_calibration, "profile", None) is None
@@ -287,8 +288,8 @@ class PreviewService:
                 != seed_preview.artifact_sha256
             ):
                 raise PreviewBuildError(
-                    "Der schnelle Vorschaukandidat kann für den Präzisionsexport "
-                    "nicht sicher wiederverwendet werden."
+                    "Der vorhandene Geometriekandidat kann für die fortgesetzte "
+                    "Kalibrierung nicht sicher wiederverwendet werden."
                 )
             seed_profile = seed_calibration.profile
             seed_stl_path = seed_preview.artifact_path
@@ -397,9 +398,9 @@ class PreviewService:
                         )
                     else:
                         generation_kind = (
-                            "schnell slicerbasiert angenähert"
+                            "getrennt slicerbasiert kalibriert"
                             if calibration.success
-                            else "schnell optimierter Vorschau-Zwischenstand"
+                            else "getrennt optimierter Slicer-Zwischenstand"
                         )
                     warnings.extend(calibration.warnings)
                     artifact = (
@@ -411,10 +412,10 @@ class PreviewService:
                         warnings.append(
                             "Die Ziel-Layerzeit wurde nicht vollständig erreicht; "
                             + (
-                                "exportiert wird der einmal gemeinsam geslicte, "
+                                "verwendet wird der gemeinsam geslicte, "
                                 "prüfbare Zwischenstand."
                                 if joint_sliced
-                                else "exportiert wird der messbar beste "
+                                else "verwendet wird der messbar beste "
                                 "Slicer-Zwischenstand."
                             )
                         )
@@ -498,6 +499,9 @@ class PreviewService:
                 )
             result = PreviewResult(
                 request_signature=signature,
+                refinement_seed_signature=(
+                    request.refinement_seed_signature()
+                ),
                 output_mode=request.output_mode,
                 scene=PreviewScene(
                     object_segments=object_segments,
@@ -511,6 +515,15 @@ class PreviewService:
                     displayed_segment_count=len(object_segments),
                     tower_height_mm=tower_height,
                     notes=tuple(warnings),
+                    object_height_mm=float(
+                        getattr(request.snapshot, "maximum_print_z_mm")
+                    ),
+                    object_layer_count=int(
+                        getattr(request.snapshot, "layer_count")
+                    ),
+                    tower_layer_count=len(
+                        tuple(getattr(profile, "layers", ()))
+                    ),
                 ),
                 artifact_path=artifact.resolve(),
                 source_sha256=final_sha256,

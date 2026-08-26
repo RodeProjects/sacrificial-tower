@@ -1,9 +1,9 @@
 {
-  "settings_schema_version": 9,
+  "settings_schema_version": 10,
   "default_output_root": "output",
   "automatic_base_width": true,
   "base_height_factor": 0.05,
-  "base_height_mm": 4.0,
+  "base_height_mm": 1.0,
   "base_margin_mm": 2.0,
   "local_reference_window": 5,
   "manual_base_width_mm": 20.0,

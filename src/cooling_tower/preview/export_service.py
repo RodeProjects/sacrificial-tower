@@ -160,4 +160,8 @@ class PreviewExportService:
                 project_output_path.resolve()
                 if project_output_path is not None else None
             ),
+            target_layer_time_s=preview.target_layer_time_s,
+            calibration_time_tolerance_s=(
+                preview.calibration_time_tolerance_s
+            ),
         )

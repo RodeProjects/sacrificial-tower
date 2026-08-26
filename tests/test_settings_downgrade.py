@@ -33,7 +33,7 @@ def current_payload(**generation_changes: object) -> dict[str, object]:
         "settings_schema_version": SETTINGS_SCHEMA_VERSION,
         "generation": generation,
         "output_root": "output",
-        "preview_iterations": 3,
+        "preview_iterations": 4,
         "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
     }
 

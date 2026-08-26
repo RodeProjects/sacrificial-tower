@@ -54,18 +54,24 @@ class UiRedesignTests(unittest.TestCase):
         self.assertTrue(window.progress_bar.isHidden())
         window.close()
 
-    def test_02_stl_and_preview_iteration_explanations_are_compact(self) -> None:
+    def test_02_stl_and_fixed_generation_budget_are_compact(self) -> None:
         window = self.window()
         self.assertEqual(
             window.stl_mode_description.text(),
             "STL-Dateien bleiben allgemein anpassbar.",
         )
         self.assertFalse(hasattr(window, "preview_quality_label"))
-        self.assertEqual(window.preview_faster_label.text(), "Schneller")
-        self.assertEqual(window.preview_precise_label.text(), "Präziser")
-        self.assertEqual(window.preview_iteration_count_label.text(), "3 Durchläufe")
-        self.assertTrue(window.preview_iteration_slider.toolTip())
-        self.assertIn("endgültige Layerzeit", window.layer_time_check_hint.text())
+        self.assertFalse(hasattr(window, "preview_fast_button"))
+        self.assertFalse(hasattr(window, "preview_precise_button"))
+        self.assertEqual(window._calibration_config().maximum_iterations, 12)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 2)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 6)
+        self.assertFalse(hasattr(window, "layer_time_check_hint"))
+        _ = window.export_success_dialog
+        self.assertIn(
+            "Nachträgliche Änderungen",
+            window.export_success_check_hint.text(),
+        )
         window.close()
 
     def test_03_hundreds_of_layer_issues_become_one_actionable_summary(self) -> None:

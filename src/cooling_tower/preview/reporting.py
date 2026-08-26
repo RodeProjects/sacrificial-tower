@@ -563,14 +563,14 @@ def build_user_report(
                 (
                     "Ergebnis: Erfolgreich gemeinsam slicerbasiert kalibriert."
                     if preview.joint_sliced
-                    else "Ergebnis: Erfolgreich schnell slicerbasiert angenähert."
+                    else "Ergebnis: Erfolgreich slicerbasiert kalibriert."
                 ),
                 (
                     "Objekt und Kühlturm wurden im abschließenden "
-                    "Präzisionsslice gemeinsam geprüft."
+                    "Generierungslauf gemeinsam geprüft."
                     if preview.joint_sliced
-                    else "Der Kühlturm wurde separat schnell geprüft; der "
-                    "gemeinsame Präzisionsslice folgt beim Export."
+                    else "Für diese Konfiguration war nur eine getrennte "
+                    "Slicer-Prüfung verfügbar."
                 ),
             )
         )
@@ -604,22 +604,18 @@ def build_user_report(
         configured = diagnostics["configured_iteration_count"]
         if preview.joint_sliced:
             lines.append(
-                "Gemeinsame Präzisionsslices im Exportlauf: "
-                f"{diagnostics['joint_slice_count']} (höchstens zwei)."
+                "Gemeinsame Slices im Generierungslauf: "
+                f"{diagnostics['joint_slice_count']} (höchstens "
+                f"{request.calibration_config.maximum_joint_slices})."
             )
             if diagnostics["fast_iteration_count"]:
                 lines.append(
-                    "Schnelle Kühlturm-Abgleiche im Exportlauf: "
+                    "Getrennte Kühlturm-Slices im Generierungslauf: "
                     f"{diagnostics['fast_iteration_count']}."
-                )
-            else:
-                lines.append(
-                    "Der bereits berechnete schnelle Vorschaukandidat wurde "
-                    "wiederverwendet."
                 )
         else:
             lines.append(
-                f"Durchgeführte schnelle Slicer-Abgleiche: {completed} von "
+                f"Durchgeführte getrennte Slicer-Abgleiche: {completed} von "
                 f"maximal {configured}."
             )
         best_iteration = diagnostics["best_iteration_number"]
@@ -641,11 +637,10 @@ def build_user_report(
                 f"{result_change:.3f} s."
             )
         lines.append(
-            "Das gemeinsame 3MF bewahrt die beim Präzisionsslice verwendete "
+            "Das gemeinsame 3MF bewahrt die beim Generierungslauf verwendete "
             "Anordnung und die objektspezifischen Turmeinstellungen."
             if preview.joint_sliced
-            else "Die endgültige gemeinsame Layerzeit wird erst beim Export "
-            "präzisionsgeprüft."
+            else "Die geprüfte Turmgeometrie wird unverändert exportiert."
         )
     elif preview.slicer_optimized:
         lines.extend(
@@ -669,12 +664,13 @@ def build_user_report(
                 "",
                 "Kalibrierungsergebnis:",
                 (
-                    "- Gemeinsame Präzisionsslices: "
-                    f"{diagnostics['joint_slice_count']} (höchstens zwei)"
+                    "- Gemeinsame Slices: "
+                    f"{diagnostics['joint_slice_count']} (höchstens "
+                    f"{request.calibration_config.maximum_joint_slices})"
                     if preview.joint_sliced
                     else f"- Durchgeführt: {diagnostics['iteration_count']} "
                     f"von maximal {diagnostics['configured_iteration_count']} "
-                    "schnelle Slicer-Abgleiche"
+                    "getrennte Slicer-Abgleiche"
                 ),
                 f"- Exportierter bester Durchlauf: "
                 f"{diagnostics['best_iteration_number']}",

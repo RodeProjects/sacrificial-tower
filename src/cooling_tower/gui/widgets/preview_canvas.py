@@ -4,10 +4,20 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import chain
+from pathlib import Path
 
-from PySide6.QtCore import QLineF, QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QLineF, QPoint, QPointF, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+    QResizeEvent,
+    QWheelEvent,
+)
+from PySide6.QtWidgets import QLabel, QToolButton, QWidget
 
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene
 
@@ -46,6 +56,7 @@ class PreviewCanvas(QWidget):
     """Small software-rendered 3D view without an external OpenGL runtime."""
 
     camera_changed = Signal(object)
+    navigation_enabled_changed = Signal(bool)
     BED_COLOR = "#667080"
     OBJECT_COLOR = "#67b7c7"
     TOWER_COLOR = "#ff9e4f"
@@ -54,6 +65,7 @@ class PreviewCanvas(QWidget):
     # Ein Mausradschritt Abstand: gleicher Faktor wie die interaktive
     # Radsteuerung, sowohl initial als auch über „Seitenansicht“.
     SIDE_VIEW_ZOOM = 1.0 / 1.15
+    RESIZE_RENDER_DELAY_MS = 180
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -68,8 +80,38 @@ class PreviewCanvas(QWidget):
         self.pan_y = 0.0
         self._last_mouse: QPoint | None = None
         self._drag_button = Qt.MouseButton.NoButton
+        self._navigation_enabled = False
         self._fit_whole_bed = False
         self._prepared_frame: _PreparedLineFrame | None = None
+        self._rendered_frame: QPixmap | None = None
+        self._rendered_frame_key: tuple[object, ...] | None = None
+        self._resize_render_timer = QTimer(self)
+        self._resize_render_timer.setSingleShot(True)
+        self._resize_render_timer.setInterval(self.RESIZE_RENDER_DELAY_MS)
+        self._resize_render_timer.timeout.connect(self._finish_deferred_resize)
+
+        asset_root = Path(__file__).resolve().parents[1] / "assets"
+        self.navigation_toggle = QToolButton(self)
+        self.navigation_toggle.setObjectName("previewNavigationToggle")
+        self.navigation_toggle.setCheckable(True)
+        self.navigation_toggle.setAutoRaise(False)
+        self.navigation_toggle.setFixedSize(34, 34)
+        self.navigation_toggle.setIconSize(QSize(20, 20))
+        self.navigation_toggle.setIcon(
+            QIcon(str(asset_root / "preview_navigation_locked.svg"))
+        )
+        self.navigation_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.navigation_toggle.toggled.connect(self.set_navigation_enabled)
+        self.navigation_toggle.hide()
+        self.navigation_status_label = QLabel(self)
+        self.navigation_status_label.setObjectName("previewNavigationStatus")
+        self.navigation_status_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self.navigation_status_label.setMinimumHeight(30)
+        self.navigation_status_label.hide()
+        self.set_navigation_enabled(False)
 
     def set_scene(
         self,
@@ -77,11 +119,95 @@ class PreviewCanvas(QWidget):
         *,
         preserve_view: bool = False,
     ) -> None:
+        # Every newly rendered preview starts protected against accidental
+        # scrolling, panning or rotation in the surrounding page.
+        self.set_navigation_enabled(False)
         self.scene = scene
         self._prepared_frame = None
+        self._invalidate_rendered_frame()
         if not preserve_view:
             self.fit_objects(emit=False)
+        has_scene = scene is not None
+        self.navigation_toggle.setVisible(has_scene)
+        self.navigation_status_label.setVisible(has_scene)
+        self._position_navigation_toggle()
+        self.navigation_toggle.raise_()
+        self.navigation_status_label.raise_()
         self.update()
+
+    @property
+    def navigation_enabled(self) -> bool:
+        return self._navigation_enabled
+
+    def set_navigation_enabled(self, enabled: bool) -> None:
+        """Enable deliberate mouse navigation while keeping page scrolling safe."""
+
+        enabled = bool(enabled)
+        changed = enabled != self._navigation_enabled
+        self._navigation_enabled = enabled
+        if self.navigation_toggle.isChecked() != enabled:
+            self.navigation_toggle.blockSignals(True)
+            self.navigation_toggle.setChecked(enabled)
+            self.navigation_toggle.blockSignals(False)
+
+        asset_root = Path(__file__).resolve().parents[1] / "assets"
+        icon_name = (
+            "preview_navigation_enabled.svg"
+            if enabled
+            else "preview_navigation_locked.svg"
+        )
+        self.navigation_toggle.setIcon(QIcon(str(asset_root / icon_name)))
+        self.navigation_toggle.setProperty("navigationEnabled", enabled)
+        if enabled:
+            hint = (
+                "Navigation aktiviert – ziehen zum Drehen oder Verschieben, "
+                "Mausrad zum Zoomen. Klicken zum Deaktivieren."
+            )
+            accessible_name = "Vorschau-Navigation deaktivieren"
+            status_text = "Navigation aktiviert"
+            status_state = "enabled"
+        else:
+            hint = (
+                "Navigation deaktiviert – die Vorschau reagiert nicht auf "
+                "Ziehen oder Scrollen. Klicken zum Aktivieren."
+            )
+            accessible_name = "Vorschau-Navigation aktivieren"
+            status_text = "Navigation deaktiviert"
+            status_state = "disabled"
+        self.navigation_toggle.setToolTip(hint)
+        self.navigation_toggle.setAccessibleName(accessible_name)
+        self.navigation_toggle.setAccessibleDescription(hint)
+        self.navigation_status_label.setText(status_text)
+        self.navigation_status_label.setProperty("state", status_state)
+        style = self.navigation_toggle.style()
+        style.unpolish(self.navigation_toggle)
+        style.polish(self.navigation_toggle)
+        status_style = self.navigation_status_label.style()
+        status_style.unpolish(self.navigation_status_label)
+        status_style.polish(self.navigation_status_label)
+        self.navigation_status_label.adjustSize()
+        self._position_navigation_toggle()
+        if not enabled:
+            self._last_mouse = None
+            self._drag_button = Qt.MouseButton.NoButton
+        if changed:
+            self.navigation_enabled_changed.emit(enabled)
+
+    def _position_navigation_toggle(self) -> None:
+        margin = 10
+        self.navigation_toggle.move(margin, margin)
+        self.navigation_status_label.move(
+            self.navigation_toggle.geometry().right() + 7,
+            margin
+            + max(
+                0,
+                (
+                    self.navigation_toggle.height()
+                    - self.navigation_status_label.height()
+                )
+                // 2,
+            ),
+        )
 
     def camera_state(self) -> dict[str, float]:
         return {
@@ -110,9 +236,15 @@ class PreviewCanvas(QWidget):
         self.zoom = max(0.05, min(50.0, zoom))
         self.pan_x = pan_x
         self.pan_y = pan_y
+        self._invalidate_rendered_frame()
         self.update()
 
     def reset_camera(self) -> None:
+        self.three_quarter_view()
+
+    def three_quarter_view(self) -> None:
+        """Show the objects in the default perspective inspection view."""
+
         self.yaw_deg = -38.0
         self.pitch_deg = 28.0
         self.fit_objects(emit=False)
@@ -313,8 +445,21 @@ class PreviewCanvas(QWidget):
         self._emit_camera()
 
     def _emit_camera(self) -> None:
+        self._invalidate_rendered_frame()
         self.update()
         self.camera_changed.emit(self.camera_state())
+
+    def _invalidate_rendered_frame(self) -> None:
+        self._resize_render_timer.stop()
+        self._rendered_frame = None
+        self._rendered_frame_key = None
+
+    def _finish_deferred_resize(self) -> None:
+        """Reproject the scene once after continuous widget resizing ends."""
+
+        self._rendered_frame = None
+        self._rendered_frame_key = None
+        self.update()
 
     def _projection_context(self) -> _ProjectionContext:
         scene = self.scene
@@ -530,34 +675,68 @@ class PreviewCanvas(QWidget):
                 "Noch keine Vorschau erstellt",
             )
             return
-        prepared = self._prepare_line_frame()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(self.BED_COLOR), 1.3))
-        self._draw_line_blocks(painter, prepared.bed_blocks)
 
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setPen(QPen(QColor(self.OBJECT_COLOR), 1.0))
-        self._draw_line_blocks(painter, prepared.object_blocks)
+        current_key = self._frame_key(scene)
+        if (
+            self._rendered_frame is not None
+            and self._rendered_frame_key is not None
+            and self._rendered_frame_key[0] == current_key[0]
+            and self._rendered_frame_key[3:] == current_key[3:]
+            and (
+                self._rendered_frame_key == current_key
+                or self._resize_render_timer.isActive()
+            )
+        ):
+            painter.drawPixmap(self.rect(), self._rendered_frame)
+            return
 
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(self.TOWER_COLOR), 1.5))
-        self._draw_line_blocks(painter, prepared.tower_blocks)
-        painter.setPen(QColor("#d9e0ea"))
-        painter.drawText(
-            12,
-            22,
-            f"Objekt: {scene.displayed_segment_count:,} / "
-            f"{scene.source_segment_count:,} Segmente · "
-            f"Turmhöhe: {scene.tower_height_mm:.2f} mm",
+        pixel_ratio = max(1.0, self.devicePixelRatioF())
+        frame = QPixmap(
+            max(1, round(self.width() * pixel_ratio)),
+            max(1, round(self.height() * pixel_ratio)),
         )
+        frame.setDevicePixelRatio(pixel_ratio)
+        frame.fill(QColor("#171a20"))
+        frame_painter = QPainter(frame)
+        prepared = self._prepare_line_frame()
+        frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        frame_painter.setPen(QPen(QColor(self.BED_COLOR), 1.3))
+        self._draw_line_blocks(frame_painter, prepared.bed_blocks)
+
+        frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        frame_painter.setPen(QPen(QColor(self.OBJECT_COLOR), 1.0))
+        self._draw_line_blocks(frame_painter, prepared.object_blocks)
+
+        frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        frame_painter.setPen(QPen(QColor(self.TOWER_COLOR), 1.5))
+        self._draw_line_blocks(frame_painter, prepared.tower_blocks)
+        frame_painter.end()
+        self._rendered_frame = frame
+        self._rendered_frame_key = current_key
+        painter.drawPixmap(0, 0, frame)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_navigation_toggle()
+        self.navigation_toggle.raise_()
+        self.navigation_status_label.raise_()
+        if self.scene is not None and self._rendered_frame is not None:
+            self._resize_render_timer.start()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._navigation_enabled:
+            event.ignore()
+            return
         self._last_mouse = event.position().toPoint()
         self._drag_button = event.button()
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._navigation_enabled:
+            event.ignore()
+            return
         if self._last_mouse is None:
+            event.ignore()
             return
         current = event.position().toPoint()
         delta = current - self._last_mouse
@@ -575,11 +754,17 @@ class PreviewCanvas(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._navigation_enabled:
+            event.ignore()
+            return
         self._last_mouse = None
         self._drag_button = Qt.MouseButton.NoButton
         event.accept()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        if not self._navigation_enabled:
+            event.ignore()
+            return
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
         self.zoom = max(0.05, min(50.0, self.zoom * factor))
         self._emit_camera()

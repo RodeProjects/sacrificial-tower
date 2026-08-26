@@ -16,6 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QLineF, QPoint
 from PySide6.QtGui import QImage, QPainter
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui.widgets import PreviewCanvas
@@ -104,6 +105,27 @@ class PreviewLineBatchingTests(unittest.TestCase):
         canvas.set_scene(make_scene(offset=3.0))
         replaced = canvas._prepare_line_frame()
         self.assertIsNot(replaced, resized)
+        canvas.close()
+
+    def test_continuous_resize_scales_cached_frame_then_reprojects_once(self) -> None:
+        canvas = PreviewCanvas()
+        canvas.resize(640, 480)
+        canvas.set_scene(make_scene(object_count=2_000, tower_count=500))
+        canvas.show()
+        self.app.processEvents()
+        self.assertIsNotNone(canvas._rendered_frame)
+        prepared = canvas._prepared_frame
+
+        canvas.resize(760, 520)
+        self.app.processEvents()
+
+        self.assertTrue(canvas._resize_render_timer.isActive())
+        self.assertIs(canvas._prepared_frame, prepared)
+        QTest.qWait(canvas.RESIZE_RENDER_DELAY_MS + 30)
+        self.app.processEvents()
+        self.assertFalse(canvas._resize_render_timer.isActive())
+        canvas.repaint()
+        self.assertIsNot(canvas._prepared_frame, prepared)
         canvas.close()
 
     def test_object_sampling_limit_preserves_the_existing_stride_contract(

@@ -46,9 +46,10 @@ _OBSOLETE_HOLLOW_FIELDS = {
 _GENERATION_DEFAULTS = GenerationSettings().to_dict()
 _PREVIEW_QUALITIES = {"fast", "balanced", "exact"}
 _LEGACY_PREVIEW_ITERATIONS = {"fast": 1, "balanced": 3, "exact": 5}
-_DEFAULT_PREVIEW_ITERATIONS = 3
-_MINIMUM_PREVIEW_ITERATIONS = 1
+_DEFAULT_PREVIEW_ITERATIONS = 4
+_MINIMUM_PREVIEW_ITERATIONS = 4
 _MAXIMUM_PREVIEW_ITERATIONS = 8
+_PRECISE_PREVIEW_THRESHOLD = 5
 _WINDOW_SIZE_KEYS = {"width", "height"}
 _WINDOW_POSITION_KEYS = {"x", "y"}
 _CAMERA_KEYS = {"yaw_deg", "pitch_deg", "zoom", "pan_x", "pan_y"}
@@ -227,6 +228,25 @@ def _migrate_settings_8_to_9(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_9_to_10(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the historical preview-pass setting."""
+
+    migrated = dict(payload)
+    try:
+        iterations = int(
+            migrated.get("preview_iterations", _DEFAULT_PREVIEW_ITERATIONS)
+        )
+    except (TypeError, ValueError):
+        iterations = _DEFAULT_PREVIEW_ITERATIONS
+    migrated["preview_iterations"] = (
+        _MAXIMUM_PREVIEW_ITERATIONS
+        if iterations >= _PRECISE_PREVIEW_THRESHOLD
+        else _DEFAULT_PREVIEW_ITERATIONS
+    )
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -263,11 +283,19 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
         iterations = int(nested.get("preview_iterations", 0))
     except (TypeError, ValueError):
         iterations = 0
-    if not _MINIMUM_PREVIEW_ITERATIONS <= iterations <= _MAXIMUM_PREVIEW_ITERATIONS:
+    if iterations not in {
+        _DEFAULT_PREVIEW_ITERATIONS,
+        _MAXIMUM_PREVIEW_ITERATIONS,
+    }:
         quality = str(nested.get("preview_quality", "")).casefold()
         iterations = _LEGACY_PREVIEW_ITERATIONS.get(
             quality,
             _DEFAULT_PREVIEW_ITERATIONS,
+        )
+        iterations = (
+            _MAXIMUM_PREVIEW_ITERATIONS
+            if iterations >= _PRECISE_PREVIEW_THRESHOLD
+            else _DEFAULT_PREVIEW_ITERATIONS
         )
     normalized["preview_iterations"] = iterations
 
@@ -309,6 +337,7 @@ _USER_SETTINGS_MIGRATIONS = {
     6: _migrate_settings_6_to_7,
     7: _migrate_settings_7_to_8,
     8: _migrate_settings_8_to_9,
+    9: _migrate_settings_9_to_10,
 }
 
 
@@ -492,9 +521,10 @@ class UserSettingsStore:
             "generation": generation.to_dict(),
             "output_root": output_root,
             "window": window,
-            "preview_iterations": min(
-                _MAXIMUM_PREVIEW_ITERATIONS,
-                max(_MINIMUM_PREVIEW_ITERATIONS, int(preview_iterations)),
+            "preview_iterations": (
+                _MAXIMUM_PREVIEW_ITERATIONS
+                if int(preview_iterations) >= _PRECISE_PREVIEW_THRESHOLD
+                else _DEFAULT_PREVIEW_ITERATIONS
             ),
             "preview_camera": dict(preview_camera or {}),
             "expanded_sections": {

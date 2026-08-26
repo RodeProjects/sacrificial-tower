@@ -8,6 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -338,6 +339,57 @@ class StartupPreparationProgressTests(unittest.TestCase):
             )
             self.assertFalse(window.profile_confirm_button.isEnabled())
             self.assertIsNone(window.profile_catalog_confirmation)
+            self.assertEqual(profile_service.prefer_active_presets, [False])
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_first_incomplete_step_two_entry_retries_detection_only_once(self) -> None:
+        discovery = SlicerDiscoveryResult(
+            installations=(self.installation,),
+            recommended_key=self.installation.identity_key,
+            gui_state=SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
+            message="Slicer gefunden",
+        )
+        window = MainWindow(
+            user_settings_path=self.root / "entry-retry-settings.json",
+            slicer_service=StartupSlicerService(discovery),
+            profile_service=StartupProfileService(self.catalog),
+            enable_update_check=False,
+            enable_startup_slicer_discovery=False,
+        )
+        source = self.root / "entry-retry.stl"
+        source.write_text("solid x\nendsolid x\n", encoding="ascii")
+
+        def make_source_ready() -> None:
+            window.current_source_path = source.resolve()
+            window.current_source_kind = SourceKind.STL
+            window.source_artifact = SimpleNamespace(
+                original_path=source.resolve(),
+                matches_current_file=lambda: True,
+            )
+            window.stl_validation_result = SimpleNamespace(valid=True)
+
+        try:
+            self.assertEqual(
+                window.slicer_refresh_button.text(),
+                "Slicer und Profile erneut erkennen",
+            )
+            make_source_ready()
+            window._startup_slicer_discovery_enabled = True
+            with patch.object(window, "start_slicer_discovery") as discovery_retry:
+                window.preparation_tabs.setCurrentIndex(1)
+                discovery_retry.assert_called_once_with(force=True)
+
+                window.preparation_tabs.setCurrentIndex(0)
+                window.current_source_path = None
+                window.current_source_kind = None
+                window.source_artifact = None
+                window.stl_validation_result = None
+                make_source_ready()
+                window.preparation_tabs.setCurrentIndex(1)
+                discovery_retry.assert_called_once_with(force=True)
         finally:
             window.close()
             window.deleteLater()
