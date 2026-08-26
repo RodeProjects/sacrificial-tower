@@ -5865,6 +5865,15 @@ class MainWindow(QMainWindow):
             "state", "available" if catalog.complete else "error"
         )
         self._refresh_widget_style(self.profile_filter_label)
+        should_match_source = bool(
+            catalog.complete
+            and (
+                match_source_after_loading
+                or self._catalog_selection_is_confirmed()
+            )
+            and self._profile_matching_context() is not None
+            and self._profile_confirmation_inputs_ready()
+        )
         if not catalog.complete:
             self.profile_catalog_confirmation = None
             self._set_profile_notice(
@@ -5877,6 +5886,19 @@ class MainWindow(QMainWindow):
             self.workflow.required_slicer_unavailable(
                 "Slicer-Profile sind unvollständig"
             )
+        elif should_match_source:
+            # The catalogue worker still owns the shared profile job until its
+            # native thread has ended. start_profile_matching() therefore
+            # queues the source match. Keep the workflow continuously busy so
+            # neither the UI nor tests can observe a false confirmation-ready
+            # gap before that queued match starts.
+            self._set_profile_notice()
+            self.profile_confirm_button.setText(
+                "Slicer und Profile bestätigen"
+            )
+            self.profile_confirm_button.setEnabled(False)
+            self.profile_confirm_button.show()
+            self.workflow.begin_profile_matching()
         elif self._catalog_selection_is_confirmed():
             self._set_profile_notice()
             self.profile_confirm_button.setEnabled(False)
@@ -5891,21 +5913,18 @@ class MainWindow(QMainWindow):
             self.profile_confirm_button.show()
             self.workflow.wait_for_profile_confirmation()
         self._set_slicer_progress(
-            100,
-            "Slicer und Profile geladen",
-            icon="✓",
-            state="success",
+            70 if should_match_source else 100,
+            (
+                "Slicer und Profile geladen · Quelle wird geprüft …"
+                if should_match_source
+                else "Slicer und Profile geladen"
+            ),
+            icon="⌛" if should_match_source else "✓",
+            state="running" if should_match_source else "success",
         )
         self._refresh_slicer_header_profiles()
         self._update_preparation_requirements()
-        if (
-            (
-                match_source_after_loading
-                or self._catalog_selection_is_confirmed()
-            )
-            and self._profile_matching_context() is not None
-            and self._profile_confirmation_inputs_ready()
-        ):
+        if should_match_source:
             # Matching may prepare a proposal, but cannot confirm it or start
             # a Pre-Slice.  Running it against the freshly installed catalogue
             # keeps the confirmation action immediate without ever mixing the

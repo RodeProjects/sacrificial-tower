@@ -792,10 +792,12 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertIsNotNone(window.prepared_analysis_source)
 
             self.adapter.slice_started.clear()
+            profile_stage_events: list[str] = []
+            window.workflow.stage_changed.connect(profile_stage_events.append)
             window.show_all_profiles_checkbox.setChecked(
                 not window.show_all_profiles_checkbox.isChecked()
             )
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + 60
             while (
                 (
                     window.workflow.stage is WorkflowStage.MATCHING_PROFILES
@@ -808,6 +810,22 @@ class StlProfileMatchingTests(unittest.TestCase):
                 app.processEvents()
                 QTest.qWait(10)
             app.processEvents()
+            self.assertIsNone(window._pending_profile_match)
+            self.assertFalse(
+                window.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+            )
+            distinct_profile_stages = [
+                stage
+                for index, stage in enumerate(profile_stage_events)
+                if index == 0 or stage != profile_stage_events[index - 1]
+            ]
+            self.assertEqual(
+                distinct_profile_stages,
+                [
+                    WorkflowStage.MATCHING_PROFILES.value,
+                    WorkflowStage.WAITING_FOR_PROFILE_CONFIRMATION.value,
+                ],
+            )
             self.assertFalse(self.adapter.slice_started.is_set())
             self.assertIsNone(window.confirmed_profile_context)
             self.assertIsNone(window.source_preslice_result)
