@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, fields, replace
@@ -101,12 +102,12 @@ class ExactGCodeBlockCache:
         boundary_mask = self.average_lines - 1
         for parsed_line in parsed_lines:
             block.append(parsed_line)
-            # Python's string hash runs in native code and remains stable for
-            # the process lifetime. Exact equality is established separately
-            # by _CacheKey.source_lines, so this value only selects boundaries.
+            # Stable boundaries must not depend on Python's process-randomized
+            # string hash. Exact equality is established separately by
+            # _CacheKey.source_lines, so CRC32 only selects boundaries.
             fingerprint = (
                 ((fingerprint << 1) & _MASK_64)
-                ^ (hash(parsed_line.raw_text) & _MASK_64)
+                ^ zlib.crc32(parsed_line.raw_text.encode("utf-8"))
             )
             count = len(block)
             if count < self.minimum_lines:
