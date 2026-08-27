@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-build.txt
 
+      - name: Native G-Code-Analyse bauen
+        run: python setup_native.py build_ext --inplace
+
       - name: Validate requested version
         shell: pwsh
         run: |

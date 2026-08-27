@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -15,6 +15,7 @@ import numpy as np
 import trimesh
 
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.gcode.parser import ParsedGCodeLine, iter_parsed_gcode_lines
 from cooling_tower.models import OccupiedBounds, TowerPlacement
 
 
@@ -923,6 +924,119 @@ def _normalise_project_atom(value: object) -> str:
     return rendered
 
 
+@dataclass(slots=True)
+class TowerInfillEvidenceCollector:
+    """Collect full-infill evidence while the timing parser streams G-code."""
+
+    tower_center_xy_mm: tuple[float, float] | None = None
+    inside_tower: bool = False
+    tower_block_count: int = 0
+    sparse_tower_infill: bool = False
+    bambu_object_block: bool = False
+    active_label: int | None = None
+    label_bounds: dict[int, list[float]] = field(default_factory=dict)
+    sparse_labels: set[int] = field(default_factory=set)
+
+    def consume(self, parsed: ParsedGCodeLine) -> None:
+        command = parsed.command or ""
+        if command == "EXCLUDE_OBJECT_START":
+            self.bambu_object_block = False
+            self.inside_tower = "cooling_tower" in parsed.code_text.casefold()
+            if self.inside_tower:
+                self.tower_block_count += 1
+            return
+        if command == "EXCLUDE_OBJECT_END":
+            self.inside_tower = False
+            return
+
+        comment = parsed.comment
+        if not comment:
+            self._consume_label_coordinates(parsed)
+            return
+        folded = comment.casefold()
+        if folded.startswith("printing object "):
+            self.bambu_object_block = True
+            self.inside_tower = "cooling_tower" in folded
+            if self.inside_tower:
+                self.tower_block_count += 1
+            return
+        if folded.startswith("start printing object, unique label id:"):
+            identifier = folded.partition(":")[2].strip()
+            if identifier.isdigit():
+                self.active_label = int(identifier)
+                self.bambu_object_block = True
+            return
+        if folded.startswith("stop printing object"):
+            self.inside_tower = False
+            self.bambu_object_block = False
+            self.active_label = None
+            return
+
+        if folded == "type:sparse infill":
+            if self.active_label is not None:
+                self.sparse_labels.add(self.active_label)
+            if self.inside_tower:
+                self.sparse_tower_infill = True
+        elif (
+            self.inside_tower
+            and not self.bambu_object_block
+            and folded == "feature: sparse infill"
+        ):
+            # Bambu uses this feature name for a valid 100-% zig-zag fill
+            # inside its explicitly identified object blocks.
+            self.sparse_tower_infill = True
+        self._consume_label_coordinates(parsed)
+
+    def _consume_label_coordinates(self, parsed: ParsedGCodeLine) -> None:
+        if self.active_label is None:
+            return
+        parameters = parsed.parameters
+        if "X" not in parameters or "Y" not in parameters:
+            return
+        x_value = parameters["X"]
+        y_value = parameters["Y"]
+        bounds = self.label_bounds.setdefault(
+            self.active_label,
+            [x_value, x_value, y_value, y_value],
+        )
+        bounds[0] = min(bounds[0], x_value)
+        bounds[1] = max(bounds[1], x_value)
+        bounds[2] = min(bounds[2], y_value)
+        bounds[3] = max(bounds[3], y_value)
+
+    def validate(self) -> None:
+        if (
+            self.tower_block_count == 0
+            and self.tower_center_xy_mm is not None
+            and self.label_bounds
+        ):
+            center_x, center_y = self.tower_center_xy_mm
+
+            def distance_to_bounds(bounds: list[float]) -> float:
+                delta_x = max(bounds[0] - center_x, 0.0, center_x - bounds[1])
+                delta_y = max(bounds[2] - center_y, 0.0, center_y - bounds[3])
+                return math.hypot(delta_x, delta_y)
+
+            ranked = sorted(
+                (distance_to_bounds(bounds), label)
+                for label, bounds in self.label_bounds.items()
+            )
+            if len(ranked) == 1 or ranked[0][0] + 1.0 < ranked[1][0]:
+                tower_label = ranked[0][1]
+                self.tower_block_count = 1
+                self.sparse_tower_infill = tower_label in self.sparse_labels
+        if self.tower_block_count == 0:
+            raise JointProjectError(
+                "Der Slicer hat den Kühlturm im gemeinsamen G-Code nicht eindeutig "
+                "gekennzeichnet; die objektspezifische Füllung ist nicht nachweisbar."
+            )
+        if self.sparse_tower_infill:
+            raise JointProjectError(
+                "Der Slicer hat die objektspezifische 100-%-Turmfüllung nicht "
+                "übernommen und erzeugte weiterhin Sparse Infill."
+            )
+
+
 def validate_tower_infill_adoption(
     gcode_path: str | Path,
     *,
@@ -930,109 +1044,12 @@ def validate_tower_infill_adoption(
 ) -> None:
     """Verify Orca-family G-code retains a recognizable full-infill tower."""
 
-    path = Path(gcode_path).resolve(strict=True)
-    inside_tower = False
-    tower_block_count = 0
-    sparse_tower_infill = False
-    bambu_object_block = False
-    active_label: int | None = None
-    label_bounds: dict[int, list[float]] = {}
-    sparse_labels: set[int] = set()
+    collector = TowerInfillEvidenceCollector(tower_center_xy_mm)
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                folded = line.casefold()
-                if folded.startswith("exclude_object_start"):
-                    bambu_object_block = False
-                    inside_tower = "cooling_tower" in folded
-                    if inside_tower:
-                        tower_block_count += 1
-                    continue
-                if folded.startswith("exclude_object_end"):
-                    inside_tower = False
-                    continue
-                if folded.startswith("; printing object "):
-                    bambu_object_block = True
-                    inside_tower = "cooling_tower" in folded
-                    if inside_tower:
-                        tower_block_count += 1
-                    continue
-                label_match = re.match(
-                    r";\s*start printing object, unique label id:\s*(\d+)",
-                    folded,
-                )
-                if label_match:
-                    active_label = int(label_match.group(1))
-                    bambu_object_block = True
-                    continue
-                if folded.startswith("; stop printing object"):
-                    inside_tower = False
-                    bambu_object_block = False
-                    active_label = None
-                    continue
-                if active_label is not None:
-                    if folded == ";type:sparse infill":
-                        sparse_labels.add(active_label)
-                    x_match = re.search(
-                        r"(?:^|\s)X(-?\d+(?:\.\d+)?)", line, re.IGNORECASE
-                    )
-                    y_match = re.search(
-                        r"(?:^|\s)Y(-?\d+(?:\.\d+)?)", line, re.IGNORECASE
-                    )
-                    if x_match and y_match:
-                        x_value = float(x_match.group(1))
-                        y_value = float(y_match.group(1))
-                        bounds = label_bounds.setdefault(
-                            active_label,
-                            [x_value, x_value, y_value, y_value],
-                        )
-                        bounds[0] = min(bounds[0], x_value)
-                        bounds[1] = max(bounds[1], x_value)
-                        bounds[2] = min(bounds[2], y_value)
-                        bounds[3] = max(bounds[3], y_value)
-                if inside_tower and folded == ";type:sparse infill":
-                    sparse_tower_infill = True
-                    break
-                # Bambu Studio labels even a 100-% zig-zag fill as
-                # ``FEATURE: Sparse infill``.  The successful slice of the
-                # already validated object override is therefore the usable
-                # adoption evidence; treating that label like Orca's
-                # ``TYPE:Sparse infill`` would reject a genuinely solid tower.
-                if (
-                    inside_tower
-                    and not bambu_object_block
-                    and folded == "; feature: sparse infill"
-                ):
-                    sparse_tower_infill = True
-                    break
+        for parsed in iter_parsed_gcode_lines(Path(gcode_path).resolve(strict=True)):
+            collector.consume(parsed)
     except OSError as error:
         raise JointProjectError(
             "Der gemeinsame G-Code konnte nicht auf die Turmfüllung geprüft werden."
         ) from error
-    if tower_block_count == 0 and tower_center_xy_mm is not None and label_bounds:
-        center_x, center_y = tower_center_xy_mm
-
-        def distance_to_bounds(bounds: list[float]) -> float:
-            delta_x = max(bounds[0] - center_x, 0.0, center_x - bounds[1])
-            delta_y = max(bounds[2] - center_y, 0.0, center_y - bounds[3])
-            return math.hypot(delta_x, delta_y)
-
-        ranked = sorted(
-            (distance_to_bounds(bounds), label)
-            for label, bounds in label_bounds.items()
-        )
-        if len(ranked) == 1 or ranked[0][0] + 1.0 < ranked[1][0]:
-            tower_label = ranked[0][1]
-            tower_block_count = 1
-            sparse_tower_infill = tower_label in sparse_labels
-    if tower_block_count == 0:
-        raise JointProjectError(
-            "Der Slicer hat den Kühlturm im gemeinsamen G-Code nicht eindeutig "
-            "gekennzeichnet; die objektspezifische Füllung ist nicht nachweisbar."
-        )
-    if sparse_tower_infill:
-        raise JointProjectError(
-            "Der Slicer hat die objektspezifische 100-%-Turmfüllung nicht "
-            "übernommen und erzeugte weiterhin Sparse Infill."
-        )
+    collector.validate()

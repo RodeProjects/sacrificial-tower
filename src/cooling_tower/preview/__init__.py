@@ -22,9 +22,15 @@ from cooling_tower.preview.source_cache import (
     PreviewSourceDataCache,
 )
 from cooling_tower.preview.controller import PreviewBuildController, PreviewBuildState
-from cooling_tower.preview.toolpath import PreviewCancelled, extract_deposition_toolpaths
+from cooling_tower.preview.toolpath import (
+    DepositionToolpathAnalysis,
+    PreviewCancelled,
+    analyze_deposition_toolpaths,
+    extract_deposition_toolpaths,
+)
 
 __all__ = [
+    "DepositionToolpathAnalysis",
     "LineSegment3D",
     "OutputMode",
     "Point3D",
@@ -44,5 +50,6 @@ __all__ = [
     "PreviewState",
     "PREVIEW_SOURCE_CACHE_SCHEMA_VERSION",
     "StalePreviewError",
+    "analyze_deposition_toolpaths",
     "extract_deposition_toolpaths",
 ]

@@ -214,6 +214,12 @@ und verwaiste Fake-Slicer-Unterprozesse. Damit beendet ein möglicher nativer
 Qt-Abbruch nicht die übrige Testsuite und bleibt mit dem ausgegebenen Seed
 reproduzierbar.
 
+Die vollständige G-Code-Datei wird bei jeder gemeinsamen Slicer-Prüfung erneut
+gelesen. Ein begrenzter, ausschließlich flüchtiger Block-Cache darf innerhalb
+des laufenden Programms nur bitgenau gleiche Maschinenzustände und vollständig
+gleiche Quellzeilen wiederverwenden. Er speichert weder Turmkandidaten noch
+Sitzungsdaten und darf deshalb keine Kalibrierungsentscheidung ersetzen.
+
 Der Architekturtest wertet den Python-Syntaxbaum aus und erkennt auch
 aliasierte beziehungsweise qualifizierte `QThread`-Konstruktoren sowie direkte
 `deleteLater`- und `terminate`-Umgehungen. Zusätzlich verbietet er die

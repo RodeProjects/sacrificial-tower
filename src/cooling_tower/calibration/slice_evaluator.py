@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+from bisect import bisect_left
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from cooling_tower.models import LayerSliceTiming, SliceEvaluation
+from cooling_tower.calibration.joint_project import TowerInfillEvidenceCollector
 from cooling_tower.services.analysis_service import GCodeAnalysisService
 from cooling_tower.slicers import EffectiveProfile, ProfileRecord, SliceResult
 from cooling_tower.slicers.orca_profile_compatibility import (
@@ -341,12 +343,27 @@ class SliceEvaluator:
         *,
         approach_times_s: Mapping[int, tuple[float, float]] | None = None,
         metadata_tolerance_s: float = 0.75,
+        validate_tower_full_infill: bool = False,
+        tower_center_xy_mm: tuple[float, float] | None = None,
     ) -> SliceEvaluation:
         if not result.success or result.gcode_path is None:
             raise ValueError(
                 result.failure_reason or "Der Slicer hat keinen G-Code erzeugt."
             )
-        snapshot = self.analysis_service.analyze(result.gcode_path, force=True)
+        infill_evidence = (
+            TowerInfillEvidenceCollector(tower_center_xy_mm=tower_center_xy_mm)
+            if validate_tower_full_infill
+            else None
+        )
+        snapshot = self.analysis_service.analyze(
+            result.gcode_path,
+            force=True,
+            line_observer=(
+                infill_evidence.consume if infill_evidence is not None else None
+            ),
+        )
+        if infill_evidence is not None:
+            infill_evidence.validate()
         tower_layers = snapshot.layers
         if not tower_layers:
             raise ValueError(
@@ -360,12 +377,25 @@ class SliceEvaluator:
                 "die Layer wurden über ihre Z-Höhe zugeordnet."
             )
         travels = approach_times_s or {}
+        tower_z_values = tuple(layer.z_mm for layer in tower_layers)
         timings: list[LayerSliceTiming] = []
         differences: list[float] = []
         for source in source_layers:
             source_index = int(getattr(source, "index"))
             z = float(getattr(source, "z_mm", getattr(source, "z", 0.0)))
-            tower = min(tower_layers, key=lambda layer: abs(layer.z_mm - z))
+            insertion = bisect_left(tower_z_values, z)
+            if insertion <= 0:
+                tower = tower_layers[0]
+            elif insertion >= len(tower_layers):
+                tower = tower_layers[-1]
+            else:
+                before = tower_layers[insertion - 1]
+                after = tower_layers[insertion]
+                tower = (
+                    before
+                    if abs(before.z_mm - z) <= abs(after.z_mm - z)
+                    else after
+                )
             approach, return_time = travels.get(source_index, (0.0, 0.0))
             computed = tower.total_time_s + approach + return_time
             reported = None

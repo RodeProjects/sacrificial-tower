@@ -7,11 +7,13 @@ from threading import RLock
 
 from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.gcode.block_cache import ExactGCodeBlockCache
 from cooling_tower.gcode.layer_detector import LayerDetector
 from cooling_tower.gcode.metadata_parser import GCodeMetadataCollector
 from cooling_tower.gcode.parser import (
     MachineStateTracker,
     MotionTimingPlanner,
+    ParsedGCodeLine,
     iter_parsed_gcode_lines,
     validate_gcode_path,
 )
@@ -27,6 +29,7 @@ from cooling_tower.tower.profile import (
 
 AnalysisProgressCallback = Callable[[int, str], None]
 CancellationCallback = Callable[[], bool]
+ParsedLineObserver = Callable[[ParsedGCodeLine], None]
 
 
 def _uses_bambu_studio_timing(source: Path) -> bool:
@@ -80,11 +83,16 @@ class GCodeAnalysisService:
             else None
         )
         self._last_cache_hit_kind: str | None = None
+        self._exact_block_cache = ExactGCodeBlockCache()
 
     @property
     def persistent_cache_path(self) -> Path | None:
         cache = self._persistent_cache
         return cache.path if cache is not None else None
+
+    @property
+    def exact_block_cache_info(self) -> dict[str, int]:
+        return self._exact_block_cache.info()
 
     def analyze(
         self,
@@ -92,6 +100,7 @@ class GCodeAnalysisService:
         *,
         progress_callback: AnalysisProgressCallback | None = None,
         cancellation_callback: CancellationCallback | None = None,
+        line_observer: ParsedLineObserver | None = None,
         force: bool = False,
     ) -> GCodeAnalysisSnapshot:
         # One service may be called by UI and worker threads. Serializing the
@@ -102,6 +111,7 @@ class GCodeAnalysisService:
                 gcode_path,
                 progress_callback=progress_callback,
                 cancellation_callback=cancellation_callback,
+                line_observer=line_observer,
                 force=force,
             )
 
@@ -111,6 +121,7 @@ class GCodeAnalysisService:
         *,
         progress_callback: AnalysisProgressCallback | None,
         cancellation_callback: CancellationCallback | None,
+        line_observer: ParsedLineObserver | None,
         force: bool,
     ) -> GCodeAnalysisSnapshot:
         source = validate_gcode_path(gcode_path).resolve()
@@ -118,7 +129,7 @@ class GCodeAnalysisService:
         notify = progress_callback or (lambda percent, status: None)
         cancelled = cancellation_callback or (lambda: False)
 
-        if not force:
+        if not force and line_observer is None:
             cached = self._get_cached_locked(source)
             if cached is not None:
                 status = (
@@ -148,10 +159,20 @@ class GCodeAnalysisService:
 
         processed_bytes = 0
         last_reported_percent = 0
-        for parsed_line in iter_parsed_gcode_lines(source):
-            if cancelled():
+        parsed_lines = iter_parsed_gcode_lines(source)
+        for parsed_line, event in self._exact_block_cache.iter_events(
+            parsed_lines,
+            tracker,
+        ):
+            if parsed_line.number % 256 == 0 and cancelled():
                 raise AnalysisCancelled("G-Code analysis was cancelled.")
-            processed_bytes += len(parsed_line.raw_text.encode("utf-8")) + 1
+            if line_observer is not None:
+                line_observer(parsed_line)
+            # This counter is used for UI progress only. G-code is overwhelmingly
+            # ASCII, so counting decoded characters avoids allocating and encoding
+            # every one of several hundred thousand lines without affecting any
+            # timing or geometry result.
+            processed_bytes += len(parsed_line.raw_text) + 1
             if parsed_line.number % 2_000 == 0 and before.st_size > 0:
                 percent = min(
                     95,
@@ -197,7 +218,6 @@ class GCodeAnalysisService:
                         )
                         pending_layer_start_line = None
                         pending_layer_z_mm = None
-            event = tracker.process_line(parsed_line)
             if event is not None:
                 for timed_event in motion_planner.process_event(event):
                     detector.process_event(timed_event)

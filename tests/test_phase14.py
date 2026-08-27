@@ -165,6 +165,32 @@ class ConfigurableRunner:
         )
 
 
+class NativeProjectRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        executable,
+        arguments,
+        *,
+        working_directory,
+        timeout_s,
+        cancellation_event=None,
+    ) -> ProcessOutcome:
+        self.calls += 1
+        values = list(arguments)
+        destination = Path(values[values.index("--export-3mf") + 1])
+        destination.write_bytes(b"synthetic native project")
+        return ProcessOutcome(
+            command=(str(executable), *(str(item) for item in arguments)),
+            return_code=0,
+            stdout="",
+            stderr="",
+            duration_s=0.01,
+        )
+
+
 def make_executable(root: Path, name: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     path = root / name
@@ -752,6 +778,46 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         result = adapter.slice_model(request)
         self.assertFalse(result.success)
         self.assertIn("keine G-Code-Datei", result.failure_reason)
+
+    def test_native_joint_project_structure_is_reused_between_rounds(self) -> None:
+        runner = NativeProjectRunner()
+        adapter, request = self.request(runner)
+        tower = self.root / "candidate_tower.stl"
+        tower.write_text("solid tower\nendsolid tower\n", encoding="ascii")
+        template = self.root / "calibration" / "native_template.3mf"
+        temporary_profile = replace(
+            request.profile,
+            machine=replace(request.profile.machine, metadata={"temporary": True}),
+            process=replace(request.profile.process, metadata={"temporary": True}),
+            filaments=tuple(
+                replace(record, metadata={"temporary": True})
+                for record in request.profile.filaments
+            ),
+        )
+        request = replace(
+            request,
+            profile=temporary_profile,
+            purpose="calibration",
+            native_project_template_path=template,
+        )
+        with patch(
+            "cooling_tower.calibration.joint_project.finalize_slicer_project",
+            return_value=object(),
+        ) as finalize:
+            for index in range(2):
+                adapter.create_joint_project(
+                    request,
+                    self.model,
+                    tower,
+                    self.root / f"joint_{index}.3mf",
+                    occupied=object(),
+                    placement=object(),
+                    tower_full_infill=False,
+                )
+
+        self.assertEqual(runner.calls, 1)
+        self.assertEqual(finalize.call_count, 2)
+        self.assertEqual(template.read_bytes(), b"synthetic native project")
 
     def test_windows_dll_initialization_failure_remains_visible(self) -> None:
         outcome = ProcessOutcome(

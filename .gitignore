@@ -27,6 +27,8 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+*.obj
+*.pyd
 
 # IDEs und lokale Editor-Einstellungen
 .idea/

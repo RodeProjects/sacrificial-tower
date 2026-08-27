@@ -197,6 +197,7 @@ class SliceRequest:
     use_cli_assemble_list: bool = False
     purpose: str = "normal"
     calibration_round: int | None = None
+    native_project_template_path: Path | None = None
     cancellation_event: Event | None = field(
         default=None,
         compare=False,
@@ -215,6 +216,12 @@ class SliceRequest:
                 self,
                 "diagnostics_root",
                 Path(self.diagnostics_root).resolve(),
+            )
+        if self.native_project_template_path is not None:
+            object.__setattr__(
+                self,
+                "native_project_template_path",
+                Path(self.native_project_template_path).resolve(),
             )
         if self.timeout_s <= 0:
             raise ValueError("Slicer timeout must be greater than zero.")

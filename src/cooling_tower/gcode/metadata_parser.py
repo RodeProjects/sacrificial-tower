@@ -41,6 +41,14 @@ _VERSION_PATTERN = re.compile(
     r"(?P<version>\d+(?:[._-]\d+)+(?:[+A-Za-z0-9._-]*)?)",
     re.IGNORECASE,
 )
+_SLICER_HINT_TOKENS = (
+    "slicer",
+    "bambu",
+    "anycubic",
+    "cura",
+    "ideamaker",
+    "simplify3d",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,16 +372,20 @@ class GCodeMetadataCollector:
         if not comment:
             return
 
-        explicit_confidence = (
-            SlicerDetectionConfidence.EXPLICIT
-            if _EXPLICIT_GENERATOR_PATTERN.search(comment)
-            else SlicerDetectionConfidence.STRONG_SIGNATURE
-        )
-        identity = _slicer_from_text(
-            comment,
-            line_number=parsed_line.number,
-            confidence=explicit_confidence,
-        )
+        lowered_comment = comment.casefold()
+        identity = None
+        explicit_confidence = SlicerDetectionConfidence.STRONG_SIGNATURE
+        if any(token in lowered_comment for token in _SLICER_HINT_TOKENS):
+            explicit_confidence = (
+                SlicerDetectionConfidence.EXPLICIT
+                if _EXPLICIT_GENERATOR_PATTERN.search(comment)
+                else SlicerDetectionConfidence.STRONG_SIGNATURE
+            )
+            identity = _slicer_from_text(
+                comment,
+                line_number=parsed_line.number,
+                confidence=explicit_confidence,
+            )
         if identity is not None:
             self._consider_slicer(identity)
             source_kind = (
@@ -408,6 +420,25 @@ class GCodeMetadataCollector:
                     )
                 )
 
+        if "=" not in comment and ":" not in comment:
+            return
+        if not self._in_config_block:
+            equals_position = comment.find("=")
+            colon_position = comment.find(":")
+            if equals_position < 0:
+                separator_position = colon_position
+            elif colon_position < 0:
+                separator_position = equals_position
+            else:
+                separator_position = min(equals_position, colon_position)
+            candidate_key = comment[:separator_position].strip().lower()
+            if (
+                candidate_key not in _RECOGNIZED_STANDALONE_CONFIG_KEYS
+                and candidate_key != "config_block_start"
+                and candidate_key != "config_block_end"
+                and not candidate_key.endswith("slicer_config")
+            ):
+                return
         config_match = _CONFIG_ENTRY_PATTERN.fullmatch(comment)
         if config_match is None:
             return

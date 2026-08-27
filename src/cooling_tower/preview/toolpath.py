@@ -12,6 +12,7 @@ from cooling_tower.gcode.parser import (
     Movement,
     iter_parsed_gcode_lines,
 )
+from cooling_tower.models import OccupiedBounds
 from cooling_tower.preview.models import LineSegment3D, Point3D
 
 
@@ -20,6 +21,15 @@ ProgressCallback = Callable[[int, str], None]
 
 class PreviewCancelled(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class DepositionToolpathAnalysis:
+    """One-pass preview sampling plus exact deposition XY bounds."""
+
+    object_segments: tuple[LineSegment3D, ...]
+    source_segment_count: int
+    occupied_bounds: OccupiedBounds | None
 
 
 @dataclass(slots=True)
@@ -91,15 +101,15 @@ def _collinear(first: LineSegment3D, second: LineSegment3D) -> bool:
     return dot >= 0.99995
 
 
-def extract_deposition_toolpaths(
+def analyze_deposition_toolpaths(
     gcode_path: str | Path,
     *,
     expected_layer_count: int,
     maximum_segments: int = 60_000,
     cancellation_event: Event | None = None,
     progress_callback: ProgressCallback | None = None,
-) -> tuple[tuple[LineSegment3D, ...], int]:
-    """Return a bounded, shape-preserving deposition-only representation."""
+) -> DepositionToolpathAnalysis:
+    """Collect preview paths and exact occupied bounds in one parser pass."""
 
     if maximum_segments < 100:
         raise ValueError("maximum_segments must be at least 100")
@@ -117,6 +127,10 @@ def extract_deposition_toolpaths(
     pending: LineSegment3D | None = None
     pending_layer: float | None = None
     pending_line = 0
+    minimum_x = math.inf
+    maximum_x = -math.inf
+    minimum_y = math.inf
+    maximum_y = -math.inf
 
     def flush_pending() -> None:
         nonlocal pending, pending_layer
@@ -133,6 +147,10 @@ def extract_deposition_toolpaths(
         event = tracker.process_line(parsed)
         if not isinstance(event, Movement) or event.category != "deposition":
             continue
+        minimum_x = min(minimum_x, event.start_x, event.end_x)
+        maximum_x = max(maximum_x, event.start_x, event.end_x)
+        minimum_y = min(minimum_y, event.start_y, event.end_y)
+        maximum_y = max(maximum_y, event.start_y, event.end_y)
         coordinates = (
             event.start_x,
             event.start_y,
@@ -170,4 +188,36 @@ def extract_deposition_toolpaths(
     if len(values) > maximum_segments:
         step = len(values) / maximum_segments
         values = [values[int(index * step)] for index in range(maximum_segments)]
-    return tuple(values), total
+    occupied_bounds = (
+        OccupiedBounds(minimum_x, maximum_x, minimum_y, maximum_y)
+        if all(
+            math.isfinite(value)
+            for value in (minimum_x, maximum_x, minimum_y, maximum_y)
+        )
+        else None
+    )
+    return DepositionToolpathAnalysis(
+        object_segments=tuple(values),
+        source_segment_count=total,
+        occupied_bounds=occupied_bounds,
+    )
+
+
+def extract_deposition_toolpaths(
+    gcode_path: str | Path,
+    *,
+    expected_layer_count: int,
+    maximum_segments: int = 60_000,
+    cancellation_event: Event | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[tuple[LineSegment3D, ...], int]:
+    """Return the backward-compatible preview-only result."""
+
+    analysis = analyze_deposition_toolpaths(
+        gcode_path,
+        expected_layer_count=expected_layer_count,
+        maximum_segments=maximum_segments,
+        cancellation_event=cancellation_event,
+        progress_callback=progress_callback,
+    )
+    return analysis.object_segments, analysis.source_segment_count

@@ -39,6 +39,7 @@ from cooling_tower.preview import (
     PreviewSourceCacheKey,
     PreviewSourceData,
     PreviewSourceDataCache,
+    analyze_deposition_toolpaths,
     extract_deposition_toolpaths,
 )
 from cooling_tower.services import GCodeAnalysisService
@@ -59,7 +60,11 @@ def source_gcode(layer_count: int = 4, moves_per_layer: int = 4) -> str:
 
 
 class SyntheticSuccessfulCalibrator:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     def calibrate(self, _snapshot, _settings, **kwargs):
+        self.calls.append(dict(kwargs))
         root = Path(kwargs["output_directory"])
         root.mkdir(parents=True, exist_ok=True)
         artifact = root / "tower.stl"
@@ -129,18 +134,13 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         return PreviewRequest(**values)
 
     def test_reuses_source_data_across_setting_changes(self) -> None:
-        service = PreviewService(SyntheticSuccessfulCalibrator())
+        calibrator = SyntheticSuccessfulCalibrator()
+        service = PreviewService(calibrator)
         statuses: list[str] = []
-        with (
-            patch(
-                "cooling_tower.preview.service.extract_deposition_toolpaths",
-                wraps=extract_deposition_toolpaths,
-            ) as extract,
-            patch(
-                "cooling_tower.preview.service.determine_occupied_bounds",
-                wraps=determine_occupied_bounds,
-            ) as bounds,
-        ):
+        with patch(
+            "cooling_tower.preview.service.analyze_deposition_toolpaths",
+            wraps=analyze_deposition_toolpaths,
+        ) as analyze:
             first = service.prepare(self.request())
             second = service.prepare(
                 self.request(
@@ -152,9 +152,13 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
                 progress_callback=lambda _percent, status: statuses.append(status),
             )
 
-        self.assertEqual(extract.call_count, 1)
-        self.assertEqual(bounds.call_count, 1)
+        self.assertEqual(analyze.call_count, 1)
         self.assertEqual(len(service.source_data_cache), 1)
+        expected_bounds = determine_occupied_bounds(self.source)
+        self.assertEqual(
+            [call["precomputed_occupied_bounds"] for call in calibrator.calls],
+            [expected_bounds, expected_bounds],
+        )
         self.assertIs(first.scene.object_segments, second.scene.object_segments)
         self.assertTrue(any("Zwischengespeicherte" in item for item in statuses))
         first.dispose()
@@ -163,13 +167,13 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
     def test_sampling_contract_change_creates_a_separate_entry(self) -> None:
         service = PreviewService(SyntheticSuccessfulCalibrator())
         with patch(
-            "cooling_tower.preview.service.extract_deposition_toolpaths",
-            wraps=extract_deposition_toolpaths,
-        ) as extract:
+            "cooling_tower.preview.service.analyze_deposition_toolpaths",
+            wraps=analyze_deposition_toolpaths,
+        ) as analyze:
             first = service.prepare(self.request(maximum_object_segments=200))
             second = service.prepare(self.request(maximum_object_segments=300))
 
-        self.assertEqual(extract.call_count, 2)
+        self.assertEqual(analyze.call_count, 2)
         self.assertEqual(len(service.source_data_cache), 2)
         first.dispose()
         second.dispose()
@@ -242,7 +246,7 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
     def test_failed_bounds_calculation_is_not_cached(self) -> None:
         service = PreviewService(SyntheticSuccessfulCalibrator())
         with patch(
-            "cooling_tower.preview.service.determine_occupied_bounds",
+            "cooling_tower.preview.service.analyze_deposition_toolpaths",
             side_effect=ValueError("synthetic bounds failure"),
         ):
             with self.assertRaisesRegex(ValueError, "synthetic bounds failure"):
@@ -253,14 +257,14 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         service = PreviewService(SyntheticSuccessfulCalibrator())
         original = self.source.read_text(encoding="utf-8")
 
-        def changing_bounds(path: str | Path) -> OccupiedBounds:
-            result = determine_occupied_bounds(path)
+        def changing_analysis(path: str | Path, **kwargs):
+            result = analyze_deposition_toolpaths(path, **kwargs)
             self.source.write_text(original + "; changed\n", encoding="utf-8")
             return result
 
         with patch(
-            "cooling_tower.preview.service.determine_occupied_bounds",
-            side_effect=changing_bounds,
+            "cooling_tower.preview.service.analyze_deposition_toolpaths",
+            side_effect=changing_analysis,
         ):
             with self.assertRaisesRegex(PreviewBuildError, "während"):
                 service.prepare(self.request())

@@ -6,9 +6,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from cooling_tower import _native_timing
+except (ImportError, OSError):
+    _native_timing = None
+
 
 NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-
 COMMAND_PATTERN = re.compile(
     rf"^(?P<command>(?:[A-Za-z]+(?:_[A-Za-z0-9]+)+|[A-Za-z]{NUMBER_PATTERN}))",
     re.ASCII,
@@ -111,12 +115,14 @@ def split_code_and_comment(text: str) -> tuple[str, str | None]:
         semicolon_comment = ""
         has_semicolon_comment = False
 
-    parenthesis_comments = [
-        match.group(1).strip()
-        for match in PARENTHESIS_COMMENT_PATTERN.finditer(code_part)
-    ]
-
-    code_part = PARENTHESIS_COMMENT_PATTERN.sub(" ", code_part)
+    if "(" in code_part:
+        parenthesis_comments = [
+            match.group(1).strip()
+            for match in PARENTHESIS_COMMENT_PATTERN.finditer(code_part)
+        ]
+        code_part = PARENTHESIS_COMMENT_PATTERN.sub(" ", code_part)
+    else:
+        parenthesis_comments = []
 
     comment_parts = [
         comment
@@ -149,8 +155,15 @@ def remove_line_number_and_checksum(code_text: str) -> str:
     becomes:
         G1 X10 Y20
     """
-    code_text = CHECKSUM_PATTERN.sub("", code_text)
-    code_text = LINE_NUMBER_PATTERN.sub("", code_text)
+    if "*" in code_text:
+        code_text = CHECKSUM_PATTERN.sub("", code_text)
+    if (
+        len(code_text) >= 2
+        and code_text[0] in {"N", "n"}
+        and code_text[1].isascii()
+        and code_text[1].isdigit()
+    ):
+        code_text = LINE_NUMBER_PATTERN.sub("", code_text)
 
     return code_text.strip()
 
@@ -222,6 +235,26 @@ def parse_gcode_line(gcode_line: GCodeLine) -> ParsedGCodeLine:
     """
     Parse one source line into command, parameters, comment, and remainder.
     """
+    if not gcode_line.text:
+        return ParsedGCodeLine(
+            number=gcode_line.number,
+            raw_text="",
+            code_text="",
+            command=None,
+            parameters={},
+            comment=None,
+            unparsed_text=None,
+        )
+    if gcode_line.text[0] == ";":
+        return ParsedGCodeLine(
+            number=gcode_line.number,
+            raw_text=gcode_line.text,
+            code_text="",
+            command=None,
+            parameters={},
+            comment=gcode_line.text[1:].strip(),
+            unparsed_text=None,
+        )
     code_text, comment = split_code_and_comment(gcode_line.text)
     code_text = remove_line_number_and_checksum(code_text)
 
@@ -269,10 +302,66 @@ def iter_parsed_gcode_lines(
     gcode_path: str | Path,
 ) -> Iterator[ParsedGCodeLine]:
     """
-    Read and parse a G-code file line by line.
+    Read and parse a G-code file in bounded native-accelerated blocks.
+
+    Lines outside the deliberately conservative native grammar automatically
+    use the Python reference parser. The complete file is still scanned and
+    no metadata, commands, or look-ahead state are skipped.
     """
-    for gcode_line in iter_gcode_lines(gcode_path):
-        yield parse_gcode_line(gcode_line)
+    path = validate_gcode_path(gcode_path)
+    native_parser = (
+        getattr(_native_timing, "parse_common_lines", None)
+        if _native_timing is not None
+        else None
+    )
+    with path.open(
+        mode="r",
+        encoding="utf-8-sig",
+        errors="replace",
+    ) as gcode_file:
+        line_number = 1
+        while True:
+            raw_lines: list[str] = []
+            for _ in range(8_192):
+                raw_line = gcode_file.readline()
+                if raw_line == "":
+                    break
+                raw_lines.append(raw_line.rstrip("\r\n"))
+            if not raw_lines:
+                break
+
+            native_lines = None
+            if native_parser is not None:
+                try:
+                    candidate = native_parser(raw_lines)
+                except (OverflowError, RuntimeError, TypeError, ValueError):
+                    candidate = None
+                if candidate is not None and len(candidate) == len(raw_lines):
+                    native_lines = candidate
+
+            for offset, raw_text in enumerate(raw_lines):
+                number = line_number + offset
+                native_line = (
+                    None if native_lines is None else native_lines[offset]
+                )
+                if native_line is None:
+                    yield parse_gcode_line(
+                        GCodeLine(number=number, text=raw_text)
+                    )
+                    continue
+                code_text, command, parameters, comment, unparsed_text = (
+                    native_line
+                )
+                yield ParsedGCodeLine(
+                    number=number,
+                    raw_text=raw_text,
+                    code_text=code_text,
+                    command=command,
+                    parameters=parameters,
+                    comment=comment,
+                    unparsed_text=unparsed_text,
+                )
+            line_number += len(raw_lines)
 
 MOTION_COMMANDS = {
     "G0",
@@ -1991,6 +2080,10 @@ def calculate_bambu_junction_speed(
     *,
     previous_speed_mm_s: float | None = None,
     current_speed_mm_s: float | None = None,
+    previous_safe_speed_mm_s: float | None = None,
+    current_safe_speed_mm_s: float | None = None,
+    previous_direction_xyze: tuple[float, float, float, float] | None = None,
+    current_direction_xyze: tuple[float, float, float, float] | None = None,
 ) -> float:
     """Mirror Bambu Studio's linear-move junction estimate.
 
@@ -2012,13 +2105,29 @@ def calculate_bambu_junction_speed(
         else current_speed_mm_s
     )
     if previous_speed <= MOVEMENT_EPSILON:
-        return _bambu_safe_feedrate(current, current_speed)
+        return (
+            _bambu_safe_feedrate(current, current_speed)
+            if current_safe_speed_mm_s is None
+            else current_safe_speed_mm_s
+        )
 
     maximum_speed = min(previous_speed, current_speed)
-    previous_base_direction = _movement_direction(previous)
-    current_base_direction = _movement_direction(current)
+    previous_base_direction = (
+        _movement_direction(previous)
+        if previous_direction_xyze is None
+        else previous_direction_xyze
+    )
+    current_base_direction = (
+        _movement_direction(current)
+        if current_direction_xyze is None
+        else current_direction_xyze
+    )
     if previous_base_direction is None or current_base_direction is None:
-        return _bambu_safe_feedrate(current, current_speed)
+        return (
+            _bambu_safe_feedrate(current, current_speed)
+            if current_safe_speed_mm_s is None
+            else current_safe_speed_mm_s
+        )
 
     previous_is_extruder_only = abs(previous_base_direction[3]) > 0.0
     current_is_extruder_only = abs(current_base_direction[3]) > 0.0
@@ -2034,35 +2143,247 @@ def calculate_bambu_junction_speed(
         or current_base_direction[:3]
     )
 
-    direction_change = tuple(
-        current_component - previous_component
-        for previous_component, current_component in zip(
-            previous_direction,
-            current_direction,
+    junction_speed = math.inf
+    found_limit = False
+    for previous_component, current_component, jerk in zip(
+        previous_direction,
+        current_direction,
+        (
+            current.jerk_x_mm_s,
+            current.jerk_y_mm_s,
+            current.jerk_z_mm_s,
+        ),
+    ):
+        component = current_component - previous_component
+        if abs(component) <= MOVEMENT_EPSILON or jerk is None:
+            continue
+        found_limit = True
+        junction_speed = min(
+            junction_speed,
+            max(0.0, jerk) / abs(component),
         )
-    )
-    candidates = tuple(
-        max(0.0, jerk) / abs(component)
-        for component, jerk in zip(
-            direction_change,
-            (
-                current.jerk_x_mm_s,
-                current.jerk_y_mm_s,
-                current.jerk_z_mm_s,
-            ),
-        )
-        if abs(component) > MOVEMENT_EPSILON and jerk is not None
-    )
-    if not candidates:
+    if not found_limit:
         return maximum_speed
 
-    junction_speed = min(candidates)
-    previous_safe = _bambu_safe_feedrate(previous, previous_speed)
-    current_safe = _bambu_safe_feedrate(current, current_speed)
+    previous_safe = (
+        _bambu_safe_feedrate(previous, previous_speed)
+        if previous_safe_speed_mm_s is None
+        else previous_safe_speed_mm_s
+    )
+    current_safe = (
+        _bambu_safe_feedrate(current, current_speed)
+        if current_safe_speed_mm_s is None
+        else current_safe_speed_mm_s
+    )
     threshold = junction_speed * 0.99
     if previous_safe > threshold and current_safe > threshold:
         junction_speed = current_safe
     return junction_speed
+
+
+@dataclass(frozen=True, slots=True)
+class _MovementKinematics:
+    target_speed_mm_s: float
+    distance_mm: float
+    acceleration_mm_s2: float
+    safe_speed_mm_s: float | None = None
+    direction_xyze: tuple[float, float, float, float] | None = None
+
+
+def native_timing_available() -> bool:
+    """Return whether the optional compiled timing engine is loaded."""
+    return _native_timing is not None
+
+
+def native_timing_cache_info() -> dict[str, int]:
+    """Return exact block-cache counters, or an empty fallback snapshot."""
+    if _native_timing is None:
+        return {
+            "hits": 0,
+            "misses": 0,
+            "entries": 0,
+            "bytes": 0,
+            "evictions": 0,
+        }
+    return dict(_native_timing.cache_info())
+
+
+def clear_native_timing_cache() -> None:
+    """Clear only reusable native timing blocks; parsing remains unaffected."""
+    if _native_timing is not None:
+        _native_timing.clear_cache()
+
+
+def _native_optional(value: float | None) -> float:
+    return math.nan if value is None else value
+
+
+def _native_direction(
+    value: tuple[float, float, float] | None,
+) -> tuple[float, float, float]:
+    if value is None:
+        return math.nan, math.nan, math.nan
+    return value
+
+
+def _native_movement_row(movement: Movement) -> tuple[float, ...]:
+    entry_x, entry_y, entry_z = _native_direction(
+        movement.entry_direction_xyz
+    )
+    exit_x, exit_y, exit_z = _native_direction(
+        movement.exit_direction_xyz
+    )
+    return (
+        movement.endpoint_distance_xy_mm,
+        movement.endpoint_distance_xyz_mm,
+        movement.delta_x,
+        movement.delta_y,
+        movement.delta_z,
+        movement.delta_e,
+        _native_optional(movement.path_length_mm),
+        _native_optional(movement.effective_feedrate_mm_min),
+        _native_optional(movement.timing_distance_mm),
+        _native_optional(movement.acceleration_mm_s2),
+        _native_optional(movement.jerk_x_mm_s),
+        _native_optional(movement.jerk_y_mm_s),
+        _native_optional(movement.jerk_z_mm_s),
+        _native_optional(movement.jerk_e_mm_s),
+        _native_optional(movement.square_corner_velocity_mm_s),
+        entry_x,
+        entry_y,
+        entry_z,
+        exit_x,
+        exit_y,
+        exit_z,
+        _native_optional(movement.arc_planar_length_mm),
+        _native_optional(movement.arc_start_radius_mm),
+        _native_optional(movement.arc_sweep_degrees),
+        _native_optional(movement.maximum_feedrate_x_mm_s),
+        _native_optional(movement.maximum_feedrate_y_mm_s),
+        _native_optional(movement.maximum_feedrate_z_mm_s),
+        _native_optional(movement.maximum_feedrate_e_mm_s),
+        _native_optional(movement.minimum_extruding_feedrate_mm_s),
+        _native_optional(movement.minimum_travel_feedrate_mm_s),
+        movement.extrusion_factor,
+        _native_optional(movement.centripetal_acceleration_mm_s2),
+        1.0 if movement.is_arc else 0.0,
+    )
+
+
+def _copy_planned_movement(
+    movement: Movement,
+    *,
+    effective_feedrate_mm_min: float | None,
+    timing_distance_mm: float | None,
+    duration_s: float | None,
+    timing_error: str | None,
+    entry_speed_mm_s: float | None,
+    cruise_speed_mm_s: float | None,
+    exit_speed_mm_s: float | None,
+) -> Movement:
+    """Copy an immutable movement while replacing only calculated timing."""
+    return Movement(
+        line_number=movement.line_number,
+        command=movement.command,
+        start_x=movement.start_x,
+        start_y=movement.start_y,
+        start_z=movement.start_z,
+        start_e=movement.start_e,
+        end_x=movement.end_x,
+        end_y=movement.end_y,
+        end_z=movement.end_z,
+        end_e=movement.end_e,
+        delta_x=movement.delta_x,
+        delta_y=movement.delta_y,
+        delta_z=movement.delta_z,
+        delta_e=movement.delta_e,
+        endpoint_distance_xy_mm=movement.endpoint_distance_xy_mm,
+        endpoint_distance_xyz_mm=movement.endpoint_distance_xyz_mm,
+        path_length_mm=movement.path_length_mm,
+        feedrate_mm_min=movement.feedrate_mm_min,
+        effective_feedrate_mm_min=effective_feedrate_mm_min,
+        timing_distance_mm=timing_distance_mm,
+        duration_s=duration_s,
+        timing_error=timing_error,
+        is_arc=movement.is_arc,
+        arc_plane=movement.arc_plane,
+        arc_radius_mm=movement.arc_radius_mm,
+        arc_sweep_degrees=movement.arc_sweep_degrees,
+        arc_error=movement.arc_error,
+        category=movement.category,
+        acceleration_mm_s2=movement.acceleration_mm_s2,
+        entry_speed_mm_s=entry_speed_mm_s,
+        cruise_speed_mm_s=cruise_speed_mm_s,
+        exit_speed_mm_s=exit_speed_mm_s,
+        jerk_x_mm_s=movement.jerk_x_mm_s,
+        jerk_y_mm_s=movement.jerk_y_mm_s,
+        jerk_z_mm_s=movement.jerk_z_mm_s,
+        jerk_e_mm_s=movement.jerk_e_mm_s,
+        square_corner_velocity_mm_s=movement.square_corner_velocity_mm_s,
+        entry_direction_xyz=movement.entry_direction_xyz,
+        exit_direction_xyz=movement.exit_direction_xyz,
+        arc_planar_length_mm=movement.arc_planar_length_mm,
+        arc_start_radius_mm=movement.arc_start_radius_mm,
+        maximum_feedrate_x_mm_s=movement.maximum_feedrate_x_mm_s,
+        maximum_feedrate_y_mm_s=movement.maximum_feedrate_y_mm_s,
+        maximum_feedrate_z_mm_s=movement.maximum_feedrate_z_mm_s,
+        maximum_feedrate_e_mm_s=movement.maximum_feedrate_e_mm_s,
+        minimum_extruding_feedrate_mm_s=(
+            movement.minimum_extruding_feedrate_mm_s
+        ),
+        minimum_travel_feedrate_mm_s=movement.minimum_travel_feedrate_mm_s,
+        extrusion_factor=movement.extrusion_factor,
+        centripetal_acceleration_mm_s2=(
+            movement.centripetal_acceleration_mm_s2
+        ),
+    )
+
+
+def _plan_movement_run_native(
+    movements: list[Movement],
+    *,
+    start_speed_mm_s: float,
+    end_speed_mm_s: float,
+    bambu_compatible: bool,
+    previous_movement: Movement | None,
+) -> list[Movement] | None:
+    if _native_timing is None:
+        return None
+    rows = tuple(_native_movement_row(movement) for movement in movements)
+    previous_row = (
+        None
+        if previous_movement is None
+        else _native_movement_row(previous_movement)
+    )
+    try:
+        native_values, _cache_hit = _native_timing.plan_block(
+            rows,
+            start_speed_mm_s,
+            end_speed_mm_s,
+            bambu_compatible,
+            previous_row,
+        )
+    except (OverflowError, RuntimeError, TypeError, ValueError):
+        # The Python implementation is deliberately retained as a quality-
+        # preserving fallback for unsupported runtimes or malformed inputs.
+        return None
+    if len(native_values) != len(movements):
+        return None
+    return [
+        _copy_planned_movement(
+            movement,
+            effective_feedrate_mm_min=value[0],
+            timing_distance_mm=(
+                value[1] if bambu_compatible else movement.timing_distance_mm
+            ),
+            duration_s=value[2],
+            timing_error=None,
+            entry_speed_mm_s=value[3],
+            cruise_speed_mm_s=value[4],
+            exit_speed_mm_s=value[5],
+        )
+        for movement, value in zip(movements, native_values)
+    ]
 
 
 def plan_movement_run(
@@ -2072,48 +2393,86 @@ def plan_movement_run(
     end_speed_mm_s: float = 0.0,
     bambu_compatible: bool = False,
     previous_movement: Movement | None = None,
+    kinematics_cache: dict[int, _MovementKinematics] | None = None,
 ) -> list[Movement]:
     """Plan a continuous run with junction and acceleration constraints."""
     if not movements:
         return []
 
+    native_result = _plan_movement_run_native(
+        movements,
+        start_speed_mm_s=start_speed_mm_s,
+        end_speed_mm_s=end_speed_mm_s,
+        bambu_compatible=bambu_compatible,
+        previous_movement=previous_movement,
+    )
+    if native_result is not None:
+        return native_result
+
     movement_count = len(movements)
     if bambu_compatible:
-        target_speeds = [
-            _bambu_cruise_feedrate(
-                movement,
-                (
-                    movements[index - 1]
-                    if index > 0
-                    else previous_movement
-                ),
+        kinematics: list[_MovementKinematics] = []
+        for index, movement in enumerate(movements):
+            cache_key = id(movement)
+            cached_kinematics = (
+                kinematics_cache.get(cache_key)
+                if kinematics_cache is not None
+                else None
             )
-            for index, movement in enumerate(movements)
-        ]
+            if cached_kinematics is None:
+                target_speed = _bambu_cruise_feedrate(
+                    movement,
+                    (
+                        movements[index - 1]
+                        if index > 0
+                        else previous_movement
+                    ),
+                )
+                cached_kinematics = _MovementKinematics(
+                    target_speed_mm_s=target_speed,
+                    distance_mm=_bambu_timing_distance(movement),
+                    acceleration_mm_s2=(movement.acceleration_mm_s2 or 0.0),
+                    safe_speed_mm_s=_bambu_safe_feedrate(
+                        movement, target_speed
+                    ),
+                    direction_xyze=_movement_direction(movement),
+                )
+                if kinematics_cache is not None:
+                    kinematics_cache[cache_key] = cached_kinematics
+            kinematics.append(cached_kinematics)
+        target_speeds = [item.target_speed_mm_s for item in kinematics]
+        distances = [item.distance_mm for item in kinematics]
+        accelerations = [item.acceleration_mm_s2 for item in kinematics]
     else:
-        target_speeds = [
-            (movement.effective_feedrate_mm_min or 0.0) / 60.0
-            for movement in movements
-        ]
-    distances = [
-        (
-            _bambu_timing_distance(movement)
-            if bambu_compatible
-            else movement.timing_distance_mm or 0.0
-        )
-        for movement in movements
-    ]
-    accelerations = [
-        movement.acceleration_mm_s2 or 0.0
-        for movement in movements
-    ]
+        kinematics = []
+        for movement in movements:
+            cache_key = id(movement)
+            cached_kinematics = (
+                kinematics_cache.get(cache_key)
+                if kinematics_cache is not None
+                else None
+            )
+            if cached_kinematics is None:
+                cached_kinematics = _MovementKinematics(
+                    target_speed_mm_s=(
+                        (movement.effective_feedrate_mm_min or 0.0) / 60.0
+                    ),
+                    distance_mm=(movement.timing_distance_mm or 0.0),
+                    acceleration_mm_s2=(movement.acceleration_mm_s2 or 0.0),
+                )
+                if kinematics_cache is not None:
+                    kinematics_cache[cache_key] = cached_kinematics
+            kinematics.append(cached_kinematics)
+        target_speeds = [item.target_speed_mm_s for item in kinematics]
+        distances = [item.distance_mm for item in kinematics]
+        accelerations = [item.acceleration_mm_s2 for item in kinematics]
 
     boundary_speeds = [0.0] * (movement_count + 1)
     if bambu_compatible:
         safe_speeds = [
-            _bambu_safe_feedrate(item, target_speeds[index])
-            for index, item in enumerate(movements)
+            item.safe_speed_mm_s or 0.0 for item in kinematics
         ]
+        movement_directions = [item.direction_xyze for item in kinematics]
         maximum_entry_speeds = [0.0] * movement_count
         nominal_length = [False] * movement_count
         for index, movement in enumerate(movements):
@@ -2129,6 +2488,10 @@ def plan_movement_run(
                     movement,
                     previous_speed_mm_s=target_speeds[index - 1],
                     current_speed_mm_s=target_speeds[index],
+                    previous_safe_speed_mm_s=safe_speeds[index - 1],
+                    current_safe_speed_mm_s=safe_speeds[index],
+                    previous_direction_xyze=movement_directions[index - 1],
+                    current_direction_xyze=movement_directions[index],
                 )
             )
             allowable_entry = math.sqrt(
@@ -2360,7 +2723,7 @@ class MotionTimingPlanner:
         self,
         lookahead_movements: int = 64,
         *,
-        refresh_threshold_movements: int = 256,
+        refresh_threshold_movements: int = 4096,
         bambu_compatible: bool = False,
     ) -> None:
         if lookahead_movements < 1:
@@ -2378,6 +2741,9 @@ class MotionTimingPlanner:
         self._pending_physical_count = 0
         self._start_speed_mm_s = 0.0
         self._previous_physical_movement: Movement | None = None
+        self._kinematics_cache: dict[
+            int, _MovementKinematics
+        ] = {}
 
     def process_event(
         self,
@@ -2442,6 +2808,7 @@ class MotionTimingPlanner:
                 end_speed_mm_s=0.0,
                 bambu_compatible=self.bambu_compatible,
                 previous_movement=self._previous_physical_movement,
+                kinematics_cache=self._kinematics_cache,
             )
         )
 
@@ -2477,12 +2844,23 @@ class MotionTimingPlanner:
         emitted = tuple(planned[:cutoff_index + 1])
         self._pending_events = self._pending_events[cutoff_index + 1:]
         self._pending_physical_count -= physical_count
+        retained_ids = {
+            id(event)
+            for event in self._pending_events
+            if isinstance(event, Movement)
+        }
+        self._kinematics_cache = {
+            key: value
+            for key, value in self._kinematics_cache.items()
+            if key in retained_ids
+        }
         return emitted
 
     def _flush_all(self) -> tuple[Movement | Dwell, ...]:
         if not self._pending_events:
             self._start_speed_mm_s = 0.0
             self._previous_physical_movement = None
+            self._kinematics_cache.clear()
             return ()
 
         emitted = tuple(self._planned_pending())
@@ -2490,4 +2868,5 @@ class MotionTimingPlanner:
         self._pending_physical_count = 0
         self._start_speed_mm_s = 0.0
         self._previous_physical_movement = None
+        self._kinematics_cache.clear()
         return emitted

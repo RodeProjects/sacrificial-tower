@@ -12,7 +12,6 @@ from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.calibration import CalibrationService
 from cooling_tower.calibration.gcode_integration import (
     GCodeIntegrationError,
-    determine_occupied_bounds,
     parse_bed_geometry,
     propose_tower_placement,
 )
@@ -38,7 +37,7 @@ from cooling_tower.preview.source_cache import (
 )
 from cooling_tower.preview.toolpath import (
     PreviewCancelled,
-    extract_deposition_toolpaths,
+    analyze_deposition_toolpaths,
 )
 
 
@@ -211,21 +210,27 @@ class PreviewService:
 
         record_diagnostic("preview_source_cache_miss")
         notify(5, "Objekt-Werkzeugpfade werden aufbereitet …")
-        object_segments, source_segment_count = extract_deposition_toolpaths(
+        source_analysis = analyze_deposition_toolpaths(
             source,
             expected_layer_count=key.expected_layer_count,
             maximum_segments=key.maximum_segments,
             cancellation_event=cancellation_event,
             progress_callback=lambda _percent, status: notify(10, status),
         )
+        object_segments = source_analysis.object_segments
+        source_segment_count = source_analysis.source_segment_count
         if not object_segments:
             raise PreviewBuildError(
                 "Im G-Code wurden keine darstellbaren Extrusionspfade gefunden."
             )
         if cancellation_event is not None and cancellation_event.is_set():
             raise PreviewCancelled()
-        notify(15, "Druckbettbelegung wird bestimmt …")
-        occupied_bounds = determine_occupied_bounds(source)
+        occupied_bounds = source_analysis.occupied_bounds
+        if occupied_bounds is None:
+            raise PreviewBuildError(
+                "Im G-Code konnte keine belegte Druckbettfläche bestimmt werden."
+            )
+        notify(15, "Druckbettbelegung ist bestimmt")
         if cancellation_event is not None and cancellation_event.is_set():
             raise PreviewCancelled()
 
@@ -348,6 +353,7 @@ class PreviewService:
                         status,
                     ),
                     source_artifact=request.source_artifact,
+                    precomputed_occupied_bounds=source_data.occupied_bounds,
                     seed_profile=seed_profile,
                     seed_stl_path=seed_stl_path,
                 )

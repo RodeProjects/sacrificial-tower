@@ -213,6 +213,8 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("console=False", spec)
         self.assertIn("windows_version_info.txt", spec)
         self.assertIn("version=str(version_info_path)", spec)
+        self.assertIn('"cooling_tower._native_timing"', spec)
+        self.assertIn("native_timing_extensions", spec)
         self.assertIn('"assets" / "app.ico"', spec)
         self.assertIn("StringStruct(u'CompanyName', u'RodeProjects')", spec)
         application = (

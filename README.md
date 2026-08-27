@@ -404,9 +404,15 @@ Die zuvor als Phase 18 geplante Gesamtintegration wird ab
 
 ## Tests
 
+Die rechenintensive G-Code-Zeitplanung und der häufige Zeilenparser besitzen
+eine mit MSVC gebaute C++-Erweiterung. Der Release-Build und die CI erstellen
+sie automatisch. Lokal wird sie vor den Tests so gebaut; ohne verfügbaren
+Compiler bleibt der qualitätsgleiche, langsamere Python-Fallback nutzbar.
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 $env:QT_QPA_PLATFORM="offscreen"
+python setup_native.py build_ext --inplace
 python -m unittest discover -s tests -v
 ```
 

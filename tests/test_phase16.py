@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -563,6 +564,33 @@ class Phase16Tests(unittest.TestCase):
             profile.config.minimum_radius_mm,
         )
 
+    def test_profile_adjuster_uses_only_sub_005s_history_model(self) -> None:
+        profile = self._radius_profile()
+        first = replace(
+            profile.layers[0],
+            calculated_radius_mm=15.0,
+            radius_mm=15.0,
+            safety_adjusted_path_mm=15.0 * 2.0 * 3.141592653589793,
+        )
+        profile = replace(profile, layers=(first, *profile.layers[1:]))
+        source_time = self.snapshot.layers[0].total_time_s
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            self.snapshot.layers,
+            {1: 23.5},
+            target_time_s=source_time + 18.0,
+            realized_outer_radii_mm={1: 15.0},
+            measurement_history={
+                1: ((10.0, 11.0), (12.0, 15.4), (14.0, 20.6)),
+            },
+            config=CalibrationConfig(),
+        )
+        self.assertAlmostEqual(
+            adjusted.layers[0].radius_mm,
+            math.sqrt(170.0),
+            places=6,
+        )
+
     def test_07c_candidate_score_penalizes_avoidable_tower_time(self) -> None:
         convergence = SimpleNamespace(
             deficient_layer_count=0,
@@ -990,6 +1018,37 @@ class Phase16Tests(unittest.TestCase):
             "final_combined_gcode",
         )
 
+    def test_joint_optimizations_also_apply_with_profile_infill(self) -> None:
+        source_stl = self.root / "source_profile_infill.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        service = CalibrationService()
+        with patch.object(
+            service.evaluator.analysis_service,
+            "analyze",
+            wraps=service.evaluator.analysis_service.analyze,
+        ) as analyze:
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(
+                    target_layer_time_s=2.0,
+                    simulate_full_tower_infill=False,
+                ),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_profile_infill_result",
+                config=CalibrationConfig(
+                    maximum_iterations=1,
+                    time_tolerance_s=1_000.0,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+            )
+
+        self.assertTrue(result.success, result.failures)
+        self.assertEqual(analyze.call_count, 1)
+        self.assertEqual(adapter.requests[0].model_path.suffix, ".3mf")
+        self.assertFalse(adapter.requests[0].temporary_overrides)
+
     def test_joint_stl_preview_rounds_never_reslice_the_complete_object(self) -> None:
         source_stl = self.root / "preview_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
@@ -1086,7 +1145,7 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(exported.configured_iteration_count, 12)
         self.assertEqual(build_profile.call_count, 1)
 
-    def test_generation_uses_six_normal_and_two_to_six_joint_slices(self) -> None:
+    def test_generation_advances_from_stable_isolated_to_joint_slices(self) -> None:
         source_stl = self.root / "bounded_joint_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
         adapter = FakeAdapter(
@@ -1112,7 +1171,11 @@ class Phase16Tests(unittest.TestCase):
         )
 
         suffixes = [request.model_path.suffix for request in adapter.requests]
-        self.assertEqual(suffixes[:6], [".stl"] * 6)
+        isolated_count = suffixes.count(".stl")
+        self.assertGreaterEqual(isolated_count, 2)
+        self.assertLessEqual(isolated_count, 6)
+        self.assertEqual(suffixes[:isolated_count], [".stl"] * isolated_count)
+        self.assertNotIn(".stl", suffixes[isolated_count:])
         self.assertGreaterEqual(suffixes.count(".3mf"), 2)
         self.assertLessEqual(suffixes.count(".3mf"), 6)
         self.assertIsNotNone(result.project_path)

@@ -25,7 +25,6 @@ from cooling_tower.calibration.gcode_integration import (
 from cooling_tower.calibration.joint_project import (
     JointProjectError,
     build_joint_project,
-    validate_tower_infill_adoption,
 )
 from cooling_tower.calibration.profile_adjuster import adjust_radius_profile
 from cooling_tower.calibration.slice_evaluator import (
@@ -42,6 +41,7 @@ from cooling_tower.models import (
     CalibrationState,
     GenerationSettings,
     LayerSliceTiming,
+    OccupiedBounds,
     SliceEvaluation,
     SourceArtifact,
     SourceKind,
@@ -91,6 +91,7 @@ class CalibrationService:
         cancellation_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
         source_artifact: SourceArtifact | None = None,
+        precomputed_occupied_bounds: OccupiedBounds | None = None,
         seed_profile: object | None = None,
         seed_stl_path: str | Path | None = None,
     ) -> CalibrationResult:
@@ -181,7 +182,11 @@ class CalibrationService:
                 seed_profile,
             )
         placement = None
-        occupied_bounds = determine_occupied_bounds(source)
+        occupied_bounds = (
+            precomputed_occupied_bounds
+            if precomputed_occupied_bounds is not None
+            else determine_occupied_bounds(source)
+        )
         calculated_base_radius = calculate_phase10_base_outer_radius(
             object_height_mm=float(getattr(snapshot, "maximum_print_z_mm")),
             automatic_base_width=settings.automatic_base_width,
@@ -270,8 +275,9 @@ class CalibrationService:
             normal_slice_count = max(0, (first_joint_round or 1) - 1)
             warnings.append(
                 (
-                    f"Zuerst optimieren {normal_slice_count} getrennte Slices "
-                    "die Turmgeometrie. "
+                    f"Zuerst optimieren bis zu {normal_slice_count} getrennte "
+                    "Slices die Turmgeometrie; bei stabiler Annäherung wird "
+                    "früher zur vollständigen gemeinsamen Prüfung gewechselt. "
                     if normal_slice_count
                     else "Der vorhandene Turmkandidat wird wiederverwendet. "
                 )
@@ -313,6 +319,7 @@ class CalibrationService:
             ) as temporary,
         ):
             work_root = Path(temporary)
+            native_joint_template = work_root / "native_joint_template.3mf"
             joint_only = reuse_seed
             initial_profile_root = work_root / (
                 "profile_joint" if joint_only else "profile_isolated"
@@ -362,6 +369,10 @@ class CalibrationService:
                         for key, value in sorted(isolated_overrides.items())
                     )
                 )
+            measurement_history: dict[
+                int, list[tuple[float, float]]
+            ] = {}
+            measurement_history_joint_phase: bool | None = None
             for number in range(1, iteration_count + 1):
                 if cancellation_event is not None and cancellation_event.is_set():
                     return CalibrationResult(
@@ -382,6 +393,13 @@ class CalibrationService:
                     first_joint_round is not None
                     and number >= first_joint_round
                 )
+                if (
+                    joint_round
+                    and first_joint_round is not None
+                    and number - first_joint_round
+                    >= config.maximum_joint_slices
+                ):
+                    break
                 use_seed_this_round = reuse_seed and number == 1
                 if joint_round:
                     round_status = "Gemeinsamer Slice wird vorbereitet …"
@@ -485,6 +503,9 @@ class CalibrationService:
                                 temporary_overrides=overrides_for_slice,
                                 purpose="calibration",
                                 calibration_round=number,
+                                native_project_template_path=(
+                                    native_joint_template
+                                ),
                             )
                             project_result = project_factory(
                                 project_request,
@@ -604,34 +625,32 @@ class CalibrationService:
                     ))
                     terminal_state = CalibrationState.SLICER_FAILED
                     break
-                if (
+                validate_full_infill = bool(
                     candidate_project is not None
                     and settings.simulate_full_tower_infill
-                ):
-                    try:
-                        if slice_result.gcode_path is None:
-                            raise JointProjectError(
-                                "Der gemeinsame Slicer-Lauf lieferte keinen G-Code."
-                            )
-                        validate_tower_infill_adoption(
-                            slice_result.gcode_path,
-                            tower_center_xy_mm=(
-                                (placement.center_x_mm, placement.center_y_mm)
-                                if placement is not None else None
-                            ),
-                        )
-                    except JointProjectError as error:
-                        failures.append(CalibrationFailure(
-                            CalibrationFailureCode.OBJECT_OVERRIDE_REJECTED,
-                            str(error),
-                        ))
-                        terminal_state = CalibrationState.SLICER_FAILED
-                        break
-                evaluation = self.evaluator.evaluate(
-                    slice_result,
-                    source_layers,
-                    metadata_tolerance_s=config.slicer_metadata_tolerance_s,
                 )
+                try:
+                    if validate_full_infill and slice_result.gcode_path is None:
+                        raise JointProjectError(
+                            "Der gemeinsame Slicer-Lauf lieferte keinen G-Code."
+                        )
+                    evaluation = self.evaluator.evaluate(
+                        slice_result,
+                        source_layers,
+                        metadata_tolerance_s=config.slicer_metadata_tolerance_s,
+                        validate_tower_full_infill=validate_full_infill,
+                        tower_center_xy_mm=(
+                            (placement.center_x_mm, placement.center_y_mm)
+                            if placement is not None else None
+                        ),
+                    )
+                except JointProjectError as error:
+                    failures.append(CalibrationFailure(
+                        CalibrationFailureCode.OBJECT_OVERRIDE_REJECTED,
+                        str(error),
+                    ))
+                    terminal_state = CalibrationState.SLICER_FAILED
+                    break
                 combined_path = None
                 if candidate_project is not None:
                     combined_path = evaluation.gcode_path
@@ -713,6 +732,21 @@ class CalibrationService:
                     int(index): float(value)
                     for index, value in evaluation.added_time_by_layer.items()
                 }
+                if measurement_history_joint_phase is not joint_round:
+                    measurement_history.clear()
+                    measurement_history_joint_phase = joint_round
+                realized_radii = {
+                    int(layer.index): float(layer.outer_radius_mm)
+                    for layer in solid.layers
+                }
+                for layer_index, observed_s in current_added_times_s.items():
+                    radius = realized_radii.get(layer_index)
+                    if radius is None:
+                        continue
+                    history = measurement_history.setdefault(layer_index, [])
+                    history.append((radius, observed_s))
+                    if len(history) > 8:
+                        del history[:-8]
                 maximum_slicer_result_change_s = (
                     self._maximum_slicer_result_change(
                         previous_added_times_s,
@@ -812,6 +846,31 @@ class CalibrationService:
                     best_gcode = combined_path
                     best_project = candidate_project
                     best_iteration_number = number
+                if (
+                    not joint_round
+                    and joint_source_stl is not None
+                    and config.perform_joint_final_slice
+                    and first_joint_round is not None
+                    and number + 1 < first_joint_round
+                    and target_time_confirmed
+                    and slicer_result_stable
+                    and convergence.profile_stable
+                    and not metadata_conflict
+                    and not solid.feasibility_issues
+                ):
+                    # Isolated slices are only a fast search stage. Once two
+                    # successive measurements and the profile itself are
+                    # stable, unused search rounds cannot improve the final
+                    # evidence; move directly to the mandatory full joint
+                    # slices without weakening their count or tolerance.
+                    first_joint_round = number + 1
+                    record_diagnostic(
+                        "calibration_joint_phase_advanced",
+                        after_isolated_round=number,
+                        saved_isolated_rounds=(
+                            normal_slice_count - number
+                        ),
+                    )
                 joint_candidate_accepted = bool(
                     joint_round
                     and target_time_confirmed
@@ -938,6 +997,7 @@ class CalibrationService:
                             layer.index: layer.outer_radius_mm
                             for layer in solid.layers
                         },
+                        measurement_history=measurement_history,
                         config=config,
                     )
                     continue
@@ -950,6 +1010,7 @@ class CalibrationService:
                         layer.index: layer.outer_radius_mm
                         for layer in solid.layers
                     },
+                    measurement_history=measurement_history,
                     config=config,
                 )
             if not failures:
@@ -1302,12 +1363,13 @@ class CalibrationService:
         # evidence. The source pre-slice is unchanged, so its known layer time
         # can be subtracted directly from that first joint measurement.
         values: list[LayerSliceTiming] = []
+        timing_by_layer = {
+            item.layer_index: item for item in isolated.layer_timings
+        }
         for source in source_layers:
             index = int(getattr(source, "index"))
             source_time = float(getattr(source, "total_time_s"))
-            original = next(
-                item for item in isolated.layer_timings if item.layer_index == index
-            )
+            original = timing_by_layer[index]
             added = max(0.0, original.total_added_time_s - source_time)
             values.append(replace(original, total_added_time_s=added))
         return replace(

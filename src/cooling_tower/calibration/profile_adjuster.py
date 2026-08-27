@@ -11,6 +11,82 @@ from cooling_tower.tower.profile import (
 )
 
 
+def _history_radius_estimate(
+    measurements: Sequence[tuple[float, float]],
+    required_added_s: float,
+    *,
+    time_tolerance_s: float,
+) -> float | None:
+    """Invert trustworthy measured radius/time evidence.
+
+    Interpolation is allowed as soon as two measurements bracket the target.
+    Extrapolation requires at least three points whose area-linear model has a
+    worst residual below 0.05 seconds. This keeps the shortcut substantially
+    stricter than the final acceptance test while retaining the complete
+    post-slice validation as the authority.
+    """
+
+    by_area: dict[float, tuple[float, float]] = {}
+    for radius, observed_s in measurements:
+        if (
+            math.isfinite(radius)
+            and radius > 0.0
+            and math.isfinite(observed_s)
+            and observed_s >= 0.0
+        ):
+            area_coordinate = radius * radius
+            by_area[area_coordinate] = (area_coordinate, observed_s)
+    points = tuple(sorted(by_area.values()))
+    if len(points) < 2:
+        return None
+
+    brackets: list[tuple[float, tuple[float, float], tuple[float, float]]] = []
+    for first_index, first in enumerate(points[:-1]):
+        for second in points[first_index + 1:]:
+            first_time = first[1]
+            second_time = second[1]
+            if (first_time - required_added_s) * (
+                second_time - required_added_s
+            ) <= 0.0 and abs(second_time - first_time) > 1e-9:
+                brackets.append((abs(second_time - first_time), first, second))
+    if brackets:
+        _, first, second = min(brackets, key=lambda item: item[0])
+        fraction = (required_added_s - first[1]) / (second[1] - first[1])
+        estimated_area = first[0] + fraction * (second[0] - first[0])
+        return math.sqrt(max(0.0, estimated_area))
+
+    if len(points) < 3:
+        return None
+    mean_area = sum(item[0] for item in points) / len(points)
+    mean_time = sum(item[1] for item in points) / len(points)
+    area_variance = sum((item[0] - mean_area) ** 2 for item in points)
+    if area_variance <= 1e-12:
+        return None
+    slope = sum(
+        (area - mean_area) * (observed_s - mean_time)
+        for area, observed_s in points
+    ) / area_variance
+    if slope <= 1e-12:
+        return None
+    intercept = mean_time - slope * mean_area
+    maximum_residual = max(
+        abs((intercept + slope * area) - observed_s)
+        for area, observed_s in points
+    )
+    residual_limit = min(0.049, max(0.01, time_tolerance_s * 0.2))
+    if maximum_residual > residual_limit:
+        return None
+    estimated_area = (required_added_s - intercept) / slope
+    observed_span = points[-1][0] - points[0][0]
+    if (
+        estimated_area <= 0.0
+        or estimated_area < points[0][0] - observed_span
+        or estimated_area > points[-1][0] + observed_span
+    ):
+        return None
+    return math.sqrt(estimated_area)
+
+
 def _layer_by_index(layers: Sequence[object]) -> dict[int, object]:
     return {int(getattr(layer, "index")): layer for layer in layers}
 
@@ -24,6 +100,9 @@ def adjust_radius_profile(
     realized_outer_radii_mm: Mapping[int, float] | None = None,
     minimum_wall_path_count: int | None = None,
     wall_path_width_mm: float | None = None,
+    measurement_history: Mapping[
+        int, Sequence[tuple[float, float]]
+    ] | None = None,
     config: CalibrationConfig,
 ) -> tuple[TowerRadiusProfile, float]:
     """Update raw radius demand from the geometry that was actually sliced.
@@ -64,6 +143,11 @@ def adjust_radius_profile(
                 float(realized_by_index.get(item.layer_index, old_radius)),
             ),
         )
+        history_radius = _history_radius_estimate(
+            (measurement_history or {}).get(item.layer_index, ()),
+            required_added,
+            time_tolerance_s=config.time_tolerance_s,
+        )
 
         if required_added <= config.time_tolerance_s:
             requested_radius = minimum_radius
@@ -80,7 +164,7 @@ def adjust_radius_profile(
             maximum_radius_factor = math.sqrt(
                 config.maximum_path_growth_factor
             )
-            requested_radius = max(
+            proportional_radius = max(
                 old_radius,
                 min(
                     realized_radius * radius_factor,
@@ -88,6 +172,12 @@ def adjust_radius_profile(
                 ),
                 old_radius + config.minimum_path_growth_mm / math.tau,
             )
+            requested_radius = proportional_radius
+            if history_radius is not None and history_radius > old_radius:
+                requested_radius = min(
+                    max(proportional_radius, history_radius),
+                    old_radius * maximum_radius_factor,
+                )
         elif observed_added > required_added + config.time_tolerance_s:
             # Do not turn a transition-provided radius into a new local
             # demand: if the envelope alone widened this layer, its raw request
@@ -96,6 +186,8 @@ def adjust_radius_profile(
             ideal_realized_radius = realized_radius * math.sqrt(
                 required_added / observed_added
             )
+            if history_radius is not None and history_radius < realized_radius:
+                ideal_realized_radius = history_radius
             reduction_target = min(old_radius, ideal_realized_radius)
             requested_radius = old_radius - (
                 old_radius - reduction_target

@@ -11,6 +11,13 @@ exec(
     version_namespace,
 )
 app_version = version_namespace["APP_VERSION"]
+native_timing_extensions = list(
+    (source_root / "cooling_tower").glob("_native_timing*.pyd")
+)
+if len(native_timing_extensions) != 1:
+    raise RuntimeError(
+        "Die native G-Code-Analyse muss vor PyInstaller genau einmal gebaut werden."
+    )
 version_numbers = tuple(int(part) for part in app_version.split(".")) + (0,)
 version_info_path = project_root / "build" / "windows_version_info.txt"
 version_info_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +58,7 @@ version_info_path.write_text(
 a = Analysis(
     [str(project_root / "start_gui.pyw")],
     pathex=[str(source_root)],
-    binaries=[],
+    binaries=[(str(native_timing_extensions[0]), "cooling_tower")],
     datas=[
         (
             str(project_root / "config" / "default_settings.json"),
@@ -70,7 +77,7 @@ a = Analysis(
             "cooling_tower/gui/assets",
         ),
     ],
-    hiddenimports=[],
+    hiddenimports=["cooling_tower._native_timing"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
