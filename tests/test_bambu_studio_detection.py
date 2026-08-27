@@ -338,6 +338,45 @@ class BambuStudioDetectionTests(unittest.TestCase):
             before,
         )
 
+    def test_forced_inventory_refresh_adds_new_gui_filament_profile(self) -> None:
+        self.create_realistic_catalog()
+        adapter, installation = self.adapter_and_installation()
+        service = ProfileMatchingService(
+            inventory_service=ProfileInventoryService(
+                self.root / "profile_inventory.json"
+            )
+        )
+        first = service.catalog(installation, adapter, force_inventory=True)
+        new_name = "Test PLA Filamentprofil (own) - MinPrintSpeed10mm"
+        new_path = self.write_json(
+            self.user_root / "default" / "filament" / f"{new_name}.json",
+            {
+                "name": new_name,
+                "inherits": "Bambu PLA Basic @BBL X2D 0.4 nozzle",
+                "from": "User",
+                "filament_settings_id": [new_name],
+                "slow_down_min_speed": ["10", "20"],
+            },
+        )
+        old_profile_bytes = {
+            record.path: record.path.read_bytes()
+            for record in first.filament_options
+        }
+
+        refreshed = service.catalog(
+            installation,
+            adapter,
+            force_inventory=True,
+        )
+
+        by_name = {record.name: record for record in refreshed.filament_options}
+        self.assertIn(new_name, by_name)
+        self.assertEqual(by_name[new_name].path, new_path.resolve())
+        self.assertEqual(
+            {path: path.read_bytes() for path in old_profile_bytes},
+            old_profile_bytes,
+        )
+
     def test_stale_foreign_machine_falls_back_to_active_bambu_machine(self) -> None:
         paths = self.create_realistic_catalog()
         adapter, installation = self.adapter_and_installation()

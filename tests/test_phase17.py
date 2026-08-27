@@ -481,20 +481,36 @@ class Phase17Tests(unittest.TestCase):
 
     def test_15_setting_change_marks_preview_stale(self) -> None:
         window = self.ready_window()
-        window.current_preview = SimpleNamespace()
+        window.preview_dialog.canvas.set_scene(preview_scene())
+        original_value = window.target_time_spin.value()
+        original_signature = window._current_preview_request().signature()
+        window.current_preview = SimpleNamespace(
+            request_signature=original_signature,
+            minimum_verified_layer_time_s=None,
+        )
         window.preview_state = PreviewState.CURRENT
-        window.target_time_spin.setValue(window.target_time_spin.value() + 1)
+        window.target_time_spin.setValue(original_value + 1)
         self.assertEqual(window.preview_state, PreviewState.STALE)
         self.assertEqual(
             window.status_label.text(),
-            "Vorschau ist nicht mehr aktuell",
+            "Einstellungen geändert",
         )
-        self.assertIn("nicht mehr aktuell", window.preview_hint_label.text())
+        self.assertTrue(window.preview_hint_label.isHidden())
+        self.assertIn("Vorschau veraltet", window.preview_dialog.state_label.text())
         window.profile_feasibility = ProfileFeasibilityAssessment(True, True)
         window.validate_form()
         self.assertFalse(window.export_button.isEnabled())
         self.assertTrue(window.preview_button.isEnabled())
         self.assertEqual(window.preview_button.text(), "Kühlturm aktualisieren")
+
+        window.target_time_spin.setValue(original_value)
+        window.profile_feasibility = ProfileFeasibilityAssessment(True, True)
+        window.validate_form()
+        self.assertEqual(window.preview_state, PreviewState.CURRENT)
+        self.assertEqual(window.preview_dialog.state, PreviewState.CURRENT)
+        self.assertIn("Vorschau ist aktuell", window.preview_dialog.state_label.text())
+        self.assertTrue(window.preview_hint_label.isHidden())
+        self.assertTrue(window.export_button.isEnabled())
         window.current_preview = None
         window.close()
 

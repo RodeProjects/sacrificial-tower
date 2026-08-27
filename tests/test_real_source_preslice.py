@@ -18,7 +18,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from cooling_tower.models import SlicerFamily
+from cooling_tower.calibration import CalibrationService
+from cooling_tower.models import CalibrationConfig, GenerationSettings, SlicerFamily
 from cooling_tower.models.gcode_metadata import SlicerIdentity
 from cooling_tower.persistence import PreSliceCache
 from cooling_tower.services import (
@@ -488,6 +489,148 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
                 (),
             )
         self.assertEqual(self._hash(self.source), original_hash)
+
+    def test_real_full_joint_calibration_reaches_target_with_gui_user_presets(
+        self,
+    ) -> None:
+        """Regress the complete Anycubic scenario reported from the GUI."""
+
+        appdata = Path(os.environ["APPDATA"])
+        relative_paths = (
+            Path("machine")
+            / "Anycubic Kobra 3 V2 0.4 nozzle - (Settings v2).json",
+            Path("process") / "PLA - Tecbears - Schwarz (matt).json",
+            Path("filament") / "PLA - Tecbears - Schwarz (matt).json",
+        )
+        profile_paths = next(
+            (
+                tuple(root / relative for relative in relative_paths)
+                for root in (appdata / "AnycubicSlicerNext" / "user").glob("*")
+                if all((root / relative).is_file() for relative in relative_paths)
+            ),
+            None,
+        )
+        if profile_paths is None:
+            self.skipTest("Die referenzierten Anycubic-Benutzerprofile fehlen.")
+
+        adapter = AnycubicSlicerNextAdapter()
+        installation = adapter.verify_installation(
+            SlicerCandidate(
+                self.executable,
+                SlicerDiscoverySource.KNOWN_PATH,
+                adapter_hint=adapter.adapter_id,
+            )
+        )
+        source = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
+        validation = StlValidationService().validate(source)
+        self.assertTrue(validation.valid, validation.technical_summary)
+        source_hash = self._hash(source)
+        profile_hashes = {path: self._hash(path) for path in profile_paths}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            matching = ProfileMatchingService(
+                inventory_service=ProfileInventoryService(
+                    root / "profile_inventory.json"
+                ),
+                mapping_store=ProfileMappingStore(root / "profile_mappings.json"),
+            )
+            match = matching.match(
+                ProfileMatchingContext.from_stl(validation.source_artifact),
+                installation,
+                adapter,
+                selected_profile_ids={
+                    "machine": str(profile_paths[0]),
+                    "process": str(profile_paths[1]),
+                    "filament": str(profile_paths[2]),
+                },
+                force_inventory=True,
+                include_all_profiles=True,
+            )
+            self.assertIsNotNone(match.selected, match.message)
+            confirmation = ProfileConfirmation.from_result(
+                match,
+                validation.source_artifact,
+            )
+            confirmed = matching.confirm(match)
+            assert confirmed.selected is not None
+            preslice = SourcePreSliceService(
+                analysis_service=GCodeAnalysisService(),
+                workspace_parent=root / "application" / "temporary",
+                diagnostics_root=root / "application" / "diagnostics",
+                timeout_s=300.0,
+            ).run(
+                stl_validation=validation,
+                profile_match=confirmed,
+                confirmation=confirmation,
+                adapter=adapter,
+            )
+            try:
+                result = CalibrationService().calibrate(
+                    preslice.analysis_snapshot,
+                    GenerationSettings(
+                        target_layer_time_s=10.0,
+                        safety_factor=1.0,
+                        minimum_outer_diameter_mm=3.0,
+                        maximum_outer_diameter_mm=40.0,
+                        minimum_object_tower_distance_mm=0.5,
+                        simulate_full_tower_infill=True,
+                        base_height_mm=1.0,
+                        automatic_base_width=True,
+                        maximum_expansion_angle_deg=50.0,
+                        maximum_contraction_angle_deg=50.0,
+                        mesh_segments=32,
+                    ),
+                    adapter=adapter,
+                    profile=confirmed.selected.effective_profile,
+                    output_directory=root / "calibration",
+                    config=CalibrationConfig(
+                        maximum_iterations=12,
+                        maximum_runtime_s=1200.0,
+                        time_tolerance_s=0.2,
+                        timeout_per_slice_s=300.0,
+                        object_clearance_mm=0.5,
+                        maximum_joint_slices=6,
+                        minimum_joint_slices=2,
+                    ),
+                    source_artifact=validation.source_artifact,
+                    progress_callback=(
+                        lambda percent, status: print(
+                            f"real-anycubic {percent:3d}% {status}"
+                        )
+                    ),
+                )
+            finally:
+                preslice.cleanup()
+
+            joint_iterations = tuple(
+                item for item in result.iterations if item.joint_slice
+            )
+            joint_minima = tuple(
+                min(item.evaluation.combined_time_by_layer.values())
+                for item in joint_iterations
+                if item.evaluation.combined_time_by_layer
+            )
+            print(
+                "real-anycubic joint minima:",
+                ", ".join(f"{value:.3f}" for value in joint_minima),
+                "best:",
+                result.best_iteration_number,
+                "state:",
+                result.state.value,
+            )
+            self.assertTrue(joint_iterations, result.failures)
+            self.assertTrue(result.success, (result.failures, joint_minima))
+            self.assertIsNotNone(result.project_path)
+            assert result.project_path is not None
+            self.assertTrue(result.project_path.is_file())
+            self.assertLessEqual(abs(joint_minima[-1] - 10.0), 0.2)
+
+        self.assertEqual(self._hash(source), source_hash)
+        self.assertEqual(
+            {path: self._hash(path) for path in profile_paths},
+            profile_hashes,
+        )
 
 
 if __name__ == "__main__":

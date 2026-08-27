@@ -39,7 +39,9 @@ from cooling_tower.models import (
     CalibrationMode,
     CalibrationState,
     GenerationSettings,
+    LayerSliceTiming,
     OccupiedBounds,
+    SliceEvaluation,
     SourceArtifact,
 )
 from cooling_tower.services import GCodeAnalysisService
@@ -650,6 +652,49 @@ class Phase16Tests(unittest.TestCase):
         )
         self.assertLess(efficient_within_tolerance, exact_but_wasteful)
 
+    def test_07e_joint_feedback_corrects_all_directly_deficient_layers(self) -> None:
+        profile = self._radius_profile()
+        observed = {
+            layer.index: max(0.0, 5.0 - layer.total_time_s)
+            for layer in self.snapshot.layers
+        }
+        combined = {layer.index: 4.0 for layer in self.snapshot.layers}
+        adjusted, change = adjust_radius_profile(
+            profile,
+            self.snapshot.layers,
+            observed,
+            target_time_s=5.0,
+            combined_layer_times_s=combined,
+            coupled_radius_scale=1.1,
+            config=CalibrationConfig(),
+        )
+        self.assertGreater(change, 0.0)
+        self.assertTrue(
+            all(
+                new.radius_mm > old.radius_mm
+                for old, new in zip(profile.layers, adjusted.layers, strict=True)
+            )
+        )
+
+    def test_07f_joint_scale_uses_direct_critical_layer_time(self) -> None:
+        config = CalibrationConfig(time_tolerance_s=0.2)
+        self.assertAlmostEqual(
+            CalibrationService._joint_coupled_radius_scale(
+                {1: 11.12, 2: 14.0},
+                target_time_s=10.0,
+                config=config,
+            ),
+            math.sqrt(10.0 / 11.12),
+        )
+        self.assertEqual(
+            CalibrationService._joint_coupled_radius_scale(
+                {1: 10.1},
+                target_time_s=10.0,
+                config=config,
+            ),
+            1.0,
+        )
+
     def test_08_convergence_requires_time_and_profile_stability(self) -> None:
         config = CalibrationConfig()
         self.assertEqual(config.time_tolerance_s, 0.2)
@@ -666,6 +711,46 @@ class Phase16Tests(unittest.TestCase):
             maximum_profile_change_mm=0.1001, config=config,
         )
         self.assertFalse(unstable.converged)
+
+    def test_08a_joint_convergence_uses_direct_combined_time(self) -> None:
+        source_layers = (SimpleNamespace(index=1, total_time_s=8.0),)
+        result = evaluate_convergence(
+            source_layers,
+            {1: 0.0},
+            target_time_s=6.0,
+            maximum_profile_change_mm=0.0,
+            combined_times_s={1: 5.0},
+            config=CalibrationConfig(),
+        )
+        self.assertEqual(result.deficient_layer_count, 1)
+        self.assertAlmostEqual(result.maximum_remaining_deficit_s, 1.0)
+
+    def test_08b_combined_evaluation_retains_direct_joint_measurement(self) -> None:
+        source_layers = (SimpleNamespace(index=1, total_time_s=8.0),)
+        evaluation = SliceEvaluation(
+            gcode_path=self.source,
+            layer_timings=(
+                LayerSliceTiming(
+                    layer_index=1,
+                    z_mm=0.2,
+                    deposition_time_s=4.0,
+                    internal_travel_time_s=1.0,
+                    retraction_time_s=0.0,
+                    approach_time_s=0.0,
+                    return_time_s=0.0,
+                    total_added_time_s=5.0,
+                ),
+            ),
+            metadata_source="gcode",
+            maximum_metadata_difference_s=None,
+        )
+        combined = CalibrationService()._combined_evaluation(
+            evaluation,
+            self.source,
+            source_layers,
+        )
+        self.assertEqual(combined.added_time_by_layer, {1: 0.0})
+        self.assertEqual(combined.combined_time_by_layer, {1: 5.0})
 
     def test_09_bed_bounds_parse_polygon_and_dimensions(self) -> None:
         polygon = parse_bed_bounds({"printable_area": "0x0,250x0,250x220,0x220"})

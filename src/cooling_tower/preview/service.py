@@ -589,8 +589,13 @@ class PreviewService:
         best = getattr(calibration, "best_iteration", None)
         iteration = best if best is not None else iterations[-1]
         added = iteration.evaluation.added_time_by_layer
+        combined = iteration.evaluation.combined_time_by_layer
         values = [
-            float(layer.total_time_s) + float(added[layer.index])
+            (
+                float(combined[layer.index])
+                if layer.index in combined
+                else float(layer.total_time_s) + float(added[layer.index])
+            )
             for layer in request.snapshot.layers
             if layer.index in added
         ]

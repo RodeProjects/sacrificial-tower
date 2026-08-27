@@ -1191,6 +1191,7 @@ class MainWindow(QMainWindow):
         self.profile_catalog: ProfileCatalog | None = None
         self.profile_catalog_confirmation: ProfileCatalogConfirmation | None = None
         self._force_profile_catalog_after_discovery = False
+        self._profile_catalog_preserve_selection_requests: dict[int, bool] = {}
         self.profile_match_result: ProfileMatchResult | None = None
         self.confirmed_profile_context: ProfileConfirmation | None = None
         self._populating_profile_combos = False
@@ -4823,28 +4824,47 @@ class MainWindow(QMainWindow):
             self.progress_bar.setProperty("task", "default")
             self._refresh_widget_style(self.progress_bar)
         had_preview = self.current_preview is not None
+        request_matches = self._retained_preview_matches_current_request()
         self.preview_state = (
-            PreviewState.STALE
+            PreviewState.CURRENT
+            if request_matches
+            else PreviewState.STALE
             if had_preview
             else PreviewState.EMPTY
         )
         if self._preview_dialog is not None:
-            self._preview_dialog.mark_stale()
-        if had_preview:
-            self.preview_hint_label.setProperty("state", "stale")
-            self.preview_hint_label.setText(
-                "⚠ Der angezeigte Kühlturm ist nicht mehr aktuell und kann nicht "
-                f"exportiert werden. {reason}"
-            )
-            self.preview_hint_label.show()
+            if request_matches:
+                self._preview_dialog.mark_current()
+            else:
+                self._preview_dialog.mark_stale()
+        # Staleness is intentionally communicated once, directly above the
+        # retained 3D scene. The prediction card and footer no longer repeat
+        # the same warning; their disabled actions still enforce safety.
+        self.preview_hint_label.hide()
+        if request_matches:
             self._set_main_status(
-                "Vorschau ist nicht mehr aktuell", icon="⚠", state="warning"
+                "Vorschau ist aktuell", icon="✓", state="success"
             )
-        else:
-            self.preview_hint_label.hide()
+        elif had_preview:
+            self._set_main_status(
+                "Einstellungen geändert", icon="↻", state="idle"
+            )
         self._refresh_widget_style(self.preview_hint_label)
         self._refresh_prediction()
         self._refresh_phase17_actions()
+
+    def _retained_preview_matches_current_request(self) -> bool:
+        """Compare all export-relevant inputs with the retained preview."""
+
+        preview = self.current_preview
+        signature = getattr(preview, "request_signature", None)
+        if not isinstance(signature, str) or not signature:
+            return False
+        try:
+            current_signature = self._current_preview_request().signature()
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return False
+        return signature == current_signature
 
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
@@ -5209,6 +5229,9 @@ class MainWindow(QMainWindow):
             self.start_profile_catalog_loading(
                 force_inventory=self._force_profile_catalog_after_discovery,
                 prefer_active_presets=True,
+                restore_remembered_profiles=(
+                    not self._force_profile_catalog_after_discovery
+                ),
             )
         else:
             self._slicer_header_installation = None
@@ -5705,6 +5728,7 @@ class MainWindow(QMainWindow):
         ] | None = None,
         include_all_profiles: bool | None = None,
         prefer_active_presets: bool = False,
+        restore_remembered_profiles: bool = True,
         match_source_after_loading: bool = False,
     ) -> None:
         """Load the selected slicer's profiles without requiring a source."""
@@ -5729,6 +5753,9 @@ class MainWindow(QMainWindow):
                 "selected_profile_ids": dict(selected_profile_ids or {}),
                 "include_all_profiles": include_all_profiles,
                 "prefer_active_presets": bool(prefer_active_presets),
+                "restore_remembered_profiles": bool(
+                    restore_remembered_profiles
+                ),
                 "match_source_after_loading": bool(
                     match_source_after_loading
                 ),
@@ -5736,7 +5763,7 @@ class MainWindow(QMainWindow):
             return
         restored_profile_ids = dict(selected_profile_ids or {})
         restored_confirmed_profiles = False
-        if not restored_profile_ids:
+        if not restored_profile_ids and restore_remembered_profiles:
             remembered = getattr(
                 self.slicer_service,
                 "remembered_profile_selections",
@@ -5788,6 +5815,9 @@ class MainWindow(QMainWindow):
         self._profile_catalog_match_source_request_id = (
             request_id if match_source_after_loading else None
         )
+        self._profile_catalog_preserve_selection_requests[request_id] = bool(
+            restore_remembered_profiles
+        )
         self.profile_match_result = None
         self.confirmed_profile_context = None
         self.workflow.begin_profile_matching()
@@ -5831,6 +5861,10 @@ class MainWindow(QMainWindow):
         catalog: ProfileCatalog,
     ) -> None:
         if request_id != self._profile_request_id:
+            self._profile_catalog_preserve_selection_requests.pop(
+                request_id,
+                None,
+            )
             return
         match_source_after_loading = (
             request_id == self._profile_catalog_match_source_request_id
@@ -5850,7 +5884,16 @@ class MainWindow(QMainWindow):
             or not previous_confirmation.matches_catalog(catalog)
         ):
             self.profile_catalog_confirmation = None
-        self._populate_profile_combos(catalog)
+        preserve_previous_selection = (
+            self._profile_catalog_preserve_selection_requests.pop(
+                request_id,
+                True,
+            )
+        )
+        self._populate_profile_combos(
+            catalog,
+            preserve_previous_selection=preserve_previous_selection,
+        )
         self.show_all_profiles_checkbox.setEnabled(bool(catalog.machine_options))
         self.profile_filter_label.setText(
             catalog.profile_filter_summary
@@ -5938,7 +5981,12 @@ class MainWindow(QMainWindow):
         _details: str,
     ) -> None:
         if request_id != self._profile_request_id:
+            self._profile_catalog_preserve_selection_requests.pop(
+                request_id,
+                None,
+            )
             return
+        self._profile_catalog_preserve_selection_requests.pop(request_id, None)
         if request_id == self._profile_catalog_match_source_request_id:
             self._profile_catalog_match_source_request_id = None
         self.profile_catalog = None
@@ -6404,6 +6452,8 @@ class MainWindow(QMainWindow):
     def _populate_profile_combos(
         self,
         result: ProfileMatchResult | ProfileCatalog,
+        *,
+        preserve_previous_selection: bool = True,
     ) -> None:
         selected = (
             result.selected if isinstance(result, ProfileMatchResult) else None
@@ -6447,14 +6497,22 @@ class MainWindow(QMainWindow):
             selected.filament if selected is not None else catalog_filament,
         )
         previous_selections = (
-            self.machine_profile_combo.currentData(),
-            self.process_profile_combo.currentData(),
-            self.filament_profile_combo.currentData(),
+            (
+                self.machine_profile_combo.currentData(),
+                self.process_profile_combo.currentData(),
+                self.filament_profile_combo.currentData(),
+            )
+            if preserve_previous_selection
+            else (None, None, None)
         )
         previous_references = (
-            self._profile_combo_reference(self.machine_profile_combo),
-            self._profile_combo_reference(self.process_profile_combo),
-            self._profile_combo_reference(self.filament_profile_combo),
+            (
+                self._profile_combo_reference(self.machine_profile_combo),
+                self._profile_combo_reference(self.process_profile_combo),
+                self._profile_combo_reference(self.filament_profile_combo),
+            )
+            if preserve_previous_selection
+            else (None, None, None)
         )
         self._populating_profile_combos = True
         try:
@@ -7287,6 +7345,9 @@ class MainWindow(QMainWindow):
                             ),
                             prefer_active_presets=bool(
                                 pending.get("prefer_active_presets", False)
+                            ),
+                            restore_remembered_profiles=bool(
+                                pending.get("restore_remembered_profiles", True)
                             ),
                             match_source_after_loading=bool(
                                 pending.get(

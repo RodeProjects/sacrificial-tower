@@ -191,6 +191,13 @@ class LayerSliceTiming:
     approach_time_s: float
     return_time_s: float
     total_added_time_s: float
+    # A joint object/tower slice is authoritative for the complete layer.  It
+    # cannot always be reconstructed as ``standalone source + non-negative
+    # tower time`` because slicer cooling rules may change both objects' speeds
+    # when they share a layer.  Keep that direct evidence separately while the
+    # established ``total_added_time_s`` field remains the non-negative tower
+    # contribution used by the geometry feedback model.
+    combined_layer_time_s: float | None = None
     slicer_reported_time_s: float | None = None
     timing_difference_s: float | None = None
 
@@ -208,6 +215,16 @@ class SliceEvaluation:
         return {
             item.layer_index: item.total_added_time_s
             for item in self.layer_timings
+        }
+
+    @property
+    def combined_time_by_layer(self) -> dict[int, float]:
+        """Return direct full-layer evidence available from a joint slice."""
+
+        return {
+            item.layer_index: item.combined_layer_time_s
+            for item in self.layer_timings
+            if item.combined_layer_time_s is not None
         }
 
 

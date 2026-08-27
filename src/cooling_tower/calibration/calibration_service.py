@@ -692,11 +692,15 @@ class CalibrationService:
                     evaluation = self._combined_evaluation(
                         evaluation, combined_path, source_layers
                     )
+                combined_times_s = (
+                    evaluation.combined_time_by_layer if joint_round else {}
+                )
                 convergence = evaluate_convergence(
                     source_layers,
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                     maximum_profile_change_mm=maximum_profile_change,
+                    combined_times_s=combined_times_s,
                     config=config,
                 )
                 joint_target_deviation_s = (
@@ -704,6 +708,7 @@ class CalibrationService:
                         source_layers,
                         evaluation.added_time_by_layer,
                         target_time_s=settings.target_layer_time_s,
+                        combined_times_s=combined_times_s,
                     )
                     if joint_round else None
                 )
@@ -711,6 +716,7 @@ class CalibrationService:
                     source_layers,
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
+                    combined_times_s=combined_times_s,
                 )
                 minimum_target_reached = bool(
                     math.isfinite(minimum_target_difference_s)
@@ -827,6 +833,7 @@ class CalibrationService:
                     source_layers=source_layers,
                     added_times_s=evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
+                    combined_times_s=combined_times_s,
                 )
                 if baseline_score is None:
                     baseline_score = candidate_score
@@ -998,6 +1005,12 @@ class CalibrationService:
                             for layer in solid.layers
                         },
                         measurement_history=measurement_history,
+                        combined_layer_times_s=combined_times_s,
+                        coupled_radius_scale=self._joint_coupled_radius_scale(
+                            combined_times_s,
+                            target_time_s=settings.target_layer_time_s,
+                            config=config,
+                        ),
                         config=config,
                     )
                     continue
@@ -1011,6 +1024,12 @@ class CalibrationService:
                         for layer in solid.layers
                     },
                     measurement_history=measurement_history,
+                    combined_layer_times_s=combined_times_s,
+                    coupled_radius_scale=self._joint_coupled_radius_scale(
+                        combined_times_s,
+                        target_time_s=settings.target_layer_time_s,
+                        config=config,
+                    ),
                     config=config,
                 )
             if not failures:
@@ -1184,6 +1203,7 @@ class CalibrationService:
         added_times_s: dict[int, float],
         *,
         target_time_s: float,
+        combined_times_s: dict[int, float] | None = None,
     ) -> float:
         """Measure over- and undershoot only where the object needs a tower."""
 
@@ -1196,8 +1216,13 @@ class CalibrationService:
             )
             if required_added <= 0.0:
                 continue
-            observed_added = max(0.0, float(added_times_s.get(index, 0.0)))
-            deviations.append(abs(observed_added - required_added))
+            combined = (
+                float(combined_times_s[index])
+                if combined_times_s and index in combined_times_s
+                else float(getattr(layer, "total_time_s"))
+                + max(0.0, float(added_times_s.get(index, 0.0)))
+            )
+            deviations.append(abs(combined - target_time_s))
         return max(deviations, default=0.0)
 
     @staticmethod
@@ -1206,19 +1231,25 @@ class CalibrationService:
         added_times_s: dict[int, float],
         *,
         target_time_s: float,
+        combined_times_s: dict[int, float] | None = None,
     ) -> float:
         """Return the signed deviation of the critical minimum layer time."""
 
         combined_times = [
-            float(getattr(layer, "total_time_s"))
-            + max(
-                0.0,
-                float(
-                    added_times_s.get(
-                        int(getattr(layer, "index")),
-                        0.0,
-                    )
-                ),
+            (
+                float(combined_times_s[int(getattr(layer, "index"))])
+                if combined_times_s
+                and int(getattr(layer, "index")) in combined_times_s
+                else float(getattr(layer, "total_time_s"))
+                + max(
+                    0.0,
+                    float(
+                        added_times_s.get(
+                            int(getattr(layer, "index")),
+                            0.0,
+                        )
+                    ),
+                )
             )
             for layer in source_layers
         ]
@@ -1236,6 +1267,7 @@ class CalibrationService:
         source_layers: tuple[object, ...],
         added_times_s: dict[int, float],
         target_time_s: float,
+        combined_times_s: dict[int, float] | None = None,
     ) -> tuple[int, float, float, float, float, float]:
         """Rank target compliance, tower-time excess, then material."""
 
@@ -1256,7 +1288,11 @@ class CalibrationService:
         avoidable_excesses = tuple(
             max(
                 0.0,
-                float(added_times_s.get(index, 0.0)) - required_added,
+                (
+                    float(combined_times_s[index]) - target_time_s
+                    if combined_times_s and index in combined_times_s
+                    else float(added_times_s.get(index, 0.0)) - required_added
+                ),
             )
             for index, required_added in required_by_index.items()
         )
@@ -1360,8 +1396,9 @@ class CalibrationService:
         # G-code and stored each matched joint layer's total time in
         # ``total_added_time_s``. Re-parsing the same multi-million-line file
         # here used to double the dominant analysis cost without adding any
-        # evidence. The source pre-slice is unchanged, so its known layer time
-        # can be subtracted directly from that first joint measurement.
+        # evidence. Preserve the joint time as direct plate evidence; only the
+        # geometry feedback contribution remains clamped after subtracting the
+        # standalone source time.
         values: list[LayerSliceTiming] = []
         timing_by_layer = {
             item.layer_index: item for item in isolated.layer_timings
@@ -1370,14 +1407,44 @@ class CalibrationService:
             index = int(getattr(source, "index"))
             source_time = float(getattr(source, "total_time_s"))
             original = timing_by_layer[index]
-            added = max(0.0, original.total_added_time_s - source_time)
-            values.append(replace(original, total_added_time_s=added))
+            direct_combined = original.total_added_time_s
+            added = max(0.0, direct_combined - source_time)
+            values.append(
+                replace(
+                    original,
+                    total_added_time_s=added,
+                    combined_layer_time_s=direct_combined,
+                )
+            )
         return replace(
             isolated,
             gcode_path=combined_path.resolve(),
             layer_timings=tuple(values),
             metadata_source="final_combined_gcode",
         )
+
+    @staticmethod
+    def _joint_coupled_radius_scale(
+        combined_times_s: dict[int, float],
+        *,
+        target_time_s: float,
+        config: CalibrationConfig,
+    ) -> float:
+        """Return a bounded plate-wide correction for coupled tower geometry."""
+
+        finite_times = tuple(
+            value
+            for value in combined_times_s.values()
+            if math.isfinite(value) and value > 1e-9
+        )
+        if not finite_times:
+            return 1.0
+        critical_time = min(finite_times)
+        if abs(critical_time - target_time_s) <= config.time_tolerance_s:
+            return 1.0
+        requested = math.sqrt(target_time_s / critical_time)
+        maximum_growth = math.sqrt(config.maximum_path_growth_factor)
+        return min(maximum_growth, max(0.5, requested))
 
     @staticmethod
     def _profile_signature(profile: object) -> str:

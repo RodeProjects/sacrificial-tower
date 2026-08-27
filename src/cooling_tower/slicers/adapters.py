@@ -248,38 +248,43 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                     "Der Slicer-Aufruf enthält keine sichere Projektanordnung."
                 ) from error
             native_project = prepared.working_root / "native_project.3mf"
+            # A native 3MF contains the actual source and tower meshes, not
+            # merely reusable metadata. Reusing round one's project for a
+            # later radius candidate silently retained the old tower geometry:
+            # Anycubic then re-sliced the same first candidate, while Bambu's
+            # direct calibration input used the new STL but exported the old
+            # one. Always regenerate the native container for the exact pair
+            # of model files. The optional path remains a latest-copy artifact,
+            # never an input cache.
             native_template = request.native_project_template_path
-            if native_template is not None and native_template.is_file():
-                shutil.copy2(native_template, native_project)
-            else:
-                export_arguments = (
-                    *arguments[:option_index],
-                    "--arrange",
-                    "1",
-                    "--ensure-on-bed",
-                    "--export-3mf",
-                    str(native_project),
-                    str(prepared.copied_model),
-                    str(copied_tower),
+            export_arguments = (
+                *arguments[:option_index],
+                "--arrange",
+                "1",
+                "--ensure-on-bed",
+                "--export-3mf",
+                str(native_project),
+                str(prepared.copied_model),
+                str(copied_tower),
+            )
+            outcome = self.runner.run(
+                prepared.executable,
+                export_arguments,
+                working_directory=prepared.working_root,
+                timeout_s=request.timeout_s,
+                cancellation_event=request.cancellation_event,
+            )
+            if outcome.return_code != 0 or not native_project.is_file():
+                details = (outcome.stderr or outcome.stdout).strip()
+                if len(details) > 1000:
+                    details = details[-1000:]
+                raise JointProjectError(
+                    "Der Slicer hat das gemeinsame 3MF nicht akzeptiert."
+                    + (f" Slicer-Ausgabe: {details}" if details else "")
                 )
-                outcome = self.runner.run(
-                    prepared.executable,
-                    export_arguments,
-                    working_directory=prepared.working_root,
-                    timeout_s=request.timeout_s,
-                    cancellation_event=request.cancellation_event,
-                )
-                if outcome.return_code != 0 or not native_project.is_file():
-                    details = (outcome.stderr or outcome.stdout).strip()
-                    if len(details) > 1000:
-                        details = details[-1000:]
-                    raise JointProjectError(
-                        "Der Slicer hat das gemeinsame 3MF nicht akzeptiert."
-                        + (f" Slicer-Ausgabe: {details}" if details else "")
-                    )
-                if native_template is not None:
-                    native_template.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(native_project, native_template)
+            if native_template is not None:
+                native_template.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(native_project, native_template)
             return finalize_slicer_project(
                 native_project,
                 prepared.copied_model,

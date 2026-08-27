@@ -345,6 +345,62 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window.deleteLater()
             self.app.processEvents()
 
+    def test_explicit_rediscovery_ignores_stale_remembered_profile_choice(self) -> None:
+        discovery = SlicerDiscoveryResult(
+            installations=(self.installation,),
+            recommended_key=self.installation.identity_key,
+            gui_state=SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
+            message="Slicer gefunden",
+        )
+        slicer_service = StartupSlicerService(discovery)
+        slicer_service.profile_selections = {
+            role: ProfileSelectionReference(record.profile_id, record.path)
+            for role, record in (
+                ("machine", self.records["machine"]),
+                ("process", self.records["process"]),
+                ("filament", self.records["filament_alt"]),
+            )
+        }
+        profile_service = StartupProfileService(self.catalog)
+        window = MainWindow(
+            user_settings_path=self.root / "rediscovery-settings.json",
+            slicer_service=slicer_service,
+            profile_service=profile_service,
+            enable_update_check=False,
+            enable_startup_slicer_discovery=True,
+        )
+        try:
+            self._wait_until(lambda: profile_service.catalog_calls == 1)
+            self.assertEqual(profile_service.prefer_active_presets, [False])
+            remembered_calls = len(slicer_service.remembered_identity_keys)
+
+            window.start_slicer_discovery(force=True)
+            self._wait_until(
+                lambda: profile_service.catalog_calls == 2
+                and not window.background_job_manager.has_active(
+                    JobKind.PROFILE_MATCH
+                )
+            )
+
+            self.assertEqual(
+                profile_service.prefer_active_presets,
+                [False, True],
+            )
+            self.assertEqual(
+                len(slicer_service.remembered_identity_keys),
+                remembered_calls,
+            )
+            self.assertEqual(
+                window._profile_combo_reference(
+                    window.filament_profile_combo
+                ).profile_id,
+                self.records["filament"].profile_id,
+            )
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
     def test_first_incomplete_step_two_entry_retries_detection_only_once(self) -> None:
         discovery = SlicerDiscoveryResult(
             installations=(self.installation,),

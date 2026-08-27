@@ -189,6 +189,7 @@ class PreviewDialog(QDialog):
         )
         self.quality_label.hide()
         self._last_quality_text = ""
+        self._last_quality_state = "neutral"
         quality_layout.addWidget(self.quality_label)
         self.quality_details_toggle = QPushButton(
             "Prüfdetails anzeigen ▸"
@@ -336,6 +337,7 @@ class PreviewDialog(QDialog):
             compact=self.embedded,
         )
         self._last_quality_text = quality_text
+        self._last_quality_state = quality_state
         self._set_quality_text(quality_text, quality_state)
         self._set_quality_details(self._last_iteration_summary(result))
         self.progress.hide()
@@ -451,20 +453,35 @@ class PreviewDialog(QDialog):
         else:
             self.state = PreviewState.STALE
             self.state_label.setText(
-                "⚠ Vorschau nicht mehr aktuell"
+                "⚠ Vorschau veraltet – Einstellungen geändert; vor dem "
+                "Export aktualisieren."
             )
             self.state_label.setProperty("state", "stale")
             self.state_label.show()
-            if self._last_quality_text:
-                self._set_quality_text(
-                    "Diese Qualitätsauswertung gehört zur nicht mehr aktuellen "
-                    f"Vorschau.\n{self._last_quality_text}",
-                    "stale",
-                )
         self._refresh_state_style()
         self.progress.hide()
         self.progress_status_widget.hide()
         self._set_preview_controls_visible(self.canvas.scene is not None)
+
+    def mark_current(self) -> None:
+        """Revalidate the retained scene after restoring its exact request."""
+
+        if self.canvas.scene is None:
+            self.mark_stale()
+            return
+        self.state = PreviewState.CURRENT
+        self.state_label.setText("✓ Vorschau ist aktuell")
+        self.state_label.setProperty("state", "current")
+        self.state_label.show()
+        if self._last_quality_text:
+            self._set_quality_text(
+                self._last_quality_text,
+                self._last_quality_state,
+            )
+        self._refresh_state_style()
+        self.progress.hide()
+        self.progress_status_widget.hide()
+        self._set_preview_controls_visible(True)
 
     def set_failed(self, message: str) -> None:
         self.state = PreviewState.FAILED
@@ -474,7 +491,9 @@ class PreviewDialog(QDialog):
         self.state_label.setProperty("state", "error")
         self.state_label.show()
         self._refresh_state_style()
-        self._last_quality_text = ""
+        if self.canvas.scene is None:
+            self._last_quality_text = ""
+            self._last_quality_state = "neutral"
         self._set_quality_details("")
         self._set_quality_text(
             "Prüfstatus der Prognose\n"

@@ -103,6 +103,8 @@ def adjust_radius_profile(
     measurement_history: Mapping[
         int, Sequence[tuple[float, float]]
     ] | None = None,
+    combined_layer_times_s: Mapping[int, float] | None = None,
+    coupled_radius_scale: float = 1.0,
     config: CalibrationConfig,
 ) -> tuple[TowerRadiusProfile, float]:
     """Update raw radius demand from the geometry that was actually sliced.
@@ -116,6 +118,8 @@ def adjust_radius_profile(
     and transition invariants.
     """
 
+    if not math.isfinite(coupled_radius_scale) or coupled_radius_scale <= 0.0:
+        raise ValueError("coupled_radius_scale must be finite and greater than zero")
     source_by_index = _layer_by_index(source_layers)
     realized_by_index = realized_outer_radii_mm or {}
     adjusted: list[LayerRadiusRecord] = []
@@ -194,6 +198,30 @@ def adjust_radius_profile(
             ) * config.material_reduction_factor
         else:
             requested_radius = old_radius
+
+        # The angle/spline envelope couples neighbouring raw radius demands.
+        # Correct every directly deficient (or excessive) joint layer in the
+        # same direction, instead of chasing one moving critical layer at a
+        # time.  Direct combined times are deliberately required here; an
+        # isolated tower slice must retain its established local adjustment.
+        combined_time = (
+            float(combined_layer_times_s[item.layer_index])
+            if combined_layer_times_s is not None
+            and item.layer_index in combined_layer_times_s
+            else None
+        )
+        if combined_time is not None and math.isfinite(combined_time):
+            coupled_radius = old_radius * coupled_radius_scale
+            if (
+                coupled_radius_scale > 1.0
+                and combined_time + config.time_tolerance_s < target_time_s
+            ):
+                requested_radius = max(requested_radius, coupled_radius)
+            elif (
+                coupled_radius_scale < 1.0
+                and combined_time > target_time_s + config.time_tolerance_s
+            ):
+                requested_radius = min(requested_radius, coupled_radius)
 
         radius = min(
             maximum_radius,

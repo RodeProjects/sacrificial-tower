@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 import trimesh
 
@@ -19,12 +20,21 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cooling_tower.calibration import (
+    CalibrationService,
     build_calibration_profile,
     determine_occupied_bounds,
     parse_bed_geometry,
     propose_tower_placement,
 )
+from cooling_tower.models import (
+    BedBounds,
+    CalibrationConfig,
+    GenerationSettings,
+    OccupiedBounds,
+    TowerPlacement,
+)
 from cooling_tower.calibration.joint_project import (
+    build_joint_project,
     validate_tower_infill_adoption,
 )
 from cooling_tower.services import GCodeAnalysisService
@@ -224,14 +234,19 @@ class RealBambuJointSliceTests(unittest.TestCase):
             control_project = root / "control" / "object_with_cooling_tower.3mf"
             control_project.parent.mkdir()
             with protect_profile_sources(profile):
-                adapter.create_joint_project(
+                # Build the native control with the same self-contained
+                # temporary profile as the real calibration. Calling the
+                # Orca-family implementation deliberately omits only Bambu's
+                # post-export filament synchronization, which is the behaviour
+                # this control is intended to isolate.
+                super(BambuStudioAdapter, adapter).create_joint_project(
                     SliceRequest(
                         model_path=source,
-                        profile=profile,
+                        profile=joint_profile,
                         output_directory=root / "control" / "project_export",
                         diagnostics_root=root / "control" / "diagnostics",
                         timeout_s=300.0,
-                        purpose="source_preslice_reference",
+                        purpose="calibration",
                     ),
                     source,
                     tower,
@@ -311,6 +326,221 @@ class RealBambuJointSliceTests(unittest.TestCase):
                 source_hash,
             )
 
+    def test_real_full_joint_calibration_exports_latest_measured_mesh(
+        self,
+    ) -> None:
+        """Regress the stale-native-project Bambu timing failure end to end."""
+
+        executable = Path(r"C:\Program Files\Bambu Studio\bambu-studio.exe")
+        source = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
+        self.assertTrue(executable.is_file(), executable)
+        self.assertTrue(source.is_file(), source)
+        adapter = BambuStudioAdapter()
+        installation = adapter.verify_installation(
+            SlicerCandidate(
+                executable,
+                SlicerDiscoverySource.KNOWN_PATH,
+                adapter_hint=adapter.adapter_id,
+            )
+        )
+        validation = StlValidationService().validate(source)
+        self.assertTrue(validation.valid, validation.technical_summary)
+        source_hash = hashlib.sha256(source.read_bytes()).digest()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            matching = ProfileMatchingService(
+                inventory_service=ProfileInventoryService(
+                    root / "profile_inventory.json"
+                ),
+                mapping_store=ProfileMappingStore(root / "profile_mappings.json"),
+            )
+            match = matching.match(
+                ProfileMatchingContext.from_stl(validation.source_artifact),
+                installation,
+                adapter,
+                force_inventory=True,
+            )
+            self.assertIsNotNone(match.selected, match.message)
+            confirmation = ProfileConfirmation.from_result(
+                match,
+                validation.source_artifact,
+            )
+            confirmed = matching.confirm(match)
+            assert confirmed.selected is not None
+            profile_hashes = {
+                path: hashlib.sha256(path.read_bytes()).digest()
+                for path in confirmed.selected.effective_profile.source_paths
+            }
+            preslice = SourcePreSliceService(
+                analysis_service=GCodeAnalysisService(),
+                workspace_parent=root / "application" / "temporary",
+                diagnostics_root=root / "application" / "diagnostics",
+                timeout_s=300.0,
+            ).run(
+                stl_validation=validation,
+                profile_match=confirmed,
+                confirmation=confirmation,
+                adapter=adapter,
+            )
+            try:
+                result = CalibrationService().calibrate(
+                    preslice.analysis_snapshot,
+                    GenerationSettings(
+                        target_layer_time_s=10.0,
+                        safety_factor=1.0,
+                        minimum_outer_diameter_mm=3.0,
+                        maximum_outer_diameter_mm=40.0,
+                        minimum_object_tower_distance_mm=0.5,
+                        simulate_full_tower_infill=True,
+                        base_height_mm=1.0,
+                        automatic_base_width=True,
+                        maximum_expansion_angle_deg=50.0,
+                        maximum_contraction_angle_deg=50.0,
+                        mesh_segments=32,
+                    ),
+                    adapter=adapter,
+                    profile=confirmed.selected.effective_profile,
+                    output_directory=root / "calibration",
+                    config=CalibrationConfig(
+                        maximum_iterations=12,
+                        maximum_runtime_s=1200.0,
+                        time_tolerance_s=0.2,
+                        timeout_per_slice_s=300.0,
+                        object_clearance_mm=0.5,
+                        maximum_joint_slices=6,
+                        minimum_joint_slices=2,
+                    ),
+                    source_artifact=validation.source_artifact,
+                    progress_callback=(
+                        lambda percent, status: print(
+                            f"real-bambu {percent:3d}% {status}"
+                        )
+                    ),
+                )
+            finally:
+                preslice.cleanup()
+
+            joint_iterations = tuple(
+                item for item in result.iterations if item.joint_slice
+            )
+            joint_minima = tuple(
+                min(item.evaluation.combined_time_by_layer.values())
+                for item in joint_iterations
+                if item.evaluation.combined_time_by_layer
+            )
+            print(
+                "real-bambu joint minima:",
+                ", ".join(f"{value:.3f}" for value in joint_minima),
+                "best:",
+                result.best_iteration_number,
+                "state:",
+                result.state.value,
+            )
+            self.assertTrue(joint_iterations, result.failures)
+            self.assertTrue(result.has_usable_improvement, result.failures)
+            self.assertIsNotNone(result.project_path)
+            assert result.project_path is not None
+            self.assertTrue(result.project_path.is_file())
+            self.assertIsNotNone(result.stl_path)
+            assert result.stl_path is not None
+            best_iteration = result.best_iteration
+            self.assertIsNotNone(best_iteration)
+            assert best_iteration is not None
+            best_joint_times = best_iteration.evaluation.combined_time_by_layer
+            self.assertTrue(best_joint_times)
+            predicted_minimum = min(best_joint_times.values())
+
+            # The Bambu CLI cannot reliably re-slice its finalized 3MF in
+            # headless mode, so verify the durable artifact at the mesh level.
+            # Before the regression fix this project embedded round one's
+            # roughly seven-second tower while the sidecar-driven calibration
+            # measured a later roughly 9.6-second STL.
+            exported_meshes = _embedded_3mf_meshes(result.project_path)
+            self.assertTrue(exported_meshes)
+            candidate_mesh = trimesh.load(
+                result.stl_path,
+                file_type="stl",
+                force="mesh",
+                process=True,
+            )
+            self.assertIsInstance(candidate_mesh, trimesh.Trimesh)
+            matching_meshes = tuple(
+                mesh
+                for mesh in exported_meshes
+                if all(
+                    abs(float(actual) - float(expected)) <= 0.01
+                    for actual, expected in zip(
+                        mesh.extents,
+                        candidate_mesh.extents,
+                    )
+                )
+                and abs(abs(float(mesh.volume)) - abs(float(candidate_mesh.volume)))
+                <= max(0.1, abs(float(candidate_mesh.volume)) * 0.001)
+            )
+            print(
+                "real-bambu exported mesh matches:",
+                len(matching_meshes),
+                "predicted minimum:",
+                f"{predicted_minimum:.3f}",
+            )
+            self.assertTrue(matching_meshes)
+            self.assertGreater(predicted_minimum, joint_minima[0] + 2.0)
+            self.assertEqual(
+                {
+                    path: hashlib.sha256(path.read_bytes()).digest()
+                    for path in profile_hashes
+                },
+                profile_hashes,
+            )
+
+        self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), source_hash)
+
+
+class Embedded3mfMeshReaderTests(unittest.TestCase):
+    def test_reads_meshes_without_optional_trimesh_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.stl"
+            tower = root / "tower.stl"
+            project = root / "joint.3mf"
+            trimesh.creation.box(extents=(10.0, 12.0, 8.0)).export(source)
+            trimesh.creation.cylinder(
+                radius=4.0,
+                height=15.0,
+                sections=32,
+            ).export(tower)
+            build_joint_project(
+                source,
+                tower,
+                project,
+                occupied=OccupiedBounds(40.0, 50.0, 40.0, 50.0),
+                placement=TowerPlacement(
+                    80.0,
+                    80.0,
+                    4.0,
+                    BedBounds(0.0, 200.0, 0.0, 200.0),
+                    25.0,
+                ),
+                tower_full_infill=True,
+            )
+
+            meshes = _embedded_3mf_meshes(project)
+
+            self.assertEqual(len(meshes), 2)
+            self.assertTrue(
+                any(
+                    all(
+                        abs(float(actual) - float(expected)) <= 0.01
+                        for actual, expected in zip(
+                            mesh.extents,
+                            (8.0, 8.0, 15.0),
+                        )
+                    )
+                    for mesh in meshes
+                )
+            )
+
 
 def _cooling_values(values: object) -> dict[str, object]:
     if not isinstance(values, dict):
@@ -365,6 +595,54 @@ def _normalise_atom(value: object) -> str:
     if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", rendered):
         return f"{float(rendered):g}"
     return rendered
+
+
+def _embedded_3mf_meshes(project: Path) -> tuple[trimesh.Trimesh, ...]:
+    """Read embedded 3MF meshes without trimesh's optional networkx loader."""
+
+    namespace = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    meshes: list[trimesh.Trimesh] = []
+    with zipfile.ZipFile(project) as archive:
+        model_paths = tuple(
+            name
+            for name in archive.namelist()
+            if name.casefold().endswith(".model")
+        )
+        for model_path in model_paths:
+            root = ElementTree.fromstring(archive.read(model_path))
+            for mesh_element in root.findall(".//m:object/m:mesh", namespace):
+                vertices_element = mesh_element.find("m:vertices", namespace)
+                triangles_element = mesh_element.find("m:triangles", namespace)
+                if vertices_element is None or triangles_element is None:
+                    continue
+                vertices = tuple(
+                    (
+                        float(vertex.get("x", "nan")),
+                        float(vertex.get("y", "nan")),
+                        float(vertex.get("z", "nan")),
+                    )
+                    for vertex in vertices_element.findall("m:vertex", namespace)
+                )
+                faces = tuple(
+                    (
+                        int(triangle.get("v1", "-1")),
+                        int(triangle.get("v2", "-1")),
+                        int(triangle.get("v3", "-1")),
+                    )
+                    for triangle in triangles_element.findall(
+                        "m:triangle",
+                        namespace,
+                    )
+                )
+                if vertices and faces:
+                    meshes.append(
+                        trimesh.Trimesh(
+                            vertices=vertices,
+                            faces=faces,
+                            process=True,
+                        )
+                    )
+    return tuple(meshes)
 
 
 if __name__ == "__main__":

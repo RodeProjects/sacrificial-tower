@@ -23,6 +23,7 @@ def evaluate_convergence(
     *,
     target_time_s: float,
     maximum_profile_change_mm: float,
+    combined_times_s: Mapping[int, float] | None = None,
     config: CalibrationConfig,
 ) -> ConvergenceAssessment:
     """Apply the Phase-16 time and profile convergence criteria."""
@@ -31,8 +32,12 @@ def evaluate_convergence(
     for layer in source_layers:
         index = int(getattr(layer, "index"))
         source = float(getattr(layer, "total_time_s"))
-        added = max(0.0, float(added_times_s.get(index, 0.0)))
-        deficits[index] = max(0.0, target_time_s - source - added)
+        combined = (
+            float(combined_times_s[index])
+            if combined_times_s is not None and index in combined_times_s
+            else source + max(0.0, float(added_times_s.get(index, 0.0)))
+        )
+        deficits[index] = max(0.0, target_time_s - combined)
     maximum = max(deficits.values(), default=0.0)
     count = sum(value > config.time_tolerance_s for value in deficits.values())
     total = sum(

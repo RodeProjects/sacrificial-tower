@@ -779,7 +779,7 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("keine G-Code-Datei", result.failure_reason)
 
-    def test_native_joint_project_structure_is_reused_between_rounds(self) -> None:
+    def test_native_joint_project_is_rebuilt_for_each_tower_geometry(self) -> None:
         runner = NativeProjectRunner()
         adapter, request = self.request(runner)
         tower = self.root / "candidate_tower.stl"
@@ -815,7 +815,7 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
                     tower_full_infill=False,
                 )
 
-        self.assertEqual(runner.calls, 1)
+        self.assertEqual(runner.calls, 2)
         self.assertEqual(finalize.call_count, 2)
         self.assertEqual(template.read_bytes(), b"synthetic native project")
 
