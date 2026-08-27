@@ -6,7 +6,7 @@ import math
 import shutil
 import tempfile
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 from typing import Callable
@@ -51,6 +51,7 @@ from cooling_tower.slicers import (
     EffectiveProfile,
     SliceRequest,
     SliceResult,
+    SlicerProcessError,
     assert_profile_copies_are_isolated,
     protect_profile_sources,
 )
@@ -65,6 +66,16 @@ from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_rad
 
 
 ProgressCallback = Callable[[int, str], None]
+
+
+@dataclass(frozen=True, slots=True)
+class _DeferredJointProjectExport:
+    adapter: object
+    request: SliceRequest
+    source_model_path: Path
+    occupied: OccupiedBounds
+    placement: object
+    tower_full_infill: bool
 
 
 class CalibrationService:
@@ -241,6 +252,7 @@ class CalibrationService:
         best_stl: Path | None = None
         best_gcode: Path | None = None
         best_project: Path | None = None
+        best_deferred_project: _DeferredJointProjectExport | None = None
         best_iteration_number: int | None = None
         best_score: tuple[int, float, float, float, float, float] | None = None
         best_is_joint = False
@@ -286,7 +298,7 @@ class CalibrationService:
                 f"{config.maximum_joint_slices} Mal gemeinsam geslicet. "
                 "Sobald die Ziel-Layerzeit innerhalb der Toleranz bestätigt ist, "
                 "endet die Generierung vorzeitig. Das exportierte 3MF reproduziert "
-                "die zuletzt verwendete geprüfte Anordnung."
+                "die ausgewählte geprüfte Anordnung."
             )
             if reuse_seed:
                 warnings.append(
@@ -470,6 +482,7 @@ class CalibrationService:
                     ))
                     break
                 candidate_project: Path | None = None
+                deferred_project: _DeferredJointProjectExport | None = None
                 slice_model_path = candidate_stl
                 use_cli_assemble_list = False
                 profile_for_slice = isolated_profile
@@ -481,31 +494,64 @@ class CalibrationService:
                             "Die feste Platzierung für das gemeinsame 3MF fehlt.",
                         ))
                         break
-                    candidate_project = iteration_root / "object_with_cooling_tower.3mf"
                     profile_for_slice = joint_profile
                     overrides_for_slice = joint_overrides
                     try:
+                        project_request = SliceRequest(
+                            model_path=joint_source_stl,
+                            profile=profile_for_slice,
+                            output_directory=(
+                                iteration_root / "project_export"
+                            ),
+                            diagnostics_root=(
+                                iteration_root / "project_diagnostics"
+                            ),
+                            timeout_s=config.timeout_per_slice_s,
+                            cancellation_event=cancellation_event,
+                            temporary_overrides=overrides_for_slice,
+                            purpose="calibration",
+                            calibration_round=number,
+                            native_project_template_path=(
+                                native_joint_template
+                            ),
+                        )
+                        lightweight_factory = getattr(
+                            adapter,
+                            "prepare_joint_slice_input",
+                            None,
+                        )
                         project_factory = getattr(
                             adapter, "create_joint_project", None
                         )
-                        if callable(project_factory):
-                            project_request = SliceRequest(
-                                model_path=joint_source_stl,
-                                profile=profile_for_slice,
-                                output_directory=(
-                                    iteration_root / "project_export"
+                        if callable(lightweight_factory):
+                            slice_input = lightweight_factory(
+                                project_request,
+                                joint_source_stl,
+                                candidate_stl,
+                                iteration_root / "candidate.bambu-assemble.json",
+                                occupied=occupied_bounds,
+                                placement=placement,
+                                tower_full_infill=(
+                                    settings.simulate_full_tower_infill
                                 ),
-                                diagnostics_root=(
-                                    iteration_root / "project_diagnostics"
+                            )
+                            slice_model_path = Path(
+                                getattr(slice_input, "slice_input_path")
+                            ).resolve()
+                            use_cli_assemble_list = True
+                            deferred_project = _DeferredJointProjectExport(
+                                adapter=adapter,
+                                request=project_request,
+                                source_model_path=joint_source_stl,
+                                occupied=occupied_bounds,
+                                placement=placement,
+                                tower_full_infill=(
+                                    settings.simulate_full_tower_infill
                                 ),
-                                timeout_s=config.timeout_per_slice_s,
-                                cancellation_event=cancellation_event,
-                                temporary_overrides=overrides_for_slice,
-                                purpose="calibration",
-                                calibration_round=number,
-                                native_project_template_path=(
-                                    native_joint_template
-                                ),
+                            )
+                        elif callable(project_factory):
+                            candidate_project = iteration_root / (
+                                "object_with_cooling_tower.3mf"
                             )
                             project_result = project_factory(
                                 project_request,
@@ -525,6 +571,9 @@ class CalibrationService:
                                 slice_model_path = Path(native_slice_input).resolve()
                                 use_cli_assemble_list = True
                         else:
+                            candidate_project = iteration_root / (
+                                "object_with_cooling_tower.3mf"
+                            )
                             build_joint_project(
                                 joint_source_stl,
                                 candidate_stl,
@@ -542,7 +591,7 @@ class CalibrationService:
                         ))
                         terminal_state = CalibrationState.INVALID_GEOMETRY
                         break
-                    if not use_cli_assemble_list:
+                    if candidate_project is not None and not use_cli_assemble_list:
                         slice_model_path = candidate_project
                 signature = self._profile_signature(solid)
                 repeated_signatures[signature] = repeated_signatures.get(signature, 0) + 1
@@ -575,9 +624,9 @@ class CalibrationService:
                     ),
                     placement_xy_mm=(
                         (placement.center_x_mm, placement.center_y_mm)
-                        if placement and candidate_project is None else None
+                        if placement and not joint_round else None
                     ),
-                    preserve_model_positions=(candidate_project is not None),
+                    preserve_model_positions=joint_round,
                     use_cli_assemble_list=use_cli_assemble_list,
                     purpose="calibration",
                     calibration_round=number,
@@ -626,7 +675,7 @@ class CalibrationService:
                     terminal_state = CalibrationState.SLICER_FAILED
                     break
                 validate_full_infill = bool(
-                    candidate_project is not None
+                    joint_round
                     and settings.simulate_full_tower_infill
                 )
                 try:
@@ -652,7 +701,7 @@ class CalibrationService:
                     terminal_state = CalibrationState.SLICER_FAILED
                     break
                 combined_path = None
-                if candidate_project is not None:
+                if joint_round:
                     combined_path = evaluation.gcode_path
                     evaluation = self._combined_evaluation(
                         evaluation,
@@ -822,7 +871,7 @@ class CalibrationService:
                     target_time_confirmed=target_time_confirmed,
                 )
                 metadata_conflict = (
-                    (config.mode is CalibrationMode.GCODE or candidate_project is not None)
+                    (config.mode is CalibrationMode.GCODE or joint_round)
                     and evaluation.maximum_metadata_difference_s is not None
                     and evaluation.maximum_metadata_difference_s
                     > config.slicer_metadata_tolerance_s
@@ -852,6 +901,7 @@ class CalibrationService:
                     best_stl = candidate_stl
                     best_gcode = combined_path
                     best_project = candidate_project
+                    best_deferred_project = deferred_project
                     best_iteration_number = number
                 if (
                     not joint_round
@@ -903,6 +953,7 @@ class CalibrationService:
                         candidate_stl=candidate_stl,
                         candidate_gcode=combined_path,
                         candidate_project=candidate_project,
+                        deferred_project=deferred_project,
                         placement=placement,
                         failures=(),
                         warnings=warnings,
@@ -1067,12 +1118,16 @@ class CalibrationService:
                 and best_score < baseline_score
             )
             if (
-                (improved or best_project is not None)
+                (
+                    improved
+                    or best_project is not None
+                    or best_deferred_project is not None
+                )
                 and best_profile is not None
                 and best_stl is not None
                 and best_iteration_number is not None
             ):
-                if best_project is not None:
+                if best_project is not None or best_deferred_project is not None:
                     warnings.append(
                         "Die gemeinsamen Slices haben die "
                         "Zielzeit nicht vollständig bestätigt. Der gemeinsam "
@@ -1098,6 +1153,7 @@ class CalibrationService:
                     candidate_stl=best_stl,
                     candidate_gcode=best_gcode,
                     candidate_project=best_project,
+                    deferred_project=best_deferred_project,
                     placement=placement,
                     failures=failures,
                     warnings=warnings,
@@ -1322,6 +1378,7 @@ class CalibrationService:
         candidate_stl: Path,
         candidate_gcode: Path | None,
         candidate_project: Path | None,
+        deferred_project: _DeferredJointProjectExport | None,
         placement: object,
         failures: tuple[CalibrationFailure, ...] | list[CalibrationFailure],
         warnings: list[str],
@@ -1331,6 +1388,66 @@ class CalibrationService:
         best_iteration_number: int,
         improved_over_initial_candidate: bool,
     ) -> CalibrationResult:
+        if candidate_project is None and deferred_project is not None:
+            project_factory = getattr(
+                deferred_project.adapter,
+                "create_joint_project",
+                None,
+            )
+            if not callable(project_factory):
+                error: BaseException = JointProjectError(
+                    "Der finale Bambu-Projektbau ist nicht verfügbar."
+                )
+            else:
+                try:
+                    final_project = candidate_stl.with_name(
+                        "selected_object_with_cooling_tower.3mf"
+                    )
+                    project_result = project_factory(
+                        deferred_project.request,
+                        deferred_project.source_model_path,
+                        candidate_stl,
+                        final_project,
+                        occupied=deferred_project.occupied,
+                        placement=deferred_project.placement,
+                        tower_full_infill=(
+                            deferred_project.tower_full_infill
+                        ),
+                    )
+                    candidate_project = Path(
+                        getattr(project_result, "path", final_project)
+                    ).resolve()
+                    if not candidate_project.is_file():
+                        raise JointProjectError(
+                            "Der finale Bambu-Projektbau lieferte kein 3MF."
+                        )
+                except (JointProjectError, OSError, SlicerProcessError) as caught:
+                    error = caught
+                else:
+                    error = None
+            if error is not None:
+                return CalibrationResult(
+                    state=CalibrationState.SLICER_FAILED,
+                    mode=config.mode,
+                    iterations=tuple(iterations),
+                    profile=profile,
+                    stl_path=None,
+                    gcode_path=None,
+                    placement=placement,
+                    failures=(
+                        *tuple(failures),
+                        CalibrationFailure(
+                            CalibrationFailureCode.SLICER_FAILURE,
+                            "Das finale Bambu-3MF konnte nicht aus dem "
+                            f"gewählten Kandidaten erzeugt werden: {error}",
+                        ),
+                    ),
+                    warnings=tuple(warnings),
+                    source_sha256=source_hash,
+                    configured_iteration_count=config.maximum_iterations,
+                    best_iteration_number=best_iteration_number,
+                    improved_over_initial_candidate=False,
+                )
         output_directory.mkdir(parents=True, exist_ok=True)
         stl_destination = output_directory / "cooling_tower_slicer_evaluated.stl"
         shutil.copy2(candidate_stl, stl_destination)

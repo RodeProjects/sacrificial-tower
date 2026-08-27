@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cooling_tower.models import (
     BedBounds,
@@ -17,6 +17,9 @@ from cooling_tower.models import (
     PreparedAnalysisSource,
     SourceArtifact,
 )
+
+if TYPE_CHECKING:
+    from cooling_tower.preview.source_cache import PreviewSourceData
 
 
 PREVIEW_SCHEMA_VERSION = 1
@@ -95,6 +98,11 @@ class PreviewRequest:
         repr=False,
     )
     prepared_analysis_source: PreparedAnalysisSource | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+    prepared_source_data: PreviewSourceData | None = field(
         default=None,
         compare=False,
         repr=False,

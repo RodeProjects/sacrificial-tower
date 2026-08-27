@@ -21,7 +21,13 @@ if str(SRC_ROOT) not in sys.path:
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.user_messages import german_user_message
-from cooling_tower.models import SlicerFamily, SlicerIdentity
+from cooling_tower.models import (
+    BedBounds,
+    OccupiedBounds,
+    SlicerFamily,
+    SlicerIdentity,
+    TowerPlacement,
+)
 from cooling_tower.slicers import (
     AnycubicSlicerNextAdapter,
     BambuStudioAdapter,
@@ -1019,6 +1025,52 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
             self.assertEqual(prepared.arguments.count(str(prepared.copied_model)), 1)
         finally:
             adapter.cleanup_prepared_slice(prepared)
+
+    def test_bambu_candidate_assembly_does_not_export_native_project(self) -> None:
+        runner = NativeProjectRunner()
+        _anycubic, request = self.request(runner)
+        adapter = BambuStudioAdapter(runner=runner)
+        source = PROJECT_ROOT / "tests" / "fixtures" / "stl" / (
+            "test_model_manifold.stl"
+        )
+        tower = PROJECT_ROOT / "tests" / "fixtures" / "stl" / (
+            "known_valid_tetrahedron_ascii.stl"
+        )
+        destination = self.root / "candidate.bambu-assemble.json"
+        source_before = hashlib.sha256(source.read_bytes()).digest()
+        tower_before = hashlib.sha256(tower.read_bytes()).digest()
+
+        result = adapter.prepare_joint_slice_input(
+            request,
+            source,
+            tower,
+            destination,
+            occupied=OccupiedBounds(0.0, 20.0, 0.0, 20.0),
+            placement=TowerPlacement(
+                80.0,
+                80.0,
+                5.0,
+                BedBounds(0.0, 250.0, 0.0, 250.0),
+                10.0,
+            ),
+            tower_full_infill=True,
+        )
+
+        self.assertEqual(runner.calls, 0)
+        self.assertEqual(result.slice_input_path, destination.resolve())
+        payload = json.loads(destination.read_text(encoding="utf-8"))
+        objects = payload["plates"][0]["objects"]
+        self.assertEqual(Path(objects[0]["path"]), source.resolve())
+        self.assertEqual(Path(objects[1]["path"]), tower.resolve())
+        self.assertEqual(objects[1]["print_params"]["sparse_infill_density"], "100%")
+        self.assertEqual(
+            hashlib.sha256(source.read_bytes()).digest(),
+            source_before,
+        )
+        self.assertEqual(
+            hashlib.sha256(tower.read_bytes()).digest(),
+            tower_before,
+        )
 
     def test_anycubic_cli_receives_typed_isolated_profile_copies(self) -> None:
         for record in (self.machine, self.process, self.filament):

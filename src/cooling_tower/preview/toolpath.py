@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import struct
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import Callable
 from cooling_tower.gcode.parser import (
     MachineStateTracker,
     Movement,
+    ParsedGCodeLine,
     iter_parsed_gcode_lines,
 )
 from cooling_tower.models import OccupiedBounds
@@ -30,6 +33,181 @@ class DepositionToolpathAnalysis:
     object_segments: tuple[LineSegment3D, ...]
     source_segment_count: int
     occupied_bounds: OccupiedBounds | None
+
+
+_SEGMENT_RECORD = struct.Struct("<7dq")
+
+
+class DepositionToolpathCollector:
+    """Collect preview products from already parsed movement events.
+
+    Collinearly merged source segments are spooled in a compact binary stream.
+    This keeps the event pass bounded without changing the existing per-layer
+    reservoir sampling after the exact layer count becomes known.
+    """
+
+    def __init__(
+        self,
+        *,
+        maximum_segments: int = 60_000,
+        spool_memory_bytes: int = 8 * 1024 * 1024,
+    ) -> None:
+        if maximum_segments < 100:
+            raise ValueError("maximum_segments must be at least 100")
+        if spool_memory_bytes < 0:
+            raise ValueError("spool_memory_bytes must not be negative")
+        self.maximum_segments = int(maximum_segments)
+        self._records = tempfile.SpooledTemporaryFile(
+            max_size=int(spool_memory_bytes),
+            mode="w+b",
+        )
+        self._total = 0
+        self._pending: LineSegment3D | None = None
+        self._pending_layer: float | None = None
+        self._pending_line = 0
+        self._minimum_x = math.inf
+        self._maximum_x = -math.inf
+        self._minimum_y = math.inf
+        self._maximum_y = -math.inf
+        self._finished = False
+
+    def consume(self, parsed: ParsedGCodeLine, event: object) -> None:
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        if not isinstance(event, Movement) or event.category != "deposition":
+            return
+        self._minimum_x = min(self._minimum_x, event.start_x, event.end_x)
+        self._maximum_x = max(self._maximum_x, event.start_x, event.end_x)
+        self._minimum_y = min(self._minimum_y, event.start_y, event.end_y)
+        self._maximum_y = max(self._maximum_y, event.start_y, event.end_y)
+        coordinates = (
+            event.start_x,
+            event.start_y,
+            event.start_z,
+            event.end_x,
+            event.end_y,
+            event.end_z,
+        )
+        if not all(math.isfinite(value) for value in coordinates):
+            return
+        self._total += 1
+        segment = LineSegment3D(
+            Point3D(event.start_x, event.start_y, event.start_z),
+            Point3D(event.end_x, event.end_y, event.end_z),
+        )
+        layer_key = round(event.end_z, 4)
+        if (
+            self._pending is not None
+            and self._pending_layer == layer_key
+            and _collinear(self._pending, segment)
+        ):
+            self._pending = LineSegment3D(self._pending.start, segment.end)
+            return
+        self._flush_pending()
+        self._pending = segment
+        self._pending_layer = layer_key
+        self._pending_line = int(getattr(parsed, "number"))
+
+    def _flush_pending(self) -> None:
+        pending = self._pending
+        layer = self._pending_layer
+        if pending is not None and layer is not None:
+            self._records.write(
+                _SEGMENT_RECORD.pack(
+                    layer,
+                    pending.start.x,
+                    pending.start.y,
+                    pending.start.z,
+                    pending.end.x,
+                    pending.end.y,
+                    pending.end.z,
+                    self._pending_line,
+                )
+            )
+        self._pending = None
+        self._pending_layer = None
+
+    def finish(self, *, expected_layer_count: int) -> DepositionToolpathAnalysis:
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        if expected_layer_count < 1:
+            raise ValueError("expected_layer_count must be positive")
+        self._finished = True
+        self._flush_pending()
+        per_layer_limit = max(
+            8,
+            min(
+                256,
+                self.maximum_segments // max(1, expected_layer_count),
+            ),
+        )
+        layers: dict[float, _LayerSample] = defaultdict(
+            lambda: _LayerSample(per_layer_limit)
+        )
+        self._records.seek(0)
+        while True:
+            raw = self._records.read(_SEGMENT_RECORD.size)
+            if not raw:
+                break
+            if len(raw) != _SEGMENT_RECORD.size:
+                raise RuntimeError("Incomplete temporary toolpath record.")
+            (
+                layer_key,
+                start_x,
+                start_y,
+                start_z,
+                end_x,
+                end_y,
+                end_z,
+                line_number,
+            ) = _SEGMENT_RECORD.unpack(raw)
+            layers[layer_key].add(
+                LineSegment3D(
+                    Point3D(start_x, start_y, start_z),
+                    Point3D(end_x, end_y, end_z),
+                ),
+                line_number,
+            )
+        values = [
+            segment
+            for layer_key in sorted(layers)
+            for segment in layers[layer_key].values()
+        ]
+        if len(values) > self.maximum_segments:
+            step = len(values) / self.maximum_segments
+            values = [
+                values[int(index * step)]
+                for index in range(self.maximum_segments)
+            ]
+        occupied_bounds = (
+            OccupiedBounds(
+                self._minimum_x,
+                self._maximum_x,
+                self._minimum_y,
+                self._maximum_y,
+            )
+            if all(
+                math.isfinite(value)
+                for value in (
+                    self._minimum_x,
+                    self._maximum_x,
+                    self._minimum_y,
+                    self._maximum_y,
+                )
+            )
+            else None
+        )
+        self._records.close()
+        return DepositionToolpathAnalysis(
+            object_segments=tuple(values),
+            source_segment_count=self._total,
+            occupied_bounds=occupied_bounds,
+        )
+
+    def close(self) -> None:
+        self._finished = True
+        if not self._records.closed:
+            self._records.close()
 
 
 @dataclass(slots=True)
@@ -115,92 +293,21 @@ def analyze_deposition_toolpaths(
         raise ValueError("maximum_segments must be at least 100")
     notify = progress_callback or (lambda _percent, _status: None)
     notify(-1, "Objekt-Werkzeugpfade werden vereinfacht …")
-    per_layer_limit = max(
-        8,
-        min(256, maximum_segments // max(1, expected_layer_count)),
-    )
-    layers: dict[float, _LayerSample] = defaultdict(
-        lambda: _LayerSample(per_layer_limit)
-    )
     tracker = MachineStateTracker()
-    total = 0
-    pending: LineSegment3D | None = None
-    pending_layer: float | None = None
-    pending_line = 0
-    minimum_x = math.inf
-    maximum_x = -math.inf
-    minimum_y = math.inf
-    maximum_y = -math.inf
-
-    def flush_pending() -> None:
-        nonlocal pending, pending_layer
-        if pending is not None and pending_layer is not None:
-            layers[pending_layer].add(pending, pending_line)
-        pending = None
-        pending_layer = None
-
-    for parsed in iter_parsed_gcode_lines(gcode_path):
-        if parsed.number % 2_000 == 0 and (
-            cancellation_event is not None and cancellation_event.is_set()
-        ):
+    collector = DepositionToolpathCollector(maximum_segments=maximum_segments)
+    try:
+        for parsed in iter_parsed_gcode_lines(gcode_path):
+            if parsed.number % 2_000 == 0 and (
+                cancellation_event is not None and cancellation_event.is_set()
+            ):
+                raise PreviewCancelled()
+            collector.consume(parsed, tracker.process_line(parsed))
+        if cancellation_event is not None and cancellation_event.is_set():
             raise PreviewCancelled()
-        event = tracker.process_line(parsed)
-        if not isinstance(event, Movement) or event.category != "deposition":
-            continue
-        minimum_x = min(minimum_x, event.start_x, event.end_x)
-        maximum_x = max(maximum_x, event.start_x, event.end_x)
-        minimum_y = min(minimum_y, event.start_y, event.end_y)
-        maximum_y = max(maximum_y, event.start_y, event.end_y)
-        coordinates = (
-            event.start_x,
-            event.start_y,
-            event.start_z,
-            event.end_x,
-            event.end_y,
-            event.end_z,
-        )
-        if not all(math.isfinite(value) for value in coordinates):
-            continue
-        total += 1
-        segment = LineSegment3D(
-            Point3D(event.start_x, event.start_y, event.start_z),
-            Point3D(event.end_x, event.end_y, event.end_z),
-        )
-        layer_key = round(event.end_z, 4)
-        if pending is not None and pending_layer == layer_key and _collinear(
-            pending, segment
-        ):
-            pending = LineSegment3D(pending.start, segment.end)
-        else:
-            flush_pending()
-            pending = segment
-            pending_layer = layer_key
-            pending_line = parsed.number
-    flush_pending()
-    if cancellation_event is not None and cancellation_event.is_set():
-        raise PreviewCancelled()
-
-    values = [
-        segment
-        for layer_key in sorted(layers)
-        for segment in layers[layer_key].values()
-    ]
-    if len(values) > maximum_segments:
-        step = len(values) / maximum_segments
-        values = [values[int(index * step)] for index in range(maximum_segments)]
-    occupied_bounds = (
-        OccupiedBounds(minimum_x, maximum_x, minimum_y, maximum_y)
-        if all(
-            math.isfinite(value)
-            for value in (minimum_x, maximum_x, minimum_y, maximum_y)
-        )
-        else None
-    )
-    return DepositionToolpathAnalysis(
-        object_segments=tuple(values),
-        source_segment_count=total,
-        occupied_bounds=occupied_bounds,
-    )
+        return collector.finish(expected_layer_count=expected_layer_count)
+    except BaseException:
+        collector.close()
+        raise
 
 
 def extract_deposition_toolpaths(

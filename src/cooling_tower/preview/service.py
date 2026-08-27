@@ -208,6 +208,25 @@ class PreviewService:
             notify(20, "Zwischengespeicherte Objekt-Werkzeugpfade werden verwendet")
             return cached
 
+        prepared_source_data = request.prepared_source_data
+        if (
+            isinstance(prepared_source_data, PreviewSourceData)
+            and prepared_source_data.key == key
+        ):
+            self.source_data_cache.put(prepared_source_data)
+            record_diagnostic(
+                "preview_source_combined_analysis_used",
+                displayed_segment_count=len(
+                    prepared_source_data.object_segments
+                ),
+                source_segment_count=prepared_source_data.source_segment_count,
+            )
+            notify(
+                20,
+                "Gemeinsam analysierte Objekt-Werkzeugpfade werden verwendet",
+            )
+            return prepared_source_data
+
         record_diagnostic("preview_source_cache_miss")
         notify(5, "Objekt-Werkzeugpfade werden aufbereitet …")
         source_analysis = analyze_deposition_toolpaths(

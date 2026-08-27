@@ -364,6 +364,81 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
     adapter_id = "bambu_studio"
     detection_module_id = "bambu_studio"
 
+    def prepare_joint_slice_input(
+        self,
+        request: SliceRequest,
+        source_model_path: Path,
+        tower_model_path: Path,
+        destination: Path,
+        *,
+        occupied: object,
+        placement: object,
+        tower_full_infill: bool,
+    ) -> object:
+        """Create only Bambu's direct fixed-position candidate assembly."""
+
+        from cooling_tower.calibration.joint_project import (
+            JointSliceInputResult,
+            describe_joint_placement,
+        )
+
+        arrangement = describe_joint_placement(
+            source_model_path,
+            tower_model_path,
+            occupied=occupied,
+            placement=placement,
+        )
+        tower_params = (
+            {
+                "sparse_infill_density": "100%",
+                "sparse_infill_pattern": "zig-zag",
+            }
+            if tower_full_infill
+            else {}
+        )
+        payload = {
+            "plates": [
+                {
+                    "plate_name": "Cooling tower calibration",
+                    "need_arrange": False,
+                    "objects": [
+                        {
+                            "path": str(Path(source_model_path).resolve()),
+                            "count": 1,
+                            "filaments": [
+                                arrangement.source_filament_index
+                            ],
+                            "pos_x": [arrangement.source_translation_mm[0]],
+                            "pos_y": [arrangement.source_translation_mm[1]],
+                            "pos_z": [arrangement.source_translation_mm[2]],
+                        },
+                        {
+                            "path": str(Path(tower_model_path).resolve()),
+                            "count": 1,
+                            "filaments": [
+                                arrangement.tower_filament_index
+                            ],
+                            "pos_x": [arrangement.tower_translation_mm[0]],
+                            "pos_y": [arrangement.tower_translation_mm[1]],
+                            "pos_z": [arrangement.tower_translation_mm[2]],
+                            "print_params": tower_params,
+                        },
+                    ],
+                }
+            ]
+        }
+        destination_path = Path(destination).resolve()
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        destination_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return JointSliceInputResult(
+            slice_input_path=destination_path,
+            placement=arrangement,
+            tower_full_infill=tower_full_infill,
+        )
+
     def create_joint_project(
         self,
         request: SliceRequest,
@@ -396,51 +471,19 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             tuple(record.path for record in request.profile.filaments),
         )
         result = replace(result, sha256=synchronized_sha256)
-        durable_tower = destination_path.with_name("cooling_tower_joint_slice.stl")
-        shutil.copy2(Path(tower_model_path).resolve(), durable_tower)
         assembly_path = destination_path.with_name(
             f"{destination_path.stem}.bambu-assemble.json"
         )
-        tower_params = (
-            {
-                "sparse_infill_density": "100%",
-                "sparse_infill_pattern": "zig-zag",
-            }
-            if tower_full_infill
-            else {}
+        slice_input = self.prepare_joint_slice_input(
+            request,
+            source_model_path,
+            tower_model_path,
+            assembly_path,
+            occupied=occupied,
+            placement=placement,
+            tower_full_infill=tower_full_infill,
         )
-        payload = {
-            "plates": [
-                {
-                    "plate_name": "Cooling tower calibration",
-                    "need_arrange": False,
-                    "objects": [
-                        {
-                            "path": str(Path(source_model_path).resolve()),
-                            "count": 1,
-                            "filaments": [1],
-                            "pos_x": [result.source_translation_mm[0]],
-                            "pos_y": [result.source_translation_mm[1]],
-                            "pos_z": [result.source_translation_mm[2]],
-                        },
-                        {
-                            "path": str(durable_tower.resolve()),
-                            "count": 1,
-                            "filaments": [1],
-                            "pos_x": [result.tower_translation_mm[0]],
-                            "pos_y": [result.tower_translation_mm[1]],
-                            "pos_z": [result.tower_translation_mm[2]],
-                            "print_params": tower_params,
-                        },
-                    ],
-                }
-            ]
-        }
-        assembly_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return replace(result, slice_input_path=assembly_path.resolve())
+        return replace(result, slice_input_path=slice_input.slice_input_path)
 
 
 class PrusaSlicerAdapter(BaseSlicerAdapter):

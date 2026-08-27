@@ -9,6 +9,7 @@ import shutil
 from threading import Event
 import tempfile
 import time
+from typing import TYPE_CHECKING
 
 from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.file_integrity import sha256_file
@@ -47,11 +48,15 @@ from cooling_tower.services.analysis_service import (
 )
 from cooling_tower.services.stl_validation import StlValidationResult
 
+if TYPE_CHECKING:
+    from cooling_tower.preview.source_cache import PreviewSourceData
+
 
 PRESLICE_ADAPTER_VERSION = 3
 DEFAULT_PRESLICE_TIMEOUT_S = 8 * 60.0
 _WORKSPACE_PREFIX = "cooling_tower_source_preslice_"
 _WORKSPACE_MARKER = ".cooling_tower_preslice_workspace"
+_PRESLICE_PREVIEW_SEGMENTS = 60_000
 
 PreSliceProgressCallback = Callable[[int, str, bool], None]
 
@@ -79,6 +84,7 @@ class SourcePreSliceResult:
     workspace_root: Path
     metadata_verified: bool
     cache_hit: bool = False
+    preview_source_data: PreviewSourceData | None = None
 
     def cleanup(self) -> None:
         _safe_cleanup_workspace(self.workspace_root)
@@ -242,9 +248,8 @@ class SourcePreSliceService:
                 raise SourcePreSliceCancelled("Der Pre-Slice wurde abgebrochen.")
             notify(70, "Layerzeiten werden analysiert", False)
             try:
-                snapshot = self.analysis_service.analyze(
+                snapshot, preview_source_data = self._analyze_with_preview_data(
                     gcode_path,
-                    force=True,
                     progress_callback=lambda percent, status: (
                         self._forward_analysis_progress(
                             notify,
@@ -306,6 +311,7 @@ class SourcePreSliceService:
                 workspace_root=workspace,
                 metadata_verified=True,
                 cache_hit=False,
+                preview_source_data=preview_source_data,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError) as error:
             _safe_cleanup_workspace(workspace)
@@ -328,6 +334,60 @@ class SourcePreSliceService:
             overall_percent,
             f"{status} ({analysis_percent} %)",
             False,
+        )
+
+    def _analyze_with_preview_data(
+        self,
+        gcode_path: Path,
+        *,
+        progress_callback: Callable[[int, str], None],
+        cancellation_callback: Callable[[], bool],
+    ) -> tuple[GCodeAnalysisSnapshot, PreviewSourceData | None]:
+        # This optional product must not initialize the preview/calibration
+        # package cycle while the core service modules are still importing.
+        from cooling_tower.preview.source_cache import (
+            PreviewSourceCacheKey,
+            PreviewSourceData,
+        )
+        from cooling_tower.preview.toolpath import DepositionToolpathCollector
+
+        collector = DepositionToolpathCollector(
+            maximum_segments=_PRESLICE_PREVIEW_SEGMENTS
+        )
+        try:
+            snapshot = self.analysis_service.analyze(
+                gcode_path,
+                force=True,
+                progress_callback=progress_callback,
+                cancellation_callback=cancellation_callback,
+                event_observers=(collector.consume,),
+            )
+            preview = collector.finish(
+                expected_layer_count=snapshot.layer_count
+            )
+        except BaseException:
+            collector.close()
+            raise
+        if not preview.object_segments or preview.occupied_bounds is None:
+            return snapshot, None
+        digest = snapshot.content_sha256
+        if digest is None:
+            return snapshot, None
+        key = PreviewSourceCacheKey(
+            source_path=snapshot.gcode_path,
+            file_size_bytes=snapshot.file_size_bytes,
+            file_modified_ns=snapshot.file_modified_ns,
+            content_sha256=digest,
+            analysis_schema_version=snapshot.analysis_schema_version,
+            parser_version=snapshot.parser_version,
+            expected_layer_count=snapshot.layer_count,
+            maximum_segments=_PRESLICE_PREVIEW_SEGMENTS,
+        )
+        return snapshot, PreviewSourceData(
+            key=key,
+            object_segments=preview.object_segments,
+            source_segment_count=preview.source_segment_count,
+            occupied_bounds=preview.occupied_bounds,
         )
 
     def _validate_request(
@@ -473,9 +533,8 @@ class SourcePreSliceService:
                 )
             notify(70, "Layerzeiten werden analysiert", False)
             try:
-                snapshot = self.analysis_service.analyze(
+                snapshot, preview_source_data = self._analyze_with_preview_data(
                     target,
-                    force=True,
                     progress_callback=lambda percent, status: (
                         self._forward_analysis_progress(
                             notify,
@@ -534,6 +593,7 @@ class SourcePreSliceService:
                 workspace_root=workspace,
                 metadata_verified=True,
                 cache_hit=True,
+                preview_source_data=preview_source_data,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError):
             _safe_cleanup_workspace(workspace)

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from hmac import compare_digest
 from pathlib import Path
 from threading import RLock
+import time
 
 from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.file_integrity import sha256_file
-from cooling_tower.gcode.block_cache import ExactGCodeBlockCache
+from cooling_tower.gcode.block_cache import (
+    BlockCachePolicy,
+    ExactGCodeBlockCache,
+    TimedSourceEvent,
+)
 from cooling_tower.gcode.layer_detector import LayerDetector
 from cooling_tower.gcode.metadata_parser import GCodeMetadataCollector
 from cooling_tower.gcode.parser import (
@@ -15,6 +20,7 @@ from cooling_tower.gcode.parser import (
     MotionTimingPlanner,
     ParsedGCodeLine,
     iter_parsed_gcode_lines,
+    native_timing_cache_info,
     validate_gcode_path,
 )
 from cooling_tower.models import GCodeAnalysisSnapshot
@@ -30,6 +36,7 @@ from cooling_tower.tower.profile import (
 AnalysisProgressCallback = Callable[[int, str], None]
 CancellationCallback = Callable[[], bool]
 ParsedLineObserver = Callable[[ParsedGCodeLine], None]
+AnalysisEventObserver = Callable[[ParsedGCodeLine, TimedSourceEvent], None]
 
 
 def _uses_bambu_studio_timing(source: Path) -> bool:
@@ -73,6 +80,8 @@ class GCodeAnalysisService:
     def __init__(
         self,
         persistent_cache_path: str | Path | None = None,
+        *,
+        block_cache_policy: BlockCachePolicy | str = BlockCachePolicy.AUTO,
     ) -> None:
         self._cache: dict[Path, GCodeAnalysisSnapshot] = {}
         self._lock = RLock()
@@ -83,7 +92,10 @@ class GCodeAnalysisService:
             else None
         )
         self._last_cache_hit_kind: str | None = None
-        self._exact_block_cache = ExactGCodeBlockCache()
+        self._exact_block_cache = ExactGCodeBlockCache(
+            policy=block_cache_policy
+        )
+        self._last_native_cache_stats: dict[str, int] | None = None
 
     @property
     def persistent_cache_path(self) -> Path | None:
@@ -91,8 +103,13 @@ class GCodeAnalysisService:
         return cache.path if cache is not None else None
 
     @property
-    def exact_block_cache_info(self) -> dict[str, int]:
+    def exact_block_cache_info(self) -> dict[str, int | float | str | None]:
         return self._exact_block_cache.info()
+
+    @property
+    def native_block_cache_info(self) -> dict[str, int] | None:
+        value = self._last_native_cache_stats
+        return dict(value) if value is not None else None
 
     def analyze(
         self,
@@ -101,17 +118,20 @@ class GCodeAnalysisService:
         progress_callback: AnalysisProgressCallback | None = None,
         cancellation_callback: CancellationCallback | None = None,
         line_observer: ParsedLineObserver | None = None,
+        event_observers: Iterable[AnalysisEventObserver] = (),
         force: bool = False,
     ) -> GCodeAnalysisSnapshot:
         # One service may be called by UI and worker threads. Serializing the
         # complete lookup/analysis/store transaction prevents duplicate
         # parsing and makes "last successful analysis" deterministic.
+        observers = tuple(event_observers)
         with self._operation_lock:
             return self._analyze_locked(
                 gcode_path,
                 progress_callback=progress_callback,
                 cancellation_callback=cancellation_callback,
                 line_observer=line_observer,
+                event_observers=observers,
                 force=force,
             )
 
@@ -122,6 +142,7 @@ class GCodeAnalysisService:
         progress_callback: AnalysisProgressCallback | None,
         cancellation_callback: CancellationCallback | None,
         line_observer: ParsedLineObserver | None,
+        event_observers: tuple[AnalysisEventObserver, ...],
         force: bool,
     ) -> GCodeAnalysisSnapshot:
         source = validate_gcode_path(gcode_path).resolve()
@@ -129,7 +150,7 @@ class GCodeAnalysisService:
         notify = progress_callback or (lambda percent, status: None)
         cancelled = cancellation_callback or (lambda: False)
 
-        if not force and line_observer is None:
+        if not force and line_observer is None and not event_observers:
             cached = self._get_cached_locked(source)
             if cached is not None:
                 status = (
@@ -144,6 +165,9 @@ class GCodeAnalysisService:
                 return cached
 
         notify(0, "G-Code wird analysiert")
+        analysis_started = time.perf_counter()
+        self._last_native_cache_stats = None
+        native_cache_before = native_timing_cache_info()
         bambu_timing = _uses_bambu_studio_timing(source)
         explicit_bambu_layers = _uses_bambu_studio_layer_markers(source)
         tracker = MachineStateTracker(bambu_compatible=bambu_timing)
@@ -163,11 +187,14 @@ class GCodeAnalysisService:
         for parsed_line, event in self._exact_block_cache.iter_events(
             parsed_lines,
             tracker,
+            workload_bytes=before.st_size,
         ):
             if parsed_line.number % 256 == 0 and cancelled():
                 raise AnalysisCancelled("G-Code analysis was cancelled.")
             if line_observer is not None:
                 line_observer(parsed_line)
+            for observer in event_observers:
+                observer(parsed_line, event)
             # This counter is used for UI progress only. G-code is overwhelmingly
             # ASCII, so counting decoded characters avoids allocating and encoding
             # every one of several hundred thousand lines without affecting any
@@ -297,6 +324,44 @@ class GCodeAnalysisService:
                     layer_count=snapshot.layer_count,
                     file_size_bytes=snapshot.file_size_bytes,
                 )
+        analysis_duration_s = max(0.0, time.perf_counter() - analysis_started)
+        self._exact_block_cache.record_analysis_time(analysis_duration_s)
+        cache_stats = self._exact_block_cache.last_analysis_stats()
+        native_cache_after = native_timing_cache_info()
+        native_deltas = {
+            key: native_cache_after.get(key, 0) - native_cache_before.get(key, 0)
+            for key in ("hits", "misses", "evictions")
+        }
+        native_deltas.update(
+            {
+                "entries_before": native_cache_before.get("entries", 0),
+                "entries_after": native_cache_after.get("entries", 0),
+                "bytes_before": native_cache_before.get("bytes", 0),
+                "bytes_after": native_cache_after.get("bytes", 0),
+            }
+        )
+        self._last_native_cache_stats = native_deltas
+        if cache_stats is not None:
+            record_diagnostic(
+                "gcode_python_block_cache_analysis",
+                configured_policy=cache_stats.configured_policy.value,
+                effective_policy=cache_stats.effective_policy.value,
+                bypass_reason=cache_stats.bypass_reason,
+                hits=cache_stats.hits,
+                misses=cache_stats.misses,
+                evictions=cache_stats.evictions,
+                processed_blocks=cache_stats.processed_blocks,
+                occupied_bytes=cache_stats.occupied_bytes_after,
+                avoided_insertions=cache_stats.avoided_insertions,
+                estimated_avoided_bytes=cache_stats.estimated_avoided_bytes,
+                cache_time_s=cache_stats.cache_time_s,
+                analysis_time_s=analysis_duration_s,
+            )
+        record_diagnostic(
+            "gcode_native_planning_cache_analysis",
+            policy="independent_enabled",
+            **native_deltas,
+        )
         notify(100, "G-Code-Analyse abgeschlossen")
         return snapshot
 

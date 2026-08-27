@@ -319,6 +319,16 @@ class SourcePreSliceServiceTests(unittest.TestCase):
         try:
             self.assertEqual(result.analysis_snapshot.layer_count, 2)
             self.assertTrue(result.metadata_verified)
+            self.assertIsNotNone(result.preview_source_data)
+            assert result.preview_source_data is not None
+            self.assertEqual(
+                result.preview_source_data.key.content_sha256,
+                result.analysis_snapshot.content_sha256,
+            )
+            self.assertEqual(
+                result.preview_source_data.key.expected_layer_count,
+                result.analysis_snapshot.layer_count,
+            )
             self.assertTrue(result.workspace_root.is_dir())
             self.assertTrue(
                 result.prepared_source.analysis_gcode_path.is_relative_to(

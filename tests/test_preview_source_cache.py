@@ -164,6 +164,48 @@ class PreviewSourceCacheIntegrationTests(unittest.TestCase):
         first.dispose()
         second.dispose()
 
+    def test_uses_matching_combined_analysis_without_second_parser_pass(
+        self,
+    ) -> None:
+        analysis = analyze_deposition_toolpaths(
+            self.source,
+            expected_layer_count=self.snapshot.layer_count,
+            maximum_segments=200,
+        )
+        self.assertIsNotNone(analysis.occupied_bounds)
+        assert analysis.occupied_bounds is not None
+        prepared = PreviewSourceData(
+            key=PreviewSourceCacheKey(
+                source_path=self.source,
+                file_size_bytes=self.snapshot.file_size_bytes,
+                file_modified_ns=self.snapshot.file_modified_ns,
+                content_sha256=self.snapshot.content_sha256,
+                analysis_schema_version=self.snapshot.analysis_schema_version,
+                parser_version=self.snapshot.parser_version,
+                expected_layer_count=self.snapshot.layer_count,
+                maximum_segments=200,
+            ),
+            object_segments=analysis.object_segments,
+            source_segment_count=analysis.source_segment_count,
+            occupied_bounds=analysis.occupied_bounds,
+        )
+        service = PreviewService(SyntheticSuccessfulCalibrator())
+        with patch(
+            "cooling_tower.preview.service.analyze_deposition_toolpaths",
+            side_effect=AssertionError("unexpected second parser pass"),
+        ) as separate_analysis:
+            result = service.prepare(
+                self.request(prepared_source_data=prepared)
+            )
+
+        self.assertEqual(separate_analysis.call_count, 0)
+        self.assertEqual(result.scene.object_segments, prepared.object_segments)
+        self.assertEqual(
+            result.scene.source_segment_count,
+            prepared.source_segment_count,
+        )
+        result.dispose()
+
     def test_sampling_contract_change_creates_a_separate_entry(self) -> None:
         service = PreviewService(SyntheticSuccessfulCalibrator())
         with patch(

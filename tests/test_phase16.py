@@ -138,6 +138,67 @@ class SequencedAdapter:
         )
 
 
+class DeferredBambuAdapter(FakeAdapter):
+    adapter_id = "bambu_studio"
+
+    def __init__(self, gcode: str, *, fail_final_export: bool = False) -> None:
+        super().__init__(gcode)
+        self.fail_final_export = fail_final_export
+        self.prepared_tower_hashes: list[str] = []
+        self.final_tower_hash: str | None = None
+        self.project_exports = 0
+
+    def prepare_joint_slice_input(
+        self,
+        _request,
+        source_model_path,
+        tower_model_path,
+        destination,
+        **_kwargs,
+    ):
+        source_path = Path(source_model_path)
+        tower_path = Path(tower_model_path)
+        self.assert_source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        self.prepared_tower_hashes.append(
+            hashlib.sha256(tower_path.read_bytes()).hexdigest()
+        )
+        destination = Path(destination)
+        destination.write_text(
+            json.dumps(
+                {
+                    "source": str(source_path.resolve()),
+                    "tower": str(tower_path.resolve()),
+                }
+            ),
+            encoding="utf-8",
+        )
+        return SimpleNamespace(slice_input_path=destination.resolve())
+
+    def create_joint_project(
+        self,
+        _request,
+        source_model_path,
+        tower_model_path,
+        destination,
+        **_kwargs,
+    ):
+        self.project_exports += 1
+        if self.fail_final_export:
+            from cooling_tower.calibration.joint_project import JointProjectError
+
+            raise JointProjectError("synthetic final project failure")
+        self.final_tower_hash = hashlib.sha256(
+            Path(tower_model_path).read_bytes()
+        ).hexdigest()
+        destination = Path(destination)
+        destination.write_bytes(
+            b"synthetic-bambu-project\n"
+            + Path(source_model_path).read_bytes()
+            + Path(tower_model_path).read_bytes()
+        )
+        return SimpleNamespace(path=destination.resolve())
+
+
 class TransientAnycubicCompatibilityAdapter(FakeAdapter):
     adapter_id = "anycubic_slicer_next"
 
@@ -1264,6 +1325,105 @@ class Phase16Tests(unittest.TestCase):
         self.assertGreaterEqual(suffixes.count(".3mf"), 2)
         self.assertLessEqual(suffixes.count(".3mf"), 6)
         self.assertIsNotNone(result.project_path)
+
+    def test_bambu_builds_only_one_native_project_for_selected_candidate(
+        self,
+    ) -> None:
+        source_stl = self.root / "deferred_bambu_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        profile = replace(
+            self.profile,
+            installation=replace(
+                self.profile.installation,
+                adapter_id="bambu_studio",
+                product_name="Synthetic Bambu Studio",
+            ),
+        )
+        adapter = DeferredBambuAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n"
+        )
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(
+                target_layer_time_s=2.0,
+                simulate_full_tower_infill=True,
+            ),
+            adapter=adapter,
+            profile=profile,
+            output_directory=self.root / "deferred_bambu_result",
+            config=CalibrationConfig(
+                maximum_iterations=3,
+                perform_joint_final_slice=True,
+                minimum_joint_slices=2,
+                maximum_joint_slices=3,
+                time_tolerance_s=1_000.0,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+        )
+
+        self.assertTrue(result.success, result.failures)
+        self.assertGreaterEqual(len(adapter.prepared_tower_hashes), 2)
+        self.assertEqual(adapter.project_exports, 1)
+        self.assertTrue(
+            all(request.use_cli_assemble_list for request in adapter.requests)
+        )
+        self.assertTrue(
+            all(request.model_path.suffix == ".json" for request in adapter.requests)
+        )
+        self.assertIsNotNone(result.project_path)
+        self.assertIsNotNone(result.stl_path)
+        assert result.stl_path is not None
+        self.assertEqual(
+            adapter.final_tower_hash,
+            hashlib.sha256(result.stl_path.read_bytes()).hexdigest(),
+        )
+
+    def test_bambu_final_project_failure_never_exports_stale_container(
+        self,
+    ) -> None:
+        source_stl = self.root / "failed_deferred_bambu_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        profile = replace(
+            self.profile,
+            installation=replace(
+                self.profile.installation,
+                adapter_id="bambu_studio",
+                product_name="Synthetic Bambu Studio",
+            ),
+        )
+        adapter = DeferredBambuAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n",
+            fail_final_export=True,
+        )
+        output = self.root / "failed_deferred_bambu_result"
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=profile,
+            output_directory=output,
+            config=CalibrationConfig(
+                maximum_iterations=2,
+                perform_joint_final_slice=True,
+                minimum_joint_slices=2,
+                maximum_joint_slices=2,
+                time_tolerance_s=1_000.0,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+        )
+
+        self.assertEqual(result.state, CalibrationState.SLICER_FAILED)
+        self.assertIsNone(result.project_path)
+        self.assertFalse(output.exists())
+        self.assertEqual(adapter.project_exports, 1)
 
     def test_25_gcode_mode_rejects_unknown_bed_before_slicing(self) -> None:
         profile = EffectiveProfile(

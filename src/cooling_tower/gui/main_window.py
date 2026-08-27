@@ -4803,6 +4803,11 @@ class MainWindow(QMainWindow):
             adapter=adapter,
             source_artifact=self.source_artifact,
             prepared_analysis_source=self.prepared_analysis_source,
+            prepared_source_data=(
+                self.source_preslice_result.preview_source_data
+                if self.source_preslice_result is not None
+                else None
+            ),
         )
 
     def _invalidate_preview(

@@ -67,6 +67,58 @@ class JointProjectResult:
     slice_input_path: Path | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class JointPlacementDescription:
+    """Deterministic arrangement shared by candidate slices and final export."""
+
+    source_translation_mm: tuple[float, float, float]
+    tower_translation_mm: tuple[float, float, float]
+    plate_index: int = 0
+    source_filament_index: int = 1
+    tower_filament_index: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class JointSliceInputResult:
+    slice_input_path: Path
+    placement: JointPlacementDescription
+    tower_full_infill: bool
+
+
+def describe_joint_placement(
+    source_stl: str | Path,
+    tower_stl: str | Path,
+    *,
+    occupied: OccupiedBounds,
+    placement: TowerPlacement,
+) -> JointPlacementDescription:
+    """Resolve one exact placement without creating a project container."""
+
+    source_path = Path(source_stl).resolve(strict=True)
+    tower_path = Path(tower_stl).resolve(strict=True)
+    source_before = sha256_file(source_path)
+    tower_before = sha256_file(tower_path)
+    source_mesh = _load_mesh(source_path)
+    tower_mesh = _load_mesh(tower_path)
+    source_center = (
+        (occupied.minimum_x_mm + occupied.maximum_x_mm) / 2.0,
+        (occupied.minimum_y_mm + occupied.maximum_y_mm) / 2.0,
+    )
+    result = JointPlacementDescription(
+        source_translation_mm=_translation(source_mesh, source_center),
+        tower_translation_mm=_translation(
+            tower_mesh,
+            (placement.center_x_mm, placement.center_y_mm),
+        ),
+    )
+    if (
+        source_before != sha256_file(source_path)
+        or tower_before != sha256_file(tower_path)
+    ):
+        raise JointProjectError("Eine STL-Quelldatei wurde unerwartet verändert.")
+    return result
+
+
 def _load_mesh(path: Path) -> trimesh.Trimesh:
     loaded = trimesh.load(path, file_type="stl", force="mesh", process=False)
     if not isinstance(loaded, trimesh.Trimesh):
