@@ -980,6 +980,8 @@ def _normalise_project_atom(value: object) -> str:
 class TowerInfillEvidenceCollector:
     """Collect full-infill evidence while the timing parser streams G-code."""
 
+    native_product_kind = "infill"
+
     tower_center_xy_mm: tuple[float, float] | None = None
     inside_tower: bool = False
     tower_block_count: int = 0
@@ -988,6 +990,22 @@ class TowerInfillEvidenceCollector:
     active_label: int | None = None
     label_bounds: dict[int, list[float]] = field(default_factory=dict)
     sparse_labels: set[int] = field(default_factory=set)
+
+    def consume_native(self, product: object) -> None:
+        """Adopt compact object/feature evidence from the native analyzer."""
+        if product is None:
+            raise ValueError("The native infill product is missing.")
+        self.tower_block_count = int(
+            getattr(product, "tower_block_count")
+        )
+        self.sparse_tower_infill = bool(
+            getattr(product, "sparse_tower_infill")
+        )
+        self.label_bounds = {
+            int(label): list(bounds)
+            for label, bounds in getattr(product, "label_bounds").items()
+        }
+        self.sparse_labels = set(getattr(product, "sparse_labels"))
 
     def consume(self, parsed: ParsedGCodeLine) -> None:
         command = parsed.command or ""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -9,6 +10,11 @@ from pathlib import Path
 try:
     from cooling_tower import _native_timing
 except (ImportError, OSError):
+    _native_timing = None
+
+if os.environ.get(
+    "COOLING_TOWER_FORCE_PYTHON_ANALYSIS", ""
+).strip().casefold() in {"1", "true", "yes", "on"}:
     _native_timing = None
 
 
@@ -393,6 +399,7 @@ class MachineState:
 
     feedrate_mm_min: float | None = None
     speed_factor_percent: float = 100.0
+    unit_scale_mm: float = 1.0
 
     print_acceleration_mm_s2: float | None = None
     travel_acceleration_mm_s2: float | None = None
@@ -624,6 +631,7 @@ def limit_acceleration_by_axes(
     state: MachineState,
     has_spatial_motion: bool,
     is_arc: bool,
+    arc_plane: str = "XY",
     timing_distance_mm: float,
     delta_x: float,
     delta_y: float,
@@ -646,23 +654,44 @@ def limit_acceleration_by_axes(
     )
 
     if has_spatial_motion and is_arc:
-        # The tangent of an XY arc changes along the path. Limiting the path
-        # acceleration to each participating axis maximum is conservative and
-        # remains valid for full circles whose endpoint delta is zero.
-        for maximum in (
-            state.maximum_acceleration_x_mm_s2,
-            state.maximum_acceleration_y_mm_s2,
-        ):
+        # The tangent changes along the complete planar arc. Limiting path
+        # acceleration to both planar axes remains valid for full circles.
+        planar_limits, helical_delta, helical_limit = {
+            "XY": (
+                (
+                    state.maximum_acceleration_x_mm_s2,
+                    state.maximum_acceleration_y_mm_s2,
+                ),
+                delta_z,
+                state.maximum_acceleration_z_mm_s2,
+            ),
+            "XZ": (
+                (
+                    state.maximum_acceleration_x_mm_s2,
+                    state.maximum_acceleration_z_mm_s2,
+                ),
+                delta_y,
+                state.maximum_acceleration_y_mm_s2,
+            ),
+            "YZ": (
+                (
+                    state.maximum_acceleration_y_mm_s2,
+                    state.maximum_acceleration_z_mm_s2,
+                ),
+                delta_x,
+                state.maximum_acceleration_x_mm_s2,
+            ),
+        }[arc_plane]
+        for maximum in planar_limits:
             if maximum is not None:
                 acceleration_limits.append(maximum)
 
-        if abs(delta_z) > MOVEMENT_EPSILON:
-            maximum_z = state.maximum_acceleration_z_mm_s2
-            if maximum_z is not None:
+        if abs(helical_delta) > MOVEMENT_EPSILON:
+            if helical_limit is not None:
                 acceleration_limits.append(
-                    maximum_z
+                    helical_limit
                     * timing_distance_mm
-                    / abs(delta_z)
+                    / abs(helical_delta)
                 )
     elif has_spatial_motion:
         for axis_delta, maximum in axis_movements:
@@ -1206,6 +1235,14 @@ class MachineStateTracker:
                 parameters=parameters,
             )
 
+        if command == "G20":
+            self.state.unit_scale_mm = 25.4
+            return None
+
+        if command == "G21":
+            self.state.unit_scale_mm = 1.0
+            return None
+
         if command == "M201":
             self._apply_maximum_acceleration(parameters)
             return None
@@ -1282,6 +1319,20 @@ class MachineStateTracker:
             self._apply_position_reset(parameters)
             return None
 
+        if command == "G28":
+            requested_axes = {
+                axis for axis in ("X", "Y", "Z") if axis in parameters
+            }
+            if not requested_axes:
+                requested_axes = {"X", "Y", "Z"}
+            if "X" in requested_axes:
+                self.state.x = 0.0
+            if "Y" in requested_axes:
+                self.state.y = 0.0
+            if "Z" in requested_axes:
+                self.state.z = 0.0
+            return None
+
         if command.startswith("T"):
             self._apply_tool_change(command)
             return None
@@ -1309,7 +1360,11 @@ class MachineStateTracker:
 
         for parameter, attribute in axis_attributes.items():
             if parameter in parameters:
-                setattr(self.state, attribute, parameters[parameter])
+                setattr(
+                    self.state,
+                    attribute,
+                    parameters[parameter] * self.state.unit_scale_mm,
+                )
 
     def _apply_maximum_feedrate(
         self,
@@ -1325,7 +1380,11 @@ class MachineStateTracker:
 
         for parameter, attribute in axis_attributes.items():
             if parameter in parameters:
-                setattr(self.state, attribute, parameters[parameter])
+                setattr(
+                    self.state,
+                    attribute,
+                    parameters[parameter] * self.state.unit_scale_mm,
+                )
 
     def _apply_movement_acceleration(
         self,
@@ -1335,6 +1394,7 @@ class MachineStateTracker:
         shared_acceleration = parameters.get("S")
 
         if shared_acceleration is not None:
+            shared_acceleration *= self.state.unit_scale_mm
             self.state.print_acceleration_mm_s2 = shared_acceleration
             self.state.travel_acceleration_mm_s2 = shared_acceleration
             # In the legacy S form Bambu/Prusa keep the previously configured
@@ -1343,19 +1403,27 @@ class MachineStateTracker:
             # override made the many short retracts appear substantially
             # slower than in Bambu Studio's own G-code viewer.
             if self.bambu_compatible and "T" in parameters:
-                self.state.retract_acceleration_mm_s2 = parameters["T"]
+                self.state.retract_acceleration_mm_s2 = (
+                    parameters["T"] * self.state.unit_scale_mm
+                )
             elif not self.bambu_compatible:
                 self.state.retract_acceleration_mm_s2 = shared_acceleration
             return
 
         if "P" in parameters:
-            self.state.print_acceleration_mm_s2 = parameters["P"]
+            self.state.print_acceleration_mm_s2 = (
+                parameters["P"] * self.state.unit_scale_mm
+            )
 
         if "T" in parameters:
-            self.state.travel_acceleration_mm_s2 = parameters["T"]
+            self.state.travel_acceleration_mm_s2 = (
+                parameters["T"] * self.state.unit_scale_mm
+            )
 
         if "R" in parameters:
-            self.state.retract_acceleration_mm_s2 = parameters["R"]
+            self.state.retract_acceleration_mm_s2 = (
+                parameters["R"] * self.state.unit_scale_mm
+            )
 
     def _apply_classic_jerk(
         self,
@@ -1363,23 +1431,37 @@ class MachineStateTracker:
     ) -> None:
         """Apply M205 classic-jerk limits used at movement junctions."""
         if "X" in parameters:
-            self.state.jerk_x_mm_s = parameters["X"]
+            self.state.jerk_x_mm_s = (
+                parameters["X"] * self.state.unit_scale_mm
+            )
             if self.bambu_compatible:
                 # Bambu treats M205 X as the shared XY jerk unless an
                 # explicit Y value follows it.
-                self.state.jerk_y_mm_s = parameters["X"]
+                self.state.jerk_y_mm_s = (
+                    parameters["X"] * self.state.unit_scale_mm
+                )
         if "Y" in parameters:
-            self.state.jerk_y_mm_s = parameters["Y"]
+            self.state.jerk_y_mm_s = (
+                parameters["Y"] * self.state.unit_scale_mm
+            )
         if "Z" in parameters:
-            self.state.jerk_z_mm_s = parameters["Z"]
+            self.state.jerk_z_mm_s = (
+                parameters["Z"] * self.state.unit_scale_mm
+            )
         if "E" in parameters:
-            self.state.jerk_e_mm_s = parameters["E"]
+            self.state.jerk_e_mm_s = (
+                parameters["E"] * self.state.unit_scale_mm
+            )
 
         if self.bambu_compatible:
             if "S" in parameters:
-                self.state.minimum_extruding_feedrate_mm_s = parameters["S"]
+                self.state.minimum_extruding_feedrate_mm_s = (
+                    parameters["S"] * self.state.unit_scale_mm
+                )
             if "T" in parameters:
-                self.state.minimum_travel_feedrate_mm_s = parameters["T"]
+                self.state.minimum_travel_feedrate_mm_s = (
+                    parameters["T"] * self.state.unit_scale_mm
+                )
 
     def _apply_velocity_limit(
         self,
@@ -1387,7 +1469,9 @@ class MachineStateTracker:
     ) -> None:
         """Apply numeric Klipper SET_VELOCITY_LIMIT parameters."""
         if "ACCEL" in parameters:
-            acceleration = parameters["ACCEL"]
+            acceleration = (
+                parameters["ACCEL"] * self.state.unit_scale_mm
+            )
             self.state.print_acceleration_mm_s2 = acceleration
             self.state.travel_acceleration_mm_s2 = acceleration
             self.state.retract_acceleration_mm_s2 = acceleration
@@ -1395,7 +1479,7 @@ class MachineStateTracker:
         if "SQUARE_CORNER_VELOCITY" in parameters:
             self.state.square_corner_velocity_mm_s = parameters[
                 "SQUARE_CORNER_VELOCITY"
-            ]
+            ] * self.state.unit_scale_mm
 
     def _create_dwell(
         self,
@@ -1461,16 +1545,16 @@ class MachineStateTracker:
         G92 assigns coordinates directly and is independent of relative mode.
         """
         if "X" in parameters:
-            self.state.x = parameters["X"]
+            self.state.x = parameters["X"] * self.state.unit_scale_mm
 
         if "Y" in parameters:
-            self.state.y = parameters["Y"]
+            self.state.y = parameters["Y"] * self.state.unit_scale_mm
 
         if "Z" in parameters:
-            self.state.z = parameters["Z"]
+            self.state.z = parameters["Z"] * self.state.unit_scale_mm
 
         if "E" in parameters:
-            self.state.e = parameters["E"]
+            self.state.e = parameters["E"] * self.state.unit_scale_mm
 
     def _apply_tool_change(self, command: str) -> None:
         """
@@ -1498,29 +1582,37 @@ class MachineStateTracker:
         feedrate_changed = "F" in parameters
 
         if feedrate_changed:
-            self.state.feedrate_mm_min = parameters["F"]
+            self.state.feedrate_mm_min = (
+                parameters["F"] * self.state.unit_scale_mm
+            )
+
+        unit_scale = self.state.unit_scale_mm
+
+        def scaled_parameter(name: str) -> float | None:
+            value = parameters.get(name)
+            return None if value is None else value * unit_scale
 
         end_x = resolve_axis_position(
             current_position=start_x,
-            parameter_value=parameters.get("X"),
+            parameter_value=scaled_parameter("X"),
             relative_mode=self.state.xyz_relative,
         )
 
         end_y = resolve_axis_position(
             current_position=start_y,
-            parameter_value=parameters.get("Y"),
+            parameter_value=scaled_parameter("Y"),
             relative_mode=self.state.xyz_relative,
         )
 
         end_z = resolve_axis_position(
             current_position=start_z,
-            parameter_value=parameters.get("Z"),
+            parameter_value=scaled_parameter("Z"),
             relative_mode=self.state.xyz_relative,
         )
 
         end_e = resolve_axis_position(
             current_position=start_e,
-            parameter_value=parameters.get("E"),
+            parameter_value=scaled_parameter("E"),
             relative_mode=self.state.extrusion_relative,
         )
 
@@ -1554,18 +1646,59 @@ class MachineStateTracker:
         if command in LINEAR_MOTION_COMMANDS:
             path_length_mm: float | None = endpoint_distance_xyz_mm
 
-        elif self.state.arc_plane == "XY":
+        else:
             arc_plane = self.state.arc_plane
+            if arc_plane == "XY":
+                start_u, start_v, start_w = start_x, start_y, start_z
+                end_u, end_v, end_w = end_x, end_y, end_z
+                center_u_name, center_v_name = "I", "J"
+
+                def direction_to_xyz(
+                    u: float, v: float
+                ) -> tuple[float, float, float]:
+                    return u, v, 0.0
+
+            elif arc_plane == "XZ":
+                # G18 is the right-handed ZX plane.
+                start_u, start_v, start_w = start_z, start_x, start_y
+                end_u, end_v, end_w = end_z, end_x, end_y
+                center_u_name, center_v_name = "K", "I"
+
+                def direction_to_xyz(
+                    u: float, v: float
+                ) -> tuple[float, float, float]:
+                    return v, 0.0, u
+
+            else:
+                start_u, start_v, start_w = start_y, start_z, start_x
+                end_u, end_v, end_w = end_y, end_z, end_x
+                center_u_name, center_v_name = "J", "K"
+
+                def direction_to_xyz(
+                    u: float, v: float
+                ) -> tuple[float, float, float]:
+                    return 0.0, u, v
+
+            arc_parameters: dict[str, float] = {}
+            for target_name, source_name in (
+                ("I", center_u_name),
+                ("J", center_v_name),
+                ("R", "R"),
+            ):
+                if source_name in parameters:
+                    arc_parameters[target_name] = (
+                        parameters[source_name] * unit_scale
+                    )
 
             arc_geometry = calculate_xy_arc_geometry(
                 command=command,
-                start_x=start_x,
-                start_y=start_y,
-                start_z=start_z,
-                end_x=end_x,
-                end_y=end_y,
-                end_z=end_z,
-                parameters=parameters,
+                start_x=start_u,
+                start_y=start_v,
+                start_z=start_w,
+                end_x=end_u,
+                end_y=end_v,
+                end_z=end_w,
+                parameters=arc_parameters,
                 center_relative=self.state.arc_center_relative,
             )
 
@@ -1582,55 +1715,44 @@ class MachineStateTracker:
                 and arc_geometry.radius_mm > ARC_EPSILON
             ):
                 start_radius = math.hypot(
-                    start_x - arc_geometry.center_x_mm,
-                    start_y - arc_geometry.center_y_mm,
+                    start_u - arc_geometry.center_x_mm,
+                    start_v - arc_geometry.center_y_mm,
                 )
                 end_radius = math.hypot(
-                    end_x - arc_geometry.center_x_mm,
-                    end_y - arc_geometry.center_y_mm,
+                    end_u - arc_geometry.center_x_mm,
+                    end_v - arc_geometry.center_y_mm,
                 )
                 if end_radius > ARC_EPSILON:
-                    start_radial_x = (
-                        start_x - arc_geometry.center_x_mm
+                    start_radial_u = (
+                        start_u - arc_geometry.center_x_mm
                     ) / start_radius
-                    start_radial_y = (
-                        start_y - arc_geometry.center_y_mm
+                    start_radial_v = (
+                        start_v - arc_geometry.center_y_mm
                     ) / start_radius
-                    end_radial_x = (
-                        end_x - arc_geometry.center_x_mm
+                    end_radial_u = (
+                        end_u - arc_geometry.center_x_mm
                     ) / end_radius
-                    end_radial_y = (
-                        end_y - arc_geometry.center_y_mm
+                    end_radial_v = (
+                        end_v - arc_geometry.center_y_mm
                     ) / end_radius
                     if command == "G2":
-                        entry_direction_xyz = (
-                            start_radial_y,
-                            -start_radial_x,
-                            0.0,
+                        entry_direction_xyz = direction_to_xyz(
+                            start_radial_v,
+                            -start_radial_u,
                         )
-                        exit_direction_xyz = (
-                            end_radial_y,
-                            -end_radial_x,
-                            0.0,
+                        exit_direction_xyz = direction_to_xyz(
+                            end_radial_v,
+                            -end_radial_u,
                         )
                     else:
-                        entry_direction_xyz = (
-                            -start_radial_y,
-                            start_radial_x,
-                            0.0,
+                        entry_direction_xyz = direction_to_xyz(
+                            -start_radial_v,
+                            start_radial_u,
                         )
-                        exit_direction_xyz = (
-                            -end_radial_y,
-                            end_radial_x,
-                            0.0,
+                        exit_direction_xyz = direction_to_xyz(
+                            -end_radial_v,
+                            end_radial_u,
                         )
-
-        else:
-            arc_plane = self.state.arc_plane
-            path_length_mm = None
-            arc_error = (
-                f"Arc plane {self.state.arc_plane} is not supported yet."
-            )
 
         has_spatial_motion = (
             endpoint_distance_xyz_mm > MOVEMENT_EPSILON
@@ -1663,6 +1785,7 @@ class MachineStateTracker:
             state=self.state,
             has_spatial_motion=has_spatial_motion,
             is_arc=is_arc,
+            arc_plane=self.state.arc_plane,
             timing_distance_mm=timing_distance_mm,
             delta_x=delta_x,
             delta_y=delta_y,

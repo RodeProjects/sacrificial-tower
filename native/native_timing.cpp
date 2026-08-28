@@ -1,6 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "native_analysis.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -8,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -21,7 +24,7 @@ namespace {
 constexpr double MOVEMENT_EPSILON = 1e-9;
 constexpr double ARC_EPSILON = 1e-7;
 constexpr std::size_t ROW_WIDTH = 33;
-constexpr std::uint64_t ENGINE_VERSION = 1;
+constexpr std::uint64_t ENGINE_VERSION = 2;
 constexpr std::size_t DEFAULT_CACHE_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 enum RowIndex : std::size_t {
@@ -1278,7 +1281,476 @@ PyObject* py_set_cache_limit(PyObject*, PyObject* arguments) {
     Py_RETURN_NONE;
 }
 
+bool dict_set_owned(PyObject* dictionary, const char* key, PyObject* value) {
+    if (value == nullptr) {
+        return false;
+    }
+    const int status = PyDict_SetItemString(dictionary, key, value);
+    Py_DECREF(value);
+    return status == 0;
+}
+
+PyObject* unicode_from_utf8(const std::string& value) {
+    return PyUnicode_DecodeUTF8(
+        value.data(),
+        static_cast<Py_ssize_t>(value.size()),
+        "replace"
+    );
+}
+
+PyObject* native_layer_to_dict(
+    const cooling_tower::native_analysis::LayerResult& layer
+) {
+    PyObject* result = PyDict_New();
+    if (result == nullptr) {
+        return nullptr;
+    }
+    const std::array<std::pair<const char*, long long>, 8> integers = {{
+        {"index", layer.index},
+        {"start_line", layer.start_line},
+        {"first_deposition_line", layer.first_deposition_line},
+        {"end_line", layer.end_line},
+        {"event_count", layer.event_count},
+        {"movement_count", layer.movement_count},
+        {"deposition_count", layer.deposition_count},
+        {"untimed_event_count", layer.untimed_event_count},
+    }};
+    for (const auto& item : integers) {
+        if (!dict_set_owned(result, item.first, PyLong_FromLongLong(item.second))) {
+            Py_DECREF(result);
+            return nullptr;
+        }
+    }
+    const std::array<std::pair<const char*, double>, 12> doubles = {{
+        {"z_mm", layer.z_mm},
+        {"height_mm", layer.height_mm},
+        {"total_time_s", layer.total_time_s},
+        {"deposition_time_s", layer.deposition_time_s},
+        {"travel_time_s", layer.travel_time_s},
+        {"retraction_time_s", layer.retraction_time_s},
+        {"unretraction_time_s", layer.unretraction_time_s},
+        {"dwell_time_s", layer.dwell_time_s},
+        {"other_time_s", layer.other_time_s},
+        {"deposition_path_mm", layer.deposition_path_mm},
+        {"deposition_e_mm", layer.deposition_e_mm},
+        {"untimed_distance_mm", layer.untimed_distance_mm},
+    }};
+    for (const auto& item : doubles) {
+        if (!dict_set_owned(result, item.first, PyFloat_FromDouble(item.second))) {
+            Py_DECREF(result);
+            return nullptr;
+        }
+    }
+    return result;
+}
+
+PyObject* native_metadata_to_tuple(
+    const std::vector<cooling_tower::native_analysis::MetadataEvent>& events
+) {
+    PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(events.size()));
+    if (result == nullptr) {
+        return nullptr;
+    }
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        PyObject* parameters = PyDict_New();
+        if (parameters == nullptr) {
+            Py_DECREF(result);
+            return nullptr;
+        }
+        for (const auto& item : event.parameters) {
+            PyObject* value = PyFloat_FromDouble(item.second);
+            if (
+                value == nullptr
+                || PyDict_SetItemString(parameters, item.first.c_str(), value) < 0
+            ) {
+                Py_XDECREF(value);
+                Py_DECREF(parameters);
+                Py_DECREF(result);
+                return nullptr;
+            }
+            Py_DECREF(value);
+        }
+        PyObject* row = PyTuple_New(4);
+        PyObject* command = event.has_command
+            ? unicode_from_utf8(event.command) : Py_NewRef(Py_None);
+        PyObject* comment = event.has_comment
+            ? unicode_from_utf8(event.comment) : Py_NewRef(Py_None);
+        if (row == nullptr || command == nullptr || comment == nullptr) {
+            Py_XDECREF(row);
+            Py_XDECREF(command);
+            Py_DECREF(parameters);
+            Py_XDECREF(comment);
+            Py_DECREF(result);
+            return nullptr;
+        }
+        PyTuple_SET_ITEM(row, 0, PyLong_FromLongLong(event.line_number));
+        PyTuple_SET_ITEM(row, 1, command);
+        PyTuple_SET_ITEM(row, 2, parameters);
+        PyTuple_SET_ITEM(row, 3, comment);
+        PyTuple_SET_ITEM(result, static_cast<Py_ssize_t>(index), row);
+    }
+    return result;
+}
+
+PyObject* native_preview_to_tuple(
+    const std::vector<cooling_tower::native_analysis::PreviewSegment>& segments
+) {
+    PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(segments.size()));
+    if (result == nullptr) {
+        return nullptr;
+    }
+    for (std::size_t index = 0; index < segments.size(); ++index) {
+        const auto& item = segments[index];
+        PyObject* row = Py_BuildValue(
+            "(dddddd)",
+            item.start_x, item.start_y, item.start_z,
+            item.end_x, item.end_y, item.end_z
+        );
+        if (row == nullptr) {
+            Py_DECREF(result);
+            return nullptr;
+        }
+        PyTuple_SET_ITEM(result, static_cast<Py_ssize_t>(index), row);
+    }
+    return result;
+}
+
+PyObject* native_infill_to_dict(
+    const cooling_tower::native_analysis::InfillEvidence& infill
+) {
+    PyObject* result = PyDict_New();
+    PyObject* label_bounds = PyDict_New();
+    PyObject* sparse_labels = PyTuple_New(
+        static_cast<Py_ssize_t>(infill.sparse_labels.size())
+    );
+    if (result == nullptr || label_bounds == nullptr || sparse_labels == nullptr) {
+        Py_XDECREF(result);
+        Py_XDECREF(label_bounds);
+        Py_XDECREF(sparse_labels);
+        return nullptr;
+    }
+    for (const auto& item : infill.label_bounds) {
+        PyObject* key = PyLong_FromLongLong(item.first);
+        PyObject* bounds = PyTuple_New(static_cast<Py_ssize_t>(item.second.size()));
+        if (key == nullptr || bounds == nullptr) {
+            Py_XDECREF(key);
+            Py_XDECREF(bounds);
+            Py_DECREF(result);
+            Py_DECREF(label_bounds);
+            Py_DECREF(sparse_labels);
+            return nullptr;
+        }
+        for (std::size_t index = 0; index < item.second.size(); ++index) {
+            PyTuple_SET_ITEM(
+                bounds,
+                static_cast<Py_ssize_t>(index),
+                PyFloat_FromDouble(item.second[index])
+            );
+        }
+        if (PyDict_SetItem(label_bounds, key, bounds) < 0) {
+            Py_DECREF(key);
+            Py_DECREF(bounds);
+            Py_DECREF(result);
+            Py_DECREF(label_bounds);
+            Py_DECREF(sparse_labels);
+            return nullptr;
+        }
+        Py_DECREF(key);
+        Py_DECREF(bounds);
+    }
+    for (std::size_t index = 0; index < infill.sparse_labels.size(); ++index) {
+        PyTuple_SET_ITEM(
+            sparse_labels,
+            static_cast<Py_ssize_t>(index),
+            PyLong_FromLongLong(infill.sparse_labels[index])
+        );
+    }
+    if (
+        !dict_set_owned(
+            result,
+            "tower_block_count",
+            PyLong_FromLongLong(infill.tower_block_count)
+        )
+        || !dict_set_owned(
+            result,
+            "sparse_tower_infill",
+            PyBool_FromLong(infill.sparse_tower_infill ? 1 : 0)
+        )
+        || PyDict_SetItemString(result, "label_bounds", label_bounds) < 0
+        || PyDict_SetItemString(result, "sparse_labels", sparse_labels) < 0
+    ) {
+        Py_DECREF(result);
+        Py_DECREF(label_bounds);
+        Py_DECREF(sparse_labels);
+        return nullptr;
+    }
+    Py_DECREF(label_bounds);
+    Py_DECREF(sparse_labels);
+    return result;
+}
+
+PyObject* native_diagnostics_to_dict(
+    const cooling_tower::native_analysis::Diagnostics& diagnostics
+) {
+    return Py_BuildValue(
+        "{sKsKsKsKsKsKsKsKsK}",
+        "bytes_read", diagnostics.bytes_read,
+        "line_count", diagnostics.line_count,
+        "movement_count", diagnostics.movement_count,
+        "dwell_count", diagnostics.dwell_count,
+        "metadata_event_count", diagnostics.metadata_event_count,
+        "planner_flush_count", diagnostics.planner_flush_count,
+        "peak_pending_movements", diagnostics.peak_pending_movements,
+        "preview_candidate_count", diagnostics.preview_candidate_count,
+        "anycubic_startup_macro_count",
+        diagnostics.anycubic_startup_macro_count
+    );
+}
+
+PyObject* native_result_to_dict(
+    const cooling_tower::native_analysis::Result& source
+) {
+    PyObject* result = PyDict_New();
+    PyObject* layers = PyTuple_New(static_cast<Py_ssize_t>(source.layers.size()));
+    if (result == nullptr || layers == nullptr) {
+        Py_XDECREF(result);
+        Py_XDECREF(layers);
+        return nullptr;
+    }
+    for (std::size_t index = 0; index < source.layers.size(); ++index) {
+        PyObject* layer = native_layer_to_dict(source.layers[index]);
+        if (layer == nullptr) {
+            Py_DECREF(result);
+            Py_DECREF(layers);
+            return nullptr;
+        }
+        PyTuple_SET_ITEM(layers, static_cast<Py_ssize_t>(index), layer);
+    }
+    PyObject* bounds = source.has_occupied_bounds
+        ? Py_BuildValue(
+            "(dddd)",
+            source.minimum_x,
+            source.maximum_x,
+            source.minimum_y,
+            source.maximum_y
+        )
+        : Py_NewRef(Py_None);
+    PyObject* metadata = native_metadata_to_tuple(source.metadata_events);
+    PyObject* preview = native_preview_to_tuple(source.preview_segments);
+    PyObject* infill = native_infill_to_dict(source.infill);
+    PyObject* diagnostics = native_diagnostics_to_dict(source.diagnostics);
+    if (
+        bounds == nullptr || metadata == nullptr || preview == nullptr
+        || infill == nullptr || diagnostics == nullptr
+    ) {
+        Py_DECREF(result);
+        Py_DECREF(layers);
+        Py_XDECREF(bounds);
+        Py_XDECREF(metadata);
+        Py_XDECREF(preview);
+        Py_XDECREF(infill);
+        Py_XDECREF(diagnostics);
+        return nullptr;
+    }
+    const bool ok =
+        dict_set_owned(
+            result,
+            "status",
+            PyUnicode_FromString(
+                cooling_tower::native_analysis::status_name(source.status)
+            )
+        )
+        && dict_set_owned(result, "message", unicode_from_utf8(source.message))
+        && dict_set_owned(
+            result, "fallback_line", PyLong_FromLongLong(source.fallback_line)
+        )
+        && dict_set_owned(
+            result,
+            "fallback_command",
+            unicode_from_utf8(source.fallback_command)
+        )
+        && PyDict_SetItemString(result, "layers", layers) == 0
+        && dict_set_owned(
+            result,
+            "confirmed_layer_changes",
+            PyLong_FromLongLong(source.confirmed_layer_changes)
+        )
+        && dict_set_owned(
+            result,
+            "rejected_z_candidates",
+            PyLong_FromLongLong(source.rejected_z_candidates)
+        )
+        && dict_set_owned(
+            result,
+            "pre_layer_event_count",
+            PyLong_FromLongLong(source.pre_layer_event_count)
+        )
+        && dict_set_owned(
+            result,
+            "pre_layer_time_s",
+            PyFloat_FromDouble(source.pre_layer_time_s)
+        )
+        && dict_set_owned(
+            result,
+            "pre_layer_untimed_event_count",
+            PyLong_FromLongLong(source.pre_layer_untimed_event_count)
+        )
+        && PyDict_SetItemString(result, "metadata_events", metadata) == 0
+        && PyDict_SetItemString(result, "preview_segments", preview) == 0
+        && dict_set_owned(
+            result,
+            "preview_source_segment_count",
+            PyLong_FromUnsignedLongLong(source.preview_source_segment_count)
+        )
+        && PyDict_SetItemString(result, "occupied_bounds", bounds) == 0
+        && PyDict_SetItemString(result, "infill", infill) == 0
+        && PyDict_SetItemString(result, "diagnostics", diagnostics) == 0;
+    Py_DECREF(layers);
+    Py_DECREF(bounds);
+    Py_DECREF(metadata);
+    Py_DECREF(preview);
+    Py_DECREF(infill);
+    Py_DECREF(diagnostics);
+    if (!ok) {
+        Py_DECREF(result);
+        return nullptr;
+    }
+    return result;
+}
+
+PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
+    PyObject* path_object = nullptr;
+    PyObject* cancellation = Py_None;
+    int bambu = 0;
+    int anycubic_slicer_next = 0;
+    int explicit_layers = 0;
+    int collect_preview = 0;
+    int collect_infill = 0;
+    Py_ssize_t maximum_preview_segments = 60000;
+    if (!PyArg_ParseTuple(
+        arguments,
+        "Opppppn|O:analyze_file",
+        &path_object,
+        &bambu,
+        &anycubic_slicer_next,
+        &explicit_layers,
+        &collect_preview,
+        &collect_infill,
+        &maximum_preview_segments,
+        &cancellation
+    )) {
+        return nullptr;
+    }
+    if (!PyUnicode_Check(path_object)) {
+        PyErr_SetString(PyExc_TypeError, "Native analysis path must be text.");
+        return nullptr;
+    }
+    if (cancellation != Py_None && !PyCallable_Check(cancellation)) {
+        PyErr_SetString(PyExc_TypeError, "Cancellation callback must be callable.");
+        return nullptr;
+    }
+    if (maximum_preview_segments < 100) {
+        PyErr_SetString(PyExc_ValueError, "maximum_preview_segments must be at least 100.");
+        return nullptr;
+    }
+
+    std::filesystem::path path;
+#ifdef _WIN32
+    Py_ssize_t wide_size = 0;
+    wchar_t* wide_path = PyUnicode_AsWideCharString(path_object, &wide_size);
+    if (wide_path == nullptr) {
+        return nullptr;
+    }
+    path = std::filesystem::path(wide_path, wide_path + wide_size);
+    PyMem_Free(wide_path);
+#else
+    PyObject* encoded_path = PyUnicode_EncodeFSDefault(path_object);
+    if (encoded_path == nullptr) {
+        return nullptr;
+    }
+    path = std::filesystem::path(
+        PyBytes_AS_STRING(encoded_path),
+        PyBytes_AS_STRING(encoded_path) + PyBytes_GET_SIZE(encoded_path)
+    );
+    Py_DECREF(encoded_path);
+#endif
+
+    cooling_tower::native_analysis::Options options;
+    options.bambu_compatible = bambu != 0;
+    options.anycubic_slicer_next_compatible = anycubic_slicer_next != 0;
+    options.use_explicit_layer_markers = explicit_layers != 0;
+    options.collect_preview = collect_preview != 0;
+    options.collect_infill_evidence = collect_infill != 0;
+    options.maximum_preview_segments = static_cast<std::size_t>(
+        maximum_preview_segments
+    );
+    bool callback_failed = false;
+    PyObject* callback_type = nullptr;
+    PyObject* callback_value = nullptr;
+    PyObject* callback_traceback = nullptr;
+    if (cancellation != Py_None) {
+        options.should_cancel = [
+            cancellation,
+            &callback_failed,
+            &callback_type,
+            &callback_value,
+            &callback_traceback
+        ](std::uint64_t, std::uint64_t) {
+            const PyGILState_STATE state = PyGILState_Ensure();
+            PyObject* value = PyObject_CallNoArgs(cancellation);
+            bool cancelled = false;
+            if (value == nullptr) {
+                callback_failed = true;
+                PyErr_Fetch(
+                    &callback_type,
+                    &callback_value,
+                    &callback_traceback
+                );
+                cancelled = true;
+            } else {
+                const int truth = PyObject_IsTrue(value);
+                Py_DECREF(value);
+                if (truth < 0) {
+                    callback_failed = true;
+                    PyErr_Fetch(
+                        &callback_type,
+                        &callback_value,
+                        &callback_traceback
+                    );
+                    cancelled = true;
+                } else {
+                    cancelled = truth != 0;
+                }
+            }
+            PyGILState_Release(state);
+            return cancelled;
+        };
+    }
+
+    cooling_tower::native_analysis::Result result;
+    PyThreadState* saved_thread = PyEval_SaveThread();
+    try {
+        result = cooling_tower::native_analysis::analyze_file(path, options);
+    } catch (const std::exception& error) {
+        PyEval_RestoreThread(saved_thread);
+        PyErr_SetString(PyExc_RuntimeError, error.what());
+        return nullptr;
+    } catch (...) {
+        PyEval_RestoreThread(saved_thread);
+        PyErr_SetString(PyExc_RuntimeError, "Unknown native analysis failure.");
+        return nullptr;
+    }
+    PyEval_RestoreThread(saved_thread);
+    if (callback_failed) {
+        PyErr_Restore(callback_type, callback_value, callback_traceback);
+        return nullptr;
+    }
+    return native_result_to_dict(result);
+}
+
 PyMethodDef module_methods[] = {
+    {"analyze_file", py_analyze_file, METH_VARARGS, "Stream and aggregate one complete G-code file."},
     {"plan_block", py_plan_block, METH_VARARGS, "Plan one exact movement block."},
     {"parse_common_lines", py_parse_common_lines, METH_VARARGS, "Parse common slicer G-code lines."},
     {"cache_info", py_cache_info, METH_NOARGS, "Return native block-cache statistics."},

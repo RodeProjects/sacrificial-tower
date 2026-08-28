@@ -120,6 +120,11 @@ def adjust_radius_profile(
 
     if not math.isfinite(coupled_radius_scale) or coupled_radius_scale <= 0.0:
         raise ValueError("coupled_radius_scale must be finite and greater than zero")
+    joint_growth_guard_s = (
+        min(1.0, max(config.time_tolerance_s, target_time_s * 0.05))
+        if combined_layer_times_s is not None and coupled_radius_scale > 1.0
+        else 0.0
+    )
     source_by_index = _layer_by_index(source_layers)
     realized_by_index = realized_outer_radii_mm or {}
     adjusted: list[LayerRadiusRecord] = []
@@ -134,6 +139,10 @@ def adjust_radius_profile(
             0.0, float(calibrated_added_times_s.get(item.layer_index, 0.0))
         )
         required_added = max(0.0, target_time_s - source_time)
+        control_required_added = max(
+            0.0,
+            target_time_s + joint_growth_guard_s - source_time,
+        )
         minimum_radius = profile.config.minimum_radius_mm
         maximum_radius = profile.config.maximum_radius_mm
         old_radius = min(
@@ -149,7 +158,7 @@ def adjust_radius_profile(
         )
         history_radius = _history_radius_estimate(
             (measurement_history or {}).get(item.layer_index, ()),
-            required_added,
+            control_required_added,
             time_tolerance_s=config.time_tolerance_s,
         )
 
@@ -160,11 +169,11 @@ def adjust_radius_profile(
                 old_radius * math.sqrt(config.maximum_path_growth_factor),
                 old_radius + config.minimum_path_growth_mm / math.tau,
             )
-        elif observed_added + config.time_tolerance_s < required_added:
+        elif observed_added + config.time_tolerance_s < control_required_added:
             # A solid cross-section's dominant deposition time grows with its
             # area.  Limit a single iteration to the configured time-growth
             # factor to avoid an unstable jump after an empty measurement.
-            radius_factor = math.sqrt(required_added / observed_added)
+            radius_factor = math.sqrt(control_required_added / observed_added)
             maximum_radius_factor = math.sqrt(
                 config.maximum_path_growth_factor
             )
@@ -182,13 +191,13 @@ def adjust_radius_profile(
                     max(proportional_radius, history_radius),
                     old_radius * maximum_radius_factor,
                 )
-        elif observed_added > required_added + config.time_tolerance_s:
+        elif observed_added > control_required_added + config.time_tolerance_s:
             # Do not turn a transition-provided radius into a new local
             # demand: if the envelope alone widened this layer, its raw request
             # may already be minimal.  Only the request that caused surplus is
             # allowed to shrink.
             ideal_realized_radius = realized_radius * math.sqrt(
-                required_added / observed_added
+                control_required_added / observed_added
             )
             if history_radius is not None and history_radius < realized_radius:
                 ideal_realized_radius = history_radius
@@ -199,11 +208,11 @@ def adjust_radius_profile(
         else:
             requested_radius = old_radius
 
-        # The angle/spline envelope couples neighbouring raw radius demands.
-        # Correct every directly deficient (or excessive) joint layer in the
-        # same direction, instead of chasing one moving critical layer at a
-        # time.  Direct combined times are deliberately required here; an
-        # isolated tower slice must retain its established local adjustment.
+        # Correct every layer inside the bounded joint reserve while another
+        # layer has a proven deficit. This also covers layers that were long
+        # enough in the source-only slice: Bambu can re-plan cooling and make
+        # one of them the next complete-plate minimum. Isolated tower slices
+        # have no combined times and therefore retain the local controller.
         combined_time = (
             float(combined_layer_times_s[item.layer_index])
             if combined_layer_times_s is not None
@@ -214,7 +223,7 @@ def adjust_radius_profile(
             coupled_radius = old_radius * coupled_radius_scale
             if (
                 coupled_radius_scale > 1.0
-                and combined_time + config.time_tolerance_s < target_time_s
+                and combined_time < target_time_s + joint_growth_guard_s
             ):
                 requested_radius = max(requested_radius, coupled_radius)
             elif (

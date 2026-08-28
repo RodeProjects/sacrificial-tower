@@ -46,6 +46,8 @@ class DepositionToolpathCollector:
     reservoir sampling after the exact layer count becomes known.
     """
 
+    native_product_kind = "preview"
+
     def __init__(
         self,
         *,
@@ -70,6 +72,37 @@ class DepositionToolpathCollector:
         self._minimum_y = math.inf
         self._maximum_y = -math.inf
         self._finished = False
+        self._native_analysis: DepositionToolpathAnalysis | None = None
+
+    def consume_native(self, product: object) -> None:
+        """Accept the compact preview product emitted by the C++ core."""
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        if product is None:
+            raise ValueError("The native preview product is missing.")
+        raw_segments = getattr(product, "segments")
+        object_segments = tuple(
+            LineSegment3D(
+                Point3D(row[0], row[1], row[2]),
+                Point3D(row[3], row[4], row[5]),
+            )
+            for row in raw_segments
+        )
+        raw_bounds = getattr(product, "occupied_bounds")
+        occupied_bounds = (
+            None
+            if raw_bounds is None
+            else OccupiedBounds(*raw_bounds)
+        )
+        self._native_analysis = DepositionToolpathAnalysis(
+            object_segments=object_segments,
+            source_segment_count=int(
+                getattr(product, "source_segment_count")
+            ),
+            occupied_bounds=occupied_bounds,
+        )
+        if not self._records.closed:
+            self._records.close()
 
     def consume(self, parsed: ParsedGCodeLine, event: object) -> None:
         if self._finished:
@@ -133,6 +166,8 @@ class DepositionToolpathCollector:
         if expected_layer_count < 1:
             raise ValueError("expected_layer_count must be positive")
         self._finished = True
+        if self._native_analysis is not None:
+            return self._native_analysis
         self._flush_pending()
         per_layer_limit = max(
             8,

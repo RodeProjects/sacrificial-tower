@@ -171,11 +171,13 @@ class CombinedSourceAnalysisTests(unittest.TestCase):
                 maximum_segments=600,
             )
             collector = DepositionToolpathCollector(maximum_segments=600)
-            combined_snapshot = GCodeAnalysisService().analyze(
+            service = GCodeAnalysisService()
+            combined_snapshot = service.analyze(
                 source,
                 force=True,
                 event_observers=(collector.consume,),
             )
+            self.assertTrue(service.native_full_analysis_info["used"])
             combined_preview = collector.finish(
                 expected_layer_count=combined_snapshot.layer_count
             )

@@ -302,12 +302,20 @@ class PersistentAnalysisCacheTests(unittest.TestCase):
     def test_same_service_serializes_parallel_analysis_to_one_parse(self) -> None:
         service = GCodeAnalysisService(self.cache_path)
         original_parser = analysis_module.iter_parsed_gcode_lines
+        original_native = analysis_module.analyze_native_gcode
 
-        with patch.object(
-            analysis_module,
-            "iter_parsed_gcode_lines",
-            wraps=original_parser,
-        ) as parser:
+        with (
+            patch.object(
+                analysis_module,
+                "iter_parsed_gcode_lines",
+                wraps=original_parser,
+            ) as parser,
+            patch.object(
+                analysis_module,
+                "analyze_native_gcode",
+                wraps=original_native,
+            ) as native_analysis,
+        ):
             with ThreadPoolExecutor(max_workers=8) as executor:
                 snapshots = tuple(
                     executor.map(
@@ -316,7 +324,8 @@ class PersistentAnalysisCacheTests(unittest.TestCase):
                     )
                 )
 
-        self.assertEqual(parser.call_count, 1)
+        self.assertEqual(native_analysis.call_count, 1)
+        self.assertLessEqual(parser.call_count, 1)
         self.assertTrue(all(item is snapshots[0] for item in snapshots))
 
     def test_cancelled_thread_releases_lock_for_waiting_analysis(self) -> None:

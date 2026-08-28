@@ -713,13 +713,16 @@ class Phase16Tests(unittest.TestCase):
         )
         self.assertLess(efficient_within_tolerance, exact_but_wasteful)
 
-    def test_07e_joint_feedback_corrects_all_directly_deficient_layers(self) -> None:
+    def test_07e_joint_feedback_corrects_all_vulnerable_layers(self) -> None:
         profile = self._radius_profile()
         observed = {
             layer.index: max(0.0, 5.0 - layer.total_time_s)
             for layer in self.snapshot.layers
         }
-        combined = {layer.index: 4.0 for layer in self.snapshot.layers}
+        combined = {
+            layer.index: 4.0 if layer.index == 1 else 5.2
+            for layer in self.snapshot.layers
+        }
         adjusted, change = adjust_radius_profile(
             profile,
             self.snapshot.layers,
@@ -737,15 +740,63 @@ class Phase16Tests(unittest.TestCase):
             )
         )
 
+    def test_07ea_joint_feedback_covers_source_sufficient_layer(self) -> None:
+        profile = self._radius_profile()
+        source_layers = tuple(
+            replace(layer, total_time_s=6.0)
+            for layer in self.snapshot.layers
+        )
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            source_layers,
+            {layer.index: 0.0 for layer in source_layers},
+            target_time_s=5.0,
+            combined_layer_times_s={
+                layer.index: 5.2 for layer in source_layers
+            },
+            coupled_radius_scale=1.1,
+            config=CalibrationConfig(time_tolerance_s=0.2),
+        )
+        self.assertTrue(
+            all(
+                new.radius_mm > old.radius_mm
+                for old, new in zip(profile.layers, adjusted.layers, strict=True)
+            )
+        )
+
+    def test_07eb_joint_feedback_reserve_is_bounded(self) -> None:
+        profile = self._radius_profile()
+        source_layers = tuple(
+            replace(layer, total_time_s=6.0)
+            for layer in self.snapshot.layers
+        )
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            source_layers,
+            {layer.index: 0.0 for layer in source_layers},
+            target_time_s=5.0,
+            combined_layer_times_s={
+                layer.index: 5.3 for layer in source_layers
+            },
+            coupled_radius_scale=1.1,
+            config=CalibrationConfig(time_tolerance_s=0.2),
+        )
+        self.assertTrue(
+            all(
+                new.radius_mm <= old.radius_mm
+                for old, new in zip(profile.layers, adjusted.layers, strict=True)
+            )
+        )
+
     def test_07f_joint_scale_uses_direct_critical_layer_time(self) -> None:
         config = CalibrationConfig(time_tolerance_s=0.2)
         self.assertAlmostEqual(
             CalibrationService._joint_coupled_radius_scale(
-                {1: 11.12, 2: 14.0},
+                {1: 9.5, 2: 14.0},
                 target_time_s=10.0,
                 config=config,
             ),
-            math.sqrt(10.0 / 11.12),
+            math.sqrt(10.5 / 9.5),
         )
         self.assertEqual(
             CalibrationService._joint_coupled_radius_scale(

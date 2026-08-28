@@ -7,6 +7,11 @@ from setuptools import Extension, setup
 
 
 ROOT = Path(__file__).resolve().parent
+NATIVE_COMPILE_ARGS = (
+    ["/O2", "/std:c++17", "/fp:strict", "/EHsc"]
+    if os.name == "nt"
+    else ["-O3", "-std=c++17", "-fno-fast-math"]
+)
 
 
 def _windows_sdk_paths() -> tuple[list[str], list[str]]:
@@ -95,11 +100,18 @@ setup(
     ext_modules=[
         Extension(
             "cooling_tower._native_timing",
-            sources=[str(ROOT / "native" / "native_timing.cpp")],
-            include_dirs=VC_INCLUDE_DIRS + SDK_INCLUDE_DIRS,
+            sources=[
+                str(ROOT / "native" / "native_timing.cpp"),
+                str(ROOT / "native" / "native_analysis.cpp"),
+            ],
+            include_dirs=(
+                [str(ROOT / "native")]
+                + VC_INCLUDE_DIRS
+                + SDK_INCLUDE_DIRS
+            ),
             library_dirs=VC_LIBRARY_DIRS + SDK_LIBRARY_DIRS,
             language="c++",
-            extra_compile_args=["/O2", "/std:c++17", "/fp:strict", "/EHsc"],
+            extra_compile_args=NATIVE_COMPILE_ARGS,
         ),
     ],
     package_dir={"": "src"},

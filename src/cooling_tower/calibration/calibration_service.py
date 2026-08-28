@@ -1559,7 +1559,18 @@ class CalibrationService:
         critical_time = min(finite_times)
         if abs(critical_time - target_time_s) <= config.time_tolerance_s:
             return 1.0
-        requested = math.sqrt(target_time_s / critical_time)
+        correction_target_s = target_time_s
+        if critical_time < target_time_s - config.time_tolerance_s:
+            # Keep the actual acceptance threshold unchanged, but leave a
+            # small bounded correction reserve. Complete-plate slicers can
+            # move the minimum to a neighbouring layer after rebuilding their
+            # cooling/speed plan; without the reserve that costs several full
+            # feedback slices for fractions of a second.
+            correction_target_s += min(
+                1.0,
+                max(config.time_tolerance_s, target_time_s * 0.05),
+            )
+        requested = math.sqrt(correction_target_s / critical_time)
         maximum_growth = math.sqrt(config.maximum_path_growth_factor)
         return min(maximum_growth, max(0.5, requested))
 
