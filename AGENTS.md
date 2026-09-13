@@ -1,96 +1,66 @@
 # Repository-Regeln
 
+Diese Regeln gelten ergänzend zur globalen `AGENTS.md` für das Repository `sacrificial-tower`. Allgemeine Arbeits-, Coding-, Eskalations-, Fortschritts-, Lizenz-/Rechts-, Dokumentations- und Python-Regeln werden hier nicht wiederholt.
+
+## Git- und GitHub-Zugriff
+
+* Für dieses Repository ist der Git-Remote `git@github.com:RodeProjects/sacrificial-tower.git` maßgeblich. Abrufen und Pushen erfolgen direkt mit Git über SSH aus dem Arbeitsverzeichnis dieses Repositories.
+* Vor einem Abruf oder Push mit `git remote -v`, `git branch --show-current` und `git status -sb` Repository, Branch, Arbeitszustand und SSH-Remote prüfen. Für normale Git-Vorgänge insbesondere `git fetch origin <branch>` und `git push origin <branch>` verwenden.
+* Die GitHub-CLI `gh` und Git über SSH verwenden getrennte Authentifizierungen. Ein ungültiges oder fehlendes `gh`-Token ist kein Nachweis für einen fehlerhaften SSH-Zugriff.
+* Bei einem ausdrücklich angeforderten direkten Git-Push weder `gh auth status` als Voraussetzung behandeln noch zu `gh auth login -h github.com` auffordern, solange der konfigurierte SSH-Remote funktioniert. `gh` nur einsetzen, wenn tatsächlich GitHub-API-Funktionen benötigt werden, insbesondere für CI-Informationen oder Pull Requests.
+* Wird ausdrücklich ein Push nach `main` verlangt, den vorhandenen SSH-Remote und `main` verwenden. Keinen separaten Arbeitsbranch oder Pull Request erzwingen, sofern keine höherrangige Regel dies verlangt.
+* Schlägt ein SSH-Abruf oder SSH-Push fehl, zunächst selbstständig Arbeitsordner, Remote, Branch, Netzwerkzugriff und SSH-Erreichbarkeit diagnostizieren. Dazu je nach Bedarf `git remote -v`, `git status -sb`, `git fetch`, `git ls-remote origin` oder `ssh -T git@github.com` verwenden.
+* Den Benutzer erst einbeziehen, wenn der Git-/SSH-Weg im korrekten Repository nach diesen Prüfungen weiterhin fehlschlägt oder eine neue Berechtigung bzw. Benutzerentscheidung erforderlich ist.
+
 ## Versionierung und Push-Freigabe
 
-- Für jeden Push muss eine vorhandene Versionsnummer in der Form `x.y.z` vor
-  dem Commit erhöht werden, indem ausschließlich die letzte Zahl (`z`) um `1`
-  steigt. Diese Versionserhöhung muss im selben Commit und Push wie die
-  zugehörigen Änderungen enthalten sein.
-- Maßgeblich ist die zuletzt gepushte Version: Ist die lokale Versionsnummer
-  bereits genau um `1` höher, wird sie in den nächsten Commit aufgenommen und
-  nicht ein zweites Mal erhöht.
-- Die ersten beiden Versionsbestandteile (`x.y`) dürfen nur geändert werden,
-  wenn der Benutzer dies ausdrücklich anweist.
-- Der letzte Versionsbestandteil (`z`) läuft fortlaufend weiter und darf nur
-  dann von neuem beginnen beziehungsweise zurückgesetzt werden, wenn im selben
-  Versionswechsel mindestens einer der vorangestellten Bestandteile (`x` oder
-  `y`) auf eine höhere Zahl gesetzt wird.
-- Vor jedem Push muss dem Benutzer zuerst die vorgesehene Commit-Message
-  ausgegeben werden. Sie muss die zu pushenden Änderungen zusammenfassen.
-- Commit-Messages müssen sprachlich einheitlich und überwiegend auf Deutsch
-  formuliert sein. Eigennamen, etablierte Anglizismen und fachsprachliche
-  Begriffe dürfen auf Englisch bleiben; die Hauptsprache der gesamten
-  Commit-Message muss Deutsch sein.
-- Aktualisierungen dieser Anwendung werden als „Programmaktualisierung“ oder
-  „Sacrificial-Tower-Update“ bezeichnet. Der Ausdruck „Windows-Update“ bleibt
-  Aktualisierungen des Windows-Betriebssystems vorbehalten; für das gebaute
-  Installationspaket ist „Windows-Installer“ zu verwenden.
-- Ein Push darf erst erfolgen, nachdem der Benutzer ihn ausdrücklich erlaubt
-  hat. Ohne diese Freigabe weder pushen noch sie aus dem Kontext ableiten.
+* Für jeden Push muss eine vorhandene Versionsnummer im Format `x.y.z` vor dem Commit erhöht werden, indem ausschließlich die letzte Zahl (`z`) um `1` steigt. Die Versionserhöhung muss im selben Commit und Push wie die zugehörigen Änderungen enthalten sein.
+* Maßgeblich ist die zuletzt gepushte Version. Ist die lokale Versionsnummer bereits genau um `1` höher, wird sie in den nächsten Commit aufgenommen und nicht erneut erhöht.
+* Die ersten beiden Versionsbestandteile (`x.y`) dürfen nur auf ausdrückliche Anweisung des Benutzers geändert werden.
+* Der letzte Versionsbestandteil (`z`) läuft fortlaufend weiter. Er darf nur zurückgesetzt bzw. neu begonnen werden, wenn im selben Versionswechsel mindestens einer der vorangestellten Bestandteile (`x` oder `y`) erhöht wird.
+* Vor jedem Push zuerst die vorgesehene Commit-Message ausgeben. Sie muss die zu pushenden Änderungen zusammenfassen.
+* Commit-Messages müssen sprachlich einheitlich und überwiegend auf Deutsch formuliert sein. Eigennamen, etablierte Anglizismen und fachsprachliche Begriffe dürfen auf Englisch bleiben.
+* Aktualisierungen dieser Anwendung als `Programmaktualisierung` oder `Sacrificial-Tower-Update` bezeichnen. `Windows-Update` ausschließlich für Aktualisierungen des Windows-Betriebssystems und `Windows-Installer` für das gebaute Installationspaket verwenden.
+* Ein Push darf erst nach ausdrücklicher Freigabe des Benutzers erfolgen. Die Freigabe niemals aus dem Kontext ableiten.
 
-## CI-Absicherung bei direkten Pushes
+## CI-Absicherung bei direkten Pushes nach `main`
 
-- Vor einem direkten Push nach `main` muss der letzte abgeschlossene Lauf des
-  GitHub-Actions-Workflows `Tests` für `main` geprüft werden. Ist dieser Lauf
-  fehlgeschlagen, muss die Ursache vor einem weiteren Push untersucht und ein
-  noch vorhandener Fehler behoben werden.
-- Die lokale Abschlussprüfung muss mindestens den in `.github/workflows/tests.yml`
-  verwendeten Befehl `python -m unittest discover -s tests -q` umfassen. Weitere
-  für die Änderung relevante Tests bleiben zusätzlich erforderlich.
-- Nach einem direkten Push nach `main` muss der dadurch ausgelöste Workflow
-  `Tests` bis zum Abschluss beobachtet werden. Die Push-Aufgabe darf erst als
-  erfolgreich abgeschlossen gemeldet werden, wenn dieser Lauf erfolgreich ist.
-  Bei einem Fehlschlag sind die Actions-Logs unmittelbar auszuwerten und der
-  Benutzer ist mit der konkreten Ursache zu informieren.
-- Die CI-Prüfung kann mit `gh run list`, `gh run watch --exit-status` und
-  `gh run view --log-failed` erfolgen. Eine fehlende GitHub-CLI-Authentifizierung
-  betrifft nur diese CI-Abfrage und ist kein Nachweis für ein Problem mit dem
-  separat konfigurierten SSH-Zugriff von Git.
+* Vor einem direkten Push nach `main` den letzten abgeschlossenen Lauf des GitHub-Actions-Workflows `Tests` für `main` prüfen. Ist dieser fehlgeschlagen, zuerst anhand der Logs unterscheiden, ob ein Code-/Testfehler oder ein externer/transienter Infrastrukturfehler (z. B. Runner-, Netzwerk-, Service- oder GitHub-Actions-Problem) vorliegt.
+* Einen noch bestehenden Code-/Testfehler vor dem Push untersuchen und beheben. Bei einem eindeutig externen/transienten Fehler keine Codeänderung nur zur Behebung des CI-Status vornehmen; den CI-Lauf bei Bedarf erneut prüfen bzw. wiederholen.
+* Vor dem Push muss grundsätzlich die vollständige Testsuite `python -m unittest discover -s tests -q` erfolgreich durchlaufen. Den dafür verwendeten Python-Interpreter gemäß den globalen Regeln zur projektbezogenen Python-Umgebung wählen. Für die konkrete Änderung erforderliche zusätzliche Tests bleiben davon unberührt.
+* Die vollständige lokale Testsuite darf ausnahmsweise entfallen, wenn der gesamte zu pushende Diff gegenüber dem zuletzt gepushten Stand nachweislich ausschließlich Änderungen enthält, die weder Laufzeitverhalten noch Build/Packaging, Abhängigkeiten, ausführungsrelevante Konfiguration, Persistenz/Migrationen, Codegenerierung, Tests/CI oder andere fehlerrelevante Programmabläufe beeinflussen können. Typische Beispiele sind reine Änderungen an `AGENTS.md` oder ausschließlich nicht ausführungsrelevanter Dokumentation.
+* Für diese Ausnahme den gesamten zu pushenden Diff prüfen, nicht nur die zuletzt bearbeiteten Dateien. Dann nur tatsächlich relevante Prüfungen durchführen; existiert für die Änderung kein sinnvoller automatisierter Test, genügt eine sorgfältige Diff-/Konsistenzprüfung. Bei Unsicherheit oder irgendeiner potenziell ausführungsrelevanten Änderung bleibt die vollständige Testsuite verpflichtend. Wird die Ausnahme genutzt, kurz nennen, warum Full-Suite-Tests nicht erforderlich sind.
+* Nach dem direkten Push nach `main` den dadurch ausgelösten Workflow `Tests` bis zum Abschluss beobachten. Die Push-Aufgabe erst als erfolgreich abgeschlossen melden, wenn dieser Lauf erfolgreich ist.
+* Schlägt der Workflow fehl, die verfügbaren Actions-Logs unmittelbar auswerten, Code-/Testfehler von externen/transienten CI-Problemen unterscheiden und entsprechend der globalen Problemlösungs- und Eskalationsregeln weiterverfahren.
+* Für die CI-Prüfung können insbesondere `gh run list`, `gh run watch --exit-status` und `gh run view --log-failed` verwendet werden.
+* Fehlende `gh`-Authentifizierung betrifft nur die darüber ausgeführte GitHub-API-/CI-Abfrage und nicht den separat konfigurierten SSH-Zugriff von Git. Sie ist daher nicht als Git-/SSH-Fehler zu behandeln. Ist eine vorgeschriebene CI-Prüfung dadurch tatsächlich nicht möglich, dies als eigenständige Blockade behandeln statt den Git-Push fälschlich als fehlgeschlagen zu diagnostizieren.
+
+## Projektdokumentation
+
+* Die Dokumentation dieses Projekts modular unter `docs/` führen; eine vorhandene gleichwertige Dokumentationsstruktur beibehalten, statt parallel eine zweite Struktur anzulegen.
+* Falls noch keine gleichwertige Struktur vorhanden ist, `docs/README.md` als zentralen Dokumentationsindex verwenden und fachlich getrennte Themen in eigenen Dateien unter `docs/` dokumentieren.
+* Für Drittkomponenten eine zentrale Dependency-/Lizenzdokumentation führen; falls noch keine entsprechende Datei existiert, `docs/dependencies.md` verwenden. Dort mindestens Komponente/Version bzw. Versionsreihe, Lizenz und belastbare Lizenzquelle, kommerzielle/proprietäre Nutzung, erforderliche Attribution/Weitergabepflichten, relevante Einschränkungen, Kosten-/Umsatzschwellen und Datum der letzten Prüfung dokumentieren.
+* Vor erneuter externer Lizenzrecherche zunächst `docs/dependencies.md` bzw. die vorhandene gleichwertige Dokumentation prüfen. Unveränderte und ausreichend dokumentierte Komponenten nur bei den global definierten Anlässen erneut lizenzrechtlich prüfen.
+* Projektspezifisch besonders wichtige Bereiche wie Slicer-Integration, Preslice-/Analyseabläufe, Profil-/Konfigurationsverarbeitung, Persistenz/Migrationen und andere komplexe Kernbereiche so dokumentieren, dass Aufbau, Datenfluss, relevante Invarianten und nicht offensichtliche Entscheidungen nachvollziehbar bleiben.
+* Keine in der globalen `AGENTS.md` bereits geregelten allgemeinen Dokumentationsprinzipien duplizieren.
 
 ## Migration von Benutzerdaten
 
-- Persistierte Benutzereinstellungen und zukünftige Einstellungsprofile müssen
-  über `VersionedJsonStore` geladen und atomar gespeichert werden.
-- Jede strukturelle oder semantische Änderung eines gespeicherten Formats muss
-  dessen Schema-Version genau um `1` erhöhen und eine explizite Migration von
-  der direkten Vorversion registrieren. Frühere Migrationsschritte dürfen nicht
-  übersprungen oder ohne ausdrückliche Aufgabe entfernt werden.
-- Vor migrationsbedingten Umschreibungen muss das Original gesichert werden.
-  Unbekannte neuere, beschädigte oder zwischenzeitlich extern veränderte Dateien
-  dürfen nicht automatisch überschrieben werden.
-- Bei der Zusammenführung von Einstellungen nach einem Downgrade dürfen nur
-  Werte mit stabiler Kennung und ausdrücklich bestätigter semantischer
-  Kompatibilität übernommen werden. Jeder einzelne Kandidat muss zuvor nach
-  den Typen, Wertebereichen, Einheiten, Abhängigkeiten und sonstigen Regeln der
-  Zielversion normalisiert und validiert werden. Ein zuletzt geänderter Wert
-  hat niemals Vorrang vor diesen Sicherheitsregeln.
-- Ist ein während des Downgrades geänderter Wert in der neueren Zielversion
-  ungültig oder nicht eindeutig übersetzbar, darf er nicht übernommen werden.
-  Stattdessen bleibt der erhaltene gültige Wert der neueren Konfiguration
-  bestehen oder es wird kontrolliert deren sicherer Standardwert verwendet.
-  Diese Entscheidung muss pro Einstellung erfolgen und darf nicht durch eine
-  pauschale Zusammenführung anhand gleicher Feldnamen ersetzt werden.
-- Jede Schemaänderung benötigt Tests für den direkten und mehrstufigen
-  Versionssprung, Sicherung und atomisches Schreiben sowie Fehler-, Downgrade-
-  und Wiederherstellungsfälle. Downgrade-Tests müssen außerdem inkompatible
-  Typen, geänderte Einheiten und in der Zielversion verschärfte Minimal- und
-  Maximalwerte abdecken.
+* Persistierte Benutzereinstellungen und zukünftige Einstellungsprofile müssen über `VersionedJsonStore` geladen und atomar gespeichert werden.
+* Jede strukturelle oder semantische Änderung eines gespeicherten Formats muss dessen Schema-Version genau um `1` erhöhen und eine explizite Migration von der direkten Vorversion registrieren. Frühere Migrationsschritte dürfen nicht übersprungen oder ohne ausdrückliche Aufgabe entfernt werden.
+* Vor migrationsbedingten Umschreibungen muss das Original gesichert werden.
+* Unbekannte neuere, beschädigte oder zwischenzeitlich extern veränderte Dateien dürfen nicht automatisch überschrieben werden.
+* Bei der Zusammenführung von Einstellungen nach einem Downgrade dürfen nur Werte mit stabiler Kennung und ausdrücklich bestätigter semantischer Kompatibilität übernommen werden.
+* Jeder Übernahmekandidat muss zuvor nach Typen, Wertebereichen, Einheiten, Abhängigkeiten und sonstigen Regeln der Zielversion normalisiert und validiert werden. Ein zuletzt geänderter Wert hat niemals Vorrang vor diesen Sicherheitsregeln.
+* Ist ein während des Downgrades geänderter Wert in der neueren Zielversion ungültig oder nicht eindeutig übersetzbar, darf er nicht übernommen werden. Stattdessen bleibt der erhaltene gültige Wert der neueren Konfiguration bestehen oder es wird kontrolliert deren sicherer Standardwert verwendet.
+* Diese Entscheidung muss pro Einstellung erfolgen und darf nicht durch eine pauschale Zusammenführung anhand gleicher Feldnamen ersetzt werden.
+* Jede Schemaänderung benötigt Tests für den direkten und mehrstufigen Versionssprung, Sicherung und atomisches Schreiben sowie Fehler-, Downgrade- und Wiederherstellungsfälle.
+* Downgrade-Tests müssen zusätzlich inkompatible Typen, geänderte Einheiten und in der Zielversion verschärfte Minimal- und Maximalwerte abdecken.
 
 ## Unveränderlichkeit von Slicer-Dateien
 
-- Bei sämtlichen Entwicklungen und Programmabläufen dürfen Dateien und
-  Verzeichnisse eines Slicers ausschließlich lesend verwendet werden. Das gilt
-  insbesondere für Installationsdateien, Profile, Presets, Konfigurationen,
-  Datenbanken, Caches und vom Slicer verwaltete G-Code- oder Projektdateien.
-- Slicer-Dateien und Slicer-Verzeichnisse dürfen niemals angelegt, verändert,
-  überschrieben, umbenannt, verschoben oder gelöscht werden. Dies gilt auch
-  dann, wenn eine Slicer-API oder Kommandozeilenfunktion solche Änderungen
-  technisch ermöglichen würde.
-- Benötigt die Anwendung veränderte oder zusammengesetzte Daten, muss sie diese
-  ausschließlich in eigenen programminternen Speicherbereichen oder eigenen
-  temporären Dateien außerhalb aller Slicer-Verzeichnisse erzeugen. Das
-  Original bleibt unverändert; auch temporäre Ausgaben dürfen nicht in
-  slicerverwaltete Pfade geschrieben werden.
-- Neue und geänderte Slicer-Integrationen müssen nach Möglichkeit durch Tests
-  absichern, dass alle slicereigenen Quelldateien vor und nach dem Vorgang
-  unverändert vorhanden und inhaltlich identisch sind.
+* Bei sämtlichen Entwicklungen und Programmabläufen dürfen Dateien und Verzeichnisse eines Slicers ausschließlich lesend verwendet werden. Dies gilt insbesondere für Installationsdateien, Profile, Presets, Konfigurationen, Datenbanken, Caches und vom Slicer verwaltete G-Code- oder Projektdateien.
+* Slicer-Dateien und Slicer-Verzeichnisse dürfen niemals angelegt, verändert, überschrieben, umbenannt, verschoben oder gelöscht werden. Dies gilt auch dann, wenn eine Slicer-API oder Kommandozeilenfunktion solche Änderungen technisch ermöglichen würde.
+* Benötigt die Anwendung veränderte oder zusammengesetzte Daten, müssen diese ausschließlich in eigenen programminternen Speicherbereichen oder eigenen temporären Dateien außerhalb aller Slicer-Verzeichnisse erzeugt werden.
+* Slicer-Originale bleiben unverändert; auch temporäre Ausgaben dürfen nicht in slicerverwaltete Pfade geschrieben werden.
+* Neue und geänderte Slicer-Integrationen nach Möglichkeit durch Tests absichern, die sicherstellen, dass alle slicereigenen Quelldateien vor und nach dem Vorgang unverändert vorhanden und inhaltlich identisch sind.
