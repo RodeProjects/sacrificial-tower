@@ -32,7 +32,11 @@ def protected_slicer_roots() -> tuple[Path, ...]:
     for variable in ("APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
         value = os.environ.get(variable)
         if value:
-            base = Path(value)
+            # Canonicalize the existing environment root before appending vendor
+            # names.  Windows runners can expose an 8.3 alias (RUNNER~1) here;
+            # resolving only the final, nonexistent vendor path preserves that
+            # alias and can then miss an equivalent long-form destination.
+            base = Path(value).expanduser().resolve()
             roots.update(base / name for name in _VENDOR_DIRECTORIES)
             if variable == "LOCALAPPDATA":
                 roots.update(base / "Programs" / name for name in _VENDOR_DIRECTORIES)

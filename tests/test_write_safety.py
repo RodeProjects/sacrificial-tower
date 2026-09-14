@@ -30,6 +30,24 @@ class WriteSafetyTests(unittest.TestCase):
                 self.assertFalse((root / "BambuStudio").exists())
                 self.assertEqual(ensure_writable_output(root / "my-exports"), root / "my-exports")
 
+    def test_vendor_directory_uses_canonical_environment_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            canonical_root = Path(directory).resolve()
+            aliased_root = canonical_root.parent / "RUNNER~1" / canonical_root.name
+            destination = canonical_root / "BambuStudio" / "user" / "exports"
+            original_resolve = Path.resolve
+
+            def canonicalize(path, *args, **kwargs):
+                if path == aliased_root:
+                    return canonical_root
+                return original_resolve(path, *args, **kwargs)
+
+            with patch.dict(os.environ, {"APPDATA": str(aliased_root)}), patch.object(
+                Path, "resolve", autospec=True, side_effect=canonicalize
+            ):
+                with self.assertRaises(ProtectedWritePathError):
+                    ensure_writable_output(destination)
+
     def test_explicit_portable_roots_and_original_files_are_protected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
