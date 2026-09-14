@@ -28,7 +28,10 @@ class WriteSafetyTests(unittest.TestCase):
                 with self.assertRaises(ProtectedWritePathError):
                     OutputService(destination).create_run_directories("model.gcode")
                 self.assertFalse((root / "BambuStudio").exists())
-                self.assertEqual(ensure_writable_output(root / "my-exports"), root / "my-exports")
+                self.assertEqual(
+                    ensure_writable_output(root / "my-exports"),
+                    (root / "my-exports").resolve(),
+                )
 
     def test_vendor_directory_uses_canonical_environment_root(self):
         with tempfile.TemporaryDirectory() as directory:
