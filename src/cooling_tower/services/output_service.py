@@ -5,6 +5,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 from typing import Any, Iterable, Mapping, Sequence
 
 from cooling_tower.config import save_generation_settings
@@ -61,6 +62,7 @@ class OutputService:
         moment = timestamp or datetime.now()
         stem = sanitize_filename_component(source.stem)
         base_name = f"{moment:%Y%m%d_%H%M%S}_{stem}"
+        ensure_writable_output(self.runs_root)
         self.runs_root.mkdir(parents=True, exist_ok=True)
 
         suffix = 1

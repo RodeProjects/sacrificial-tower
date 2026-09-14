@@ -354,7 +354,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
 
     def test_08_portable_manual_installation_is_verified_and_saved(self) -> None:
         adapter = FakeAdapter("portable", "Portable", SlicerFamily.OTHER)
-        path = make_executable(self.root, "portable.exe")
+        path = make_executable(self.root / "portable-installation", "portable.exe")
         service = self.service((adapter,))
         result = service.add_manual_installation(path)
         self.assertEqual(result.installations[0].discovery_source, SlicerDiscoverySource.MANUAL)
@@ -627,10 +627,19 @@ class Phase14DiscoveryTests(unittest.TestCase):
 
 
 class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
+    def test_output_inside_slicer_installation_is_rejected_without_changes(self) -> None:
+        from cooling_tower.write_policy import ProtectedWritePathError
+        adapter, request = self.request(ConfigurableRunner())
+        before = {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        with self.assertRaises(ProtectedWritePathError):
+            adapter.prepare_slice(replace(request, output_directory=self.executable.parent / "output"))
+        after = {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.executable = make_executable(self.root, "AnycubicSlicerNext.exe")
+        self.executable = make_executable(self.root / "slicer-installation", "AnycubicSlicerNext.exe")
         self.model = self.root / "tower.stl"
         self.model.write_text("solid test\nendsolid test\n", encoding="ascii")
         self.machine = self._profile("machine", ProfileKind.MACHINE)

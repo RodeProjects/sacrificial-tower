@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 from typing import Any, Iterable, Mapping, Sequence
 
 from cooling_tower.diagnostic_context import record_diagnostic
@@ -680,6 +681,9 @@ class BaseSlicerAdapter:
     def prepare_slice(self, request: SliceRequest) -> PreparedSlice:
         """Copy inputs and build a command without starting an external process."""
 
+        ensure_writable_output(request.output_directory, protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots))
+        if request.diagnostics_root is not None:
+            ensure_writable_output(request.diagnostics_root, protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots))
         if not request.model_path.is_file():
             raise FileNotFoundError(f"Model file not found: {request.model_path}")
         if request.profile.installation.adapter_id != self.adapter_id:
@@ -823,11 +827,20 @@ class BaseSlicerAdapter:
                 process_output_diagnostic_path=outcome.output_diagnostic_path,
             )
 
+        ensure_writable_output(
+            request.output_directory,
+            protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots),
+            protected_files=request.profile.source_paths,
+        )
         request.output_directory.mkdir(parents=True, exist_ok=True)
         copied_outputs: list[Path] = []
         for source in produced:
             relative = source.relative_to(prepared.output_directory)
-            destination = request.output_directory / relative
+            destination = ensure_writable_output(
+                request.output_directory / relative,
+                protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots),
+                protected_files=request.profile.source_paths,
+            )
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             copied_outputs.append(destination.resolve())

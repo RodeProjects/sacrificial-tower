@@ -27,9 +27,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-build.txt
+          cache-dependency-path: requirements-windows.lock
 
       - name: Erfolgreiche main-CI für Release-Commit prüfen
         env:
@@ -41,7 +39,7 @@ jobs:
           --ref "${{ github.ref }}"
 
       - name: Install dependencies
-        run: python -m pip install -r requirements-build.txt
+        run: python -m pip install --require-hashes -r requirements-windows.lock
 
       - name: Native G-Code-Analyse bauen
         run: python setup_native.py build_ext --inplace
@@ -55,8 +53,14 @@ jobs:
           }
           "APP_VERSION=$appVersion" >> $env:GITHUB_ENV
 
+      - name: Versionsgebundenes Qt-Quellmaterial vorbereiten
+        run: python scripts/prepare_qt_sources.py
+
       - name: Build application directory
         run: pyinstaller --noconfirm --clean SacrificialTower.spec
+
+      - name: Lieferumfang und Lizenztexte prüfen
+        run: python scripts/distribution_compliance.py --bundle dist/SacrificialTower --output dist/installer/build-inventory.json
 
       - name: Install pinned Inno Setup compiler
         shell: pwsh
@@ -126,5 +130,6 @@ jobs:
             dist/installer/SacrificialTowerSetup-${{ inputs.version }}.exe
             dist/installer/update-metadata.json
             dist/installer/latest.json
+            dist/installer/build-inventory.json
           if-no-files-found: error
           retention-days: 14

@@ -33,8 +33,8 @@ nicht überschreibende Legacy-Übernahme stehen in
 - `persistence`: versionierte, gesicherte und atomare Benutzerdaten
 
 Abhängigkeiten sollen von der Oberfläche in Richtung Fachlogik verlaufen.
-Fachmodule dürfen keine Qt-Abhängigkeit erhalten. Die einzige bewusst
-gekapselte Ausnahme ist das austauschbare Slicer-Transportbackend
+Fachmodule dürfen keine Qt-Abhängigkeit erhalten. Die bewusst
+gekapselte Laufzeitausnahme ist das austauschbare Slicer-Transportbackend
 `slicers.qprocess_backend`; Adapter, Prozessauftrag und fachliche Auswertung
 bleiben Qt-unabhängig.
 
@@ -239,3 +239,53 @@ Wiedereinführung der entfernten Legacy-Job-API im produktiven Quellcode.
    Testsuite, GUI-Starttest sowie einen Thread-/Schließtest ausführen.
 6. Generierte Caches, virtuelle Umgebungen und Build-Artefakte nicht
    versionieren.
+
+## Verantwortlichkeiten nach dem Wartbarkeitsumbau September 2026
+
+- `gui/about_dialog.py`: eigener Dialog mit Rechtstextanzeige und responsive
+  Anordnung. `MainWindow` koordiniert lediglich Öffnen und Positionierung.
+- `gui/widgets/preparation_controls.py`: Vorbereitungsnavigation, Statusmodell
+  und Fortschrittsanzeige ohne Kenntnis der Hauptfenster-Implementierung.
+- `gui/preview_controller.py`: Qt-Thread-/Statuskoordination der Vorschau.
+  `preview/controller.py` bleibt nur als schmale Kompatibilitätsweiterleitung;
+  die Paket-API lädt den Controller erst bei explizitem Zugriff.
+- `slicers/profile_rules.py`: reine Identitäts-, Normalisierungs-, Düsen- und
+  Kompatibilitätsregeln. Inventar-I/O und Matching-Orchestrierung bleiben im
+  Matching-Service. Alte Funktionsimporte werden weiterhin bereitgestellt.
+- `calibration/candidate_evaluation.py`: reine Kandidatenbewertung und
+  Konvergenzmessgrößen. Der Service besitzt weiterhin den iterativen Ablauf und
+  priorisiert gemeinsame gegenüber isolierten Kandidaten.
+- `settings_defaults.py`: aktuelle Standards aus der Ressourcen-JSON; historische
+  Migrationswerte bleiben explizit in ihren Migrationsschritten.
+- `write_policy.py`: gemeinsame Prüfung eigener Schreibziele gegen bekannte und
+  registrierte Slicer-Verzeichnisse; Datei-/Junction-Auflösung vor Schreibzugriffen.
+- `persistence/document_lock.py`: gemeinsame Sperre pro kanonischem Dokumentpfad
+  über Threads und kooperierende Prozesse, ohne zusätzliche Bibliothek.
+- `start_gui.pyw`: auch frühe Import-/DLL-Fehler protokollieren nur im eigenen
+  Benutzerdatenordner; das Installationsverzeichnis bleibt unverändert.
+- `legal_documents.py`: offline gerenderte Texte aus einer einzigen Anbieterdatei.
+  Build-/Vertriebsprüfungen liegen unter `scripts/`, nicht im Produktablauf.
+
+Qt-Signalempfänger für Worker-Ergebnisse sind ausdrücklich als Slots registriert.
+Widgetänderungen und Folgestarts bleiben im GUI-Thread. Die Qt-Transportklasse
+wird erst bei tatsächlicher Verwendung geladen; ein Import des fachlichen
+Vorschaupakets lädt kein Qt. Kompatibilitätsimporte sind kein Vorbild für neue
+Fachmodule: neue Aufrufer verwenden die zuständige konkrete Komponente.
+
+## Grenzen und nächste größere Strukturänderungen
+
+`MainWindow` und die Kalibrierungsschleife bleiben umfangreiche Orchestratoren.
+Die Auslagerungen beseitigen konkrete vermischte Verantwortlichkeiten, ersetzen
+aber keine vollständige Zerlegung. Beim nächsten betroffenen Funktionsausbau
+sollten Quellenvorbereitung/Profilbestätigung und Einstellungsansicht jeweils
+Eigentümer ihres Zustands und ihrer Widgets werden. Dafür konkrete Übergaben
+und Signale definieren; keine Mixins mit beliebigem Zugriff auf hunderte
+Hauptfensterattribute einführen. Die bestehende Workflow-Zustandsmaschine und
+Request-ID-Prüfung bleiben verbindlich.
+
+Für den Parser ist die Python-/C++-Parität der entscheidende Vertrag, siehe
+[native Analyse](native_analysis.md). Eine Komplettumschreibung oder gemeinsame
+Codegenerierung würde derzeit zusätzlichen Prüfaufwand und neue Risiken erzeugen.
+Gezielte Funktionsänderungen benötigen nur die verantwortlichen Module und
+passenden Tests, nicht jedes Mal die gesamte Historie. Testnavigation und
+abschließender Prüfumfang: [Entwicklung](development.md).

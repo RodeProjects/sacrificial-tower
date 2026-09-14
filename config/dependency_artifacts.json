@@ -1,0 +1,95 @@
+{
+  "platform": "cp313-win_amd64",
+  "artifacts": [
+    {
+      "name": "altgraph",
+      "version": "0.17.5",
+      "wheel": "altgraph-0.17.5-py2.py3-none-any.whl",
+      "sha256": "f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597"
+    },
+    {
+      "name": "cffi",
+      "version": "2.1.0",
+      "wheel": "cffi-2.1.0-cp313-cp313-win_amd64.whl",
+      "sha256": "8e74a6135550c4748af665b1b1118b6aab33b1fc6a16f9aff630af107c3b4512"
+    },
+    {
+      "name": "cryptography",
+      "version": "49.0.0",
+      "wheel": "cryptography-49.0.0-cp311-abi3-win_amd64.whl",
+      "sha256": "e5dfc1e64de5677cec922ffa8da89c546d0415bf6efdf081842e5d44c84e1f0e"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.1",
+      "wheel": "numpy-2.5.1-cp313-cp313-win_amd64.whl",
+      "sha256": "6c3fe51bc6a16453d452997053454f309e8e0ed7b42d6b361ce4ac8c32913d74"
+    },
+    {
+      "name": "packaging",
+      "version": "26.2",
+      "wheel": "packaging-26.2-py3-none-any.whl",
+      "sha256": "5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e"
+    },
+    {
+      "name": "pefile",
+      "version": "2024.8.26",
+      "wheel": "pefile-2024.8.26-py3-none-any.whl",
+      "sha256": "76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f"
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "wheel": "pycparser-3.0-py3-none-any.whl",
+      "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+    },
+    {
+      "name": "pyinstaller",
+      "version": "6.21.0",
+      "wheel": "pyinstaller-6.21.0-py3-none-win_amd64.whl",
+      "sha256": "7fae06c494ce0ebfe6bd3055c0e409def884f63af2e3705d06bd431ad9237fc7"
+    },
+    {
+      "name": "pyinstaller-hooks-contrib",
+      "version": "2026.6",
+      "wheel": "pyinstaller_hooks_contrib-2026.6-py3-none-any.whl",
+      "sha256": "fd13b8ac126b35361175edacd41a0d97080b75dd5f4b594ecefefff969509dd3"
+    },
+    {
+      "name": "PySide6_Essentials",
+      "version": "6.11.1",
+      "wheel": "pyside6_essentials-6.11.1-cp310-abi3-win_amd64.whl",
+      "sha256": "63311bd48e32c584599ab04b9ef7c324082374cd2c9fa533f978fb893bb47e40"
+    },
+    {
+      "name": "pywin32-ctypes",
+      "version": "0.2.3",
+      "wheel": "pywin32_ctypes-0.2.3-py3-none-any.whl",
+      "sha256": "8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8"
+    },
+    {
+      "name": "setuptools",
+      "version": "83.0.0",
+      "wheel": "setuptools-83.0.0-py3-none-any.whl",
+      "sha256": "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
+    },
+    {
+      "name": "shiboken6",
+      "version": "6.11.1",
+      "wheel": "shiboken6-6.11.1-cp310-abi3-win_amd64.whl",
+      "sha256": "c2c6863aa80ec18c0f82cea3417837b279cdc60024ac17123461dc9042577df7"
+    },
+    {
+      "name": "trimesh",
+      "version": "4.12.2",
+      "wheel": "trimesh-4.12.2-py3-none-any.whl",
+      "sha256": "b5b5afa63c5272345f2858f7676bc8c217dc8a89f4fadf6193fe10a81b5ff2aa"
+    },
+    {
+      "name": "truststore",
+      "version": "0.10.4",
+      "wheel": "truststore-0.10.4-py3-none-any.whl",
+      "sha256": "adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981"
+    }
+  ]
+}

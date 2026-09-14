@@ -41,7 +41,6 @@ from cooling_tower.slicers.process import (
     create_slicer_process_runner,
     isolated_slicer_environment,
 )
-from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
 from cooling_tower.slicers.compatibility import (
     SLICER_COMPATIBILITY_MATRIX,
     SlicerCompatibility,
@@ -221,3 +220,10 @@ __all__ = [
     "protect_profile_paths",
     "protect_profile_sources",
 ]
+
+
+def __getattr__(name: str):
+    if name == "QProcessSlicerProcessRunner":
+        from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
+        return QProcessSlicerProcessRunner
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

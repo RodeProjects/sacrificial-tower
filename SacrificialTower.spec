@@ -1,8 +1,17 @@
 from pathlib import Path
+import sys
+import json
 
 
 project_root = Path(SPECPATH)
 source_root = project_root / "src"
+sys.path.insert(0, str(project_root / "scripts"))
+from distribution_compliance import (
+    keep_qt_binary, prepare_legal_material, isolate_binary_search_path, binary_origins,
+)
+isolate_binary_search_path()
+legal_root = project_root / "build" / "legal"
+prepare_legal_material(legal_root)
 
 version_namespace = {}
 exec(
@@ -60,6 +69,8 @@ a = Analysis(
     pathex=[str(source_root)],
     binaries=[(str(native_timing_extensions[0]), "cooling_tower")],
     datas=[
+        (str(legal_root), "legal"),
+        (str(project_root / "config" / "legal_profile.json"), "config"),
         (
             str(project_root / "config" / "default_settings.json"),
             "config",
@@ -81,10 +92,15 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["PySide6.QtVirtualKeyboard", "PySide6.QtPdf", "PySide6.QtQuick", "PySide6.QtQml"],
     noarchive=False,
     optimize=0,
 )
+# Qt hooks collect optional plugins even without a Python import.
+a.binaries = [entry for entry in a.binaries if keep_qt_binary(entry[0])]
+origins_path = project_root / "build" / "binary-origins.json"
+origins_path.write_text(json.dumps(binary_origins(a.binaries), indent=2) + "\n", encoding="utf-8")
+a.datas.append(("legal/binary-origins.json", str(origins_path), "DATA"))
 pyz = PYZ(a.pure)
 
 exe = EXE(

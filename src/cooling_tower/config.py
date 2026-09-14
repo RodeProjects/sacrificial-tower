@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 
 from cooling_tower.models import GenerationSettings
 
@@ -36,6 +37,7 @@ def save_generation_settings(
     path: str | Path,
 ) -> Path:
     settings_path = Path(path)
+    ensure_writable_output(settings_path)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     with settings_path.open("w", encoding="utf-8", newline="\n") as handle:
         payload = {

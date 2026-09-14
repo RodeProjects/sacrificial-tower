@@ -1,7 +1,9 @@
+from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 import argparse
 import csv
 import sys
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 
 from cooling_tower.gcode.parser import (
     MachineStateTracker,
@@ -46,21 +48,21 @@ from cooling_tower.services.reporting_service import (
 
 DEFAULT_PREVIEW_COUNT = 10
 DEFAULT_CSV_PATH = Path("output/layer_analysis.csv")
-DEFAULT_SAFETY_FACTOR = 1.10
-DEFAULT_MINIMUM_DIAMETER_MM = 10.0
-DEFAULT_MAXIMUM_DIAMETER_MM = 40.0
-DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM = 25.0
-DEFAULT_LOCAL_TIME_FACTOR_WINDOW = 5
-DEFAULT_MINIMUM_RADIUS_HEIGHT_FACTOR = 0.04
-DEFAULT_MINIMUM_BASE_RADIUS_MM = 10.0
-DEFAULT_BASE_HEIGHT_FACTOR = 0.05
-DEFAULT_BASE_MARGIN_MM = 2.0
-DEFAULT_BASE_HEIGHT_MM = 4.0
-DEFAULT_MANUAL_BASE_WIDTH_MM = 20.0
-DEFAULT_EXPANSION_ANGLE_DEG = 50.0
-DEFAULT_CONTRACTION_ANGLE_DEG = 50.0
-DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z = 0.35
-DEFAULT_MESH_SEGMENTS = 32
+DEFAULT_SAFETY_FACTOR = GENERATION_DEFAULTS["safety_factor"]
+DEFAULT_MINIMUM_DIAMETER_MM = GENERATION_DEFAULTS["minimum_outer_diameter_mm"]
+DEFAULT_MAXIMUM_DIAMETER_MM = GENERATION_DEFAULTS["maximum_outer_diameter_mm"]
+DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"]
+DEFAULT_LOCAL_TIME_FACTOR_WINDOW = GENERATION_DEFAULTS["local_reference_window"]
+DEFAULT_MINIMUM_RADIUS_HEIGHT_FACTOR = GENERATION_DEFAULTS["minimum_radius_height_factor"]
+DEFAULT_MINIMUM_BASE_RADIUS_MM = GENERATION_DEFAULTS["minimum_base_radius_mm"]
+DEFAULT_BASE_HEIGHT_FACTOR = GENERATION_DEFAULTS["base_height_factor"]
+DEFAULT_BASE_MARGIN_MM = GENERATION_DEFAULTS["base_margin_mm"]
+DEFAULT_BASE_HEIGHT_MM = GENERATION_DEFAULTS["base_height_mm"]
+DEFAULT_MANUAL_BASE_WIDTH_MM = GENERATION_DEFAULTS["manual_base_width_mm"]
+DEFAULT_EXPANSION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
+DEFAULT_CONTRACTION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
+DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"]
+DEFAULT_MESH_SEGMENTS = GENERATION_DEFAULTS["mesh_segments"]
 FLOAT_EPSILON = 1e-12
 
 
@@ -398,7 +400,7 @@ def write_layer_csv(
 
     UTF-8 with BOM is used for convenient opening under Windows.
     """
-    output_path = Path(csv_path).expanduser()
+    output_path = ensure_writable_output(csv_path)
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,

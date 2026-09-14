@@ -65,6 +65,14 @@ from cooling_tower.tower.profile import TowerProfileConfig, build_tower_radius_p
 from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_radius
 
 
+from cooling_tower.calibration.candidate_evaluation import (
+    candidate_score,
+    maximum_slicer_result_change,
+    maximum_target_deviation,
+    minimum_target_difference,
+)
+from cooling_tower.write_policy import ensure_writable_output
+
 ProgressCallback = Callable[[int, str], None]
 
 
@@ -1225,148 +1233,13 @@ class CalibrationService:
             return 0.0
         return number if math.isfinite(number) and number >= 0.0 else 0.0
 
-    @staticmethod
-    def _maximum_slicer_result_change(
-        previous_added_times_s: dict[int, float] | None,
-        current_added_times_s: dict[int, float],
-        source_layers: tuple[object, ...],
-    ) -> float | None:
-        """Compare consecutive slicer timings for every relevant source layer."""
+    _maximum_slicer_result_change = staticmethod(maximum_slicer_result_change)
 
-        if previous_added_times_s is None:
-            return None
-        expected_indices = tuple(
-            int(getattr(layer, "index")) for layer in source_layers
-        )
-        if any(
-            index not in previous_added_times_s
-            or index not in current_added_times_s
-            for index in expected_indices
-        ):
-            return math.inf
-        changes = []
-        for index in expected_indices:
-            previous = previous_added_times_s[index]
-            current = current_added_times_s[index]
-            if not math.isfinite(previous) or not math.isfinite(current):
-                return math.inf
-            changes.append(abs(current - previous))
-        return max(changes, default=0.0)
+    _maximum_target_deviation = staticmethod(maximum_target_deviation)
 
-    @staticmethod
-    def _maximum_target_deviation(
-        source_layers: tuple[object, ...],
-        added_times_s: dict[int, float],
-        *,
-        target_time_s: float,
-        combined_times_s: dict[int, float] | None = None,
-    ) -> float:
-        """Measure over- and undershoot only where the object needs a tower."""
+    _minimum_target_difference = staticmethod(minimum_target_difference)
 
-        deviations = []
-        for layer in source_layers:
-            index = int(getattr(layer, "index"))
-            required_added = max(
-                0.0,
-                target_time_s - float(getattr(layer, "total_time_s")),
-            )
-            if required_added <= 0.0:
-                continue
-            combined = (
-                float(combined_times_s[index])
-                if combined_times_s and index in combined_times_s
-                else float(getattr(layer, "total_time_s"))
-                + max(0.0, float(added_times_s.get(index, 0.0)))
-            )
-            deviations.append(abs(combined - target_time_s))
-        return max(deviations, default=0.0)
-
-    @staticmethod
-    def _minimum_target_difference(
-        source_layers: tuple[object, ...],
-        added_times_s: dict[int, float],
-        *,
-        target_time_s: float,
-        combined_times_s: dict[int, float] | None = None,
-    ) -> float:
-        """Return the signed deviation of the critical minimum layer time."""
-
-        combined_times = [
-            (
-                float(combined_times_s[int(getattr(layer, "index"))])
-                if combined_times_s
-                and int(getattr(layer, "index")) in combined_times_s
-                else float(getattr(layer, "total_time_s"))
-                + max(
-                    0.0,
-                    float(
-                        added_times_s.get(
-                            int(getattr(layer, "index")),
-                            0.0,
-                        )
-                    ),
-                )
-            )
-            for layer in source_layers
-        ]
-        if not combined_times or not all(
-            math.isfinite(value) for value in combined_times
-        ):
-            return math.inf
-        return min(combined_times) - target_time_s
-
-    @staticmethod
-    def _candidate_score(
-        convergence: object,
-        profile: object,
-        *,
-        source_layers: tuple[object, ...],
-        added_times_s: dict[int, float],
-        target_time_s: float,
-        combined_times_s: dict[int, float] | None = None,
-    ) -> tuple[int, float, float, float, float, float]:
-        """Rank target compliance, tower-time excess, then material."""
-
-        material = sum(
-            max(
-                0.0,
-                float(layer.outer_radius_mm) ** 2,
-            )
-            for layer in getattr(profile, "layers")
-        )
-        required_by_index = {
-            int(getattr(layer, "index")): max(
-                0.0,
-                target_time_s - float(getattr(layer, "total_time_s")),
-            )
-            for layer in source_layers
-        }
-        avoidable_excesses = tuple(
-            max(
-                0.0,
-                (
-                    float(combined_times_s[index]) - target_time_s
-                    if combined_times_s and index in combined_times_s
-                    else float(added_times_s.get(index, 0.0)) - required_added
-                ),
-            )
-            for index, required_added in required_by_index.items()
-        )
-        deficient_layer_count = int(
-            getattr(convergence, "deficient_layer_count")
-        )
-        return (
-            deficient_layer_count,
-            (
-                float(getattr(convergence, "maximum_remaining_deficit_s"))
-                if deficient_layer_count > 0
-                else 0.0
-            ),
-            float(getattr(convergence, "total_remaining_deficit_s")),
-            sum(avoidable_excesses),
-            max(avoidable_excesses, default=0.0),
-            material,
-        )
+    _candidate_score = staticmethod(candidate_score)
 
     @staticmethod
     def _export_candidate(
@@ -1448,18 +1321,21 @@ class CalibrationService:
                     best_iteration_number=best_iteration_number,
                     improved_over_initial_candidate=False,
                 )
+        output_directory = ensure_writable_output(output_directory)
         output_directory.mkdir(parents=True, exist_ok=True)
-        stl_destination = output_directory / "cooling_tower_slicer_evaluated.stl"
+        stl_destination = ensure_writable_output(output_directory / "cooling_tower_slicer_evaluated.stl", protected_files=(source,))
         shutil.copy2(candidate_stl, stl_destination)
         gcode_destination = None
         if candidate_gcode is not None:
             gcode_destination = output_directory / f"{source.stem}_cooling_tower.gcode"
+            ensure_writable_output(gcode_destination, protected_files=(source,))
             shutil.copy2(candidate_gcode, gcode_destination)
         project_destination = None
         if candidate_project is not None:
             project_destination = output_directory / (
                 f"{source.stem}_with_cooling_tower.3mf"
             )
+            ensure_writable_output(project_destination, protected_files=(source,))
             shutil.copy2(candidate_project, project_destination)
         if config.mode is CalibrationMode.GCODE and gcode_destination is None:
             raise GCodeIntegrationError(
@@ -1496,7 +1372,7 @@ class CalibrationService:
             best_iteration_number=best_iteration_number,
             improved_over_initial_candidate=improved_over_initial_candidate,
         )
-        report_path = output_directory / "calibration_report.json"
+        report_path = ensure_writable_output(output_directory / "calibration_report.json", protected_files=(source,))
         report_path.write_text(
             json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

@@ -21,7 +21,6 @@ from cooling_tower.preview.source_cache import (
     PreviewSourceData,
     PreviewSourceDataCache,
 )
-from cooling_tower.preview.controller import PreviewBuildController, PreviewBuildState
 from cooling_tower.preview.toolpath import (
     DepositionToolpathAnalysis,
     PreviewCancelled,
@@ -53,3 +52,11 @@ __all__ = [
     "analyze_deposition_toolpaths",
     "extract_deposition_toolpaths",
 ]
+
+
+def __getattr__(name: str):
+    # Preserve the public API without importing Qt for headless preview services.
+    if name in {"PreviewBuildController", "PreviewBuildState"}:
+        from cooling_tower.gui import preview_controller
+        return getattr(preview_controller, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

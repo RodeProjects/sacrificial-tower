@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from cooling_tower.write_policy import register_slicer_roots
 from typing import Iterable, Sequence
 
 from cooling_tower.diagnostic_context import record_diagnostic
@@ -145,6 +146,7 @@ class SlicerDiscoveryService:
                     )
                     errors.append(f"{adapter.adapter_id}: {error}")
                     continue
+                register_slicer_roots((installation.executable_path.parent, *installation.profile_roots))
                 installations.append(installation)
                 record_diagnostic(
                     "slicer_candidate_verified",
@@ -199,6 +201,7 @@ class SlicerDiscoveryService:
                 )
                 errors.append(str(error))
                 continue
+            register_slicer_roots((installation.executable_path.parent, *installation.profile_roots))
             current = list(self._installations or ())
             current.append(installation)
             self._installations = self._deduplicate_installations(current)

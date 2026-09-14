@@ -65,6 +65,10 @@ from cooling_tower.diagnostics import (
     DiagnosticJournal,
     current_diagnostic_journal,
 )
+from cooling_tower.gui.about_dialog import AboutDialog, CURRENT_LICENSE_STATUS, LICENSE_STATUS_DEFINITIONS
+from cooling_tower.gui.widgets.preparation_controls import (
+    _SequentialPreparationTabs, _PreparationState, _PreparationStepSelector, _PreparationRequirementsPanel, _ConfirmationProgressBar
+)
 from cooling_tower.gui.background_jobs import (
     BackgroundJob,
     BackgroundJobManager,
@@ -222,43 +226,6 @@ _PRESLICE_TIMEOUT_FORMAT = (
     "Zeitlimit von 8 Minuten erreicht, Pre-Slice wird abgebrochen... (%p%)"
 )
 _PRESLICE_ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
-CURRENT_LICENSE_STATUS = "development"
-LICENSE_STATUS_DEFINITIONS = {
-    "development": {
-        "label": "Entwicklungsversion",
-        "description": (
-            "Diese Version befindet sich noch in Entwicklung und ist nicht "
-            "für den regulären Vertrieb bestimmt."
-        ),
-        "foreground": "#6b4b00",
-        "background": "#fff3ce",
-        "border": "#e3c365",
-    },
-    "evaluation": {
-        "label": "Testversion",
-        "description": (
-            "Diese Version ist für einen begrenzten Test- und "
-            "Evaluierungszeitraum vorgesehen."
-        ),
-        "foreground": "#174ea6",
-        "background": "#eaf2ff",
-        "border": "#9bbcf2",
-    },
-    "licensed": {
-        "label": "Lizenzierte Version",
-        "description": "Für diese Version liegt eine gültige Lizenz vor.",
-        "foreground": "#17633a",
-        "background": "#e7f6ed",
-        "border": "#8fc9a5",
-    },
-    "unlicensed": {
-        "label": "Nicht lizenzierte Version",
-        "description": "Für diese Version liegt keine gültige Lizenz vor.",
-        "foreground": "#9b1c1c",
-        "background": "#fdecec",
-        "border": "#e4a1a1",
-    },
-}
 SETTING_UNITS = {
     "target_layer_time_s": "s",
     "safety_factor": "",
@@ -503,76 +470,6 @@ class _FooterIssueLabel(QLabel):
         self.setAccessibleDescription(self._plain_text)
 
 
-class _ResponsiveLegalButtonGrid(QWidget):
-    """Flow three legal-document actions across as many columns as fit."""
-
-    def __init__(
-        self,
-        buttons: list[QPushButton],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.buttons = buttons
-        self.grid = QGridLayout(self)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(8)
-        self.grid.setVerticalSpacing(8)
-        self.column_count = 0
-        for button in self.buttons:
-            button.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Fixed,
-            )
-        # Start with the preferred one-row arrangement so the parent dialog's
-        # natural width can account for all three actions. A real resize then
-        # reduces the column count when the available viewport is narrower.
-        self._relayout(10_000)
-
-    def _columns_for_width(self, width: int) -> int:
-        widths = [
-            QFontMetrics(button.font()).horizontalAdvance(button.text())
-            + button.iconSize().width()
-            + 30
-            for button in self.buttons
-        ]
-        spacing = max(0, self.grid.horizontalSpacing())
-        if width >= sum(widths) + spacing * (len(widths) - 1):
-            return 3
-        if width >= sum(sorted(widths, reverse=True)[:2]) + spacing:
-            return 2
-        return 1
-
-    def _relayout(self, width: int) -> None:
-        columns = self._columns_for_width(width)
-        if columns == self.column_count:
-            return
-        for button in self.buttons:
-            self.grid.removeWidget(button)
-        for index, button in enumerate(self.buttons):
-            row, column = divmod(index, columns)
-            is_last_unpaired = (
-                columns == 2
-                and index == len(self.buttons) - 1
-                and len(self.buttons) % columns
-            )
-            self.grid.addWidget(
-                button,
-                row,
-                column,
-                1,
-                columns if is_last_unpaired else 1,
-            )
-        for column in range(3):
-            self.grid.setColumnStretch(column, 0)
-        for column in range(columns):
-            self.grid.setColumnStretch(column, 1)
-        self.column_count = columns
-        self.grid.invalidate()
-        self.updateGeometry()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        self._relayout(event.size().width())
-        super().resizeEvent(event)
 
 
 class _InternalDialogRevealFilter(QObject):
@@ -646,395 +543,14 @@ class _InternalDialogRevealFilter(QObject):
             dialog.activateWindow()
 
 
-class _SequentialPreparationTabs(QTabWidget):
-    """Guarded preparation pages with a directional card transition."""
-
-    step_blocked = Signal(int)
-    transition_started = Signal(int, int, int)
-
-    def __init__(
-        self,
-        parent: QWidget | None = None,
-        *,
-        transition_duration_ms: int = 500,
-    ) -> None:
-        super().__init__(parent)
-        self.transition_duration_ms = max(0, int(transition_duration_ms))
-        self._effective_transition_duration_ms = (
-            0
-            if os.environ.get("QT_QPA_PLATFORM", "").casefold()
-            == "offscreen"
-            else self.transition_duration_ms
-        )
-        self._step_guard: Callable[[int], bool] | None = None
-        self._transition_targets: tuple[QWidget, ...] = ()
-        self._transition_prepare: Callable[[], None] | None = None
-        self._transition_animation: QParallelAnimationGroup | None = None
-        self._transition_viewport: QWidget | None = None
-        self._transition_overlays: list[QLabel] = []
-        self._pending_transition_index: int | None = None
-        self.last_transition: tuple[int, int, int] | None = None
-        self.last_blocked_index: int | None = None
-
-    def set_step_guard(self, guard: Callable[[int], bool]) -> None:
-        self._step_guard = guard
-
-    def set_transition_targets(
-        self,
-        targets: tuple[QWidget, ...],
-        prepare_layout: Callable[[], None],
-    ) -> None:
-        self._transition_targets = targets
-        self._transition_prepare = prepare_layout
-
-    def can_navigate_to(self, index: int) -> bool:
-        return (
-            0 <= index < self.count()
-            and (self._step_guard is None or self._step_guard(index))
-        )
-
-    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 - Qt API
-        if self._transition_animation is not None:
-            return
-        current_index = super().currentIndex()
-        if index == current_index:
-            return
-        if not self.can_navigate_to(index):
-            self.last_blocked_index = index
-            self.step_blocked.emit(index)
-            return
-        self.last_blocked_index = None
-        self.last_transition = (
-            current_index,
-            index,
-            self.transition_duration_ms,
-        )
-        self.transition_started.emit(
-            current_index,
-            index,
-            self.transition_duration_ms,
-        )
-        if (
-            current_index < 0
-            or self._effective_transition_duration_ms <= 0
-            or not self.isVisible()
-        ):
-            super().setCurrentIndex(index)
-            return
-        self._animate_to(index)
-
-    def _animate_to(self, index: int) -> None:
-        stack = self.findChild(QStackedWidget)
-        old_index = super().currentIndex()
-        if (
-            stack is None
-            or stack.width() <= 0
-            or not (0 <= old_index < len(self._transition_targets))
-            or not (0 <= index < len(self._transition_targets))
-        ):
-            super().setCurrentIndex(index)
-            return
-        self._finish_transition()
-        old_target = self._transition_targets[old_index]
-        new_target = self._transition_targets[index]
-        old_pixmap = old_target.grab()
-        old_position = old_target.mapTo(stack, QPoint(0, 0))
-        old_tab_height = self.height()
-
-        # Lay out and capture the target page synchronously while signals are
-        # blocked.  No paint event can expose it before the old page is
-        # restored, and currentChanged is emitted only after the animation.
-        signals_were_blocked = self.blockSignals(True)
-        try:
-            super().setCurrentIndex(index)
-            if self._transition_prepare is not None:
-                self._transition_prepare()
-            new_pixmap = new_target.grab()
-            new_position = new_target.mapTo(stack, QPoint(0, 0))
-            new_tab_height = self.height()
-            super().setCurrentIndex(old_index)
-            if self._transition_prepare is not None:
-                self._transition_prepare()
-        finally:
-            self.blockSignals(signals_were_blocked)
-
-        if old_pixmap.isNull() or new_pixmap.isNull():
-            super().setCurrentIndex(index)
-            return
-
-        viewport_width = max(old_pixmap.width(), new_pixmap.width())
-        viewport_left = max(0, (stack.width() - viewport_width) // 2)
-        viewport_top = min(old_position.y(), new_position.y())
-        viewport_bottom = max(
-            old_position.y() + old_pixmap.height(),
-            new_position.y() + new_pixmap.height(),
-        )
-        viewport_height = max(1, viewport_bottom - viewport_top)
-        self.setFixedHeight(max(old_tab_height, new_tab_height))
-
-        viewport = QWidget(stack)
-        viewport.setObjectName("preparationTransitionViewport")
-        viewport.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        viewport.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
-        )
-        viewport.setGeometry(
-            viewport_left,
-            viewport_top,
-            viewport_width,
-            viewport_height,
-        )
-        viewport.show()
-        viewport.raise_()
-        self._transition_viewport = viewport
-
-        direction = 1 if index > old_index else -1
-        old_overlay = QLabel(viewport)
-        new_overlay = QLabel(viewport)
-        for overlay, pixmap in (
-            (old_overlay, old_pixmap),
-            (new_overlay, new_pixmap),
-        ):
-            overlay.setObjectName("preparationTransitionOverlay")
-            overlay.setAttribute(
-                Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-                True,
-            )
-            overlay.setPixmap(
-                pixmap
-            )
-            overlay.resize(pixmap.size())
-            overlay.show()
-            overlay.raise_()
-        old_start = QPoint(
-            old_position.x() - viewport_left,
-            old_position.y() - viewport_top,
-        )
-        new_end = QPoint(
-            new_position.x() - viewport_left,
-            new_position.y() - viewport_top,
-        )
-        old_overlay.move(old_start)
-        new_overlay.move(
-            new_end + QPoint(direction * viewport_width, 0)
-        )
-        self._transition_overlays = [old_overlay, new_overlay]
-        self._pending_transition_index = index
-
-        animation_group = QParallelAnimationGroup(self)
-        for overlay, end_position in (
-            (
-                old_overlay,
-                old_start + QPoint(-direction * viewport_width, 0),
-            ),
-            (new_overlay, new_end),
-        ):
-            animation = QPropertyAnimation(overlay, b"pos", animation_group)
-            animation.setDuration(self._effective_transition_duration_ms)
-            animation.setStartValue(overlay.pos())
-            animation.setEndValue(end_position)
-            animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-            animation_group.addAnimation(animation)
-        animation_group.finished.connect(self._complete_transition)
-        self._transition_animation = animation_group
-        animation_group.start()
-
-    def _complete_transition(self) -> None:
-        index = self._pending_transition_index
-        self._finish_transition()
-        if index is None:
-            return
-        super().setCurrentIndex(index)
-        if self._transition_prepare is not None:
-            self._transition_prepare()
-
-    def _finish_transition(self) -> None:
-        animation = self._transition_animation
-        self._transition_animation = None
-        self._pending_transition_index = None
-        if animation is not None:
-            animation.stop()
-            animation.deleteLater()
-        for overlay in self._transition_overlays:
-            overlay.hide()
-            overlay.deleteLater()
-        self._transition_overlays.clear()
-        viewport = self._transition_viewport
-        self._transition_viewport = None
-        if viewport is not None:
-            viewport.hide()
-            viewport.deleteLater()
 
 
-@dataclass(frozen=True, slots=True)
-class _PreparationState:
-    """One immutable snapshot used by every preparation UI affordance."""
-
-    source_selected: bool
-    source_accepted: bool
-    slicer_detected: bool
-    profiles_loaded: bool
-    profiles_confirmed: bool
-    model_analyzed: bool
-
-    @property
-    def step1_completed(self) -> bool:
-        return self.source_selected and self.source_accepted
-
-    @property
-    def step2_completed(self) -> bool:
-        return all(
-            (
-                self.slicer_detected,
-                self.profiles_loaded,
-                self.profiles_confirmed,
-                self.model_analyzed,
-            )
-        )
-
-    @property
-    def preparation_completed(self) -> bool:
-        return self.step1_completed and self.step2_completed
-
-    def requirements(self) -> dict[str, bool]:
-        return {
-            "source_selected": self.source_selected,
-            "source_validated": self.source_accepted,
-            "slicer_detected": self.slicer_detected,
-            "profiles_loaded": self.profiles_loaded,
-            "profiles_confirmed": self.profiles_confirmed,
-            "model_analyzed": self.model_analyzed,
-        }
 
 
-class _PreparationStepSelector(QPushButton):
-    """Step selector that exposes its hover state to the complete card."""
-
-    hover_changed = Signal(bool)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._progress_value = 0
-        self.progress_label = QLabel("0 %", self)
-        self.progress_label.setObjectName("preparationStepProgressLabel")
-        self.progress_label.setAlignment(
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
-        )
-        self.progress_label.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
-        )
-        # Progress belongs to the preparation as a whole.  The value remains
-        # available for accessibility and compatibility, but is no longer
-        # painted as a separate per-step bar.
-        self.progress_label.hide()
-
-    def set_progress_value(self, value: int) -> None:
-        """Update the step progress exposed to accessibility and tests."""
-
-        progress_value = max(0, min(100, int(value)))
-        if progress_value == self._progress_value:
-            return
-        self._progress_value = progress_value
-        self.progress_label.setText(f"{progress_value} %")
-        self.update()
-
-    @property
-    def progress_value(self) -> int:
-        """Return the percentage fulfilled inside this preparation step."""
-
-        return self._progress_value
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        label_width = 44
-        self.progress_label.setGeometry(
-            max(0, self.width() - label_width - 7),
-            4,
-            label_width,
-            15,
-        )
-        self.progress_label.raise_()
-
-    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        super().paintEvent(event)
-
-    def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        self.hover_changed.emit(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        self.hover_changed.emit(False)
-        super().leaveEvent(event)
 
 
-class _PreparationRequirementsPanel(QFrame):
-    """Passive prerequisite summary inside one preparation step."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
-class _ConfirmationProgressBar(QProgressBar):
-    """Progress bar with stable, readable text and a larger activity glyph."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._display_format = ""
-        self.setTextVisible(False)
-        self.overlay = QWidget(self)
-        self.overlay.setObjectName("profileConfirmationProgressOverlay")
-        self.overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
-        )
-        overlay_layout = QHBoxLayout(self.overlay)
-        overlay_layout.setContentsMargins(8, 0, 8, 0)
-        overlay_layout.setSpacing(6)
-        overlay_layout.addStretch(1)
-        self.text_label = QLabel()
-        self.text_label.setObjectName("profileConfirmationProgressText")
-        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.activity_label = QLabel()
-        self.activity_label.setObjectName("profileConfirmationActivity")
-        self.activity_label.setFixedWidth(28)
-        self.activity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        activity_font = self.activity_label.font()
-        activity_font.setPointSizeF(max(17.0, activity_font.pointSizeF() + 7.0))
-        activity_font.setBold(True)
-        self.activity_label.setFont(activity_font)
-        overlay_layout.addWidget(self.text_label)
-        overlay_layout.addWidget(self.activity_label)
-        overlay_layout.addStretch(1)
-
-    def setFormat(self, text: str) -> None:  # noqa: N802
-        self._display_format = str(text)
-        super().setFormat(text)
-        self._sync_overlay_text()
-
-    def setValue(self, value: int) -> None:  # noqa: N802
-        super().setValue(value)
-        self._sync_overlay_text()
-
-    def set_activity_frame(self, frame: str) -> None:
-        self.activity_label.setText(str(frame))
-        self.activity_label.update()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self.overlay.setGeometry(self.rect())
-
-    def _sync_overlay_text(self) -> None:
-        if not hasattr(self, "text_label"):
-            return
-        text = self._display_format
-        if "%p" in text and self.maximum() > self.minimum():
-            text = text.replace("%p", str(self.value()))
-        self.text_label.setText(text)
 
 
 class MainWindow(QMainWindow):
@@ -4076,6 +3592,7 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, object)
     def _on_update_check_succeeded(
         self,
         request_id: int,
@@ -4094,6 +3611,7 @@ class MainWindow(QMainWindow):
         self.update_button.setEnabled(True)
         self.update_button.show()
 
+    @Slot(int, str, str)
     def _on_update_check_failed(
         self,
         request_id: int,
@@ -4131,11 +3649,13 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, int)
     def _on_update_download_progress(self, request_id: int, percent: int) -> None:
         if request_id != self._update_download_request_id or self._closing:
             return
         self.update_button.setText(f"Lädt … {max(0, min(100, percent))} %")
 
+    @Slot(int, object)
     def _on_update_download_succeeded(
         self,
         request_id: int,
@@ -4157,6 +3677,7 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.quit()
 
+    @Slot(int, str, str)
     def _on_update_download_failed(
         self,
         request_id: int,
@@ -4378,212 +3899,92 @@ class MainWindow(QMainWindow):
         return self._export_success_dialog
 
     @property
-    def about_dialog(self) -> QDialog:
-        """Create the compact, scrollable program information dialog lazily."""
-
+    def about_dialog(self) -> AboutDialog:
         if self._about_dialog is None:
-            dialog = QDialog(self)
-            dialog.setObjectName("aboutDialog")
-            dialog.setWindowTitle(f"Über {APP_NAME}")
-            dialog.setModal(False)
-            dialog.setMinimumWidth(ABOUT_DIALOG_MINIMUM_WIDTH_PX)
-            dialog.setSizeGripEnabled(True)
-
-            dialog_layout = QVBoxLayout(dialog)
-            dialog_layout.setContentsMargins(0, 0, 0, 0)
-            dialog_layout.setSpacing(0)
-
-            scroll = QScrollArea(dialog)
-            scroll.setObjectName("aboutScroll")
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAsNeeded
-            )
-            scroll.setVerticalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAsNeeded
-            )
-
-            content = QWidget()
-            content.setObjectName("aboutContent")
-            content.setMinimumWidth(320)
-            content_layout = QVBoxLayout(content)
-            content_layout.setContentsMargins(24, 22, 24, 20)
-            content_layout.setSpacing(14)
-            self.about_content_layout = content_layout
-
-            hero = QFrame()
-            hero.setObjectName("aboutHero")
-            hero_layout = QHBoxLayout(hero)
-            hero_layout.setContentsMargins(18, 16, 18, 16)
-            hero_layout.setSpacing(20)
-
-            program_icon = QLabel()
-            program_icon.setObjectName("aboutProgramIcon")
-            program_icon.setAccessibleName(f"Programmsymbol {APP_NAME}")
-            program_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_pixmap = QPixmap(
-                str(GUI_ASSET_ROOT / "icon_tower_render.png")
-            )
-            program_icon.setPixmap(
-                icon_pixmap.scaled(
-                    104,
-                    140,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-            program_icon.setFixedSize(108, 144)
-            hero_layout.addWidget(program_icon)
-
-            hero_text = QVBoxLayout()
-            hero_text.setSpacing(6)
-            product_title = QLabel(APP_NAME)
-            product_title.setObjectName("aboutProductTitle")
-            self.about_product_title = product_title
-            product_description = QLabel(APP_SUBTITLE)
-            product_description.setObjectName("aboutProductDescription")
-            product_description.setWordWrap(True)
-            self.about_product_description = product_description
-            version = QLabel(APP_VERSION_LABEL)
-            version.setObjectName("aboutVersion")
-            hero_text.addStretch(1)
-            hero_text.addWidget(product_title)
-            hero_text.addWidget(product_description)
-            hero_text.addWidget(version)
-            hero_text.addStretch(1)
-            hero_layout.addLayout(hero_text, 1)
-            content_layout.addWidget(hero)
-
-            developer_section = QFrame()
-            developer_section.setObjectName("aboutSection")
-            developer_layout = QVBoxLayout(developer_section)
-            developer_layout.setContentsMargins(18, 16, 18, 16)
-            developer_layout.setSpacing(10)
-            developer_name = QLabel("Florian Rode")
-            developer_name.setObjectName("aboutEmphasis")
-            self.about_developer_name = developer_name
-            self.about_developer_row = self._about_icon_text_row(
-                "user.svg",
-                "Entwickelt von:",
-                heading=True,
-                value_widget=developer_name,
-            )
-            developer_layout.addLayout(self.about_developer_row)
-            self.about_copyright_row = self._about_symbol_text_row(
-                "©",
-                "2026 Florian Rode · Alle Rechte vorbehalten.",
-            )
-            developer_layout.addLayout(self.about_copyright_row)
-            proprietary_notice = QLabel(
-                "Proprietäre Software. Die Nutzung, Vervielfältigung, "
-                "Weitergabe oder Veränderung ist nur im Rahmen der "
-                "geltenden Lizenzbedingungen gestattet."
-            )
-            proprietary_notice.setWordWrap(True)
-            proprietary_notice.setObjectName("aboutBodyText")
-            developer_layout.addWidget(proprietary_notice)
-            content_layout.addWidget(developer_section)
-
-            license_section = QFrame()
-            license_section.setObjectName("aboutSection")
-            license_layout = QVBoxLayout(license_section)
-            license_layout.setContentsMargins(18, 16, 18, 16)
-            license_layout.setSpacing(9)
-            development_status = QLabel()
-            development_status.setObjectName("aboutStatusBadge")
-            development_status.setSizePolicy(
-                QSizePolicy.Policy.Fixed,
-                QSizePolicy.Policy.Fixed,
-            )
-            self.about_license_status_label = development_status
-            self.about_license_status_row = self._about_icon_text_row(
-                "shield.svg",
-                "Lizenzstatus:",
-                heading=True,
-                value_widget=development_status,
-            )
-            license_layout.addLayout(self.about_license_status_row)
-            development_notice = QLabel()
-            development_notice.setWordWrap(True)
-            development_notice.setObjectName("aboutBodyText")
-            self.about_license_status_description = development_notice
-            self._set_about_license_status(CURRENT_LICENSE_STATUS)
-            license_layout.addWidget(development_notice)
-            content_layout.addWidget(license_section)
-
-            legal_specs = (
-                ("document.svg", "Lizenzbedingungen"),
-                ("privacy.svg", "Datenschutzerklärung"),
-                ("packages.svg", "Drittanbieter-Lizenzen"),
-            )
-            self.about_legal_buttons: list[QPushButton] = []
-            for icon_name, caption in legal_specs:
-                button = QPushButton(caption)
-                button.setObjectName("aboutLegalButton")
-                button.setIcon(QIcon(str(GUI_ASSET_ROOT / icon_name)))
-                button.setIconSize(QSize(18, 18))
-                button.setToolTip(f"{caption} – Inhalt folgt später")
-                button.clicked.connect(
-                    lambda _checked=False, name=caption: (
-                        self._show_legal_placeholder(name)
-                    )
-                )
-                self.about_legal_buttons.append(button)
-            self.about_legal_grid = _ResponsiveLegalButtonGrid(
-                self.about_legal_buttons
-            )
-            self.about_legal_grid.setObjectName("aboutLegalGrid")
-            content_layout.addWidget(self.about_legal_grid)
-
-            self.about_placeholder_label = QLabel()
-            self.about_placeholder_label.setObjectName("aboutPlaceholder")
-            self.about_placeholder_label.setWordWrap(True)
-            self.about_placeholder_label.hide()
-            content_layout.addWidget(self.about_placeholder_label)
-
-            support_frame = QFrame()
-            support_frame.setObjectName("aboutSupport")
-            support_layout = QHBoxLayout(support_frame)
-            support_layout.setContentsMargins(14, 10, 14, 10)
-            support_layout.setSpacing(9)
-            support_icon = QLabel()
-            support_icon.setPixmap(
-                QIcon(str(GUI_ASSET_ROOT / "mail.svg")).pixmap(20, 20)
-            )
-            support_icon.setAccessibleName("E-Mail")
-            support_layout.addWidget(support_icon)
-            support_link = QLabel(
-                'Support: <a href="mailto:florian.rode@outlook.com">'
-                '<span style="color:#123c63;">'
-                "florian.rode@outlook.com</span></a>"
-            )
-            support_link.setObjectName("aboutSupportLink")
-            support_link.setOpenExternalLinks(True)
-            support_layout.addWidget(support_link, 1)
-            content_layout.addWidget(support_frame)
-
-            close_row = QHBoxLayout()
-            close_row.addStretch(1)
-            close_button = QPushButton("Schließen")
-            close_button.setObjectName("aboutCloseButton")
-            close_button.setIcon(
-                QIcon(str(GUI_ASSET_ROOT / "close.svg"))
-            )
-            close_button.setIconSize(QSize(18, 18))
-            close_button.clicked.connect(dialog.close)
-            close_row.addWidget(close_button)
-            content_layout.addLayout(close_row)
-
-            scroll.setWidget(content)
-            dialog_layout.addWidget(scroll)
-            self.about_scroll = scroll
-            self.about_content = content
-            self.about_program_icon = program_icon
-            self.about_support_link = support_link
-            self.about_close_button = close_button
-            self._about_dialog = dialog
+            self._about_dialog = AboutDialog(self)
+            self._about_dialog.content_changed.connect(self._expand_about_downward_for_content)
         return self._about_dialog
+
+    def _set_about_license_status(self, status: str) -> None:
+        self.about_dialog._set_about_license_status(status)
+
+    @property
+    def about_close_button(self):
+        return self.about_dialog.about_close_button
+
+    @property
+    def about_content(self):
+        return self.about_dialog.about_content
+
+    @property
+    def about_content_layout(self):
+        return self.about_dialog.about_content_layout
+
+    @property
+    def about_copyright_row(self):
+        return self.about_dialog.about_copyright_row
+
+    @property
+    def about_copyright_symbol(self):
+        return self.about_dialog.about_copyright_symbol
+
+    @property
+    def about_copyright_text(self):
+        return self.about_dialog.about_copyright_text
+
+    @property
+    def about_developer_name(self):
+        return self.about_dialog.about_developer_name
+
+    @property
+    def about_developer_row(self):
+        return self.about_dialog.about_developer_row
+
+    @property
+    def about_legal_buttons(self):
+        return self.about_dialog.about_legal_buttons
+
+    @property
+    def about_legal_grid(self):
+        return self.about_dialog.about_legal_grid
+
+    @property
+    def about_license_status_description(self):
+        return self.about_dialog.about_license_status_description
+
+    @property
+    def about_license_status_label(self):
+        return self.about_dialog.about_license_status_label
+
+    @property
+    def about_license_status_row(self):
+        return self.about_dialog.about_license_status_row
+
+    @property
+    def about_placeholder_label(self):
+        return self.about_dialog.about_placeholder_label
+
+    @property
+    def about_product_description(self):
+        return self.about_dialog.about_product_description
+
+    @property
+    def about_product_title(self):
+        return self.about_dialog.about_product_title
+
+    @property
+    def about_program_icon(self):
+        return self.about_dialog.about_program_icon
+
+    @property
+    def about_scroll(self):
+        return self.about_dialog.about_scroll
+
+    @property
+    def about_support_link(self):
+        return self.about_dialog.about_support_link
+
+
 
     @property
     def support_report_dialog(self) -> SupportReportDialog:
@@ -4599,80 +4000,9 @@ class MainWindow(QMainWindow):
             )
         return self._support_report_dialog
 
-    def _about_icon_text_row(
-        self,
-        icon_name: str,
-        text: str,
-        *,
-        heading: bool = False,
-        value_widget: QWidget | None = None,
-    ) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        icon = QLabel()
-        icon.setPixmap(QIcon(str(GUI_ASSET_ROOT / icon_name)).pixmap(20, 20))
-        icon.setFixedSize(22, 22)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label = QLabel(text)
-        label.setObjectName("aboutSectionTitle" if heading else "aboutMetaText")
-        label.setWordWrap(value_widget is None)
-        icon_alignment = (
-            Qt.AlignmentFlag.AlignVCenter
-            if value_widget is not None
-            else Qt.AlignmentFlag.AlignTop
-        )
-        row.addWidget(icon, 0, icon_alignment)
-        row.addWidget(label, 0 if value_widget is not None else 1)
-        if value_widget is not None:
-            row.addWidget(value_widget)
-            row.addStretch(1)
-        return row
 
-    def _about_symbol_text_row(
-        self,
-        symbol: str,
-        text: str,
-    ) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        symbol_label = QLabel(symbol)
-        symbol_label.setObjectName("aboutCopyrightSymbol")
-        symbol_label.setAccessibleName("Copyright")
-        symbol_label.setFixedWidth(22)
-        symbol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        text_label = QLabel(text)
-        text_label.setObjectName("aboutMetaText")
-        text_label.setWordWrap(True)
-        row.addWidget(symbol_label, 0, Qt.AlignmentFlag.AlignTop)
-        row.addWidget(text_label, 1)
-        self.about_copyright_symbol = symbol_label
-        self.about_copyright_text = text_label
-        return row
 
-    def _set_about_license_status(self, status: str) -> None:
-        try:
-            definition = LICENSE_STATUS_DEFINITIONS[status]
-        except KeyError as error:
-            raise ValueError(f"Unbekannter Lizenzstatus: {status}") from error
-        self.about_license_status_label.setText(definition["label"])
-        self.about_license_status_label.setProperty("licenseStatus", status)
-        self.about_license_status_description.setText(
-            definition["description"]
-        )
-        self.about_license_status_label.style().unpolish(
-            self.about_license_status_label
-        )
-        self.about_license_status_label.style().polish(
-            self.about_license_status_label
-        )
 
-    def _show_legal_placeholder(self, document_name: str) -> None:
-        self.about_placeholder_label.setText(
-            f"„{document_name}“ wird in einer späteren Version ergänzt."
-        )
-        self.about_placeholder_label.show()
-        self.about_content_layout.invalidate()
-        QTimer.singleShot(0, self._expand_about_downward_for_content)
 
     def _close_additional_options(self) -> None:
         if self._additional_options_dialog is not None:
@@ -5107,6 +4437,7 @@ class MainWindow(QMainWindow):
         if selected:
             self.start_slicer_discovery(manual_path=Path(selected))
 
+    @Slot(int, object)
     def _on_slicer_discovery_succeeded(
         self,
         request_id: int,
@@ -5254,6 +4585,7 @@ class MainWindow(QMainWindow):
             self._update_preparation_requirements()
         self._refresh_prediction()
 
+    @Slot(int, str, str)
     def _on_slicer_discovery_failed(
         self,
         request_id: int,
@@ -5860,6 +5192,7 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, object)
     def _on_profile_catalog_succeeded(
         self,
         request_id: int,
@@ -5979,6 +5312,7 @@ class MainWindow(QMainWindow):
             # old and new profile scopes.
             self.start_profile_matching()
 
+    @Slot(int, str, str)
     def _on_profile_catalog_failed(
         self,
         request_id: int,
@@ -6267,6 +5601,7 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, object)
     def _on_profile_matching_succeeded(
         self,
         request_id: int,
@@ -7022,6 +6357,7 @@ class MainWindow(QMainWindow):
             reason="preslice_cancelled_by_user",
         )
 
+    @Slot(int, int, str, bool)
     def _on_source_preslice_progress(
         self,
         request_id: int,
@@ -7046,6 +6382,7 @@ class MainWindow(QMainWindow):
         )
         self._set_main_status(rendered, icon="⏳", state="running")
 
+    @Slot(int, object)
     def _on_source_preslice_succeeded(
         self,
         request_id: int,
@@ -7115,6 +6452,7 @@ class MainWindow(QMainWindow):
         self._refresh_stl_availability()
         self._finish_preparation()
 
+    @Slot(int, str, str)
     def _on_source_preslice_failed(
         self,
         request_id: int,
@@ -7155,6 +6493,7 @@ class MainWindow(QMainWindow):
         self._update_preparation_requirements()
         self.validate_form()
 
+    @Slot(int)
     def _on_source_preslice_cancelled(self, request_id: int) -> None:
         if request_id != self._preslice_request_id or self._closing:
             return
@@ -7264,10 +6603,12 @@ class MainWindow(QMainWindow):
         # leave a still-running native thread without a Python owner.
         self.start_profile_matching(stale_check_only=True)
 
+    @Slot(int)
     def _on_profile_inventory_unchanged(self, request_id: int) -> None:
         if request_id != self._profile_request_id:
             return
 
+    @Slot(int, str, str)
     def _on_profile_matching_failed(
         self,
         request_id: int,
@@ -8789,6 +8130,7 @@ class MainWindow(QMainWindow):
             parent_operation_id=f"prediction-{request_id}",
         )
 
+    @Slot(int, int, str)
     def _on_slicer_prediction_progress(
         self,
         request_id: int,
@@ -8803,6 +8145,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_prediction_advice()
 
+    @Slot(int, object)
     def _on_slicer_prediction_succeeded(
         self,
         request_id: int,
@@ -8825,6 +8168,7 @@ class MainWindow(QMainWindow):
             result.dispose()
         self._refresh_prediction()
 
+    @Slot(int, str, str)
     def _on_slicer_prediction_failed(
         self,
         request_id: int,
@@ -9309,6 +8653,7 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, int, str)
     def _on_stl_validation_progress(
         self,
         request_id: int,
@@ -9328,6 +8673,7 @@ class MainWindow(QMainWindow):
         )
         self.drop_zone.set_status("STL-Geometrie wird geprüft")
 
+    @Slot(int, object)
     def _on_stl_validation_succeeded(
         self,
         request_id: int,
@@ -9672,6 +9018,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._refresh_preparation_section_layout)
         self.validate_form()
 
+    @Slot(int, str, str)
     def _on_stl_validation_failed(
         self,
         request_id: int,
@@ -9873,6 +9220,7 @@ class MainWindow(QMainWindow):
             worker=worker,
         )
 
+    @Slot(int, object)
     def _on_feasibility_succeeded(
         self,
         request_id: int,
@@ -9930,6 +9278,7 @@ class MainWindow(QMainWindow):
         self._refresh_prediction()
         self.validate_form()
 
+    @Slot(int, str, str)
     def _on_feasibility_failed(
         self,
         request_id: int,
@@ -11688,6 +11037,7 @@ class MainWindow(QMainWindow):
             parent_operation_id=f"preview-{request_id}",
         )
 
+    @Slot(int, int, str)
     def _on_preview_progress(
         self,
         request_id: int,
@@ -11703,6 +11053,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_bar.show()
 
+    @Slot(int, object)
     def _on_preview_succeeded(
         self,
         request_id: int,
@@ -11756,6 +11107,7 @@ class MainWindow(QMainWindow):
         self.warning_text.hide()
         self._refresh_issue_panels()
 
+    @Slot(int, str, str)
     def _on_preview_failed(
         self,
         request_id: int,
@@ -11816,6 +11168,7 @@ class MainWindow(QMainWindow):
             state="running",
         )
 
+    @Slot(int)
     def _on_preview_finished(self, request_id: int) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
@@ -11908,6 +11261,7 @@ class MainWindow(QMainWindow):
             parent_operation_id=f"export-{request_id}",
         )
 
+    @Slot(int, int, str)
     def _on_export_progress(
         self,
         request_id: int,
@@ -11922,6 +11276,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_bar.show()
 
+    @Slot(int, object)
     def _on_export_succeeded(
         self,
         request_id: int,
@@ -11959,6 +11314,7 @@ class MainWindow(QMainWindow):
         self._bambu_multinozzle_tower_only_export_active = False
         self._show_export_success_dialog(result)
 
+    @Slot(int, str, str)
     def _on_export_failed(
         self,
         request_id: int,
@@ -11981,6 +11337,7 @@ class MainWindow(QMainWindow):
         self._bambu_multinozzle_tower_only_export_active = False
         self._refresh_phase17_actions()
 
+    @Slot(int)
     def _on_export_finished(self, request_id: int) -> None:
         if request_id != self._export_request_id or self._closing:
             return

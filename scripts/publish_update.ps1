@@ -35,6 +35,9 @@ function Assert-NativeSuccess {
     }
 }
 
+& $python (Join-Path $PSScriptRoot "check_release_readiness.py") --release
+Assert-NativeSuccess "Die Anbieter- und Vertriebsfreigabeprüfung"
+
 & $gh auth status
 Assert-NativeSuccess "Die GitHub-Anmeldeprüfung"
 

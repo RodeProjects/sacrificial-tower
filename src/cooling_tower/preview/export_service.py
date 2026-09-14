@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime
 from hmac import compare_digest
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.preview.models import (
@@ -70,7 +71,7 @@ class PreviewExportService:
                 "Das gemeinsame 3MF ist nicht mehr unverändert verfügbar."
             )
 
-        root = Path(output_root).expanduser().resolve()
+        root = ensure_writable_output(output_root)
         root.mkdir(parents=True, exist_ok=True)
         created_at = datetime.now().astimezone()
         stamp = created_at.strftime("%Y%m%d_%H%M%S")

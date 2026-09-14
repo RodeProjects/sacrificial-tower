@@ -1,0 +1,10 @@
+{
+  "provider_name": "Florian Rode",
+  "provider_brand": "RodeProjects",
+  "provider_email": "florian.rode@outlook.com",
+  "provider_postal_address": "[[PROVIDER_POSTAL_ADDRESS]]",
+  "support_retention_policy": "[[SUPPORT_RETENTION_POLICY]]",
+  "commercial_terms": "[[COMMERCIAL_TERMS]]",
+  "release_legal_review": "[[RELEASE_LEGAL_REVIEW]]",
+  "provider_additional_details": "[[PROVIDER_ADDITIONAL_DETAILS]]"
+}

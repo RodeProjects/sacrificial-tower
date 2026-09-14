@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
 from typing import Any, Mapping
+from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 
 
 _UNSET = object()
@@ -68,24 +69,24 @@ class GenerationSettings:
 
     def __init__(
         self,
-        target_layer_time_s: float = 11.0,
-        safety_factor: float = 1.10,
+        target_layer_time_s: float = GENERATION_DEFAULTS["target_layer_time_s"],
+        safety_factor: float = GENERATION_DEFAULTS["safety_factor"],
         minimum_outer_diameter_mm: float | object = _UNSET,
         maximum_outer_diameter_mm: float | object = _UNSET,
-        minimum_object_tower_distance_mm: float = 25.0,
-        simulate_full_tower_infill: bool = False,
-        minimum_base_radius_mm: float = 10.0,
-        base_height_mm: float = 1.0,
-        base_margin_mm: float = 2.0,
-        base_height_factor: float = 0.05,
-        automatic_base_width: bool = True,
-        manual_base_width_mm: float = 20.0,
-        minimum_radius_height_factor: float = 0.04,
-        maximum_radius_change_per_mm_z: float = 0.35,
-        maximum_expansion_angle_deg: float = 50.0,
-        maximum_contraction_angle_deg: float = 50.0,
-        local_reference_window: int = 5,
-        mesh_segments: int = 32,
+        minimum_object_tower_distance_mm: float = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"],
+        simulate_full_tower_infill: bool = GENERATION_DEFAULTS["simulate_full_tower_infill"],
+        minimum_base_radius_mm: float = GENERATION_DEFAULTS["minimum_base_radius_mm"],
+        base_height_mm: float = GENERATION_DEFAULTS["base_height_mm"],
+        base_margin_mm: float = GENERATION_DEFAULTS["base_margin_mm"],
+        base_height_factor: float = GENERATION_DEFAULTS["base_height_factor"],
+        automatic_base_width: bool = GENERATION_DEFAULTS["automatic_base_width"],
+        manual_base_width_mm: float = GENERATION_DEFAULTS["manual_base_width_mm"],
+        minimum_radius_height_factor: float = GENERATION_DEFAULTS["minimum_radius_height_factor"],
+        maximum_radius_change_per_mm_z: float = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"],
+        maximum_expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"],
+        maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
+        local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
+        mesh_segments: int = GENERATION_DEFAULTS["mesh_segments"],
         **legacy: Any,
     ) -> None:
         legacy_minimum_radius = legacy.pop("minimum_outer_radius_mm", _UNSET)
@@ -93,15 +94,11 @@ class GenerationSettings:
         if legacy_minimum_radius is not _UNSET:
             minimum_outer_diameter_mm = 2.0 * float(legacy_minimum_radius)
         elif minimum_outer_diameter_mm is _UNSET:
-            minimum_outer_diameter_mm = (
-                10.0
-            )
+            minimum_outer_diameter_mm = GENERATION_DEFAULTS["minimum_outer_diameter_mm"]
         if legacy_maximum_radius is not _UNSET:
             maximum_outer_diameter_mm = 2.0 * float(legacy_maximum_radius)
         elif maximum_outer_diameter_mm is _UNSET:
-            maximum_outer_diameter_mm = (
-                40.0
-            )
+            maximum_outer_diameter_mm = GENERATION_DEFAULTS["maximum_outer_diameter_mm"]
 
         hollow_values: dict[str, float] = {}
         for name, default in _LEGACY_HOLLOW_DEFAULTS.items():

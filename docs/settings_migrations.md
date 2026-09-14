@@ -161,3 +161,39 @@ store = VersionedJsonStore(
 Ein vorhandenes Profil muss vor dem Überschreiben immer erfolgreich mit
 `load()` geladen worden sein. Nur eine ausdrücklich vom Nutzer ausgelöste
 Reparatur darf `replace_with_recovery()` verwenden.
+
+## Parallelzugriffe und aktuelle Standardwerte
+
+`VersionedJsonStore` sperrt Laden/Migrieren, Speichern und explizite Wiederherstellung
+pro kanonischem Dokumentpfad. Unter Windows verwendet `document_lock` einen
+benannten Kernel-Mutex; kooperierende Prozesse in derselben Windows-Sitzung und
+Threads werden serialisiert. Auf POSIX wird eine advisory Dateisperre in einem
+eigenen Temp-Unterordner verwendet. Rekursion im selben Thread ist erlaubt,
+Wartezeiten sind begrenzt. Ein abgestürzter Windows-Prozess hinterlässt keine
+permanent blockierende Sperrdatei.
+
+Der nach dem Laden gespeicherte Vergleichsstand stammt aus exakt den gelesenen
+beziehungsweise geschriebenen Bytes. Eine spätere externe Änderung wird nicht
+als vermeintlich eigener Stand eingelesen. Bei erstmaliger Anlage erzeugt ein
+atomarer Hardlink die Zieldatei nur, wenn sie weiterhin fehlt; eine zwischenzeitlich
+angelegte Datei wird nicht ersetzt. Das setzt ein Dateisystem mit Hardlink-
+Unterstützung voraus (Referenz: NTFS); andernfalls scheitert der Schreibvorgang
+sicher. Backups werden exklusiv angelegt; eine fremde kollidierende Sicherung
+wird bei einem Fehler nicht gelöscht. Auch Migrationssicherungen unterliegen
+dem Slicer-Schreibschutz.
+
+**Grenze:** Fremde Editoren nehmen nicht an dieser kooperativen Sperre teil.
+Der Bytesvergleich erkennt Änderungen vor dem letzten Austausch. Zwischen
+Prüfung und `os.replace` einer bereits vorhandenen Datei bleibt gegenüber einem
+nicht kooperierenden Schreiber ein kleines Betriebssystem-Zeitfenster. Eine
+vollständige dateisystemweite Compare-and-Swap-Garantie wird nicht behauptet.
+Keine parallele Bearbeitung derselben Einstellungsdatei durch externe Werkzeuge
+während einer Speicherung vorsehen. Netzwerkdateisysteme und unterschiedliche
+Windows-Sitzungen benötigen eine gesonderte Integrationsprüfung.
+
+Aktuelle Standardwerte für neu erzeugte Konfigurationen stehen ausschließlich in
+`config/default_settings.json`; GUI, Modellkonstruktor und CLI verwenden sie.
+Der CLI-Standfuß ist dadurch wie im Produkt 1 mm hoch. Historische Migrationen
+behalten ihre damaligen expliziten Werte. Gespeichertes Format, stabile Kennungen
+und Einheiten wurden dabei nicht verändert; die Schema-Version bleibt 10.
+Ohne `--target-time` bleibt die CLI bewusst im Analysemodus.

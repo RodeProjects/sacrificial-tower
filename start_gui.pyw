@@ -21,12 +21,19 @@ if not getattr(sys, "frozen", False) and str(SRC_ROOT) not in sys.path:
 
 
 def _fallback_startup_error(details: str) -> None:
-    log_path = PROJECT_ROOT / "output" / "logs" / "application_startup.log"
     try:
+        from cooling_tower.runtime_paths import resolve_user_data_root
+        from cooling_tower.write_policy import ensure_writable_output
+
+        log_path = ensure_writable_output(
+            resolve_user_data_root() / "logs" / "application_startup.log"
+        )
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(details, encoding="utf-8")
         location = str(log_path.resolve())
-    except OSError:
+    except Exception:
+        # Last-resort diagnostics must not write into the installation when
+        # resource imports or the configured application data path are broken.
         location = "nicht verfügbar"
     try:
         import ctypes

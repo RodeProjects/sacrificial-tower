@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from cooling_tower.slicers.models import SliceRequest, SliceResult
 from cooling_tower.slicers.process import SecureSlicerProcessRunner
-from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
 
 if TYPE_CHECKING:
     from cooling_tower.slicers.base import BaseSlicerAdapter
@@ -112,6 +111,8 @@ def validate_adapter_backends(
     report_path: str | Path | None = None,
 ) -> BackendValidationReport:
     """Run one adapter sequentially in isolated legacy and QProcess workspaces."""
+
+    from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
 
     with tempfile.TemporaryDirectory(
         prefix=f"cooling_tower_backend_validation_{adapter.adapter_id}_"

@@ -218,7 +218,7 @@ class WorkflowDefinitionTests(unittest.TestCase):
         )
         self.assertIn("runs-on: windows-latest", workflow)
         self.assertIn('python-version: "3.13"', workflow)
-        self.assertIn("python -m pip install -r requirements.txt", workflow)
+        self.assertIn("python -m pip install --require-hashes -r requirements-windows.lock", workflow)
         self.assertIn("python setup_native.py build_ext --inplace", workflow)
         self.assertIn("python -m unittest discover -s tests -q", workflow)
 

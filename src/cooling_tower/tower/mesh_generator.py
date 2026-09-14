@@ -5,6 +5,7 @@ import struct
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from cooling_tower.write_policy import ensure_writable_output
 
 from cooling_tower.tower.profile import StableTowerProfile
 from cooling_tower.tower.hollow_profile import HollowTowerProfile
@@ -569,7 +570,7 @@ def write_binary_stl(
             "solid and cannot be exported."
         )
 
-    path = Path(output_path).expanduser()
+    path = ensure_writable_output(output_path)
 
     if path.exists() and path.is_dir():
         raise IsADirectoryError(

@@ -142,3 +142,20 @@ Store-spezifische Variante der Distributionsdatei.
   geprüft.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung
   beendet, ersetzt und anschließend neu geöffnet.
+
+## Zusätzliche Build- und Vertriebsprüfung ab September 2026
+
+CI verwendet die Python-Reihe 3.13 mit aktueller Patchversion. Alle Windows-Wheels
+werden über `requirements-windows.lock` einschließlich SHA-256 fixiert. Vor PyInstaller wird das versionierte Qt-
+Quellmaterial vorbereitet; Lizenztexte, Quellen und zulässiger DLL-Lieferumfang
+werden im Paket geprüft. Der Workflow archiviert `build-inventory.json` zusammen
+mit dem Installer. Details: [Entwicklung](development.md) und
+[Dependencies](dependencies.md).
+
+`scripts/publish_update.ps1` führt vor seinen GitHub-Aufrufen
+`check_release_readiness.py --release` aus. Solange rechtliche Platzhalter oder
+unregistrierte Vorlagenfelder vorhanden sind, wird keine Veröffentlichung
+begonnen. Alle offenen Daten stehen in [missing_data.md](missing_data.md).
+Ein interner Entwicklungsbuild bleibt mit sichtbaren Platzhaltern möglich.
+Diese maschinelle Vollständigkeitsprüfung ersetzt nicht die inhaltliche
+[Vertriebsfreigabe](commercial_release.md).

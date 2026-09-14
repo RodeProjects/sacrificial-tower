@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from functools import wraps
+
+from cooling_tower.persistence.document_lock import document_lock
+from cooling_tower.write_policy import ensure_writable_output
 
 
 JsonObject = dict[str, Any]
@@ -52,6 +56,18 @@ class VersionedLoadResult:
     @property
     def changed(self) -> bool:
         return self.migrated or self.normalized
+
+
+def _locked_document(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with document_lock(self.path):
+            return method(self, *args, **kwargs)
+    return call
+
+
+def _serialized_json(payload: Mapping[str, Any]) -> bytes:
+    return (json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 class VersionedJsonStore:
@@ -98,6 +114,7 @@ class VersionedJsonStore:
     def write_blocked(self) -> bool:
         return self._write_blocked_reason is not None
 
+    @_locked_document
     def load(self) -> VersionedLoadResult:
         try:
             original, original_bytes = self._read_payload()
@@ -122,12 +139,11 @@ class VersionedJsonStore:
             self._loaded_successfully = False
             raise
 
-        try:
-            self._last_known_bytes = self.path.read_bytes()
-        except OSError as error:
-            self._write_blocked_reason = str(error)
-            self._loaded_successfully = False
-            raise
+        # Bind the returned payload to the bytes actually interpreted/written;
+        # never accept a later external edit as if it belonged to this snapshot.
+        self._last_known_bytes = (
+            _serialized_json(normalized_payload) if migrated or normalized else original_bytes
+        )
         self._write_blocked_reason = None
         self._loaded_successfully = True
         return VersionedLoadResult(
@@ -139,6 +155,7 @@ class VersionedJsonStore:
             backup_path=backup_path,
         )
 
+    @_locked_document
     def save(self, payload: Mapping[str, Any]) -> Path:
         if self.path.is_file() and not self._loaded_successfully:
             self._write_blocked_reason = (
@@ -160,20 +177,17 @@ class VersionedJsonStore:
                     if self._loaded_successfully
                     else None
                 ),
+                expect_absent=not self._loaded_successfully,
             )
         except (OSError, VersionedDocumentError) as error:
             self._write_blocked_reason = str(error)
             self._loaded_successfully = False
             raise
-        try:
-            self._last_known_bytes = self.path.read_bytes()
-        except OSError as error:
-            self._write_blocked_reason = str(error)
-            self._loaded_successfully = False
-            raise
+        self._last_known_bytes = _serialized_json(normalized)
         self._loaded_successfully = True
         return self.path.resolve()
 
+    @_locked_document
     def replace_with_recovery(self, payload: Mapping[str, Any]) -> Path:
         """Explicitly replace a blocked document after preserving its bytes."""
 
@@ -182,7 +196,7 @@ class VersionedJsonStore:
             if self.path.is_file():
                 self._create_backup("recovery")
             atomic_write_json(self.path, normalized)
-            self._last_known_bytes = self.path.read_bytes()
+            self._last_known_bytes = _serialized_json(normalized)
         except (OSError, VersionedDocumentError) as error:
             self._write_blocked_reason = str(error)
             self._loaded_successfully = False
@@ -287,6 +301,7 @@ class VersionedJsonStore:
         *,
         expected_bytes: bytes | None = None,
     ) -> Path:
+        ensure_writable_output(self.path)
         label = str(source_version).replace(os.sep, "_")
         base = self.path.with_name(
             f"{self.path.name}.schema-{label}.backup"
@@ -308,14 +323,17 @@ class VersionedJsonStore:
             candidate = base.with_name(f"{base.name}.{suffix}")
             suffix += 1
         candidate.parent.mkdir(parents=True, exist_ok=True)
+        created = False
         try:
             with candidate.open("xb") as handle:
+                created = True
                 handle.write(original_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
             shutil.copystat(self.path, candidate)
         except Exception:
-            candidate.unlink(missing_ok=True)
+            if created:
+                candidate.unlink(missing_ok=True)
             raise
         return candidate.resolve()
 
@@ -325,20 +343,26 @@ def atomic_write_json(
     payload: Mapping[str, Any],
     *,
     expected_original_bytes: bytes | None = None,
+    expect_absent: bool = False,
 ) -> Path:
-    """Write JSON beside its target and replace the target in one operation."""
+    """Serialize cooperating writers and atomically replace a checked document."""
+    target = ensure_writable_output(path)
+    with document_lock(target):
+        return _atomic_write_json_locked(
+            target, payload, expected_original_bytes=expected_original_bytes,
+            expect_absent=expect_absent,
+        )
 
-    target = Path(path)
+
+def _atomic_write_json_locked(
+    target: Path, payload: Mapping[str, Any], *,
+    expected_original_bytes: bytes | None, expect_absent: bool,
+) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
-    serialized = json.dumps(
-        dict(payload),
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+    serialized = _serialized_json(payload)
     try:
-        with temporary.open("x", encoding="utf-8", newline="\n") as handle:
+        with temporary.open("xb") as handle:
             handle.write(serialized)
             handle.flush()
             os.fsync(handle.fileno())
@@ -355,7 +379,18 @@ def atomic_write_json(
                     "Die Zieldatei wurde nach dem Laden verändert und deshalb "
                     "nicht überschrieben."
                 )
-        os.replace(temporary, target)
+        if expect_absent:
+            try:
+                # Hard-link creation is atomic and cannot replace a file that
+                # appeared since the initial existence check.
+                os.link(temporary, target)
+            except FileExistsError as error:
+                raise ConcurrentDocumentChangeError(
+                    "Die Zieldatei wurde zwischenzeitlich angelegt und bleibt unverändert."
+                ) from error
+            temporary.unlink()
+        else:
+            os.replace(temporary, target)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise

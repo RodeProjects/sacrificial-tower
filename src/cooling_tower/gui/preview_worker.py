@@ -10,7 +10,7 @@ from cooling_tower.diagnostic_events import (
 )
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.preview import PreviewCancelled, PreviewRequest, PreviewService
-from cooling_tower.preview.controller import PreviewBuildController
+from cooling_tower.gui.preview_controller import PreviewBuildController
 
 
 class PreviewWorker(CancelableWorker):
