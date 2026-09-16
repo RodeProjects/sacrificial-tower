@@ -341,6 +341,7 @@ def _get_time_factor_reference(
     layer_position: int,
     window_size: int,
     global_seconds_per_mm: float | None,
+    target_time_s: float | None = None,
 ) -> _TimeFactorReference:
     start, end = _get_centered_window_bounds(
         layer_position=layer_position,
@@ -348,6 +349,22 @@ def _get_time_factor_reference(
         window_size=window_size,
     )
 
+    if target_time_s is not None:
+        # Do not mix opposite sides of a sharp change in cooling demand.
+        # A large surface on a later layer must not alter the earlier layer's
+        # estimated deposition speed and cause an anticipatory narrowing.
+        for boundary in range(start + 1, end):
+            before, after = layers[boundary - 1], layers[boundary]
+            crosses_target = ((before.total_time_s < target_time_s)
+                              != (after.total_time_s < target_time_s))
+            low = min(before.total_time_s, after.total_time_s)
+            high = max(before.total_time_s, after.total_time_s)
+            if crosses_target and high > 1.5 * max(low, VALUE_EPSILON):
+                if boundary <= layer_position:
+                    start = boundary
+                else:
+                    end = boundary
+                    break
     local_layers = layers[start:end]
     local_seconds_per_mm = calculate_seconds_per_deposition_mm(
         local_layers
@@ -492,6 +509,7 @@ def build_tower_radius_profile(
             layer_position=layer_position,
             window_size=config.local_time_factor_window,
             global_seconds_per_mm=global_seconds_per_mm,
+            target_time_s=config.target_layer_time_s,
         )
 
         radius_layers.append(

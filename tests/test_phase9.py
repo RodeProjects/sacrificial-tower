@@ -201,7 +201,7 @@ class TowerNeedAssessmentTests(unittest.TestCase):
             ).tower_required
         )
 
-    def test_first_last_deficit_and_next_layer_height_are_reported(self) -> None:
+    def test_first_last_deficit_and_early_end_are_reported(self) -> None:
         snapshot = make_snapshot(
             self.source,
             (10.0, 2.0, 10.0, 10.0),
@@ -214,13 +214,13 @@ class TowerNeedAssessmentTests(unittest.TestCase):
         self.assertTrue(assessment.tower_required)
         self.assertEqual(assessment.first_deficit_layer_index, 2)
         self.assertEqual(assessment.last_deficit_layer_index, 2)
-        self.assertEqual(assessment.tower_end_layer_index, 3)
-        self.assertAlmostEqual(assessment.tower_end_z_mm, 0.6)
-        self.assertEqual(assessment.tower_layer_count, 3)
-        self.assertAlmostEqual(assessment.saved_tower_height_mm, 0.4)
+        self.assertEqual(assessment.tower_end_layer_index, 2)
+        self.assertAlmostEqual(assessment.tower_end_z_mm, 0.5)
+        self.assertEqual(assessment.tower_layer_count, 2)
+        self.assertAlmostEqual(assessment.saved_tower_height_mm, 0.5)
         self.assertFalse(assessment.synthetic_final_layer_used)
 
-    def test_critical_final_layer_uses_one_synthetic_layer_height(self) -> None:
+    def test_critical_final_layer_ends_at_object_height(self) -> None:
         snapshot = make_snapshot(
             self.source,
             (10.0, 10.0, 2.0),
@@ -230,10 +230,10 @@ class TowerNeedAssessmentTests(unittest.TestCase):
             snapshot,
             generation_settings(5.0),
         )
-        self.assertTrue(assessment.synthetic_final_layer_used)
+        self.assertFalse(assessment.synthetic_final_layer_used)
         self.assertEqual(assessment.last_deficit_layer_index, 3)
-        self.assertEqual(assessment.tower_end_layer_index, 4)
-        self.assertAlmostEqual(assessment.tower_end_z_mm, 0.8)
+        self.assertEqual(assessment.tower_end_layer_index, 3)
+        self.assertAlmostEqual(assessment.tower_end_z_mm, 0.65)
         self.assertEqual(assessment.tower_layer_count, 3)
 
     def test_safety_factor_changes_capacity_not_need_decision(self) -> None:
@@ -309,7 +309,7 @@ class GenerationBoundaryTests(unittest.TestCase):
         self.assertIn("keine STL", result.reason)
         self.assertIn("STL: nicht erzeugt", format_no_tower_report(result))
 
-    def test_profile_and_mesh_end_at_layer_after_last_deficit(self) -> None:
+    def test_profile_and_mesh_end_at_last_deficit(self) -> None:
         snapshot = make_snapshot(
             self.source,
             (10.0, 2.0, 10.0, 10.0),
@@ -320,19 +320,19 @@ class GenerationBoundaryTests(unittest.TestCase):
             generation_settings(5.0),
         )
         self.assertIsInstance(result, GenerationResult)
-        self.assertAlmostEqual(result.assessment.tower_end_z_mm, 0.6)
+        self.assertAlmostEqual(result.assessment.tower_end_z_mm, 0.4)
         self.assertAlmostEqual(
             result.mesh_validation.maximum_z_mm,
-            0.6,
+            0.4,
         )
-        self.assertEqual(len(result.profile), 3)
+        self.assertEqual(len(result.profile), 2)
         with result.analysis_path.open(
             mode="r", encoding="utf-8", newline=""
         ) as csv_file:
             rows = list(csv.DictReader(csv_file))
         self.assertEqual(len(rows), 4)
 
-    def test_critical_last_layer_extends_mesh_by_one_layer_height(self) -> None:
+    def test_critical_last_layer_ends_mesh_at_object_height(self) -> None:
         snapshot = make_snapshot(
             self.source,
             (10.0, 10.0, 10.0, 2.0),
@@ -344,11 +344,11 @@ class GenerationBoundaryTests(unittest.TestCase):
             generation_settings(5.0),
         )
         self.assertIsInstance(result, GenerationResult)
-        self.assertTrue(result.assessment.synthetic_final_layer_used)
-        self.assertAlmostEqual(result.assessment.tower_end_z_mm, 1.0)
+        self.assertFalse(result.assessment.synthetic_final_layer_used)
+        self.assertAlmostEqual(result.assessment.tower_end_z_mm, 0.8)
         self.assertAlmostEqual(
             result.mesh_validation.maximum_z_mm,
-            1.0,
+            0.8,
         )
 
 

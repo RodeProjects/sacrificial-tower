@@ -114,9 +114,9 @@ programmeigenen temporären Verzeichnis geslict. Änderungen der Ziel-Layerzeit
 werden danach ohne erneutes Einlesen oder Slicen live bewertet.
 Wenn kein Layer die Zielzeit unterschreitet, zeigt die Oberfläche
 `Kein Kühlturm erforderlich` an und erzeugt weder eine STL noch einen leeren
-Laufordner. Wird ein Turm benötigt, endet er beim letzten Layer mit Zeitdefizit
-zuzüglich eines Abschlusslayers, statt unnötig bis zur vollständigen
-Modellhöhe weiterzulaufen.
+Laufordner. Wird ein Turm benötigt, endet er spätestens auf Objekthöhe;
+bei dauerhaft früher entfallendem Bedarf kann er verkürzt werden.
+Die aktuelle Höhenregel ist in `docs/tower_geometry.md` beschrieben.
 
 Nach der Analyse werden auch die eingestellten Geometriegrenzen live geprüft.
 Kann die gewünschte Zeit beispielsweise wegen des Aufweitungswinkels, des

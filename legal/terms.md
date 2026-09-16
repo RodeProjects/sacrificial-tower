@@ -1,6 +1,6 @@
 # Nutzungsbedingungen für Sacrificial Tower
 
-Stand: 14. September 2026. Anbieter und Rechteinhaber: {{provider_name}}
+Stand: 15. September 2026. Anbieter und Rechteinhaber: {{provider_name}}
 ({{provider_brand}}), {{provider_postal_address}}. Kontakt: {{provider_email}}.
 Weitere erforderliche Anbieterangaben: {{provider_additional_details}}.
 
@@ -51,10 +51,3 @@ Programmaktualisierungen werden technisch angeboten, sobald im eingerichteten
 Kanal eine neuere Version verfügbar ist. Ein bestimmter Veröffentlichungsrhythmus
 oder eine Supportdauer wird für die Entwicklungsversion nicht zugesagt; gesetzlich
 oder vertraglich geschuldete Pflichten werden hierdurch nicht eingeschränkt.
-
-## Vor einem regulären Vertrieb noch zu vervollständigen
-
-Kommerzieller Nutzungsumfang, gegebenenfalls Preis-/Vertragsmodell, Support- und
-Aktualisierungszusagen: {{commercial_terms}}.
-Prüfung und Freigabe für den konkreten Vertrieb: {{release_legal_review}}.
-Dieser Abschnitt macht die offenen Angaben sichtbar und ersetzt keine Freigabe.

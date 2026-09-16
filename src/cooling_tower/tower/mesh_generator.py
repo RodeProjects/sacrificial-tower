@@ -119,6 +119,7 @@ def _validate_stable_profile(profile: StableTowerProfile) -> None:
         )
 
     previous_z: float | None = None
+    previous_radius: float | None = None
 
     for point in profile.points:
         if not math.isfinite(point.z_mm):
@@ -135,9 +136,19 @@ def _validate_stable_profile(profile: StableTowerProfile) -> None:
             previous_z is not None
             and point.z_mm <= previous_z + Z_EPSILON_MM
         ):
-            raise MeshGenerationError(
-                "Stable profile Z positions must be strictly increasing."
+            inward_solid_step = (
+                isinstance(profile, SolidTowerProfile)
+                and profile.settings.simulate_full_tower_infill
+                and point.z_mm == previous_z
+                and previous_z > 0.0
+                and previous_radius is not None
+                and point.radius_mm < previous_radius - Z_EPSILON_MM
+                and point.source == "inward_step"
             )
+            if not inward_solid_step:
+                raise MeshGenerationError(
+                    "Profile heights must increase except at supported inward solid steps."
+                )
 
         if (
             not math.isfinite(point.radius_mm)
@@ -149,6 +160,7 @@ def _validate_stable_profile(profile: StableTowerProfile) -> None:
             )
 
         previous_z = point.z_mm
+        previous_radius = point.radius_mm
 
 
 def generate_tower_mesh(

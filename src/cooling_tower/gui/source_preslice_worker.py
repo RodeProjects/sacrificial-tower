@@ -23,6 +23,7 @@ class SourcePreSliceWorker(CancelableWorker):
     progress = Signal(int, int, str, bool)
     succeeded = Signal(int, object)
     failed = Signal(int, str, str)
+    support_simulation_available = Signal(int)
     cancelled = Signal(int)
     finished = Signal(int)
 
@@ -34,6 +35,8 @@ class SourcePreSliceWorker(CancelableWorker):
         profile_match: ProfileMatchResult,
         confirmation: ProfileConfirmation,
         adapter: SlicerAdapter,
+        *,
+        simulate_supports: bool = False,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -42,6 +45,7 @@ class SourcePreSliceWorker(CancelableWorker):
         self.profile_match = profile_match
         self.confirmation = confirmation
         self.adapter = adapter
+        self.simulate_supports = simulate_supports
 
     @Slot()
     def run(self) -> None:
@@ -57,6 +61,7 @@ class SourcePreSliceWorker(CancelableWorker):
                     profile_match=self.profile_match,
                     confirmation=self.confirmation,
                     adapter=self.adapter,
+                    **({"simulate_supports": True} if self.simulate_supports else {}),
                     cancellation_event=self.cancellation_event,
                     progress_callback=lambda percent, status, busy: (
                         self.progress.emit(
@@ -75,6 +80,8 @@ class SourcePreSliceWorker(CancelableWorker):
                 self.cancelled.emit(self.request_id)
             except Exception as error:
                 if not self.cancellation_requested():
+                    if getattr(error, "support_simulation_available", False):
+                        self.support_simulation_available.emit(self.request_id)
                     self.diagnose(
                         "source_preslice_failed",
                         outcome="failed",

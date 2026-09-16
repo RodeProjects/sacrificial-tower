@@ -1360,7 +1360,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
 
             self.mark_valid_source(window)
             self.app.processEvents()
-            self.assertEqual(window.preparation_progress_bar.value(), 33)
+            self.assertEqual(window.preparation_progress_bar.value(), 29)
             self.assertEqual(window.preparation_step_connector.text(), "›››")
             self.assertFalse(
                 window.preparation_step_selectors[1].property("locked")
@@ -1965,7 +1965,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(
                 window.preparation_step_selectors[1].property("locked")
             )
-            self.assertEqual(window.preparation_progress_bar.value(), 17)
+            self.assertEqual(window.preparation_progress_bar.value(), 14)
             window.preparation_tabs.setCurrentIndex(1)
             self.assertEqual(window.preparation_tabs.currentIndex(), 0)
         finally:
@@ -2078,6 +2078,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                     "slicer_detected",
                     "profiles_loaded",
                     "profiles_confirmed",
+                    "preslice_completed",
                     "model_analyzed",
                 },
             )

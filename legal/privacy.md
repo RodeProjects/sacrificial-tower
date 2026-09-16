@@ -1,6 +1,6 @@
 # Datenschutzinformationen
 
-Stand: 14. September 2026. Verantwortlich für die vom Anbieter verarbeiteten
+Stand: 15. September 2026. Verantwortlich für die vom Anbieter verarbeiteten
 personenbezogenen Daten: {{provider_name}} ({{provider_brand}}),
 {{provider_postal_address}}, E-Mail: {{provider_email}}.
 
@@ -28,10 +28,8 @@ die Anwendung keine individuelle Nutzungsstatistik dieser Abrufe.
 
 Die Prüfung lässt sich vor dem Start mit der Umgebungsvariable
 COOLING_TOWER_DISABLE_UPDATE_CHECK=1 unterbinden. Entwicklungsversionen aus Python
-und der vorbereitete Store-Kanal aktivieren diesen Updater standardmäßig nicht.
-Die vorgesehenen Aktualisierungsabrufe dienen der Bereitstellung aktueller und
-sicherer Software; die abschließende rechtliche Einordnung des konkreten
-Vertriebs erfolgt im dokumentierten Freigabeprozess.
+aktivieren diesen Updater standardmäßig nicht. Die Aktualisierungsabrufe dienen
+der Bereitstellung aktueller und sicherer Software.
 
 ## Diagnose und Kontakt
 
@@ -58,8 +56,3 @@ kann für die Zukunft widerrufen werden. Außerdem besteht ein Beschwerderecht b
 einer Datenschutzaufsichtsbehörde. Anfragen können an die oben genannte Kontaktadresse
 gerichtet werden. Angaben, auf die der Anbieter keinen Zugriff hat, insbesondere
 ausschließlich lokale Dateien, können vom Anbieter nicht eingesehen oder gelöscht werden.
-
-## Noch offene Angaben
-
-Die sichtbar markierten Angaben sind vor einer regulären Veröffentlichung zu
-ergänzen. Gesamtprüfung: {{release_legal_review}}.

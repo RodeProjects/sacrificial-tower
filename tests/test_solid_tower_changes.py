@@ -71,7 +71,7 @@ class SolidSettingsMigrationTests(unittest.TestCase):
     def test_public_settings_contain_only_diameter_and_solid_controls(self) -> None:
         settings = GenerationSettings()
         payload = settings.to_dict()
-        self.assertEqual(payload["minimum_outer_diameter_mm"], 10.0)
+        self.assertEqual(payload["minimum_outer_diameter_mm"], 5.0)
         self.assertEqual(payload["maximum_outer_diameter_mm"], 40.0)
         self.assertFalse(payload["simulate_full_tower_infill"])
         for obsolete in (
@@ -278,6 +278,8 @@ class SolidGeometryTests(unittest.TestCase):
             global_seconds_per_deposition_mm=0.1,
             layers=(
                 radius_layer(index=1, z=1.0, calculated_radius=80.0, radius=20.0),
+                radius_layer(index=2, z=2.0, calculated_radius=80.0, radius=20.0),
+                radius_layer(index=3, z=3.0, calculated_radius=80.0, radius=20.0),
             ),
         )
         profile = build_solid_tower_profile(

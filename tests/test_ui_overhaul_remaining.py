@@ -118,15 +118,15 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         )
         window.close()
 
-    def test_card_headers_expose_compact_key_values(self) -> None:
+    def test_settings_headers_show_only_the_section_name(self) -> None:
         window = self.window()
-        self.assertIn("Ziel", window.timing_group.summary())
-        self.assertIn("Sicherheitsfaktor", window.timing_group.summary())
-        self.assertIn("Außendurchmesser", window.geometry_group.summary())
-        self.assertIn("Profilfüllung", window.geometry_group.summary())
-        self.assertIn("Standfuß", window.stability_group.summary())
-        self.assertIn("Winkel", window.overhang_group.summary())
-        self.assertTrue(window.geometry_settings_group.summary())
+        for section in (window.timing_group, window.geometry_group,
+                        window.stability_group, window.overhang_group,
+                        window.geometry_settings_group):
+            self.assertEqual(section.summary(), "")
+        self.assertEqual(window.geometry_settings_group.title(), "Turm-Einstellungen")
+        self.assertFalse(window.timing_group.isCheckable())
+        self.assertTrue(window.geometry_settings_group.isAncestorOf(window.timing_group))
         window.close()
 
     def test_reset_buttons_are_consistent_non_sticky_controls(self) -> None:

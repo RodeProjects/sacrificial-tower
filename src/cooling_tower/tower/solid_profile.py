@@ -12,12 +12,10 @@ from cooling_tower.tower.base_calculator import (
     MINIMUM_BASE_WIDTH_MM,
     calculate_phase10_base_outer_radius,
 )
+from cooling_tower.tower.diameter_transitions import DiameterSegment, plan_diameter_transitions
 from cooling_tower.tower.profile import LayerRadiusRecord, TowerRadiusProfile
 from cooling_tower.tower.spline_profile import (
-    adaptive_quintic_segment_samples,
     angle_to_radial_slope,
-    build_asymmetric_spline_envelope,
-    maximum_quintic_segment_slope,
     slope_to_angle_deg,
 )
 
@@ -62,6 +60,10 @@ class SolidTowerProfile:
     support_point_count: int = 0
     maximum_spline_error_mm: float = SPLINE_RADIAL_ERROR_MM
 
+    @property
+    def printable_layer_count(self) -> int:
+        return len(self.layers)
+
 
 @dataclass(frozen=True, slots=True)
 class _RawSupport:
@@ -91,6 +93,8 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
     for name, value in settings.to_dict().items():
         if name in {"automatic_base_width", "simulate_full_tower_infill"}:
             continue
+        if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+            continue
         if not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Generation setting {name} must be finite.")
 
@@ -108,8 +112,6 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError(
             "Minimum object/tower distance must not be negative."
         )
-    if settings.base_height_mm < 0.0:
-        raise ValueError("Base height must not be negative.")
     if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:
         raise ValueError(
             f"Manual base width must be at least {MINIMUM_BASE_WIDTH_MM:g} mm."
@@ -124,7 +126,8 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
             f"{MAXIMUM_EXPANSION_ANGLE_DEG:g} degrees."
         )
     angle_to_radial_slope(settings.maximum_expansion_angle_deg)
-    angle_to_radial_slope(settings.maximum_contraction_angle_deg)
+    if not settings.simulate_full_tower_infill:
+        angle_to_radial_slope(settings.maximum_contraction_angle_deg)
 
 
 def build_solid_tower_profile(
@@ -151,6 +154,7 @@ def build_solid_tower_profile(
         raise ValueError("Tower end height must be finite and greater than zero.")
     if total_height < last_layer_z - EPSILON:
         raise ValueError("Tower end height cannot be below the last included layer.")
+    total_height = last_layer_z
 
     base_reference_height = (
         total_height if object_height_mm is None else object_height_mm
@@ -182,7 +186,14 @@ def build_solid_tower_profile(
             )
         )
     base_outer = max(calculated_base_outer, minimum_outer)
-    effective_base_height = min(settings.base_height_mm, total_height)
+    effective_base_height = phase2_profile.layers[min(1, len(phase2_profile.layers) - 1)].z_mm
+    # Twenty actual layer intervals take precedence over the 5 mm preference.
+    taper_last = phase2_profile.layers[min(21, len(phase2_profile.layers) - 1)].z_mm
+    minimum_taper_height = max(0.0, taper_last - effective_base_height)
+    base_taper_height = min(
+        last_layer_z - effective_base_height,
+        max(minimum_taper_height, min(5.0, 0.025 * base_reference_height)),
+    )
     supports = _build_raw_supports(
         phase2_profile=phase2_profile,
         total_height_mm=total_height,
@@ -195,16 +206,38 @@ def build_solid_tower_profile(
         for index, support in enumerate(supports)
         if support.z_mm <= effective_base_height + EPSILON
     )
-    outer_radii, unreachable = _build_outer_envelope(
-        supports=supports,
-        base_anchor_index=base_anchor_index,
-        base_outer_radius_mm=base_outer,
-        maximum_expansion_slope=angle_to_radial_slope(
-            settings.maximum_expansion_angle_deg
-        ),
-        maximum_contraction_slope=angle_to_radial_slope(
-            settings.maximum_contraction_angle_deg
-        ),
+    required = [support.raw_outer_radius_mm for support in supports]
+    abrupt_drops = set()
+    if settings.simulate_full_tower_infill:
+        for index in range(base_anchor_index + 1, len(supports)):
+            previous = supports[index - 1].phase2_layer
+            current = supports[index].phase2_layer
+            if (previous is not None and current is not None
+                    and previous.time_deficit_s > settings.layer_time_tolerance_s
+                    and current.time_deficit_s <= settings.layer_time_tolerance_s
+                    and current.layer_time_s > previous.layer_time_s * 1.5):
+                abrupt_drops.add(index)
+                # A descending request before a discontinuity can come from
+                # the centered timing window or calibration. Keep that trunk
+                # intact until the first self-sufficient object layer.
+                start = index - 1
+                while (start > base_anchor_index + 1
+                       and required[start - 1] >= required[start] - EPSILON):
+                    start -= 1
+                held_radius = max(required[start:index])
+                required[start:index] = [held_radius] * (index - start)
+    outer_radii, unreachable, segments = plan_diameter_transitions(
+        tuple(support.z_mm for support in supports),
+        tuple(required),
+        base_index=base_anchor_index,
+        base_radius=base_outer,
+        minimum_radius=minimum_outer,
+        expansion_slope=angle_to_radial_slope(settings.maximum_expansion_angle_deg),
+        contraction_slope=(1.0 if settings.simulate_full_tower_infill else
+                           angle_to_radial_slope(settings.maximum_contraction_angle_deg)),
+        allow_steps=settings.simulate_full_tower_infill,
+        base_taper_height=base_taper_height,
+        abrupt_drop_indices=frozenset(abrupt_drops),
     )
 
     initial_geometry_limitations: list[FeasibilityIssue] = []
@@ -222,8 +255,9 @@ def build_solid_tower_profile(
         settings=settings,
         initial_geometry_limitations=initial_geometry_limitations,
         effective_base_height_mm=effective_base_height,
+        segments=segments,
     )
-    points = _sample_support_splines(support_points)
+    points = _sample_support_splines(support_points, segments)
     unique_limitations = _unique_issues(initial_geometry_limitations)
     warnings = [
         "Der Kühlturm wird als geschlossener Vollkörper ohne Hohlraum erzeugt.",
@@ -274,14 +308,12 @@ def _build_raw_supports(
             layer_index=None,
         )
     ]
-    regular_by_layer: dict[int, tuple[float, float]] = {}
     for layer in phase2_profile.layers:
         requested = max(
             settings.minimum_outer_radius_mm,
             layer.calculated_radius_mm,
         )
         regular = min(settings.maximum_outer_radius_mm, requested)
-        regular_by_layer[layer.layer_index] = (regular, requested)
         in_base = layer.z_mm <= effective_base_height_mm + EPSILON
         supports.append(
             _RawSupport(
@@ -317,52 +349,11 @@ def _build_raw_supports(
             )
         )
 
-    last_layer = phase2_profile.layers[-1]
-    if total_height_mm > last_layer.z_mm + EPSILON:
-        regular, requested = regular_by_layer[last_layer.layer_index]
-        in_base = total_height_mm <= effective_base_height_mm + EPSILON
-        supports.append(
-            _RawSupport(
-                z_mm=total_height_mm,
-                raw_outer_radius_mm=(base_outer_radius_mm if in_base else regular),
-                requested_outer_radius_mm=(
-                    min(base_outer_radius_mm, requested) if in_base else requested
-                ),
-                required_path_mm=last_layer.safety_adjusted_path_mm,
-                source="synthetic_final_layer",
-                layer_index=None,
-                phase2_layer=last_layer,
-            )
-        )
-
     supports.sort(key=lambda support: support.z_mm)
     for previous, current in zip(supports, supports[1:]):
         if current.z_mm <= previous.z_mm + EPSILON:
             raise ValueError("Solid profile support heights must be strictly increasing.")
     return tuple(supports)
-
-
-def _build_outer_envelope(
-    *,
-    supports: tuple[_RawSupport, ...],
-    base_anchor_index: int,
-    base_outer_radius_mm: float,
-    maximum_expansion_slope: float,
-    maximum_contraction_slope: float,
-) -> tuple[tuple[float, ...], tuple[int, ...]]:
-    prefix = tuple(base_outer_radius_mm for _ in range(base_anchor_index))
-    tail = supports[base_anchor_index:]
-    result = build_asymmetric_spline_envelope(
-        [support.z_mm for support in tail],
-        [support.raw_outer_radius_mm for support in tail],
-        maximum_increase_per_mm_z=maximum_expansion_slope,
-        maximum_decrease_per_mm_z=maximum_contraction_slope,
-        fixed_start_value=base_outer_radius_mm,
-    )
-    return (
-        prefix + result.values,
-        tuple(base_anchor_index + index for index in result.unreachable_positions),
-    )
 
 
 def _build_support_results(
@@ -372,8 +363,8 @@ def _build_support_results(
     settings: GenerationSettings,
     initial_geometry_limitations: list[FeasibilityIssue],
     effective_base_height_mm: float,
+    segments: tuple[DiameterSegment, ...],
 ) -> tuple[tuple[SolidTowerPoint, ...], tuple[TowerLayerProfile, ...]]:
-    z_values = tuple(support.z_mm for support in supports)
     points: list[SolidTowerPoint] = []
     layers: list[TowerLayerProfile] = []
     for index, (support, outer) in enumerate(
@@ -398,7 +389,7 @@ def _build_support_results(
                 )
             )
         expansion, contraction = _support_angles(
-            z_values, outer_radii, index
+            segments, index
         )
         region = _profile_region(
             support=support,
@@ -451,32 +442,34 @@ def _build_support_results(
 
 def _sample_support_splines(
     support_points: tuple[SolidTowerPoint, ...],
+    segments: tuple[DiameterSegment, ...],
 ) -> tuple[SolidTowerPoint, ...]:
-    sampled: list[SolidTowerPoint] = [support_points[0]]
-    for start, end in zip(support_points, support_points[1:]):
-        for sample in adaptive_quintic_segment_samples(
-            start_z_mm=start.z_mm,
-            end_z_mm=end.z_mm,
-            start_outer_radius_mm=start.outer_radius_mm,
-            end_outer_radius_mm=end.outer_radius_mm,
-            start_wall_thickness_mm=0.0,
-            end_wall_thickness_mm=0.0,
-            maximum_radial_error_mm=SPLINE_RADIAL_ERROR_MM,
-            maximum_z_step_mm=SPLINE_MAXIMUM_Z_STEP_MM,
+    sampled = [support_points[0]]
+    for start, end, segment in zip(support_points, support_points[1:], segments):
+        if segment.step_radius is not None:
+            sampled.append(SolidTowerPoint(
+                z_mm=start.z_mm,
+                outer_radius_mm=segment.step_radius,
+                source="inward_step",
+                layer_index=None,
+                raw_outer_radius_mm=segment.step_radius,
+                profile_region="shoulder",
+            ))
+        for z, radius in segment.samples(
+            radial_error=SPLINE_RADIAL_ERROR_MM,
+            maximum_z_step=SPLINE_MAXIMUM_Z_STEP_MM,
         ):
-            if sample.t >= 1.0 - EPSILON:
+            if abs(z - end.z_mm) <= EPSILON:
                 sampled.append(end)
             else:
-                sampled.append(
-                    SolidTowerPoint(
-                        z_mm=sample.z_mm,
-                        outer_radius_mm=sample.outer_radius_mm,
-                        source="spline_transition",
-                        layer_index=None,
-                        raw_outer_radius_mm=sample.outer_radius_mm,
-                        profile_region=_transition_region(start, end),
-                    )
-                )
+                sampled.append(SolidTowerPoint(
+                    z_mm=z,
+                    outer_radius_mm=radius,
+                    source="spline_transition",
+                    layer_index=None,
+                    raw_outer_radius_mm=radius,
+                    profile_region=_transition_region(start, end),
+                ))
     return tuple(sampled)
 
 
@@ -494,8 +487,7 @@ def _append_angle_issues(
         previous = max(base_anchor_index, index - 1)
         delta_z = support.z_mm - supports[previous].z_mm
         required_angle = 90.0 if delta_z <= EPSILON else slope_to_angle_deg(
-            1.875
-            * max(
+            max(
                 0.0,
                 support.raw_outer_radius_mm - outer_radii[previous],
             )
@@ -522,29 +514,24 @@ def _append_angle_issues(
 
 
 def _support_angles(
-    z_values: tuple[float, ...],
-    outer_values: tuple[float, ...],
-    index: int,
+    segments: tuple[DiameterSegment, ...], index: int,
 ) -> tuple[float, float]:
-    expansion = 0.0
-    contraction = 0.0
-    for left_index, right_index in ((index - 1, index), (index, index + 1)):
-        if left_index < 0 or right_index >= len(outer_values):
+    expansion = contraction = 0.0
+    for position in (index - 1, index):
+        if not 0 <= position < len(segments):
             continue
-        start = outer_values[left_index]
-        end = outer_values[right_index]
-        angle = slope_to_angle_deg(
-            maximum_quintic_segment_slope(
-                start,
-                end,
-                z_values[right_index] - z_values[left_index],
-            )
-        )
-        if end > start + EPSILON:
-            expansion = max(expansion, angle)
-        elif start > end + EPSILON:
-            contraction = max(contraction, angle)
-    return expansion, contraction
+        segment = segments[position]
+        start = segment.start_radius if segment.step_radius is None else segment.step_radius
+        slope = (segment.end_radius - start) / (segment.end_z - segment.start_z)
+        expansion = max(expansion, slope)
+        if segment.taper is not None:
+            taper = segment.taper
+            derivative = 2.0 * (taper.start_radius - taper.minimum_radius) / taper.duration
+            derivative *= max(0.0, 1.0 - (segment.start_z - taper.start_z) / taper.duration)
+            contraction = max(contraction, derivative)
+        else:
+            contraction = max(contraction, -slope)
+    return slope_to_angle_deg(expansion), slope_to_angle_deg(contraction)
 
 
 def _profile_region(
@@ -554,8 +541,6 @@ def _profile_region(
     outer_radii: tuple[float, ...],
     effective_base_height_mm: float,
 ) -> str:
-    if support.source == "synthetic_final_layer":
-        return "final_cap"
     if support.z_mm <= effective_base_height_mm + EPSILON:
         return "base"
     previous = outer_radii[index - 1] if index else outer_radii[index]

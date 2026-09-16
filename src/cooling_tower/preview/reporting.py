@@ -277,6 +277,7 @@ def _profile_details(request: PreviewRequest) -> dict[str, Any]:
             dict(getattr(profile, "effective_values", {}))
         ),
         "resolution_notes": list(getattr(profile, "resolution_notes", ())),
+        "supports_simulated": bool(getattr(profile, "supports_simulated", False)),
     }
 
 
@@ -757,6 +758,15 @@ def build_user_report(
         )
     )
     lines.extend(f"- {warning}" for warning in user_warnings)
+    if getattr(request.effective_profile, "supports_simulated", False):
+        lines.append(
+            "- Stützen wurden simuliert. In der exportierten 3MF sind sie aktiviert; "
+            "in anderen Projekten oder beim STL-Import ggf. selbst aktivieren. "
+            "Dies gilt ebenso für eine simulierte 100-%-Turmfüllung."
+            if project_path is not None else
+            "- Stützen wurden simuliert. Ohne exportierte 3MF müssen sie im "
+            "Zielprojekt selbst aktiviert werden."
+        )
     lines.extend(
         (
             "",

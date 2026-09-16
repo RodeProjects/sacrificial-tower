@@ -167,6 +167,8 @@ class WindowsProcessPolicyUnitTests(unittest.TestCase):
             )
             self.assertIsNone(windows_process_status_description(0xC0000999))
             self.assertIsNone(windows_process_status(7))
+            for code in (-1, -17, -50, -100, 0xFFFFFF9C):
+                self.assertIsNone(windows_process_status(code))
 
     def test_all_product_subprocess_launchers_use_safe_creation_flags(self) -> None:
         managed_launchers = (

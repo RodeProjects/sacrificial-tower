@@ -246,7 +246,7 @@ class SettingsSchemaTests(unittest.TestCase):
 
         settings, state = self.store.load()
 
-        self.assertEqual(settings.target_layer_time_s, 73.0)
+        self.assertEqual(settings.target_layer_time_s, 30.0)
         self.assertEqual(
             state["settings_schema_version"],
             SETTINGS_SCHEMA_VERSION,
@@ -718,7 +718,7 @@ class LiveValidationTests(GuiCase):
             (1.0, 10.0, 10.0),
             layer_heights=(0.2, 0.2, 199.6),
         )
-        self.assertAlmostEqual(self.window.tower_assessment.tower_end_z_mm, 0.4)
+        self.assertAlmostEqual(self.window.tower_assessment.tower_end_z_mm, 0.2)
         self.assertIn(
             "200.00 mm ermittelte Modellhöhe",
             self.window.automatic_base_width_label.text(),
@@ -736,7 +736,6 @@ class LiveValidationTests(GuiCase):
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
-        self.window.base_height_spin.setValue(0.0)
         self.window.maximum_outer_spin.setValue(500.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
@@ -765,7 +764,6 @@ class LiveValidationTests(GuiCase):
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
-        self.window.base_height_spin.setValue(0.0)
         self.window.maximum_outer_spin.setValue(500.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
@@ -830,8 +828,8 @@ class LiveValidationTests(GuiCase):
                 "maximum_outer_diameter_mm"
             ].message_label.text()
         )
-        self.assertIn("Kleinster Außendurchmesser", self.window.validation_label.text())
-        self.assertIn("Größter Außendurchmesser", self.window.validation_label.text())
+        self.assertIn("Minimaler Turmdurchmesser", self.window.validation_label.text())
+        self.assertIn("Maximaler Turmdurchmesser", self.window.validation_label.text())
         self.assertFalse(self.window.preview_button.isEnabled())
 
     def test_incomplete_numeric_text_is_safe_and_inline(self) -> None:

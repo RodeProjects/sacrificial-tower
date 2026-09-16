@@ -87,21 +87,21 @@ class SettingsAndValidationTests(GuiTestCase):
         self.assertIn("Deaktiviert", text)
         self.assertNotIn("Aktuell aktiviert", text)
 
-    def test_default_base_height_is_one_millimetre(self) -> None:
-        self.assertEqual(self.window.base_height_spin.value(), 1.0)
+    def test_base_height_is_automatic(self) -> None:
+        self.assertNotIn("base_height_mm", self.window._setting_widgets)
 
     def test_user_settings_are_persisted_and_restored(self) -> None:
         path = self.root / "user_settings.json"
         self.window.target_time_spin.setValue(27.5)
         self.window.output_root_edit.setText(str(self.root / "custom"))
-        self.window.timing_group.setChecked(False)
+        self.window.geometry_settings_group.setChecked(False)
         self.window.prediction_frame.setChecked(False)
         self.window.close()
         restored = MainWindow(user_settings_path=path)
         try:
             self.assertAlmostEqual(restored.target_time_spin.value(), 27.5)
             self.assertEqual(restored.output_root_edit.text(), str(self.root / "custom"))
-            self.assertFalse(restored.timing_group.isChecked())
+            self.assertFalse(restored.geometry_settings_group.isChecked())
             self.assertFalse(restored.prediction_frame.isChecked())
         finally:
             restored.close()
@@ -110,7 +110,7 @@ class SettingsAndValidationTests(GuiTestCase):
         self.window.target_time_spin.setValue(99.0)
         self.window.full_infill_checkbox.setChecked(True)
         self.window.reset_defaults()
-        self.assertAlmostEqual(self.window.target_time_spin.value(), 11.0)
+        self.assertAlmostEqual(self.window.target_time_spin.value(), 9.0)
         self.assertFalse(self.window.full_infill_checkbox.isChecked())
 
 

@@ -222,8 +222,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertTrue(window.export_success_dialog.isVisible())
             self.assertEqual(
                 window.export_success_deviation_label.text(),
-                "Abweichung: -0,1 Sekunden\n"
-                "innerhalb der Toleranz von ±0,2 Sekunden",
+                "Abweichung: -0,1 Sekunden "
+                "(innerhalb der Toleranz von ±0,2 Sekunden)",
             )
             self.assertEqual(
                 window.export_success_achieved_label.text(),
@@ -233,7 +233,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 "innerhalb der Toleranz von ±0,2 Sekunden",
                 window.export_success_deviation_label.text(),
             )
-            self.assertNotIn(
+            self.assertIn(
                 "(innerhalb der Toleranz",
                 window.export_success_deviation_label.text(),
             )
@@ -261,7 +261,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window.export_success_check_hint.text(),
             )
             self.assertIn(
-                "größeren Abweichungen",
+                "zu Abweichungen",
                 window.export_success_check_hint.text(),
             )
             window.export_success_open_button.click()
@@ -293,8 +293,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window._show_export_success_dialog(result)
             self.assertEqual(
                 window.export_success_deviation_label.text(),
-                "Abweichung: -0,5 Sekunden\n"
-                "0,3 Sekunden außerhalb der Toleranz von ±0,2 Sekunden",
+                "Abweichung: -0,5 Sekunden "
+                "(außerhalb der Toleranz von ±0,2 Sekunden)",
             )
             dialog_layout = window.export_success_dialog.layout()
             self.assertEqual(dialog_layout.contentsMargins().top(), 11)
@@ -985,12 +985,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         expected_units = {
             "target_layer_time_s": "s",
+            "layer_time_tolerance_s": "s",
             "safety_factor": "",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
             "minimum_object_tower_distance_mm": "mm",
             "manual_base_width_mm": "mm",
-            "base_height_mm": "mm",
             "maximum_expansion_angle_deg": "°",
             "maximum_contraction_angle_deg": "°",
             "mesh_segments": "Segm.",
@@ -1029,7 +1029,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window._setting_widgets[
                 "maximum_outer_diameter_mm"
             ].label.text(),
-            "Größter Außendurchmesser",
+            "Maximaler Turmdurchmesser",
         )
         window.close()
 
@@ -1096,7 +1096,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.timing_group.setChecked(True)
         self.app.processEvents()
         self.assertGreater(window.timing_group.height(), 54)
-        self.assertGreater(window.ready_grid.height(), collapsed_height)
+        self.assertEqual(window.ready_grid.height(), collapsed_height)
+        self.assertFalse(window.timing_group.isVisible())
 
         timing_open_height = window.ready_grid.height()
         window.prediction_frame.setChecked(True)
@@ -1112,7 +1113,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
 
-        for name in ("manual_base_width_mm", "base_height_mm"):
+        for name in ("manual_base_width_mm",):
             self.assertTrue(
                 window.stability_group.isAncestorOf(
                     window._setting_widgets[name]

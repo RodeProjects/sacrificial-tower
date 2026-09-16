@@ -114,7 +114,7 @@ class CalibrationService:
         seed_profile: object | None = None,
         seed_stl_path: str | Path | None = None,
     ) -> CalibrationResult:
-        config = config or CalibrationConfig()
+        config = config or CalibrationConfig(time_tolerance_s=settings.layer_time_tolerance_s)
         notify = progress_callback or (lambda percent, status: None)
         started = time.monotonic()
         source = Path(getattr(snapshot, "gcode_path")).resolve()

@@ -163,6 +163,7 @@ def build_hollow_tower_profile(
         raise ValueError("Tower end height must be finite and greater than zero.")
     if total_height < last_layer_z - EPSILON:
         raise ValueError("Tower end height cannot be below the last included layer.")
+    total_height = last_layer_z
 
     warnings = _initial_warnings(settings, bounds)
     issues: list[FeasibilityIssue] = []
@@ -401,7 +402,6 @@ def _build_raw_supports(
             layer_index=None,
         )
     ]
-    regular_outer_by_layer: dict[int, float] = {}
     for layer in phase2_profile.layers:
         solved = calculate_required_outer_radius(
             layer.safety_adjusted_path_mm,
@@ -412,7 +412,6 @@ def _build_raw_supports(
             settings.maximum_outer_radius_mm,
             max(minimum_outer_radius_mm, solved),
         )
-        regular_outer_by_layer[layer.layer_index] = regular_outer
         in_base = layer.z_mm <= effective_base_height_mm + EPSILON
         supports.append(
             _RawSupport(
@@ -441,26 +440,6 @@ def _build_raw_supports(
                 required_path_mm=0.0,
                 source="base_transition",
                 layer_index=None,
-            )
-        )
-
-    last_layer = phase2_profile.layers[-1]
-    if total_height_mm > last_layer.z_mm + EPSILON:
-        synthetic_in_base = (
-            total_height_mm <= effective_base_height_mm + EPSILON
-        )
-        supports.append(
-            _RawSupport(
-                z_mm=total_height_mm,
-                raw_outer_radius_mm=(
-                    base_outer_radius_mm
-                    if synthetic_in_base
-                    else regular_outer_by_layer[last_layer.layer_index]
-                ),
-                required_path_mm=last_layer.safety_adjusted_path_mm,
-                source="synthetic_final_layer",
-                layer_index=None,
-                phase2_layer=last_layer,
             )
         )
 
@@ -925,8 +904,6 @@ def _profile_region(
     minimum_wall_thickness_mm: float,
     effective_base_height_mm: float,
 ) -> str:
-    if support.source == "synthetic_final_layer":
-        return "final_cap"
     if support.z_mm <= effective_base_height_mm + EPSILON:
         return "base"
     if wall_thickness_mm > minimum_wall_thickness_mm + EPSILON:

@@ -170,6 +170,7 @@ class EffectiveProfile:
     definitions: tuple[ProfileRecord, ...] = ()
     effective_values: Mapping[str, Any] = field(default_factory=dict)
     resolution_notes: tuple[str, ...] = ()
+    supports_simulated: bool = False
 
     @property
     def source_paths(self) -> tuple[Path, ...]:

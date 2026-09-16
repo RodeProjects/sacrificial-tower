@@ -2,6 +2,11 @@ from __future__ import annotations
 
 
 SETTING_INFO_TEXTS = {
+    "layer_time_tolerance_s": (
+        "Zulässige Abweichung von der gewünschten Layerzeit nach oben und unten. "
+        "Bereich: 0,01 bis 3 Sekunden; Standard: 0,2 Sekunden. "
+        "Eine kleinere Toleranz kann mehr Kalibrierungsdurchläufe benötigen."
+    ),
     "target_layer_time_s": (
         "Kürzeste gewünschte Druckzeit je Layer. Der Kühlturm ergänzt "
         "Druckzeit, wenn das eigentliche Objekt diesen Wert unterschreitet."
@@ -11,8 +16,8 @@ SETTING_INFO_TEXTS = {
         "1,10 entspricht zehn Prozent Sicherheitszuschlag."
     ),
     "minimum_outer_diameter_mm": (
-        "Kleinster zulässiger Außendurchmesser des Kühlturms. Der Turm "
-        "beginnt mit dieser Breite und wächst nur bei zusätzlichem Zeitbedarf."
+        "Kleinster zulässiger Außendurchmesser oberhalb des Standfußes. "
+        "Entfällt der Kühlbedarf dauerhaft, endet der Turm vorzeitig."
     ),
     "maximum_outer_diameter_mm": (
         "Größter regulärer Außendurchmesser des Kühlturms. Er begrenzt den "
@@ -26,17 +31,15 @@ SETTING_INFO_TEXTS = {
         "Außendurchmesser des Standfußes bei deaktivierter Automatik. "
         "Mindestens 20 mm sind erforderlich."
     ),
-    "base_height_mm": (
-        "Vertikale Höhe des verstärkten Standfußbereichs am unteren Ende "
-        "des Kühlturms."
-    ),
     "maximum_expansion_angle_deg": (
         "Größter zulässiger Winkel, mit dem sich der Turm nach außen "
-        "aufweiten darf, gemessen zur Vertikalen."
+        "linear aufweiten darf, gemessen zur Vertikalen."
     ),
     "maximum_contraction_angle_deg": (
         "Größter zulässiger Winkel, mit dem sich der Turm nach innen "
-        "verjüngen darf, gemessen zur Vertikalen."
+        "entlang einer konkaven Kurve verjüngen darf, gemessen zur Vertikalen. "
+        "Bei 100 % Turmfüllung wird diese Winkelgrenze vollständig ignoriert. "
+        "Bei abrupt sinkendem Bedarf sind dann direkte Absätze nach innen möglich."
     ),
     "mesh_segments": (
         "Anzahl gerader Segmente pro Kreisring im STL-Netz. Mehr Segmente "

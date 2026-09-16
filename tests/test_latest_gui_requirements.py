@@ -237,7 +237,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertTrue(bool(expansion.editor.property("warning")))
         window.close()
 
-    def test_ranges_are_visible_and_layer_time_is_limited_to_120_seconds(self) -> None:
+    def test_ranges_are_visible_and_layer_time_is_limited_to_30_seconds(self) -> None:
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -247,7 +247,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         for setting in window._setting_widgets.values():
             self.assertTrue(setting.range_label.text().strip())
             self.assertFalse(setting.range_label.isHidden())
-        self.assertIn("Max. 120,00 s", window._setting_widgets[
+        self.assertIn("Max. 30,00 s", window._setting_widgets[
             "target_layer_time_s"
         ].range_label.text())
         window.target_time_spin.setValue(121.0)
@@ -255,7 +255,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(window.target_time_spin.value(), 121.0)
         self.assertTrue(window.target_time_spin.property("invalid"))
         self.assertIn(
-            "120,00",
+            "30,00",
             window.validation_label.text(),
         )
         self.assertIn("Gewünschte Mindest-Layerzeit: 121,00 s", window.validation_label.text())
@@ -294,8 +294,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         relationship_errors = [
             message
             for message in window._static_error_causes
-            if "Größter Außendurchmesser" in message
-            and "Kleinster Außendurchmesser" in message
+            if "Maximaler Turmdurchmesser" in message
+            and "Minimaler Turmdurchmesser" in message
         ]
         self.assertEqual(len(relationship_errors), 1)
         minimum_setting = window._setting_widgets["minimum_outer_diameter_mm"]
@@ -901,7 +901,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             diameter_setting.message_label.text(),
         )
         self.assertNotIn(
-            "Größter Außendurchmesser",
+            "Maximaler Turmdurchmesser",
             diameter_setting.message_label.text(),
         )
         window.close()
@@ -911,7 +911,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
-        window.target_time_spin.setValue(111.0)
+        window.target_time_spin.setValue(29.0)
         window._last_changed_setting_name = "target_layer_time_s"
         issues = (
             FeasibilityIssue(
@@ -948,7 +948,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             window.validation_label.text().splitlines(),
             [
-                "Gewünschte Mindest-Layerzeit: 111,00 s",
+                "Gewünschte Mindest-Layerzeit: 29,00 s",
                 "• Maximaler Aufweitungswinkel reicht nicht aus.",
                 "• Standfußbreite reicht nicht aus.",
                 "• Eingestellter größter Außendurchmesser von 40,00 mm reicht nicht aus.",
@@ -962,7 +962,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             Qt.TextFormat.RichText,
         )
         self.assertIn(
-            "<b>Gewünschte Mindest-Layerzeit: 111,00 s</b>",
+            "<b>Gewünschte Mindest-Layerzeit: 29,00 s</b>",
             window.validation_label._rendered_html,
         )
         self.assertIn(
@@ -1062,7 +1062,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
-        window.target_time_spin.setValue(111.0)
+        window.target_time_spin.setValue(29.0)
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
@@ -1444,7 +1444,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
         self.assertEqual(
             window.geometry_settings_group.badge_label.text(),
-            "1 Fehler",
+            "2 Fehler",
         )
 
         window.target_time_spin.setValue(11.0)

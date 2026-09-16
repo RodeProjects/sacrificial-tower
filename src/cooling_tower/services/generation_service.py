@@ -300,8 +300,6 @@ class GenerationService:
                 "Last deficit layer: "
                 f"{assessment.last_deficit_layer_index}",
                 f"Tower end Z: {assessment.tower_end_z_mm:.6f} mm",
-                "Synthetic final layer: "
-                f"{assessment.synthetic_final_layer_used}",
                 f"Generated triangles: {export.validation.face_count}",
                 f"STL: {paths.stl_path.resolve()}",
                 *(f"Warning: {warning}" for warning in warnings),

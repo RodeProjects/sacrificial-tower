@@ -122,7 +122,7 @@ class UiRedesignTests(unittest.TestCase):
         self.assertEqual(
             window.validation_label.text().splitlines(),
             [
-                "Kleinster Außendurchmesser: 0,000 mm",
+                "Minimaler Turmdurchmesser: 0,000 mm",
                 "• Liegt unter dem Mindestwert 0,002 mm.",
             ],
         )

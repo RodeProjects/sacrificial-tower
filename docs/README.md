@@ -8,6 +8,7 @@ bei Änderungen zuerst das zuständige Thema lesen.
 | Thema | Maßgebliches Dokument |
 |---|---|
 | Komponenten, Verantwortlichkeiten, Datenfluss und Erweiterung | [Architektur](architecture.md) |
+| Turmhöhe, lineare Verbreiterung, konkave Verjüngung und Absätze | [Turmgeometrie](tower_geometry.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Proprietäre Distribution, Rechtstexte, Freigaben | [Kommerzieller Vertrieb](commercial_release.md) |

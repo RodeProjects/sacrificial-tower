@@ -209,7 +209,9 @@ def windows_process_status(return_code: int | None) -> str | None:
     if os.name != "nt" or return_code is None:
         return None
     normalized = int(return_code) & 0xFFFFFFFF
-    if normalized < 0x80000000:
+    # Bit 28 is reserved and must be clear in an NTSTATUS. Ordinary negative
+    # application exits (-1, -17, -100, ...) set it; they are not OS crashes.
+    if normalized < 0x80000000 or normalized & 0x10000000:
         return None
     return f"0x{normalized:08X}"
 

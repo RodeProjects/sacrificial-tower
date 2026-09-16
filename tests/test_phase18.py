@@ -206,33 +206,33 @@ class Phase18UiTests(unittest.TestCase):
             [section.y() for section in geometry_sections],
             sorted(section.y() for section in geometry_sections),
         )
-        for card in (window.timing_group, window.prediction_frame):
+        for card in (window.geometry_settings_group, window.prediction_frame):
             self.assertTrue(card.isCheckable())
             self.assertTrue(card.isChecked())
             self.assertTrue(card.toggle_button.isVisible())
-        self.assertTrue(bool(window.timing_group.property("outerDropdown")))
+        self.assertTrue(bool(window.geometry_settings_group.property("outerDropdown")))
         self.assertEqual(window.prediction_frame.property("cardTone"), "preview")
         expanded_prediction_height = window.prediction_frame.height()
-        window.timing_group.setChecked(False)
+        window.geometry_settings_group.setChecked(False)
         self.app.processEvents()
-        self.assertTrue(window.timing_group.content_widget.isHidden())
+        self.assertTrue(window.geometry_settings_group.content_widget.isHidden())
         self.assertTrue(window.prediction_frame.content_widget.isVisible())
         self.assertLess(
-            window.timing_group.height(),
+            window.geometry_settings_group.height(),
             expanded_prediction_height,
         )
         self.assertLessEqual(
-            window.timing_group.height(),
-            window.timing_group.header.height() + 2,
+            window.geometry_settings_group.height(),
+            window.geometry_settings_group.header.height() + 2,
         )
         self.assertEqual(
             window.geometry_settings_group.title_label.text(),
-            "Turmgeometrie",
+            "Turm-Einstellungen",
         )
         self.assertFalse(bool(window.geometry_group.property("collapsible")))
         self.assertFalse(bool(window.stability_group.property("collapsible")))
         for card in (
-            window.timing_group,
+            window.geometry_settings_group,
             window.prediction_frame,
             window.geometry_settings_group,
             window.geometry_group,
@@ -440,7 +440,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         geometry = window.geometry_settings_group
         self.assertTrue(geometry.isChecked())
-        self.assertEqual(geometry.title(), "Turmgeometrie")
+        self.assertEqual(geometry.title(), "Turm-Einstellungen")
         for obsolete_alias in (
             "calculation_group",
             "advanced_group",
@@ -685,7 +685,6 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         outer_groups = (
             window.workflow_group,
-            window.timing_group,
             window.geometry_settings_group,
             window.prediction_frame,
         )
@@ -738,10 +737,10 @@ class Phase18UiTests(unittest.TestCase):
             initial_header.pixelColor(initial_header.width() // 2, 5).name(),
             "#ebf5fb",
         )
-        timing_header = window.timing_group.header.grab().toImage()
+        self.assertFalse(window.timing_group.property("outerDropdown"))
         self.assertEqual(
-            timing_header.pixelColor(timing_header.width() // 2, 5).name(),
-            "#ebf5fb",
+            window.timing_group.header.grab().toImage().pixelColor(5, 5),
+            window.geometry_group.header.grab().toImage().pixelColor(5, 5),
         )
         geometry_header = window.geometry_settings_group.header.grab().toImage()
         self.assertEqual(
@@ -761,7 +760,6 @@ class Phase18UiTests(unittest.TestCase):
         )
         for group in (
             window.workflow_group,
-            window.timing_group,
             window.geometry_settings_group,
         ):
             self.assertEqual(group.title_label.font().pointSizeF(), 12.0)
@@ -787,7 +785,6 @@ class Phase18UiTests(unittest.TestCase):
             "#4d3c86",
         )
         expected_accents = {
-            window.timing_group: "#1769aa",
             window.geometry_settings_group: "#1769aa",
             window.prediction_frame: "#6f52c9",
         }
@@ -1341,7 +1338,7 @@ class Phase18UiTests(unittest.TestCase):
                 )
                 self.assertLess(max(object_x), min(tower_x))
 
-    def test_refreshing_preview_preserves_view_pan_fit_mode_and_exact_zoom(self) -> None:
+    def test_refreshing_preview_restores_side_view_pan_fit_and_zoom(self) -> None:
         window = self.window()
 
         def result(offset: float):
@@ -1387,8 +1384,13 @@ class Phase18UiTests(unittest.TestCase):
 
         window.preview_dialog.set_preview(result(3.0))
 
-        self.assertEqual(canvas.camera_state(), state_before)
-        self.assertTrue(canvas._fit_whole_bed)
+        self.assertNotEqual(canvas.camera_state(), state_before)
+        self.assertAlmostEqual(canvas.yaw_deg, canvas._side_by_side_yaw_deg())
+        self.assertEqual(canvas.pitch_deg, 0.0)
+        self.assertEqual(canvas.pan_x, 0.0)
+        self.assertEqual(canvas.pan_y, 0.0)
+        self.assertAlmostEqual(canvas.zoom, canvas.SIDE_VIEW_ZOOM)
+        self.assertFalse(canvas._fit_whole_bed)
         window.close()
 
     def test_side_view_handles_diagonal_placement_with_overlapping_xy_bounds(self) -> None:
@@ -1628,86 +1630,34 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(icon.width(), 18)
         window.close()
 
-    def test_geometry_dropdown_never_hides_timing_or_prediction_cards(self) -> None:
+    def test_tower_dropdown_toggles_timing_and_geometry_together(self) -> None:
         window = self.window()
-        window.resize(1205, 1393)
+        self.addCleanup(window.close)
+        window.resize(1400, 1000)
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
-        QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
-        timing_height = window.timing_group.height()
         prediction_height = window.prediction_frame.height()
-        timing_geometry = window.timing_group.geometry()
-        prediction_geometry = window.prediction_frame.geometry()
-        timing_image = window.timing_group.grab().toImage()
-        prediction_image = window.prediction_frame.grab().toImage()
-        ready_origin = window.ready_grid.mapTo(
-            window.settings_content, QPoint(0, 0)
-        )
-        ready_width = window.ready_grid.width()
-        viewport_width = window.settings_scroll.viewport().width()
-        self.assertTrue(window.settings_scroll.verticalScrollBar().isVisible())
+        for width in (1400, 760):
+            window.resize(width, 1000)
+            self.app.processEvents()
+            window.geometry_settings_group.setChecked(False)
+            self.app.processEvents()
+            self.assertFalse(window.timing_group.isVisible())
+            self.assertFalse(window.geometry_group.isVisible())
+            self.assertTrue(window.prediction_frame.isVisible())
+            self.assertTrue(window.prediction_frame.content_widget.isVisible())
+            window.geometry_settings_group.setChecked(True)
+            self.app.processEvents()
+            self.assertTrue(window.timing_group.isVisible())
+            self.assertTrue(window.geometry_group.isVisible())
+            self.assertTrue(window.local_window_spin.isVisible())
+            self.assertTrue(window.target_time_spin.isVisible())
+            self.assertIsNone(window.timing_group.graphicsEffect())
+            self.assertIsNone(window.prediction_frame.graphicsEffect())
 
-        window.geometry_settings_group.toggle()
-        QTest.qWait(METRICS.animation_duration_ms // 2)
-        self.app.processEvents()
-        for card in (window.timing_group, window.prediction_frame):
-            self.assertTrue(card.isVisible())
-            self.assertFalse(card.isHidden())
-            self.assertTrue(card.content_widget.isVisible())
-        self.assertEqual(window.timing_group.height(), timing_height)
-        self.assertEqual(window.prediction_frame.height(), prediction_height)
-        self.assertGreater(window.timing_group.width(), timing_geometry.width())
-        self.assertGreater(
-            window.prediction_frame.width(),
-            prediction_geometry.width(),
-        )
-        self.assertGreater(window.ready_grid.width(), ready_width)
-        self.assertGreater(
-            window.settings_scroll.viewport().width(),
-            viewport_width,
-        )
-        self.assertFalse(
-            window.settings_scroll.verticalScrollBar().isVisible()
-        )
-        self.assertIsNone(window.timing_group.graphicsEffect())
-        self.assertIsNone(window.prediction_frame.graphicsEffect())
-
-        QTest.qWait(METRICS.animation_duration_ms)
-        self.app.processEvents()
-        self.assertTrue(window.geometry_settings_group.content_widget.isHidden())
-        self.assertTrue(window.timing_group.content_widget.isVisible())
-        self.assertTrue(window.prediction_frame.content_widget.isVisible())
-        self.assertFalse(
-            window.settings_scroll.verticalScrollBar().isVisible()
-        )
-
-        window.geometry_settings_group.toggle()
-        QTest.qWait(METRICS.animation_duration_ms // 2)
-        self.app.processEvents()
-        self.assertIsNone(window.timing_group.graphicsEffect())
-        self.assertIsNone(window.prediction_frame.graphicsEffect())
-        self.assertIsNone(window.timing_group.content_widget.graphicsEffect())
-        self.assertIsNone(window.prediction_frame.content_widget.graphicsEffect())
-        QTest.qWait(METRICS.animation_duration_ms)
-        self.app.processEvents()
-        self.assertFalse(window.geometry_settings_group.content_widget.isHidden())
-        self.assertEqual(window.timing_group.geometry(), timing_geometry)
-        self.assertEqual(window.prediction_frame.geometry(), prediction_geometry)
-        self.assertEqual(
-            window.ready_grid.mapTo(window.settings_content, QPoint(0, 0)),
-            ready_origin,
-        )
-        self.assertEqual(window.ready_grid.width(), ready_width)
-        self.assertEqual(window.settings_scroll.viewport().width(), viewport_width)
-        self.assertTrue(window.settings_scroll.verticalScrollBar().isVisible())
-        self.assertEqual(window.timing_group.grab().toImage(), timing_image)
-        self.assertEqual(
-            window.prediction_frame.grab().toImage(), prediction_image
-        )
-        window.close()
 
     def test_geometry_dropdown_first_open_from_restored_collapsed_state(self) -> None:
         window = self.window()
@@ -1724,8 +1674,7 @@ class Phase18UiTests(unittest.TestCase):
 
         self.assertFalse(geometry.isChecked())
         self.assertTrue(body.isHidden())
-        timing_y = window.timing_group.y()
-        timing_height = window.timing_group.height()
+        self.assertFalse(window.timing_group.isVisible())
         prediction_y = window.prediction_frame.y()
         prediction_height = window.prediction_frame.height()
 
@@ -1736,8 +1685,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(body.isHidden())
         self.assertGreater(body.height(), 1)
         self.assertGreater(geometry.height(), geometry.header.height() + 1)
-        self.assertEqual(window.timing_group.y(), timing_y)
-        self.assertEqual(window.timing_group.height(), timing_height)
+        self.assertTrue(window.timing_group.isVisible())
+        self.assertTrue(window.target_time_spin.isVisible())
         self.assertEqual(window.prediction_frame.y(), prediction_y)
         self.assertEqual(window.prediction_frame.height(), prediction_height)
         self.assertIsNone(window.timing_group.graphicsEffect())

@@ -1471,7 +1471,7 @@ QLabel#exportSuccessCheckHint {
     background: #edf6fc;
     border: 1px solid #c5dce9;
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 12px 14px;
 }
 
 QLabel#exportSuccessError {
@@ -2031,25 +2031,6 @@ QPushButton#profileConfirmButton:hover {
     color: #214b35;
     background: #c9e5d3;
     border-color: #86b798;
-}
-
-QPushButton#removeSourceButton {
-    color: #7d4141;
-    background: #faeeee;
-    border-color: #dfbcbc;
-    font-weight: 600;
-}
-
-QPushButton#removeSourceButton:hover {
-    color: #713636;
-    background: #f4dddd;
-    border-color: #cc9d9d;
-}
-
-QPushButton#removeSourceButton:disabled {
-    color: #8995a0;
-    background: #edf0f2;
-    border-color: #d8dee3;
 }
 
 QPushButton#sourcePrimaryActionButton:disabled,
@@ -2638,7 +2619,7 @@ QToolButton#previewNavigationToggle[navigationEnabled="true"]:hover {
     background: #125b96;
 }
 
-QLabel#previewNavigationStatus {
+QToolButton#previewNavigationStatus {
     background: rgba(34, 39, 48, 215);
     border: 1px solid rgba(198, 207, 218, 120);
     border-radius: 5px;
@@ -2646,10 +2627,10 @@ QLabel#previewNavigationStatus {
     font-size: 9pt;
     font-weight: 650;
 }
-QLabel#previewNavigationStatus[state="disabled"] {
+QToolButton#previewNavigationStatus[state="disabled"] {
     color: #f2a39d;
 }
-QLabel#previewNavigationStatus[state="enabled"] {
+QToolButton#previewNavigationStatus[state="enabled"] {
     color: #8fddb5;
 }
 
@@ -2670,4 +2651,67 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: transparent;
+}
+
+QPushButton#removeSourceButton,
+QPushButton#supportSimulationCancelButton,
+QPushButton#presliceCancelButton,
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton {
+    color: #7d4141;
+    background: #faeeee;
+    border-color: #dfbcbc;
+    font-weight: 600;
+}
+
+QPushButton#removeSourceButton:hover,
+QPushButton#supportSimulationCancelButton:hover,
+QPushButton#presliceCancelButton:hover,
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:hover {
+    color: #713636;
+    background: #f4dddd;
+    border-color: #cc9d9d;
+}
+
+QPushButton#removeSourceButton:disabled,
+QPushButton#supportSimulationCancelButton:disabled,
+QPushButton#supportSimulationReloadButton:disabled,
+QPushButton#supportSimulationProceedButton:disabled,
+QPushButton#presliceCancelButton:disabled,
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:disabled {
+    color: #8995a0;
+    background: #edf0f2;
+    border-color: #d8dee3;
+}
+
+
+QPushButton#supportSimulationReloadButton {
+    color: #1769aa;
+    background: #edf4fb;
+    border-color: #bbd2e5;
+    font-weight: 600;
+}
+QPushButton#supportSimulationReloadButton:hover {
+    color: #12588f;
+    background: #dceaf7;
+    border-color: #98bbd7;
+}
+QPushButton#supportSimulationProceedButton {
+    color: #23704c;
+    background: #edf7f0;
+    border-color: #b9d8c5;
+    font-weight: 600;
+}
+QPushButton#supportSimulationProceedButton:hover {
+    color: #1b5e3f;
+    background: #dcefe3;
+    border-color: #97bfa7;
+}
+
+QFrame#previewActionControl[cancelAction="true"] {
+    background: #faeeee;
+    border-color: #dfbcbc;
+}
+QToolButton#previewNavigationStatus:hover {
+    background: rgba(57, 65, 78, 240);
+    border-color: #c4cdd8;
 }

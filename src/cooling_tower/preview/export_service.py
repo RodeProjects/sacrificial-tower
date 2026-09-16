@@ -145,6 +145,8 @@ class PreviewExportService:
             shutil.rmtree(destination, ignore_errors=True)
             raise
         return PreviewExportResult(
+            full_tower_infill_simulated=request.settings.simulate_full_tower_infill,
+            supports_simulated=bool(getattr(request.effective_profile, "supports_simulated", False)),
             output_mode=preview.output_mode,
             run_directory=destination.resolve(),
             output_path=output_path.resolve(),

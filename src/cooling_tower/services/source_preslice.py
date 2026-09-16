@@ -38,6 +38,9 @@ from cooling_tower.slicers import (
     assert_profile_copies_are_isolated,
 )
 from cooling_tower.slicers.profile_models import stable_json_fingerprint
+from cooling_tower.slicers.support_simulation import (
+    can_offer_support_simulation, with_simulated_supports,
+)
 from cooling_tower.slicers.profile_matching import metadata_values
 from cooling_tower.slicers.orca_profile_compatibility import (
     temporary_orca_machine_identity,
@@ -67,9 +70,11 @@ class SourcePreSliceError(RuntimeError):
         message: str,
         *,
         technical_details: str | None = None,
+        support_simulation_available: bool = False,
     ) -> None:
         super().__init__(message)
         self.technical_details = technical_details
+        self.support_simulation_available = support_simulation_available
 
 
 class SourcePreSliceCancelled(SourcePreSliceError):
@@ -85,6 +90,7 @@ class SourcePreSliceResult:
     metadata_verified: bool
     cache_hit: bool = False
     preview_source_data: PreviewSourceData | None = None
+    supports_simulated: bool = False
 
     def cleanup(self) -> None:
         _safe_cleanup_workspace(self.workspace_root)
@@ -127,6 +133,7 @@ class SourcePreSliceService:
         adapter: SlicerAdapter,
         cancellation_event: Event | None = None,
         progress_callback: PreSliceProgressCallback | None = None,
+        simulate_supports: bool = False,
     ) -> SourcePreSliceResult:
         notify = progress_callback or (lambda _percent, _status, _busy: None)
         cancelled = cancellation_event or Event()
@@ -151,6 +158,7 @@ class SourcePreSliceService:
                 profile_match=profile_match,
                 confirmation=confirmation,
                 adapter_version=PRESLICE_ADAPTER_VERSION,
+                simulate_supports=simulate_supports,
             )
             if self.cache is not None:
                 self.cache.assert_safe_location(
@@ -172,6 +180,7 @@ class SourcePreSliceService:
                     confirmation=confirmation,
                     cancellation_event=cancelled,
                     notify=notify,
+                    simulate_supports=simulate_supports,
                 )
 
         notify(5, "Slicer wird vorbereitet", False)
@@ -194,7 +203,8 @@ class SourcePreSliceService:
                     ),
                 ):
                     timing_profile, timing_overrides = build_calibration_profile(
-                        selected.effective_profile,
+                        (with_simulated_supports(selected.effective_profile)
+                         if simulate_supports else selected.effective_profile),
                         workspace / "timing_profile",
                         simulate_full_tower_infill=False,
                         resolved_profiles=selected.resolved_profiles,
@@ -234,6 +244,8 @@ class SourcePreSliceService:
                     slice_result.failure_reason
                     or "Der Slicer konnte keinen G-Code erzeugen.",
                     technical_details=self._slice_failure_details(slice_result),
+                    support_simulation_available=(not simulate_supports and
+                        can_offer_support_simulation(slice_result, selected.effective_profile)),
                 )
             notify(55, "Slicer-Ausgabe wird geprüft", False)
             gcode_path = self._validated_output_gcode(
@@ -311,6 +323,7 @@ class SourcePreSliceService:
                 workspace_root=workspace,
                 metadata_verified=True,
                 cache_hit=False,
+                supports_simulated=simulate_supports,
                 preview_source_data=preview_source_data,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError) as error:
@@ -513,6 +526,7 @@ class SourcePreSliceService:
         confirmation: ProfileConfirmation,
         cancellation_event: Event,
         notify: PreSliceProgressCallback,
+        simulate_supports: bool = False,
     ) -> SourcePreSliceResult:
         source = stl_validation.source_artifact
         workspace = self._create_workspace(profile_match, source.original_path)
@@ -594,6 +608,7 @@ class SourcePreSliceService:
                 metadata_verified=True,
                 cache_hit=True,
                 preview_source_data=preview_source_data,
+                supports_simulated=simulate_supports,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError):
             _safe_cleanup_workspace(workspace)
@@ -815,6 +830,7 @@ def build_preslice_cache_key(
     confirmation: ProfileConfirmation,
     adapter_version: int = PRESLICE_ADAPTER_VERSION,
     gcode_parser_version: int = ANALYSIS_PARSER_VERSION,
+    simulate_supports: bool = False,
 ) -> str:
     if (
         isinstance(adapter_version, bool)
@@ -854,6 +870,7 @@ def build_preslice_cache_key(
             ],
             "adapter_version": adapter_version,
             "gcode_parser_version": gcode_parser_version,
+            "simulate_supports": simulate_supports,
         }
     )
 

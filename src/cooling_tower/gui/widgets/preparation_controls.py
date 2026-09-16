@@ -237,6 +237,7 @@ class _PreparationState:
     profiles_loaded: bool
     profiles_confirmed: bool
     model_analyzed: bool
+    preslice_completed: bool = False
 
     @property
     def step1_completed(self) -> bool:
@@ -249,6 +250,7 @@ class _PreparationState:
                 self.slicer_detected,
                 self.profiles_loaded,
                 self.profiles_confirmed,
+                self.preslice_completed,
                 self.model_analyzed,
             )
         )
@@ -264,6 +266,7 @@ class _PreparationState:
             "slicer_detected": self.slicer_detected,
             "profiles_loaded": self.profiles_loaded,
             "profiles_confirmed": self.profiles_confirmed,
+            "preslice_completed": self.preslice_completed,
             "model_analyzed": self.model_analyzed,
         }
 

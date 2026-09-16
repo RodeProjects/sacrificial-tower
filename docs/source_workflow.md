@@ -32,6 +32,64 @@ mit demselben `GCodeAnalysisSnapshot`.
 
 ## STL-Prüfung
 
+Ein geschlossenes (manifold) Netz garantiert keine mit jedem Profil druckbare
+erste Schicht. Die Datei `input/Test-STL (manifold).stl` steht auf einer dünnen
+Spitze: bei Z=0,1 mm misst ihr Querschnitt nur etwa 0,50 × 0,29 mm. Mit dem
+Anycubic-Profil des gemeldeten Fehlers (0,4-mm-Düse, erste Linienbreite 0,5 mm,
+Elefantenfußkompensation 0,1 mm, Stützen aus) entsteht keine erste Druckbahn.
+Anycubic Slicer Next meldet dabei lediglich `Errors` und Exitcode `-100`.
+Die Fehleranzeige verweist deshalb auf Auflagefläche und Stützen, statt einen
+Windows-Absturz zu behaupten. Ein Kontrollslice mit Stützen war erfolgreich;
+auch die Testdatei mit abrupten Flächenänderungen läuft ohne Stützen durch.
+Die Anwendung fragt bei passenden Slicerfehlern in einem zentrierten Popup,
+ob der Pre-Slice mit simulierten Stützen wiederholt werden soll. Erst nach
+Zustimmung aktiviert sie Stützen in ihrer Profilkopie für diese STL; alle
+anderen Stützenparameter bleiben unverändert. Abbrechen belässt die
+fehlgeschlagene Analyse unverändert. Original-STL und Slicerprofile bleiben
+immer schreibgeschützt. Untersuchung: 16.09.2026.
+Der [Anycubic-Quellcode](https://github.com/ANYCUBIC-3D/AnycubicSlicerNext/blob/main/src/libslic3r/GCode.cpp)
+erklärt die Ablehnung einer ersten Schicht ohne Extrusion in
+`GCode::collect_layers_to_print`.
+
+### Zustimmung und Weitergabe simulierter Stützen
+
+`SourcePreSliceError.support_simulation_available` beschreibt ein mögliches
+Wiederherstellungsangebot, keine sichere Fehlerdiagnose. Es wird bei einem
+Hinweis auf eine leere erste Schicht oder Anycubics unspezifischem Slicingfehler
+`-100` angeboten, sofern Stützen noch deaktiviert sind. Abstürze, Zeitlimits,
+Abbrüche und ein bereits mit Simulation fehlgeschlagener Versuch lösen das
+Angebot nicht aus. Der vorhandene Thread wird vor dem erneuten Start freigegeben.
+Eine veraltete Zustimmung nach Quellen-/Profilwechsel oder beim Beenden wird verworfen.
+
+Alternativ lädt „Ich habe die Stützen selbst aktiviert und gespeichert“ den gesamten
+Profilkatalog des gewählten Slicers erneut von den Quelldateien. Die bisherigen
+Profile werden anhand ihrer Kennung und ihres Pfads wieder vorausgewählt,
+sofern vorhanden. Alte Bestätigungen und Fehlerhinweise werden verworfen;
+der Benutzer muss die frisch eingelesenen Profile erneut bestätigen, bevor
+ein weiterer Pre-Slice startet. Auch der Profilimport wartet auf die Freigabe
+des vorherigen Pre-Slice-Prozesses.
+
+Die Simulation ist auf den aktuellen Auftrag begrenzt und wird nicht als
+Benutzervoreinstellung gespeichert. Ihr Status gehört zum Pre-Slice-Cachekey
+und bleibt auch bei Cachetreffern im Ergebnis erhalten. Der Vorschauauftrag
+übernimmt ihn in `EffectiveProfile.supports_simulated` und seine Signatur.
+`build_calibration_profile` aktiviert dadurch Stützen auch in allen folgenden
+temporären Profilkopien und beim Erzeugen des gemeinsamen 3MF-Projekts.
+Die ursprüngliche Profilbestätigung und Überwachung der Quelldateien bleiben
+auf die unveränderten Originale bezogen. Beim Laden einer anderen Quelle
+oder Profilauswahl wird das Pre-Slice-Ergebnis einschließlich Simulation verworfen.
+
+Das abschließende Zusammenfassungsfenster und die Exportberichte kennzeichnen
+simulierte Stützen. Nur eine tatsächlich exportierte 3MF übernimmt deren
+Aktivierung automatisch. Bei STL-Import oder Verwendung eines anderen Projekts
+muss der Benutzer sie ggf. selbst aktivieren; das gilt ebenso für simulierte
+100-%-Turmfüllung. Eine fehlende 3MF wird im Hinweis ausdrücklich berücksichtigt.
+
+Das Zusammenfassungsfenster listet die im exportierten 3MF simulierten Eigenschaften
+einzeln in Grün (aktivierte Stützen und/oder 100-%-Turmfüllung). Grundlage ist der
+Exportauftrag, nicht der spätere Zustand der Einstellungsfelder. Ohne exportiertes
+3MF erscheint keine Liste automatisch übernommener Simulationseinstellungen.
+
 Die STL-Prüfung läuft lesend und abbrechbar in einem Hintergrundjob. Binäre und
 ASCII-STL werden ohne automatische Reparatur oder Normalisierung verarbeitet.
 Vor der Freigabe werden insbesondere geprüft:

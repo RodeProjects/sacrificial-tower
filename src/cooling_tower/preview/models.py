@@ -213,6 +213,7 @@ class PreviewRequest:
             "output_mode": self.output_mode.value,
             "slicer_identity_key": self.slicer_identity_key,
             "profile_fingerprint": self.profile_fingerprint,
+            "supports_simulated": bool(getattr(self.effective_profile, "supports_simulated", False)),
             "calibration": _json_value(asdict(self.calibration_config)),
             "maximum_object_segments": self.maximum_object_segments,
         }
@@ -311,6 +312,17 @@ class PreviewExportResult:
     primary_failure_reason: str | None = None
     target_layer_time_s: float | None = None
     calibration_time_tolerance_s: float = 0.2
+    supports_simulated: bool = False
+    full_tower_infill_simulated: bool = False
+
+    @property
+    def simulated_project_properties(self) -> tuple[str, ...]:
+        if self.project_path is None:
+            return ()
+        return tuple(label for enabled, label in (
+            (self.supports_simulated, "Aktivierte Stützen wurden simuliert"),
+            (self.full_tower_infill_simulated, "100%-Turmfüllung simuliert"),
+        ) if enabled)
 
     @property
     def technical_report_path(self) -> Path:

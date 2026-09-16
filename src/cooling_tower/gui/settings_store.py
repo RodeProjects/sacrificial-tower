@@ -81,6 +81,11 @@ def _generation_values(values: object) -> dict[str, Any]:
         if name not in migrated:
             continue
         value = migrated[name]
+        if name == "layer_time_tolerance_s" and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(float(value)) or not 0.01 <= value <= 3.0
+        ):
+            continue
         default = _GENERATION_DEFAULTS[name]
         if isinstance(default, bool):
             if isinstance(value, bool):
@@ -247,6 +252,37 @@ def _migrate_settings_9_to_10(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_10_to_11(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add the configurable layer-time tolerance in seconds."""
+    migrated = _nest_legacy_generation(payload)
+    generation = _generation_values(migrated["generation"])
+    generation.setdefault("layer_time_tolerance_s", 0.2)
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_11_to_12(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replace manual foot height with the geometry's layer-based policy."""
+    migrated = _nest_legacy_generation(payload)
+    migrated.pop("base_height_mm", None)
+    migrated["generation"].pop("base_height_mm", None)
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_12_to_13(payload: dict[str, Any]) -> dict[str, Any]:
+    """Restrict requested layer times while preserving valid user choices."""
+    migrated = _nest_legacy_generation(payload)
+    generation = migrated["generation"]
+    value = generation.get("target_layer_time_s", 9.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0.01:
+        value = 9.0
+    generation["target_layer_time_s"] = min(value, 30.0)
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -338,6 +374,9 @@ _USER_SETTINGS_MIGRATIONS = {
     7: _migrate_settings_7_to_8,
     8: _migrate_settings_8_to_9,
     9: _migrate_settings_9_to_10,
+    10: _migrate_settings_10_to_11,
+    11: _migrate_settings_11_to_12,
+    12: _migrate_settings_12_to_13,
 }
 
 

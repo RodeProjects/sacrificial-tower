@@ -57,7 +57,7 @@ DEFAULT_MINIMUM_RADIUS_HEIGHT_FACTOR = GENERATION_DEFAULTS["minimum_radius_heigh
 DEFAULT_MINIMUM_BASE_RADIUS_MM = GENERATION_DEFAULTS["minimum_base_radius_mm"]
 DEFAULT_BASE_HEIGHT_FACTOR = GENERATION_DEFAULTS["base_height_factor"]
 DEFAULT_BASE_MARGIN_MM = GENERATION_DEFAULTS["base_margin_mm"]
-DEFAULT_BASE_HEIGHT_MM = GENERATION_DEFAULTS["base_height_mm"]
+DEFAULT_BASE_HEIGHT_MM = 1.0  # Historical Phase-3 API only; solid feet use two layers.
 DEFAULT_MANUAL_BASE_WIDTH_MM = GENERATION_DEFAULTS["manual_base_width_mm"]
 DEFAULT_EXPANSION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
 DEFAULT_CONTRACTION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
@@ -207,15 +207,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    parser.add_argument(
-        "--base-height",
-        type=float,
-        default=DEFAULT_BASE_HEIGHT_MM,
-        help=(
-            "Base height in millimeters. "
-            f"Default: {DEFAULT_BASE_HEIGHT_MM}"
-        ),
-    )
+    parser.set_defaults(base_height=DEFAULT_BASE_HEIGHT_MM)
 
     parser.add_argument(
         "--manual-base-width",

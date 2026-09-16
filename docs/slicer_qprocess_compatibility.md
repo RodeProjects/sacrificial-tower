@@ -23,6 +23,15 @@ jeweils auf 1 MiB begrenzt. Bei Überschreitung bleibt der letzte relevante
 Teil im Ergebnis; die vollständigen Bytes werden in einer `.binlog`-Datei im
 Diagnoseverzeichnis archiviert.
 
+Negative Anwendungs-Exitcodes sind keine Windows-Abstürze. Insbesondere
+Anycubics `-100` (`0xFFFFFF9C`) bezeichnet einen Slicing-/Exportfehler.
+`windows_process_status` prüft auch das reservierte NTSTATUS-Bit 28;
+gewöhnliche negative Exitcodes fallen dadurch nicht in die Absturzdiagnose.
+Die Fehlerübersetzung normalisiert vorzeichenlose DWORD-Werte des alten
+Prozess-Backends und vorzeichenbehaftete QProcess-Werte auf dieselbe Meldung.
+Echte Windows-Fehler wie `0xC0000142` bleiben als solche erkennbar.
+Bitbelegung: [Microsoft NTSTATUS-Dokumentation](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/defining-new-ntstatus-values).
+
 ## Interne Freigabeschalter
 
 - `COOLING_TOWER_SLICER_PROCESS_BACKEND=qprocess|legacy` wählt den allgemeinen

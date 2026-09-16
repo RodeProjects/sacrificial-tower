@@ -77,7 +77,11 @@ def _generation_rule(
 
 SETTING_COMPATIBILITY_RULES = (
     _generation_rule(
-        "target_layer_time_s", "duration-seconds-v1", "float", minimum=0.01, maximum=120.0
+        "layer_time_tolerance_s", "layer-time-tolerance-seconds-v1", "float",
+        minimum=0.01, maximum=3.0,
+    ),
+    _generation_rule(
+        "target_layer_time_s", "duration-seconds-v1", "float", minimum=0.01, maximum=30.0
     ),
     _generation_rule(
         "safety_factor", "dimensionless-factor-v1", "float", minimum=1.0, maximum=10.0
@@ -103,10 +107,6 @@ SETTING_COMPATIBILITY_RULES = (
     ),
     _generation_rule(
         "minimum_base_radius_mm", "base-radius-mm-v1", "float",
-        group="generation.base-v1", minimum=0.0, maximum=500.0,
-    ),
-    _generation_rule(
-        "base_height_mm", "base-height-mm-v1", "float",
         group="generation.base-v1", minimum=0.0, maximum=500.0,
     ),
     _generation_rule(

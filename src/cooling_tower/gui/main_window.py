@@ -88,6 +88,8 @@ from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
 from cooling_tower.gui.stl_validation_worker import StlValidationWorker
 from cooling_tower.gui.source_preslice_worker import SourcePreSliceWorker
+from cooling_tower.gui.support_simulation_dialog import SupportSimulationDialog
+from cooling_tower.slicers.support_simulation import with_simulated_supports
 from cooling_tower.gui.support_report_dialog import SupportReportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
@@ -204,7 +206,7 @@ GENERATION_MAXIMUM_ITERATIONS = (
 )
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
-MAXIMUM_TARGET_LAYER_TIME_S = 120.0
+MAXIMUM_TARGET_LAYER_TIME_S = 30.0
 PREVIEW_ACTION_COMPACT_WIDTH_PX = 176
 EXPORT_ACTION_HORIZONTAL_PADDING_PX = 25
 ABOUT_DIALOG_MINIMUM_WIDTH_PX = 450
@@ -228,12 +230,12 @@ _PRESLICE_TIMEOUT_FORMAT = (
 _PRESLICE_ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
 SETTING_UNITS = {
     "target_layer_time_s": "s",
+    "layer_time_tolerance_s": "s",
     "safety_factor": "",
     "minimum_outer_diameter_mm": "mm",
     "maximum_outer_diameter_mm": "mm",
     "minimum_object_tower_distance_mm": "mm",
     "manual_base_width_mm": "mm",
-    "base_height_mm": "mm",
     "maximum_expansion_angle_deg": "°",
     "maximum_contraction_angle_deg": "°",
     "mesh_segments": "Segm.",
@@ -714,6 +716,10 @@ class MainWindow(QMainWindow):
         self.profile_preview_outdated = False
         self._stl_validation_request_id = 0
         self._preslice_request_id = 0
+        self._support_simulation_offer_id = None
+        self._support_simulation_dialog = None
+        self._pending_support_retry = None
+        self._pending_support_profile_reload = None
         self._preslice_runtime_request_id: int | None = None
         self._preslice_timeout_request_id: int | None = None
         self._preslice_cancel_requested = False
@@ -2024,13 +2030,14 @@ class MainWindow(QMainWindow):
             requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_requirement_rows: dict[str, tuple[QLabel, QLabel]] = {}
         source_requirement_texts = (
-            ("source_selected", "STL-Datei ausgewählt"),
+            ("source_selected", "STL-Datei erfolgreich übergeben"),
             ("source_validated", "STL-Geometrie erfolgreich geprüft"),
         )
         slicer_requirement_texts = (
             ("slicer_detected", "Verwendbarer Slicer erkannt"),
             ("profiles_loaded", "Zugehörige Profile geladen"),
             ("profiles_confirmed", "Slicer- und Profilauswahl bestätigt"),
+            ("preslice_completed", "Pre-Slice erfolgreich durchgeführt"),
             (
                 "model_analyzed",
                 "Modell mit bestätigten Profilen analysiert",
@@ -2323,6 +2330,7 @@ class MainWindow(QMainWindow):
             "targetLayerTime",
         )
         self.safety_factor_spin = self._double_spin(1.0, 10.0, 3, 0.05, "safetyFactor")
+        self.layer_time_tolerance_spin = self._double_spin(0.01, 3.0, 2, 0.01, "layerTimeTolerance")
         self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
@@ -2337,6 +2345,10 @@ class MainWindow(QMainWindow):
         )
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
+        )
+        self._add_numeric_setting(
+            timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
+            self.layer_time_tolerance_spin,
         )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
@@ -2364,13 +2376,13 @@ class MainWindow(QMainWindow):
         self._add_numeric_setting(
             geometry_layout,
             "minimum_outer_diameter_mm",
-            "Kleinster Außendurchmesser",
+            "Minimaler Turmdurchmesser",
             self.minimum_outer_spin,
         )
         self._add_numeric_setting(
             geometry_layout,
             "maximum_outer_diameter_mm",
-            "Größter Außendurchmesser",
+            "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
         self._add_numeric_setting(
@@ -2487,7 +2499,6 @@ class MainWindow(QMainWindow):
         self.minimum_base_spin = self._double_spin(
             0.0, 500.0, 3, 0.5, "minimumBaseRadius"
         )
-        self.base_height_spin = self._double_spin(0.0, 500.0, 3, 0.5, "baseHeight")
         self.base_margin_spin = self._double_spin(0.0, 500.0, 3, 0.5, "baseMargin")
         self.base_height_factor_spin = self._double_spin(
             0.0, 10.0, 4, 0.01, "baseHeightFactor"
@@ -2516,12 +2527,10 @@ class MainWindow(QMainWindow):
         # to the manual value row and can no longer overlap or sit above it.
         self.automatic_base_reset_button = manual_base_setting.reset_button
         stability_fields_layout.addWidget(self.automatic_base_width_label)
-        self.base_height_setting = self._add_numeric_setting(
-            stability_fields_layout,
-            "base_height_mm",
-            "Standfußhöhe",
-            self.base_height_spin,
-        )
+        base_height_hint = QLabel("Standfußhöhe: automatisch 2 Layer; anschließend bei Bedarf konkave Verjüngung.")
+        base_height_hint.setObjectName("calculatedHint")
+        base_height_hint.setWordWrap(True)
+        stability_fields_layout.addWidget(base_height_hint)
         stability_group.refresh_collapsed_state()
         self.content_layout.addWidget(stability_group)
 
@@ -2537,13 +2546,13 @@ class MainWindow(QMainWindow):
         self.maximum_expansion_angle_setting = self._add_numeric_setting(
             overhang_layout,
             "maximum_expansion_angle_deg",
-            "Maximaler Aufweitungswinkel zur Vertikalen",
+            "Maximaler Aufweitungswinkel",
             self.maximum_expansion_angle_spin,
         )
         self._add_numeric_setting(
             overhang_layout,
             "maximum_contraction_angle_deg",
-            "Maximaler Verjüngungswinkel zur Vertikalen",
+            "Maximaler Verjüngungswinkel",
             self.maximum_contraction_angle_spin,
         )
         overhang_group.refresh_collapsed_state()
@@ -2806,10 +2815,10 @@ class MainWindow(QMainWindow):
         )
         options_actions.addWidget(self.additional_options_close_button)
         options_layout.addLayout(options_actions)
-        # All geometry subsections remain grouped, but now follow one another
-        # in one column so the outer card can share the timing-card width.
+        # Timing and geometry share one collapsible card after preparation.
+        # Its grey subsections stay open and follow one another in one column.
         self.geometry_settings_group = SectionCard(
-            "Turmgeometrie",
+            "Turm-Einstellungen",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2821,6 +2830,9 @@ class MainWindow(QMainWindow):
             0, 0, 0, 0
         )
         geometry_group.setCheckable(False)
+        timing_group.setCheckable(False)
+        timing_group.setProperty("outerDropdown", False)
+        timing_group.setProperty("subsection", "single")
         stability_group.setCheckable(False)
         overhang_group.setCheckable(False)
         geometry_group.setProperty("subsection", "single")
@@ -2842,6 +2854,7 @@ class MainWindow(QMainWindow):
             overhang_group,
         ):
             self.content_layout.removeWidget(card)
+        self.geometry_split_layout.addWidget(timing_group)
         self.geometry_split_layout.addWidget(geometry_group)
         self.geometry_split_layout.addWidget(stability_group)
         self.geometry_split_layout.addWidget(overhang_group)
@@ -2860,7 +2873,6 @@ class MainWindow(QMainWindow):
         ready_left_layout.setContentsMargins(0, 0, 0, 0)
         ready_left_layout.setSpacing(METRICS.card_spacing_px)
         ready_left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        ready_left_layout.addWidget(timing_group)
         ready_left_layout.addWidget(self.geometry_settings_group)
         self.ready_grid.add_pair(
             self.ready_left_column,
@@ -3810,7 +3822,7 @@ class MainWindow(QMainWindow):
             metrics_frame.setObjectName("exportSuccessMetrics")
             metrics_layout = QVBoxLayout(metrics_frame)
             metrics_layout.setContentsMargins(14, 12, 14, 12)
-            metrics_layout.setSpacing(6)
+            metrics_layout.setSpacing(12)
             self.export_success_target_label = QLabel()
             self.export_success_target_label.setObjectName(
                 "exportSuccessMetric"
@@ -3828,13 +3840,30 @@ class MainWindow(QMainWindow):
             self.export_success_deviation_label.setWordWrap(True)
             metrics_layout.addWidget(self.export_success_achieved_label)
             metrics_layout.addWidget(self.export_success_deviation_label)
+            metrics_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
             layout.addWidget(metrics_frame)
+
+            self.export_success_simulation_frame = QFrame()
+            self.export_success_simulation_frame.setObjectName("exportSuccessUsage")
+            simulation_layout = QVBoxLayout(self.export_success_simulation_frame)
+            simulation_layout.setContentsMargins(14, 12, 14, 12)
+            simulation_layout.setSpacing(12)
+            simulation_title = QLabel("Simulierte Einstellungen")
+            simulation_title.setObjectName("exportSuccessUsageTitle")
+            self.export_success_simulation_label = QLabel()
+            self.export_success_simulation_label.setObjectName("exportSuccessUsageText")
+            self.export_success_simulation_label.setTextFormat(Qt.TextFormat.RichText)
+            self.export_success_simulation_label.setWordWrap(True)
+            simulation_layout.addWidget(simulation_title)
+            simulation_layout.addWidget(self.export_success_simulation_label)
+            layout.addWidget(self.export_success_simulation_frame)
+            self.export_success_simulation_frame.hide()
 
             usage_frame = QFrame()
             usage_frame.setObjectName("exportSuccessUsage")
             usage_layout = QVBoxLayout(usage_frame)
             usage_layout.setContentsMargins(14, 12, 14, 12)
-            usage_layout.setSpacing(6)
+            usage_layout.setSpacing(12)
             self.export_success_usage_title = QLabel(
                 "So können Sie die exportierten Dateien verwenden"
             )
@@ -3855,9 +3884,9 @@ class MainWindow(QMainWindow):
 
             self.export_success_check_hint = QLabel(
                 "<b>Wichtig:</b> Prüfen Sie die Layerzeit vor dem Druck noch einmal "
-                "im Slicer. Nachträgliche Änderungen im Slicer an Modell, "
-                "Turm, Anordnung oder Druckprofil können zu deutlich "
-                "größeren Abweichungen von der hier erreichten Layerzeit "
+                "im Slicer. Nachträgliche Änderungen im Slicer am Modell, "
+                "Turm, Anordnung oder Druckprofilen können zu "
+                "Abweichungen von der hier erreichten Layerzeit "
                 "führen."
             )
             self.export_success_check_hint.setObjectName(
@@ -3867,6 +3896,7 @@ class MainWindow(QMainWindow):
                 Qt.TextFormat.RichText
             )
             self.export_success_check_hint.setWordWrap(True)
+            self.export_success_check_hint.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
             layout.addWidget(self.export_success_check_hint)
 
             self.export_success_error_label = QLabel()
@@ -4032,6 +4062,7 @@ class MainWindow(QMainWindow):
         )
         return CalibrationConfig(
             mode=CalibrationMode.STL,
+            time_tolerance_s=self.layer_time_tolerance_spin.value(),
             maximum_iterations=GENERATION_MAXIMUM_ITERATIONS,
             object_clearance_mm=(
                 self.minimum_object_tower_distance_spin.value()
@@ -4117,6 +4148,8 @@ class MainWindow(QMainWindow):
                 "automatisch aufrufbaren Slicer mit vollständigen Profilen."
             )
         effective_profile = result.selected.effective_profile
+        if self.source_preslice_result is not None and getattr(self.source_preslice_result, "supports_simulated", False):
+            effective_profile = with_simulated_supports(effective_profile)
         adapter = self.slicer_service.adapter_for(result.execution_slicer)
         slicer_key = result.execution_slicer.identity_key
         profile_fingerprint = (
@@ -6267,7 +6300,7 @@ class MainWindow(QMainWindow):
         self._refresh_stl_availability()
         self._update_preparation_requirements()
 
-    def start_source_preslice(self) -> None:
+    def start_source_preslice(self, *, simulate_supports: bool = False) -> None:
         validation = self.stl_validation_result
         profile_match = self.profile_match_result
         confirmation = self.confirmed_profile_context
@@ -6323,7 +6356,9 @@ class MainWindow(QMainWindow):
             profile_match,
             confirmation,
             adapter,
+            simulate_supports=simulate_supports,
         )
+        worker.support_simulation_available.connect(self._on_support_simulation_available)
         worker.progress.connect(self._on_source_preslice_progress)
         worker.succeeded.connect(self._on_source_preslice_succeeded)
         worker.failed.connect(self._on_source_preslice_failed)
@@ -6461,6 +6496,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._preslice_request_id or self._closing:
             return
+        confirmation = self.confirmed_profile_context
         self.current_gcode_path = None
         self.analysis_snapshot = None
         self.prepared_analysis_source = None
@@ -6492,6 +6528,93 @@ class MainWindow(QMainWindow):
         self._reset_preslice_confirmation_for_retry(rendered)
         self._update_preparation_requirements()
         self.validate_form()
+        if self._support_simulation_offer_id == request_id and confirmation is not None:
+            self._show_support_simulation_dialog(request_id, confirmation)
+
+    @Slot(int)
+    def _on_support_simulation_available(self, request_id: int) -> None:
+        if request_id == self._preslice_request_id and not self._closing:
+            self._support_simulation_offer_id = request_id
+
+    def _show_support_simulation_dialog(self, request_id, confirmation) -> None:
+        if self._support_simulation_dialog is not None:
+            self._support_simulation_dialog.reject()
+            self._support_simulation_dialog.deleteLater()
+        dialog = SupportSimulationDialog(self)
+        self._support_simulation_dialog = dialog
+        source = self.source_artifact
+        match = self.profile_match_result
+
+        def accepted():
+            if (self._closing or request_id != self._preslice_request_id
+                    or source != self.source_artifact or match is not self.profile_match_result):
+                return
+            self._pending_support_retry = (request_id, confirmation, match)
+            self._start_pending_support_retry()
+
+        def reload_profiles():
+            if (self._closing or request_id != self._preslice_request_id
+                    or source != self.source_artifact or match is not self.profile_match_result):
+                return
+            profile = match.selected
+            selected = {
+                role: ProfileSelectionReference(record.profile_id, record.path)
+                for role in ("machine", "filament", "process")
+                if (record := getattr(profile, role)) is not None
+            }
+            self._discard_source_preslice("Profile werden erneut eingelesen")
+            self.profile_catalog_confirmation = None
+            self.confirmed_profile_context = None
+            self._workflow_error_message = None
+            self._analysis_failed = False
+            self.profile_match_result = None
+            self.workflow.begin_profile_matching()
+            self.profile_confirm_button.setEnabled(False)
+            self._set_profile_notice()
+            self.profile_diagnostics.clear()
+            self._set_main_status("Profile werden erneut eingelesen", icon="⌛", state="running")
+            self._set_slicer_progress(0, "Profile werden erneut eingelesen …", icon="⌛", state="running")
+            self._pending_support_profile_reload = (self._preslice_request_id, source, selected)
+            self._start_pending_support_retry()
+            self.validate_form()
+
+        dialog.accepted.connect(accepted)
+        dialog.reload_profiles_requested.connect(reload_profiles)
+        self._show_internal_dialog_without_flash(dialog, self._resize_support_simulation_dialog)
+
+    def _resize_support_simulation_dialog(self) -> None:
+        dialog = self._support_simulation_dialog
+        if dialog is None or not dialog.isVisible():
+            return
+        screen = dialog.screen() or self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            dialog.resize(min(640, available.width() - 40), min(571, available.height() - 40))
+        self._place_dialog_centered(dialog)
+
+    def _start_pending_support_retry(self) -> None:
+        reload_pending = self._pending_support_profile_reload
+        if reload_pending is not None and not self.background_job_manager.has_active(JobKind.PRESLICE):
+            self._pending_support_profile_reload = None
+            request_id, source, selected = reload_pending
+            if (not self._closing and request_id == self._preslice_request_id
+                    and source == self.source_artifact):
+                self.start_profile_catalog_loading(
+                    force_inventory=True, selected_profile_ids=selected,
+                    restore_remembered_profiles=False, match_source_after_loading=False,
+                )
+        pending = self._pending_support_retry
+        if pending is None or self.background_job_manager.has_active(JobKind.PRESLICE):
+            return
+        self._pending_support_retry = None
+        request_id, confirmation, match = pending
+        if (self._closing or request_id != self._preslice_request_id
+                or self.profile_match_result is not match or self.source_artifact is None
+                or not confirmation.matches_source(self.source_artifact)):
+            return
+        self.profile_match_result = replace(match, user_confirmed=True, requires_confirmation=False)
+        self.confirmed_profile_context = confirmation
+        self.start_source_preslice(simulate_supports=True)
 
     @Slot(int)
     def _on_source_preslice_cancelled(self, request_id: int) -> None:
@@ -6565,6 +6688,11 @@ class MainWindow(QMainWindow):
             result.cleanup()
 
     def _discard_source_preslice(self, reason: str) -> None:
+        self._pending_support_retry = None
+        self._pending_support_profile_reload = None
+        self._support_simulation_offer_id = None
+        if self._support_simulation_dialog is not None:
+            self._support_simulation_dialog.reject()
         if not hasattr(self, "background_job_manager"):
             return
         self._stop_preslice_runtime_watchdog()
@@ -6640,6 +6768,8 @@ class MainWindow(QMainWindow):
         """React only after the manager has observed the native thread end."""
 
         finished_kind = job.kind
+        if finished_kind == JobKind.PRESLICE:
+            self._start_pending_support_retry()
 
         if self._closing:
             return
@@ -6804,6 +6934,7 @@ class MainWindow(QMainWindow):
         self.geometry_split.setMinimumHeight(0)
         self.geometry_split.setMaximumHeight(16777215)
         for subsection in (
+            self.timing_group,
             self.geometry_group,
             self.stability_group,
             self.overhang_group,
@@ -6811,6 +6942,7 @@ class MainWindow(QMainWindow):
         ):
             subsection.setMinimumHeight(0)
             subsection.setMaximumHeight(16777215)
+        self.timing_group.content_layout.setContentsMargins(20, 10, 20, 10)
         self.geometry_fields_layout.setContentsMargins(20, 10, 20, 10)
         self.stability_fields_layout.setContentsMargins(20, 10, 20, 10)
         self.overhang_fields_layout.setContentsMargins(20, 10, 20, 10)
@@ -6818,6 +6950,7 @@ class MainWindow(QMainWindow):
             20, 4, 20, 10
         )
         for nested_layout in (
+            self.timing_group.content_layout,
             self.geometry_fields_layout,
             self.stability_fields_layout,
             self.overhang_fields_layout,
@@ -7533,6 +7666,14 @@ class MainWindow(QMainWindow):
             slicer_detected=slicer_detected,
             profiles_loaded=profiles_loaded,
             profiles_confirmed=profiles_confirmed,
+            preslice_completed=bool(
+                profiles_confirmed
+                and self.source_preslice_result is not None
+                and self.prepared_analysis_source is not None
+                and source_confirmation is not None
+                and self.source_artifact is not None
+                and source_confirmation.matches_source(self.source_artifact)
+            ),
             model_analyzed=model_analyzed,
         )
 
@@ -7557,6 +7698,7 @@ class MainWindow(QMainWindow):
                 "slicer_detected",
                 "profiles_loaded",
                 "profiles_confirmed",
+                "preslice_completed",
                 "model_analyzed",
             ):
                 progress_requirements[key] = False
@@ -7584,6 +7726,7 @@ class MainWindow(QMainWindow):
                 "slicer_detected",
                 "profiles_loaded",
                 "profiles_confirmed",
+                "preslice_completed",
                 "model_analyzed",
             ),
         )
@@ -8527,6 +8670,7 @@ class MainWindow(QMainWindow):
     def _on_full_infill_changed(self, _checked: bool) -> None:
         if self._closing:
             return
+        self.maximum_contraction_angle_spin.setEnabled(not _checked)
         self._last_changed_setting_name = "simulate_full_tower_infill"
         self._pending_reset_setting_name = None
         self._feasibility_request_id += 1
@@ -9451,8 +9595,8 @@ class MainWindow(QMainWindow):
             {
                 "target_layer_time_s": ("Ziel-Layerzeit",),
                 "safety_factor": ("Sicherheitsfaktor",),
-                "minimum_outer_diameter_mm": ("Kleinster Außendurchmesser",),
-                "maximum_outer_diameter_mm": ("Größter Außendurchmesser",),
+                "minimum_outer_diameter_mm": ("Minimaler Turmdurchmesser",),
+                "maximum_outer_diameter_mm": ("Maximaler Turmdurchmesser",),
                 "manual_base_width_mm": ("Manuelle Standfußbreite",),
                 "maximum_expansion_angle_deg": ("Aufweitungswinkel",),
                 "maximum_contraction_angle_deg": ("Verjüngungswinkel",),
@@ -9614,8 +9758,6 @@ class MainWindow(QMainWindow):
             return "Die automatische Standfußbreite wieder aktivieren."
         if trigger == "manual_base_width_mm":
             return "Die zuletzt geänderte manuelle Standfußbreite erhöhen."
-        if trigger == "base_height_mm":
-            return "Die zuletzt geänderte Standfußhöhe erhöhen."
         if trigger == "maximum_expansion_angle_deg":
             if (
                 required_values
@@ -9775,7 +9917,7 @@ class MainWindow(QMainWindow):
             target_value = float(target)
             achieved_value = float(achieved)
             difference = achieved_value - target_value
-            within_tolerance = abs(difference) <= tolerance
+            within_tolerance = abs(difference) <= tolerance + 1e-9
             self.export_success_target_label.clear()
             self.export_success_achieved_label.setText(
                 "Erreichte Layerzeit: "
@@ -9784,20 +9926,10 @@ class MainWindow(QMainWindow):
             )
             deviation_text = (
                 "Abweichung: "
-                f"{self._format_export_seconds(difference, signed=True)}\n"
+                f"{self._format_export_seconds(difference, signed=True)} "
+                f"({'innerhalb' if within_tolerance else 'außerhalb'} der Toleranz "
+                f"von ±{self._format_export_number(tolerance)} Sekunden)"
             )
-            if within_tolerance:
-                deviation_text += (
-                    "innerhalb der Toleranz von "
-                    f"±{self._format_export_number(tolerance)} Sekunden"
-                )
-            else:
-                outside_tolerance = abs(difference) - tolerance
-                deviation_text += (
-                    f"{self._format_export_number(outside_tolerance)} "
-                    "Sekunden außerhalb der Toleranz von "
-                    f"±{self._format_export_number(tolerance)} Sekunden"
-                )
             self.export_success_deviation_label.setText(deviation_text)
             self.export_success_deviation_label.setProperty(
                 "status",
@@ -9814,7 +9946,7 @@ class MainWindow(QMainWindow):
             self.export_success_deviation_label.setProperty(
                 "status", "unknown"
             )
-        if self.full_infill_checkbox.isChecked():
+        if getattr(result, "full_tower_infill_simulated", False):
             manual_infill = (
                 "Stellen Sie für die Turm-STL objektspezifisch 100 % "
                 "Fülldichte ein. Das Druckobjekt behält seine eigene Füllung."
@@ -9833,15 +9965,27 @@ class MainWindow(QMainWindow):
                 "Falls der Exportordner zusätzlich eine .3MF-Datei enthält, "
                 "können Sie diese alternativ öffnen."
             )
+        simulated_properties = getattr(result, "simulated_project_properties", ())
+        simulation_hint = ""
+        if simulated_properties:
+            simulation_hint = (
+                '<ul style="color:#23704c; -qt-list-indent:0; margin-left:20px; margin-top:0; margin-bottom:12px">'
+                + ''.join(f'<li><b>{escape(label)}</b></li>' for label in simulated_properties)
+                + '</ul><p style="margin:0">Diese Einstellungen sind <b>in der exportierten 3MF aktiviert</b>. '
+                'In anderen Projekten oder beim STL-Import müssen sie ggf. selbst aktiviert werden. '
+                'Originalprofile bleiben unverändert.</p>'
+            )
+        self.export_success_simulation_label.setText(simulation_hint)
+        self.export_success_simulation_frame.setVisible(bool(simulated_properties))
         self.export_success_usage_label.setText(
-            "<b>1. Turm-STL manuell zum Druckobjekt hinzufügen</b><br>"
+            '<p style="margin:0 0 12px 0"><b>1. Turm-STL manuell zum Druckobjekt hinzufügen</b><br>'
             "Importieren Sie die exportierte Turm-STL zusammen mit Ihrem "
             "Druckobjekt auf dieselbe Druckplatte. "
-            f"{escape(manual_infill)}<br><br>"
-            "<b>2. Optional die vorbereitete .3MF-Datei verwenden</b><br>"
+            f"{escape(manual_infill)}</p>"
+            '<p style="margin:0"><b>2. Optional die vorbereitete .3MF-Datei verwenden</b><br>'
             f"{project_intro} Sie enthält Druckobjekt und Kühlturm bereits "
             "gemeinsam angeordnet und übernimmt die beim Export gewählte "
-            "Turmfüllung."
+            "Turmfüllung.</p>"
         )
         self._refresh_widget_style(self.export_success_deviation_label)
         self.export_success_error_label.clear()
@@ -9880,7 +10024,7 @@ class MainWindow(QMainWindow):
         dialog.setFixedWidth(target_width)
         dialog.layout().invalidate()
         dialog.layout().activate()
-        dialog.setFixedHeight(dialog.sizeHint().height())
+        dialog.setFixedHeight(max(dialog.minimumSizeHint().height(), dialog.layout().totalHeightForWidth(target_width)))
         self._place_dialog_centered(dialog)
 
     def _open_export_directory_from_success_dialog(self) -> None:
@@ -10073,6 +10217,7 @@ class MainWindow(QMainWindow):
         dialog.move(target_frame.topLeft())
 
     def _resize_visible_optional_dialogs(self) -> None:
+        self._resize_support_simulation_dialog()
         if self._about_dialog is not None and self._about_dialog.isVisible():
             self._resize_about_to_content()
         if (
@@ -10229,6 +10374,7 @@ class MainWindow(QMainWindow):
     def collect_settings(self) -> GenerationSettings:
         return GenerationSettings(
             target_layer_time_s=self.target_time_spin.value(),
+            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
             safety_factor=self.safety_factor_spin.value(),
             minimum_outer_diameter_mm=self.minimum_outer_spin.value(),
             maximum_outer_diameter_mm=self.maximum_outer_spin.value(),
@@ -10239,7 +10385,6 @@ class MainWindow(QMainWindow):
                 self.full_infill_checkbox.isChecked()
             ),
             minimum_base_radius_mm=self.minimum_base_spin.value(),
-            base_height_mm=self.base_height_spin.value(),
             base_margin_mm=self.base_margin_spin.value(),
             base_height_factor=self.base_height_factor_spin.value(),
             automatic_base_width=self.automatic_base_checkbox.isChecked(),
@@ -10263,6 +10408,7 @@ class MainWindow(QMainWindow):
     def apply_settings(self, settings: GenerationSettings) -> None:
         values = (
             (self.target_time_spin, settings.target_layer_time_s),
+            (self.layer_time_tolerance_spin, settings.layer_time_tolerance_s),
             (self.safety_factor_spin, settings.safety_factor),
             (self.minimum_outer_spin, settings.minimum_outer_diameter_mm),
             (self.maximum_outer_spin, settings.maximum_outer_diameter_mm),
@@ -10272,7 +10418,6 @@ class MainWindow(QMainWindow):
             ),
             (self.minimum_base_spin, settings.minimum_base_radius_mm),
             (self.manual_base_width_spin, settings.manual_base_width_mm),
-            (self.base_height_spin, settings.base_height_mm),
             (self.base_margin_spin, settings.base_margin_mm),
             (self.base_height_factor_spin, settings.base_height_factor),
             (
@@ -10310,6 +10455,7 @@ class MainWindow(QMainWindow):
             settings.simulate_full_tower_infill
         )
         self.full_infill_checkbox.blockSignals(False)
+        self.maximum_contraction_angle_spin.setEnabled(not settings.simulate_full_tower_infill)
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
         )
@@ -10342,34 +10488,14 @@ class MainWindow(QMainWindow):
 
         if not hasattr(self, "timing_group"):
             return
-        self.timing_group.set_summary(
-            f"Ziel {_de_number(self.target_time_spin.value())} s · "
-            f"Sicherheitsfaktor {_de_number(self.safety_factor_spin.value())}"
-        )
-        self.geometry_group.set_summary(
-            f"Außendurchmesser {_de_number(self.minimum_outer_spin.value())}–"
-            f"{_de_number(self.maximum_outer_spin.value())} mm · "
-            f"{'100 % Füllung simuliert' if self.full_infill_checkbox.isChecked() else 'Profilfüllung'}"
-        )
-        base_mode = (
-            "Standfuß automatisch"
-            if self.automatic_base_checkbox.isChecked()
-            else f"Standfuß {_de_number(self.manual_base_width_spin.value())} mm"
-        )
-        self.stability_group.set_summary(
-            f"{base_mode} · Höhe "
-            f"{_de_number(self.base_height_spin.value())} mm"
-        )
-        self.overhang_group.set_summary(
-            "Winkel "
-            f"{_de_number(self.maximum_expansion_angle_spin.value(), 1)}/"
-            f"{_de_number(self.maximum_contraction_angle_spin.value(), 1)}°"
-        )
-        self.geometry_settings_group.set_summary(
-            f"Durchmesser {_de_number(self.minimum_outer_spin.value())}–"
-            f"{_de_number(self.maximum_outer_spin.value())} mm · {base_mode} · "
-            f"{self.mesh_segments_spin.value()} Segmente"
-        )
+        for group in (
+            self.timing_group,
+            self.geometry_group,
+            self.stability_group,
+            self.overhang_group,
+            self.geometry_settings_group,
+        ):
+            group.set_summary("")
         output_text = self.output_root_edit.text().strip()
         manual_base_modified = (
             abs(
@@ -10475,6 +10601,8 @@ class MainWindow(QMainWindow):
         for name, setting in self._setting_widgets.items():
             if not hasattr(settings, name):
                 continue
+            if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+                continue
             value = float(getattr(settings, name))
             minimum = setting.editor.property("validationMinimum")
             maximum = setting.editor.property("validationMaximum")
@@ -10505,6 +10633,8 @@ class MainWindow(QMainWindow):
                     f"{f' {SETTING_UNITS.get(name)}' if SETTING_UNITS.get(name) else ''}.",
                 )
         for name in self._incomplete_setting_names:
+            if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+                continue
             setting = self._setting_widgets.get(name)
             message = (
                 setting.invalid_input_message()
@@ -10555,7 +10685,7 @@ class MainWindow(QMainWindow):
         ):
             add_error(
                 ("minimum_outer_diameter_mm",),
-                "Kleinster Außendurchmesser muss größer als 0 sein.",
+                "Minimaler Turmdurchmesser muss größer als 0 sein.",
                 (
                     "Einen kleinsten Außendurchmesser größer als 0 mm eingeben.",
                     "Den Standardwert wiederherstellen.",
@@ -10613,7 +10743,8 @@ class MainWindow(QMainWindow):
                 ),
             )
         if (
-            "maximum_contraction_angle_deg" not in range_invalid_names
+            not settings.simulate_full_tower_infill
+            and "maximum_contraction_angle_deg" not in range_invalid_names
             and not 0.0 < settings.maximum_contraction_angle_deg < 90.0
         ):
             add_error(
@@ -10825,17 +10956,19 @@ class MainWindow(QMainWindow):
         sections = (
             (
                 self.timing_group,
-                {"target_layer_time_s", "safety_factor"},
+                {"target_layer_time_s", "safety_factor", "layer_time_tolerance_s"},
             ),
             (
                 self.geometry_settings_group,
                 {
+                    "target_layer_time_s",
+                    "safety_factor",
+                    "layer_time_tolerance_s",
                     "minimum_outer_diameter_mm",
                     "maximum_outer_diameter_mm",
                     "minimum_object_tower_distance_mm",
                     "automatic_base_width",
                     "manual_base_width_mm",
-                    "base_height_mm",
                     "maximum_expansion_angle_deg",
                     "maximum_contraction_angle_deg",
                     "mesh_segments",
@@ -11458,6 +11591,11 @@ class MainWindow(QMainWindow):
             "Letzter Export" if compact else "Letzten Export öffnen"
         )
         self.reset_button.setText("Standardwerte wiederherstellen")
+        cancelling = self.preview_state is PreviewState.BUILDING
+        for widget in (self.preview_action_control, self.preview_button):
+            if widget.property("cancelAction") != cancelling:
+                widget.setProperty("cancelAction", cancelling)
+                self._refresh_widget_style(widget)
         if self.preview_state is PreviewState.BUILDING:
             self.preview_button.setText(
                 "Abbruch wird ausgeführt …"
@@ -11594,6 +11732,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self._closing = True
+        self._pending_support_retry = None
+        self._pending_support_profile_reload = None
+        if self._support_simulation_dialog is not None:
+            self._support_simulation_dialog.reject()
         self._pending_slicer_discovery = None
         self._pending_profile_match = None
         self._feasibility_timer.stop()

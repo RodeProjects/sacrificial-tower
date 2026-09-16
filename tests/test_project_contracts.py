@@ -29,7 +29,8 @@ class ProjectContractTests(unittest.TestCase):
     def test_current_domain_and_cli_defaults_agree(self):
         self.assertEqual(GenerationSettings().to_dict(), dict(GENERATION_DEFAULTS))
         args = build_argument_parser().parse_args(["--gcode", "example.gcode"])
-        self.assertEqual(args.base_height, GENERATION_DEFAULTS["base_height_mm"])
+        self.assertNotIn("base_height_mm", GENERATION_DEFAULTS)
+        self.assertNotIn("--base-height ", build_argument_parser().format_help())
         self.assertEqual(args.minimum_diameter, GENERATION_DEFAULTS["minimum_outer_diameter_mm"])
         self.assertEqual(args.maximum_diameter, GENERATION_DEFAULTS["maximum_outer_diameter_mm"])
         self.assertIsNone(args.target_time)  # Deliberate CLI analysis-only default.

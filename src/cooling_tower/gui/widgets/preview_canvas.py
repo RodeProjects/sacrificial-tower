@@ -17,7 +17,7 @@ from PySide6.QtGui import (
     QResizeEvent,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QLabel, QToolButton, QWidget
+from PySide6.QtWidgets import QToolButton, QWidget
 
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene
 
@@ -103,11 +103,11 @@ class PreviewCanvas(QWidget):
         self.navigation_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.navigation_toggle.toggled.connect(self.set_navigation_enabled)
         self.navigation_toggle.hide()
-        self.navigation_status_label = QLabel(self)
+        self.navigation_status_label = QToolButton(self)
         self.navigation_status_label.setObjectName("previewNavigationStatus")
-        self.navigation_status_label.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
+        self.navigation_status_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.navigation_status_label.clicked.connect(
+            lambda: self.set_navigation_enabled(not self.navigation_enabled)
         )
         self.navigation_status_label.setMinimumHeight(30)
         self.navigation_status_label.hide()
@@ -178,6 +178,8 @@ class PreviewCanvas(QWidget):
         self.navigation_toggle.setAccessibleName(accessible_name)
         self.navigation_toggle.setAccessibleDescription(hint)
         self.navigation_status_label.setText(status_text)
+        self.navigation_status_label.setToolTip(hint)
+        self.navigation_status_label.setAccessibleName(accessible_name)
         self.navigation_status_label.setProperty("state", status_state)
         style = self.navigation_toggle.style()
         style.unpolish(self.navigation_toggle)
@@ -273,7 +275,9 @@ class PreviewCanvas(QWidget):
             self._emit_camera()
 
     def front_view(self) -> None:
-        self.yaw_deg = 0.0
+        # The side view follows the object/tower placement. Its front view
+        # must therefore be orthogonal to that same reference direction.
+        self.yaw_deg = self._side_by_side_yaw_deg() - 90.0
         self.pitch_deg = 0.0
         self.fit_objects(emit=False)
         self._emit_camera()

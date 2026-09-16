@@ -17,8 +17,8 @@ gewöhnlichen Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen
 | OFFEN | `provider_postal_address` | Ladungsfähige Anschrift: Straße, Hausnummer, PLZ, Ort, Land | `legal/privacy.md`, `legal/terms.md` |
 | OFFEN | `provider_additional_details` | Rechtsform, Vertretung, Register und USt-ID, soweit einschlägig; andernfalls ausdrücklich nicht einschlägig | `legal/terms.md` |
 | OFFEN | `support_retention_policy` | Tatsächliche Löschfristen und eingesetzte Support-/Maildienstleister | `legal/privacy.md` |
-| OFFEN | `commercial_terms` | Vertriebs-/Nutzungsmodell sowie konkrete Support- und Updatezusagen | `legal/terms.md` |
-| OFFEN | `release_legal_review` | Datierte Freigabe mit Nachweisen: Rechtstexte, LGPL-Quell-/Binärzuordnung, Build-Tool-Lizenzberechtigung samt Runtime-Redistribution und CRA-Einordnung | `legal/privacy.md`, `legal/terms.md`, `legal/third_party.md` |
+| OFFEN | `commercial_terms` | Vertriebs-/Nutzungsmodell sowie konkrete Support- und Updatezusagen | Freigabeprozess |
+| OFFEN | `release_legal_review` | Datierte Freigabe mit Nachweisen: Rechtstexte, LGPL-Quell-/Binärzuordnung, Build-Tool-Lizenzberechtigung samt Runtime-Redistribution und CRA-Einordnung | Freigabeprozess |
 
 Wenn alle Einträge erledigt sind und die Prüfung erfolgreich ist, sind sämtliche
 hier registrierten Daten eingepflegt. Das bestätigt die Vollständigkeit der

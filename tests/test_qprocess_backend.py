@@ -78,6 +78,8 @@ class QProcessBackendTests(unittest.TestCase):
                     "elif mode == 'error':",
                     "    print('failure', file=sys.stderr)",
                     "    raise SystemExit(7)",
+                    "elif mode == 'slicing-error':",
+                    "    raise SystemExit(-100)",
                     "elif mode == 'invalid':",
                     "    sys.stdout.buffer.write(b'valid\\xfftail')",
                     "    sys.stdout.flush()",
@@ -162,6 +164,17 @@ class QProcessBackendTests(unittest.TestCase):
                     legacy.stderr.replace("\r\n", "\n"),
                     qprocess.stderr.replace("\r\n", "\n"),
                 )
+
+    @unittest.skipUnless(os.name == "nt", "Signed Windows application exits")
+    def test_slicing_error_is_not_reported_as_a_windows_crash(self) -> None:
+        for runner in (SecureSlicerProcessRunner(), QProcessSlicerProcessRunner()):
+            with self.subTest(backend=runner.backend_name):
+                outcome = self.run_backend(runner, "slicing-error")
+                self.assertEqual(outcome.return_code & 0xFFFFFFFF, 0xFFFFFF9C)
+                self.assertFalse(outcome.crashed, outcome)
+                reason = BaseSlicerAdapter._failure_reason(outcome, ())
+                self.assertIn("erste Schicht", reason)
+                self.assertNotIn("abgestürzt", reason)
 
     def test_timeout_and_cross_thread_cancel_finish_before_return(self) -> None:
         timeout = self.run_backend(

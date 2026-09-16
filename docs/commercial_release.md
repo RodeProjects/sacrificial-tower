@@ -26,6 +26,26 @@ Widerruf und steuerliche Angaben passend zu Kundengruppe und Vertriebsweg zu
 definieren. Eine EULA oder ein Haftungshinweis ersetzt diese Entscheidungen nicht.
 Die Entwürfe erhalten zwingende Rechte und LGPL-Rechte ausdrücklich.
 
+### Straffung der sichtbaren Rechtstexte am 15.09.2026
+
+Interne Freigabeaufgaben und noch zu bestimmende Verkaufsbedingungen gehören
+in diesen Freigabeprozess und die zentrale Platzhaltercheckliste. Sie werden
+nicht mehr als Bestandteil der aktuellen Nutzungsbedingungen, Datenschutzhinweise
+oder Drittanbieter-Lizenzen angezeigt. `commercial_terms` und
+`release_legal_review` bleiben verpflichtende Felder der Vertriebsprüfung.
+Fehlende tatsächliche Anbieter- und Datenschutzangaben bleiben sichtbar markiert.
+
+Die ausführliche Qt-Austauschanleitung bleibt einmalig in
+`legal/source_build_notes.md`. Der sichtbare Drittanbietertext erklärt kurz die
+LGPL-Rechte und verweist auf diese Datei, die Quellarchive und Lizenztexte.
+Das richtet sich an Empfänger, die Bibliotheken ändern oder ersetzen möchten;
+für normale Anwender ist kein Austausch erforderlich. Die Anleitung komplett
+zu entfernen wäre angesichts der LGPL-Austauschrechte nicht empfehlenswert.
+Geprüft anhand der [Qt-Lizenzübersicht](https://doc.qt.io/qt-6/licensing.html),
+der [Qt-Erläuterung zu LGPL-Pflichten](https://www.qt.io/development/open-source-lgpl-obligations)
+und der mitgelieferten LGPLv3, insbesondere Abschnitt 4. Keine Lizenztexte oder
+Attributionen wurden gekürzt; Abhängigkeiten und Distribution bleiben unverändert.
+
 ## LGPL-Distribution
 
 Qt/PySide bleiben dynamisch austauschbar. Das Paket enthält LGPL/GPL-Texte,

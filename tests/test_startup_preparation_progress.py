@@ -267,9 +267,9 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window._update_preparation_requirements()
             self.assertEqual(
                 window.preparation_step_selectors[1].progress_value,
-                50,
+                40,
             )
-            self.assertEqual(window.preparation_progress_bar.value(), 67)
+            self.assertEqual(window.preparation_progress_bar.value(), 57)
 
             self.assertEqual(
                 {

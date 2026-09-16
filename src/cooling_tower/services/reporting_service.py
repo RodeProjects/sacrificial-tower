@@ -128,8 +128,6 @@ def format_generation_report(result: GenerationResult) -> str:
             if report.original_model_height_mm is not None
             else "Ursprüngliche Modellhöhe: -",
             f"Eingesparte Turmhöhe: {report.saved_tower_height_mm:.3f} mm",
-            "Synthetischer Abschlusslayer: "
-            f"{'Ja' if report.synthetic_final_layer_used else 'Nein'}",
             f"STL: {report.stl_path}",
             f"Laufordner: {report.run_directory}",
         )

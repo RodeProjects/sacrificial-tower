@@ -193,7 +193,45 @@ Windows-Sitzungen benötigen eine gesonderte Integrationsprüfung.
 
 Aktuelle Standardwerte für neu erzeugte Konfigurationen stehen ausschließlich in
 `config/default_settings.json`; GUI, Modellkonstruktor und CLI verwenden sie.
-Der CLI-Standfuß ist dadurch wie im Produkt 1 mm hoch. Historische Migrationen
+Historische Migrationen
 behalten ihre damaligen expliziten Werte. Gespeichertes Format, stabile Kennungen
-und Einheiten wurden dabei nicht verändert; die Schema-Version bleibt 10.
+und Einheiten wurden bei dieser Vereinheitlichung nicht verändert (Schema 10).
 Ohne `--target-time` bleibt die CLI bewusst im Analysemodus.
+
+## Schema 11: einstellbare Layerzeit-Toleranz
+
+Die Migration 10→11 ergänzt `generation.layer_time_tolerance_s` mit 0,2 Sekunden.
+Die Einstellung akzeptiert endliche Zahlen von 0,01 bis 3 Sekunden; ungültige
+gespeicherte Werte fallen auf den Standard zurück. Vor der Migration wird das
+Original gesichert, der neue Stand atomar geschrieben. Frühere Migrationsschritte
+bleiben erhalten. Die stabile Kennung `generation.layer_time_tolerance_s` verwendet
+den Einheitentoken `layer-time-tolerance-seconds-v1`; Downgrade-Übernahmen mit
+anderen Einheiten, ungültigen Typen oder außerhalb des Zielbereichs werden verworfen.
+
+Unter „Kühlzeit und Qualität“ gilt die Toleranz symmetrisch um die Ziel-Layerzeit.
+Sie wird an die Kalibrierung übergeben und gehört zur Vorschau-Signatur. Der Export
+behält die beim Generieren verwendete Toleranz für seine farbige Abweichungsanzeige.
+
+## Schema 12: automatische Standfußhöhe
+
+11→12 entfernt `generation.base_height_mm` und dessen Kompatibilitätskennung.
+Die Sicherung vor der atomaren Migration erhält den alten Wert. Neu gespeicherte
+Konfigurationen enthalten keine manuelle Fußhöhe; auch eine Downgrade-Übernahme
+kann diese entfernte Einstellung nicht erneut aktivieren. Eine interne Python-
+Kompatibilitätseigenschaft bleibt für historische Hohlprofil-Berechnungen erhalten,
+hat aber keinen Einfluss auf die aktive Vollkörpergeometrie. Deren Regeln stehen
+in [Turmgeometrie](tower_geometry.md#automatischer-standfuß).
+
+## Schema 13: Ziel-Layerzeit und neue Standardwerte
+
+12→13 begrenzt gespeicherte Ziel-Layerzeiten auf 30 Sekunden; ungültige Typen,
+nicht endliche Zahlen und Werte unter 0,01 Sekunden werden durch 9 Sekunden
+ersetzt. Die bestehende Sicherung und atomare Speicherung bleiben aktiv.
+Gültige Benutzerwerte bleiben erhalten. Downgrade-Übernahmen prüfen den neuen
+Bereich von 0,01 bis 30 Sekunden und verwerfen inkompatible Werte.
+
+Neue Einstellungen und Zurücksetzen verwenden zentral aus
+`config/default_settings.json`: Ziel-Layerzeit 9 s, Toleranz ±0,25 s,
+minimaler Turmdurchmesser 5 mm, Verjüngungswinkel 55°, Objektabstand 15 mm und
+Zeit-Sicherheitsfaktor 1,0.
+Historische Migrationen behalten ihre damaligen Standardwerte.

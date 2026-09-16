@@ -546,9 +546,10 @@ class PreviewService:
                     object_layer_count=int(
                         getattr(request.snapshot, "layer_count")
                     ),
-                    tower_layer_count=len(
-                        tuple(getattr(profile, "layers", ()))
-                    ),
+                    tower_layer_count=int(getattr(
+                        profile, "printable_layer_count",
+                        len(tuple(getattr(profile, "layers", ()))),
+                    )),
                 ),
                 artifact_path=artifact.resolve(),
                 source_sha256=final_sha256,

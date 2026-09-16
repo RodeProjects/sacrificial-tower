@@ -11,7 +11,6 @@ from cooling_tower.models import (
 
 
 TIME_EPSILON_S = 1e-6
-Z_EPSILON_MM = 1e-9
 
 
 def assess_tower_need(
@@ -64,22 +63,13 @@ def assess_tower_need(
     last_position = deficit_positions[-1]
     first_layer = snapshot.layers[first_position]
     last_layer = snapshot.layers[last_position]
-    next_position = last_position + 1
-    synthetic = next_position >= len(snapshot.layers)
-
-    if synthetic:
-        end_position = last_position
-        end_layer_index = last_layer.index + 1
-        end_z = last_layer.z_mm + _synthetic_layer_height(
-            snapshot.layers
-        )
-        tower_layer_count = len(snapshot.layers)
-    else:
-        end_position = next_position
-        end_layer = snapshot.layers[end_position]
-        end_layer_index = end_layer.index
-        end_z = end_layer.z_mm
-        tower_layer_count = end_position + 1
+    # One sufficient top surface alone is not a useful early termination.
+    end_position = (len(snapshot.layers) - 1
+                    if last_position >= len(snapshot.layers) - 2 else last_position)
+    end_layer = snapshot.layers[end_position]
+    end_layer_index = end_layer.index
+    end_z = end_layer.z_mm
+    tower_layer_count = end_position + 1
 
     return TowerNeedAssessment(
         tower_required=True,
@@ -95,7 +85,7 @@ def assess_tower_need(
         tower_end_z_mm=end_z,
         tower_layer_count=tower_layer_count,
         maximum_time_deficit_s=max(deficits),
-        synthetic_final_layer_used=synthetic,
+        synthetic_final_layer_used=False,
         original_model_height_mm=model_height,
         saved_tower_height_mm=max(0.0, model_height - end_z),
         layer_time_deficits_s=deficits,
@@ -109,19 +99,3 @@ def layers_for_tower(
     if not assessment.tower_required:
         return ()
     return snapshot.layers[: assessment.tower_layer_count]
-
-
-def _synthetic_layer_height(
-    layers: tuple[LayerRecord, ...],
-) -> float:
-    last = layers[-1]
-    if last.height_mm > Z_EPSILON_MM:
-        return last.height_mm
-    if len(layers) > 1:
-        difference = last.z_mm - layers[-2].z_mm
-        if difference > Z_EPSILON_MM:
-            return difference
-    raise ValueError(
-        "The final critical layer has no usable height for its synthetic "
-        "closing layer."
-    )

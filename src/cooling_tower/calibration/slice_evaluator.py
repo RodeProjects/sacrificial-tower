@@ -15,6 +15,7 @@ from cooling_tower.slicers.orca_profile_compatibility import (
     harmonize_temporary_orca_profile_compatibility,
 )
 from cooling_tower.slicers.profile_models import ResolvedProfile
+from cooling_tower.slicers.support_simulation import SUPPORT_KEYS
 
 
 FULL_INFILL_OVERRIDES_BY_ADAPTER: Mapping[
@@ -47,6 +48,9 @@ def build_calibration_profile(
         "bambu_studio",
     }
     applied: dict[str, object] = {}
+    if profile.supports_simulated:
+        key = SUPPORT_KEYS[profile.installation.adapter_id]
+        values[key] = applied[key] = "1"
     if simulate_full_tower_infill:
         overrides = FULL_INFILL_OVERRIDES_BY_ADAPTER.get(
             profile.installation.adapter_id

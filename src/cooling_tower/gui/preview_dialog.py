@@ -306,13 +306,8 @@ class PreviewDialog(QDialog):
 
     def set_preview(self, result: PreviewResult) -> None:
         self.state = PreviewState.CURRENT
-        first_scene = self.canvas.scene is None
-        self.canvas.set_scene(
-            result.scene,
-            preserve_view=not first_scene,
-        )
-        if first_scene:
-            self.canvas.side_view()
+        self.canvas.set_scene(result.scene)
+        self.canvas.side_view()
         self.state_label.setText("✓ Vorschau ist aktuell")
         self.state_label.setProperty("state", "current")
         self.state_label.show()

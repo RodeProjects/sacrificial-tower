@@ -221,7 +221,7 @@ class HollowProfileTests(unittest.TestCase):
         )
         profile = build_hollow_tower_profile(
             phase2_profile(required, z),
-            settings(maximum_radius_change_per_mm_z=1.0),
+            settings(maximum_radius_change_per_mm_z=1.0, maximum_contraction_angle_deg=50.0),
         )
         radii = [layer.outer_radius_mm for layer in profile.layers]
         # Phase 10 limits the maximum derivative inside each quintic segment,

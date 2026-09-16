@@ -230,8 +230,8 @@ class SplineMathematicsTests(unittest.TestCase):
 
 
 class Phase10ProfileTests(unittest.TestCase):
-    def test_15_default_minimum_outer_radius_is_five_mm(self) -> None:
-        self.assertEqual(GenerationSettings().minimum_outer_radius_mm, 5.0)
+    def test_15_default_minimum_outer_radius_is_two_and_a_half_mm(self) -> None:
+        self.assertEqual(GenerationSettings().minimum_outer_radius_mm, 2.5)
         self.assertEqual(GenerationSettings().base_height_mm, 1.0)
 
     def test_16_automatic_base_width_has_twenty_mm_minimum(self) -> None:
@@ -462,9 +462,9 @@ class Phase10OutputAndMeshTests(unittest.TestCase):
             tower_end_z_mm=41.0,
         )
 
-    def test_32_shortened_profile_has_requested_final_cap_height(self) -> None:
-        self.assertAlmostEqual(self.profile.points[-1].z_mm, 41.0)
-        self.assertEqual(self.profile.points[-1].profile_region, "final_cap")
+    def test_32_profile_does_not_extend_above_last_object_layer(self) -> None:
+        self.assertAlmostEqual(self.profile.points[-1].z_mm, 40.0)
+        self.assertNotEqual(self.profile.points[-1].profile_region, "final_cap")
 
     def test_33_adaptive_mesh_is_hollow_and_watertight(self) -> None:
         mesh = generate_hollow_tower_mesh(
@@ -529,7 +529,7 @@ class Phase10OutputAndMeshTests(unittest.TestCase):
             self.assertTrue(window.automatic_base_checkbox.isChecked())
             self.assertFalse(window.manual_base_width_spin.isEnabled())
             self.assertEqual(window.maximum_expansion_angle_spin.value(), 50.0)
-            self.assertEqual(window.maximum_contraction_angle_spin.value(), 50.0)
+            self.assertEqual(window.maximum_contraction_angle_spin.value(), 55.0)
             window.close()
         application.processEvents()
 

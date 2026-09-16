@@ -5,32 +5,23 @@ Python, NumPy, trimesh, truststore, cryptography und weitere separat dokumentier
 Komponenten unter ihren jeweiligen Lizenzen. Die proprietäre Lizenz der Anwendung
 ersetzt diese Lizenzen nicht.
 
-Die mitgelieferten vollständigen Lizenztexte liegen im Unterordner „licenses“
-dieses Rechtsverzeichnisses. Der Buildnachweis nennt konkrete Versionen und
-Datei-Hashes. Quellmaterial und Lizenzpflichten der tatsächlich eingebundenen
-Unterkomponenten werden im Release-Nachweis geprüft.
+Die vollständigen Lizenztexte und Urheberrechtshinweise der mitgelieferten
+Komponenten liegen im Unterordner „licenses“ dieses Rechtsverzeichnisses.
+Die jeweiligen Lizenzen bestimmen die Nutzungs- und Weitergaberechte.
 
-## Qt/PySide6 austauschen
+## Qt/PySide6 und Shiboken (LGPLv3)
 
-Die Windows-Anwendung verwendet dynamische Bibliotheken im Verzeichnis
-_internal/PySide6 und _internal/shiboken6. Eine Sicherung der Installation anlegen,
-das Programm schließen und die betroffenen Bibliotheken durch ABI-kompatible
-eigene Builds derselben Versionsreihe ersetzen. Python-ABI, Architektur (x64),
-Qt-Plugins und zugehörige Bindings müssen zusammenpassen. Anschließend die lokale
-Kopie starten und insbesondere Fenster, Dateiauswahl, SVG-Icons und Slicer-Aufrufe
-prüfen. Es gibt keine Integritätsprüfung, die ausgetauschte Qt-Bibliotheken beim
-Programmstart zurückweist. Ein Programmupdate kann eigene Änderungen ersetzen;
-für eine bearbeitete Kopie lässt sich die automatische Updateprüfung deaktivieren.
+Diese Bibliotheken werden dynamisch eingebunden. Sie dürfen entsprechend der
+LGPLv3 geändert und durch kompatible Versionen ersetzt werden. Das hierfür
+erforderliche Reverse Engineering zur Fehlerbehebung an solchen Änderungen ist
+zulässig. Ein Austausch ist für die normale Benutzung der Anwendung nicht nötig.
 
-Änderungen an diesen Bibliotheken und das hierfür erforderliche Reverse Engineering
-zur Fehlerbehebung sind erlaubt. Die zugehörigen LGPL-/GPL-Lizenztexte beschreiben
-die Rechte vollständig. Der Quellcode der eigenen Anwendung muss allein aufgrund
-der zulässigen LGPL-Nutzung nicht offengelegt werden.
+Die LGPLv3 und die zugehörige GPLv3 liegen unter „licenses/Qt“. Quellarchive
+befinden sich im mitgelieferten Ordner „sources“. Technische Hinweise für Nutzer,
+die Bibliotheken selbst ändern möchten, stehen in „source_build_notes.md“ im
+selben Rechtsverzeichnis.
 
-Die Bereitstellung des korrespondierenden Bibliotheksquellcodes samt erforderlichen
-Buildinformationen wird vor öffentlicher Distribution im Release-Nachweis verifiziert.
-Ein bloßer Verweis auf eine allgemeine Hersteller-Startseite genügt diesem Prozess
-nicht. Noch offene Freigabe: {{release_legal_review}}.
+## Externe Slicer
 
 Slicer werden nicht mitgeliefert. Die separat installierten Programme unterliegen
 den Bedingungen ihrer jeweiligen Anbieter. Die Verwendung ihrer Produktnamen

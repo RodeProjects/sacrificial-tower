@@ -46,6 +46,13 @@ from cooling_tower.windows_process import (
 _VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,4})(?!\d)")
 
 _SLICER_RETURN_CODE_EXPLANATIONS = {
+    -100: (
+        "Der Slicer konnte mit dieser Modell-/Profilkombination keinen "
+        "G-Code erzeugen. Prüfe insbesondere, ob die erste Schicht eine "
+        "druckbare Auflagefläche hat und ob Stützen erforderlich sind. "
+        "Auch eine geschlossene (manifold) STL kann auf einer zu dünnen "
+        "Spitze stehen."
+    ),
     -50: (
         "Der Slicer hat die Modellgeometrie abgelehnt und konnte daraus "
         "keinen zuverlässig verarbeitbaren G-Code erzeugen."
@@ -932,9 +939,14 @@ class BaseSlicerAdapter:
                 "abgestürzt."
             )
         if outcome.return_code != 0:
+            # subprocess can expose DWORD exits as unsigned values, whereas
+            # QProcess uses signed int. Keep both backends' messages identical.
+            return_code = outcome.return_code
+            if return_code is not None and 0x80000000 <= return_code <= 0xFFFFFFFF:
+                return_code -= 0x100000000
             return (
                 output_explanation
-                or _SLICER_RETURN_CODE_EXPLANATIONS.get(outcome.return_code)
+                or _SLICER_RETURN_CODE_EXPLANATIONS.get(return_code)
                 or (
                     "Der Slicer hat den Auftrag wegen eines internen oder "
                     "nicht näher beschriebenen Verarbeitungsfehlers "
