@@ -1999,7 +1999,11 @@ QComboBox[important="true"][hovered="true"]::drop-down {
 
 /* ---------- Schaltflächen ---------- */
 QPushButton {
-    background: #f5f8fb;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #fafcfd,
+        stop: 1 #e8eef3
+    );
     border: 1px solid #bdcad5;
     border-radius: 7px;
     padding: 7px 13px;
@@ -2007,8 +2011,21 @@ QPushButton {
     color: #21384f;
 }
 
-QPushButton:hover { background: #eaf1f7; border-color: #92a9bd; }
-QPushButton:pressed { background: #dde8f1; }
+QPushButton:hover {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #f1f6fa,
+        stop: 1 #dce7f0
+    );
+    border-color: #92a9bd;
+}
+QPushButton:pressed {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #dce6ee,
+        stop: 1 #cfdce6
+    );
+}
 QPushButton:disabled { color: #8995a0; background: #edf0f2; border-color: #d8dee3; }
 
 QPushButton#sourcePrimaryActionButton,
@@ -2207,32 +2224,84 @@ QPushButton#primaryButton {
 QPushButton#primaryButton:hover { background: #105b93; }
 QPushButton#primaryButton:disabled { background: #9eb6c8; border-color: #91aabd; }
 
+QPushButton#exportButton {
+    color: #ffffff;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #35a66c,
+        stop: 1 #247f52
+    );
+    border-color: #1f7048;
+    font-weight: 700;
+    padding: 7px 25px;
+}
+
+QPushButton#exportButton:hover {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #40b477,
+        stop: 1 #298b5a
+    );
+    border-color: #195d3c;
+}
+
+QPushButton#exportButton:pressed {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #2d945f,
+        stop: 1 #1f7048
+    );
+}
+
+QPushButton#exportButton:disabled {
+    color: #8995a0;
+    background: #edf0f2;
+    border-color: #d8dee3;
+}
+
 QPushButton#previewButton {
     color: #ffffff;
-    background: #1769aa;
-    border-color: #105784;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #2f7fb7,
+        stop: 1 #1769aa
+    );
+    border-color: #145b91;
     font-weight: 650;
 }
 
 QPushButton#previewButton:hover {
-    background: #105b93;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #3b8bc1,
+        stop: 1 #1d75b7
+    );
+    border-color: #104e7d;
 }
 
 QFrame#previewActionControl {
-    background: #1769aa;
-    border: 1px solid #105784;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #2f7fb7,
+        stop: 1 #1769aa
+    );
+    border: 1px solid #145b91;
     border-radius: 7px;
 }
 
 QFrame#previewActionControl QPushButton#previewButton {
     color: #ffffff;
-    background: #1769aa;
+    background: transparent;
     border: none;
     border-radius: 6px;
 }
 
 QFrame#previewActionControl QPushButton#previewButton:hover {
-    background: #105b93;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #3b8bc1,
+        stop: 1 #1d75b7
+    );
 }
 
 QFrame#previewActionControl QPushButton#previewButton:pressed {
@@ -2653,10 +2722,46 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: transparent;
 }
 
+QFrame#previewActionControl[cancelAction="true"] {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #c95d5d,
+        stop: 1 #a83f3f
+    );
+    border-color: #913535;
+}
+
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton {
+    color: #ffffff;
+    background: transparent;
+    border: none;
+    font-weight: 650;
+}
+
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:hover {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #d66a6a,
+        stop: 1 #b64949
+    );
+}
+
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:pressed {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #b94e4e,
+        stop: 1 #913535
+    );
+}
+
+QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:disabled {
+    color: #ffffff;
+    background: transparent;
+}
+
 QPushButton#removeSourceButton,
 QPushButton#supportSimulationCancelButton,
-QPushButton#presliceCancelButton,
-QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton {
+QPushButton#presliceCancelButton {
     color: #7d4141;
     background: #faeeee;
     border-color: #dfbcbc;
@@ -2665,8 +2770,7 @@ QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton {
 
 QPushButton#removeSourceButton:hover,
 QPushButton#supportSimulationCancelButton:hover,
-QPushButton#presliceCancelButton:hover,
-QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:hover {
+QPushButton#presliceCancelButton:hover {
     color: #713636;
     background: #f4dddd;
     border-color: #cc9d9d;
@@ -2676,8 +2780,7 @@ QPushButton#removeSourceButton:disabled,
 QPushButton#supportSimulationCancelButton:disabled,
 QPushButton#supportSimulationReloadButton:disabled,
 QPushButton#supportSimulationProceedButton:disabled,
-QPushButton#presliceCancelButton:disabled,
-QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton:disabled {
+QPushButton#presliceCancelButton:disabled {
     color: #8995a0;
     background: #edf0f2;
     border-color: #d8dee3;
@@ -2707,10 +2810,6 @@ QPushButton#supportSimulationProceedButton:hover {
     border-color: #97bfa7;
 }
 
-QFrame#previewActionControl[cancelAction="true"] {
-    background: #faeeee;
-    border-color: #dfbcbc;
-}
 QToolButton#previewNavigationStatus:hover {
     background: rgba(57, 65, 78, 240);
     border-color: #c4cdd8;

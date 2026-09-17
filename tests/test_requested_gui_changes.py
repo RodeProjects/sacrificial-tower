@@ -229,6 +229,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window.export_success_achieved_label.text(),
                 "Erreichte Layerzeit: 14,9 von 15 Sekunden",
             )
+            self.assertEqual(
+                window.export_success_achieved_label.parentWidget().layout().spacing(),
+                0,
+            )
             self.assertIn(
                 "innerhalb der Toleranz von ±0,2 Sekunden",
                 window.export_success_deviation_label.text(),
@@ -251,7 +255,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertIn(".3MF-Datei", usage)
             self.assertNotIn("druckprojekt.3mf", usage)
             self.assertIn("Druckobjekt und Kühlturm", usage)
-            self.assertIn("gewählte Turmfüllung", usage)
+            self.assertIn("inklusive aller simulierten Einstellungen", usage)
             self.assertIn(
                 "<b>Wichtig:</b>",
                 window.export_success_check_hint.text(),

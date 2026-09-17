@@ -180,6 +180,14 @@ Die maschinenlesbare Fassung befindet sich in
 - Die Vorschau nennt Breite und Tiefe der verwendeten Druckplatte.
 - Ein rechtsbündiger Button „Kühlturm exportieren“ verwendet denselben
   Exportzustand wie die Hauptansicht.
+- „Kühlturm exportieren“ verwendet den grünen Verlauf des aktiven
+  „Fertig“-Buttons. Generieren und Aktualisieren verwenden den blauen Verlauf
+  des „Zurück“-Buttons; „Generierung abbrechen“ bleibt als roter Verlauf
+  hervorgehoben.
+- Der zuletzt erfolgreich exportierte Generierungsstand kann innerhalb der
+  laufenden Sitzung nicht erneut exportiert werden. Nach einem abweichenden
+  erfolgreichen Export darf ein früherer identischer Stand erneut exportiert
+  werden; beim Neustart beginnt die Sperre ebenfalls leer.
 - Beim ersten Öffnen steht das Fenster nach Möglichkeit rechts neben dem
   Hauptfenster; andernfalls gibt das Hauptfenster Bildschirmfläche frei.
 
@@ -197,6 +205,10 @@ Die maschinenlesbare Fassung befindet sich in
 
 - Die erzeugte STL-Datei, der Kurzbericht und der technische Bericht sind
   verständlich erreichbar.
+- Der Dialog verwendet „Schließen“ statt „Abbrechen“. Sein Inhalt bleibt als
+  letzter Exportbericht für die laufende Sitzung erhalten und kann über den
+  nur dann sichtbaren Button „Letzten Exportbericht öffnen“ ohne erneuten
+  Export wieder angezeigt werden. Ein neuer erfolgreicher Export ersetzt ihn.
 - Die Ausgabe wird nicht als unstrukturierter technischer Textblock dargestellt.
 - Der gelbe Hinweisbereich wächst mit seinem Inhalt, bleibt bei kurzem Text
   kompakt und scrollt nur bei tatsächlich langen Hinweisen.
@@ -212,6 +224,9 @@ Die maschinenlesbare Fassung befindet sich in
   durch eine senkrechte Linie optisch voneinander getrennt.
 - Eingabefelder, Reset-Buttons und Spinbox-Pfeile überlappen nicht.
 - Hauptaktionen werden bei schmaler Breite nicht abgeschnitten.
+- Der Button für den letzten Exportbericht steht direkt rechts neben
+  „Letzten Export öffnen“, bricht vor „öffnen“ kontrolliert auf zwei Zeilen um
+  und bleibt an den responsiven Haltepunkten vollständig lesbar.
 - Beschriftungen stehen links, gleich große Editoren und Reset-Schaltflächen
   rechts.
 - Zusatzinformationen erhalten nach dem nur bedarfsgroßen Überschriftentext

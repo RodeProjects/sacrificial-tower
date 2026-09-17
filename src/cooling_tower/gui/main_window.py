@@ -749,6 +749,10 @@ class MainWindow(QMainWindow):
         self._export_request_id = 0
         self._bambu_multinozzle_tower_only_export_active = False
         self.last_export_result: PreviewExportResult | None = None
+        # Session-only state: exported generations must not create duplicate
+        # timestamped folders, while their confirmation remains reopenable.
+        self._last_exported_preview_signature: str | None = None
+        self._last_export_report_result: PreviewExportResult | None = None
         self._latest_export_directory: Path | None = None
         self._latest_export_root_text: str | None = None
         self._latest_export_unavailable_reason = "Kein Exportordner gefunden."
@@ -2933,7 +2937,7 @@ class MainWindow(QMainWindow):
             self._on_generation_button_clicked
         )
         self.export_button = QPushButton("Kühlturm exportieren")
-        self.export_button.setObjectName("primaryButton")
+        self.export_button.setObjectName("exportButton")
         self.export_button.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
@@ -3062,13 +3066,18 @@ class MainWindow(QMainWindow):
             Qt.WidgetAttribute.WA_AlwaysShowToolTips,
             True,
         )
-        self.open_run_button = QPushButton("Letzten Kurzbericht öffnen")
+        self.open_run_button = QPushButton("Letzten Exportbericht\nöffnen")
+        self.open_run_button.setObjectName("openExportReportButton")
+        self.open_run_button.setAccessibleName(
+            "Letzten Exportbericht öffnen"
+        )
+        self.last_export_report_button = self.open_run_button
         self.open_output_button.setEnabled(False)
         self.open_stl_button.setEnabled(False)
-        self.open_run_button.setEnabled(False)
+        self._refresh_last_export_report_action()
         self.open_output_button.clicked.connect(self.open_output_directory)
         self.open_stl_button.clicked.connect(self.open_stl_directory)
-        self.open_run_button.clicked.connect(self.open_run_directory)
+        self.open_run_button.clicked.connect(self.show_last_export_report)
         self.open_run_button.hide()
 
         self.preview_action_control = QFrame()
@@ -3099,20 +3108,25 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignBottom,
         )
         main_actions.addWidget(
+            self.open_run_button,
+            0,
+            2,
+            Qt.AlignmentFlag.AlignBottom,
+        )
+        main_actions.addWidget(
             self.preview_action_control,
             0,
-            3,
+            4,
             Qt.AlignmentFlag.AlignBottom,
         )
         main_actions.addWidget(
             self.export_button,
             0,
-            4,
+            5,
             Qt.AlignmentFlag.AlignBottom,
         )
-        main_actions.addWidget(self.open_run_button, 0, 5)
-        main_actions.setColumnStretch(2, 1)
-        for column in (0, 1, 3, 4, 5):
+        main_actions.setColumnStretch(3, 1)
+        for column in (0, 1, 2, 4, 5):
             main_actions.setColumnStretch(column, 0)
 
         self.workflow.stage_changed.connect(self._on_workflow_stage_changed)
@@ -3822,7 +3836,7 @@ class MainWindow(QMainWindow):
             metrics_frame.setObjectName("exportSuccessMetrics")
             metrics_layout = QVBoxLayout(metrics_frame)
             metrics_layout.setContentsMargins(14, 12, 14, 12)
-            metrics_layout.setSpacing(12)
+            metrics_layout.setSpacing(0)
             self.export_success_target_label = QLabel()
             self.export_success_target_label.setObjectName(
                 "exportSuccessMetric"
@@ -3911,7 +3925,7 @@ class MainWindow(QMainWindow):
             actions.setContentsMargins(0, 2, 0, 0)
             actions.setSpacing(8)
             actions.addStretch(1)
-            self.export_success_cancel_button = QPushButton("Abbrechen")
+            self.export_success_cancel_button = QPushButton("Schließen")
             self.export_success_cancel_button.clicked.connect(dialog.reject)
             actions.addWidget(self.export_success_cancel_button)
             self.export_success_open_button = QPushButton(
@@ -4257,6 +4271,14 @@ class MainWindow(QMainWindow):
             export_reason = (
                 "Bitte zuerst einen aktuellen Kühlturm generieren."
             )
+        if (
+            export_reason is None
+            and preview_is_current
+            and self._current_preview_was_exported()
+        ):
+            export_reason = (
+                "Dieser Generierungsstand wurde bereits exportiert."
+            )
         self._set_export_button_state(
             export_reason is None,
             export_reason,
@@ -4283,6 +4305,16 @@ class MainWindow(QMainWindow):
             )
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
+
+    def _current_preview_was_exported(self) -> bool:
+        """Return whether the exact current generation was exported this session."""
+
+        signature = getattr(self.current_preview, "request_signature", None)
+        return bool(
+            isinstance(signature, str)
+            and signature
+            and signature == self._last_exported_preview_signature
+        )
 
     def _export_block_reason(
         self,
@@ -8583,7 +8615,7 @@ class MainWindow(QMainWindow):
         self._refresh_issue_panels()
         self.validation_label.clear()
         self._refresh_folder_action_states()
-        self.open_run_button.setEnabled(False)
+        self._refresh_last_export_report_action()
         self.preview_hint_label.setProperty("state", "current")
         self.preview_hint_label.setText(
             "Beim Export wird der Kühlturm immer mit den aktuellen "
@@ -8760,7 +8792,7 @@ class MainWindow(QMainWindow):
         self.warning_text.hide()
         self._refresh_issue_panels()
         self._refresh_folder_action_states()
-        self.open_run_button.setEnabled(False)
+        self._refresh_last_export_report_action()
         self.validation_label.clear()
         self._show_reconstructed_configuration(None)
         self._refresh_prediction()
@@ -9984,8 +10016,8 @@ class MainWindow(QMainWindow):
             f"{escape(manual_infill)}</p>"
             '<p style="margin:0"><b>2. Optional die vorbereitete .3MF-Datei verwenden</b><br>'
             f"{project_intro} Sie enthält Druckobjekt und Kühlturm bereits "
-            "gemeinsam angeordnet und übernimmt die beim Export gewählte "
-            "Turmfüllung.</p>"
+            "gemeinsam angeordnet inklusive aller simulierten "
+            "Einstellungen.</p>"
         )
         self._refresh_widget_style(self.export_success_deviation_label)
         self.export_success_error_label.clear()
@@ -11345,6 +11377,9 @@ class MainWindow(QMainWindow):
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self.result_label.setText(german_user_message(error))
             return
+        if request.signature() == self._last_exported_preview_signature:
+            self._refresh_phase17_actions()
+            return
         preview = self.current_preview
         if not (
             preview is not None
@@ -11418,6 +11453,10 @@ class MainWindow(QMainWindow):
         if request_id != self._export_request_id or self._closing:
             return
         self.last_export_result = result
+        self._last_export_report_result = result
+        self._last_exported_preview_signature = getattr(
+            self.current_preview, "request_signature", None
+        )
         self._latest_export_directory = result.output_path.parent.resolve()
         self._latest_export_root_text = self.output_root_edit.text().strip()
         self._latest_export_unavailable_reason = ""
@@ -11441,10 +11480,11 @@ class MainWindow(QMainWindow):
         self.result_label.setToolTip(str(result.output_path))
         self._update_responsive_action_labels()
         self._refresh_folder_action_states()
-        self.open_run_button.setEnabled(True)
+        self._refresh_last_export_report_action()
         self._clear_result_notices()
         self._save_user_settings()
         self._bambu_multinozzle_tower_only_export_active = False
+        self._refresh_phase17_actions()
         self._show_export_success_dialog(result)
 
     @Slot(int, str, str)
@@ -11520,6 +11560,24 @@ class MainWindow(QMainWindow):
     def open_run_directory(self) -> None:
         if self.last_export_result is not None:
             open_path(self.last_export_result.user_report_path)
+
+    def show_last_export_report(self) -> None:
+        """Reopen the latest successful export confirmation without exporting."""
+
+        result = self._last_export_report_result
+        if result is None:
+            return
+        self._show_export_success_dialog(result)
+
+    def _refresh_last_export_report_action(self) -> None:
+        if not hasattr(self, "open_run_button"):
+            return
+        available = self._last_export_report_result is not None
+        self.open_run_button.setVisible(available)
+        self.open_run_button.setEnabled(
+            available
+            and not self.background_job_manager.has_active(JobKind.EXPORT)
+        )
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -11651,6 +11709,7 @@ class MainWindow(QMainWindow):
             if latest_export_available
             else self._latest_export_unavailable_reason
         )
+        self._refresh_last_export_report_action()
 
     def _has_non_default_settings(self) -> bool:
         if self.collect_settings() != self.settings_store.load_defaults():

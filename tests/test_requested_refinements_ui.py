@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from cooling_tower.gui.main_window import MainWindow
@@ -81,25 +80,28 @@ class RequestedRefinementsUiTests(unittest.TestCase):
         self.assertEqual(dialog.height_info_label.text().count("0,65 mm"), 2)
         dialog.close()
 
-    def test_abort_palette_matches_remove_and_returns_to_blue(self):
+    def test_generation_abort_uses_red_gradient_and_returns_to_blue(self):
         with tempfile.TemporaryDirectory() as temporary:
             window = MainWindow(user_settings_path=Path(temporary) / "settings.json",
                                 enable_update_check=False, enable_startup_slicer_discovery=False)
-            window.drop_zone.remove_button.setEnabled(True)
             window.preview_button.setEnabled(True)
+            window.preview_state = PreviewState.EMPTY
+            window._update_responsive_action_labels()
+            self.assertFalse(window.preview_action_control.property("cancelAction"))
             window.preview_state = PreviewState.BUILDING
             window._update_responsive_action_labels()
-            for widget in (window.preview_button, window.preslice_cancel_button,
-                           window.drop_zone.remove_button):
-                widget.ensurePolished()
-            for role in (QPalette.ColorRole.Button, QPalette.ColorRole.ButtonText):
-                expected = window.drop_zone.remove_button.palette().color(role)
-                self.assertEqual(window.preview_button.palette().color(role), expected)
-                self.assertEqual(window.preslice_cancel_button.palette().color(role), expected)
+            self.assertTrue(window.preview_action_control.property("cancelAction"))
+            self.assertEqual(window.preview_button.text(), "Generierung abbrechen")
+            style = window.styleSheet()
+            self.assertIn(
+                'QFrame#previewActionControl[cancelAction="true"] {',
+                style,
+            )
+            self.assertIn("stop: 0 #c95d5d", style)
+            self.assertIn("stop: 1 #a83f3f", style)
             window.preview_state = PreviewState.EMPTY
             window._update_responsive_action_labels()
             self.assertFalse(window.preview_button.property("cancelAction"))
-            self.assertEqual(window.preview_button.palette().color(QPalette.ColorRole.Button).name(), "#1769aa")
             window.close()
 
     def test_preslice_is_a_separate_required_completion(self):

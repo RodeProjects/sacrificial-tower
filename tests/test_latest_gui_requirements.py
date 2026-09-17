@@ -1545,15 +1545,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             for widget in (
                 window.open_output_button,
                 window.open_stl_button,
+                window.last_export_report_button,
                 window.preview_action_control,
                 window.export_button,
             )
         }
         self.assertEqual(positions[window.open_output_button], 0)
         self.assertEqual(positions[window.open_stl_button], 1)
-        self.assertEqual(positions[window.preview_action_control], 3)
-        self.assertEqual(positions[window.export_button], 4)
-        self.assertEqual(window.main_actions_layout.columnStretch(2), 1)
+        self.assertEqual(positions[window.last_export_report_button], 2)
+        self.assertEqual(positions[window.preview_action_control], 4)
+        self.assertEqual(positions[window.export_button], 5)
+        self.assertEqual(window.main_actions_layout.columnStretch(3), 1)
         window.close()
 
 
