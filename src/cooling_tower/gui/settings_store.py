@@ -50,6 +50,9 @@ _DEFAULT_PREVIEW_ITERATIONS = 4
 _MINIMUM_PREVIEW_ITERATIONS = 4
 _MAXIMUM_PREVIEW_ITERATIONS = 8
 _PRECISE_PREVIEW_THRESHOLD = 5
+_DEFAULT_MAXIMUM_JOINT_SLICES = 10
+_MINIMUM_JOINT_SLICES = 5
+_MAXIMUM_JOINT_SLICES = 25
 _WINDOW_SIZE_KEYS = {"width", "height"}
 _WINDOW_POSITION_KEYS = {"x", "y"}
 _CAMERA_KEYS = {"yaw_deg", "pitch_deg", "zoom", "pan_x", "pan_y"}
@@ -283,6 +286,18 @@ def _migrate_settings_12_to_13(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_13_to_14(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add the bounded budget for complete object/tower slices."""
+
+    migrated = dict(payload)
+    migrated.setdefault(
+        "maximum_joint_slices",
+        _DEFAULT_MAXIMUM_JOINT_SLICES,
+    )
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
@@ -335,6 +350,21 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
         )
     normalized["preview_iterations"] = iterations
 
+    maximum_joint_slices = nested.get(
+        "maximum_joint_slices",
+        _DEFAULT_MAXIMUM_JOINT_SLICES,
+    )
+    if (
+        isinstance(maximum_joint_slices, int)
+        and not isinstance(maximum_joint_slices, bool)
+        and _MINIMUM_JOINT_SLICES
+        <= maximum_joint_slices
+        <= _MAXIMUM_JOINT_SLICES
+    ):
+        normalized["maximum_joint_slices"] = maximum_joint_slices
+    else:
+        normalized["maximum_joint_slices"] = _DEFAULT_MAXIMUM_JOINT_SLICES
+
     raw_camera = nested.get("preview_camera")
     camera: dict[str, float] = {}
     if isinstance(raw_camera, Mapping):
@@ -377,6 +407,7 @@ _USER_SETTINGS_MIGRATIONS = {
     10: _migrate_settings_10_to_11,
     11: _migrate_settings_11_to_12,
     12: _migrate_settings_12_to_13,
+    13: _migrate_settings_13_to_14,
 }
 
 
@@ -434,6 +465,22 @@ class UserSettingsStore:
             base = self.default_output_base or self.default_path.resolve().parent.parent
             return (base / "output").resolve()
 
+    def load_default_maximum_joint_slices(self) -> int:
+        try:
+            value = self._read_payload(self.default_path).get(
+                "maximum_joint_slices",
+                _DEFAULT_MAXIMUM_JOINT_SLICES,
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return _DEFAULT_MAXIMUM_JOINT_SLICES
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and _MINIMUM_JOINT_SLICES <= value <= _MAXIMUM_JOINT_SLICES
+        ):
+            return value
+        return _DEFAULT_MAXIMUM_JOINT_SLICES
+
     def load(self) -> tuple[GenerationSettings, dict[str, Any]]:
         defaults = self.load_defaults()
         self.last_load_warning = None
@@ -483,6 +530,7 @@ class UserSettingsStore:
         window_x: int | None = None,
         window_y: int | None = None,
         preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
+        maximum_joint_slices: int = _DEFAULT_MAXIMUM_JOINT_SLICES,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -494,6 +542,7 @@ class UserSettingsStore:
             window_x=window_x,
             window_y=window_y,
             preview_iterations=preview_iterations,
+            maximum_joint_slices=maximum_joint_slices,
             preview_camera=preview_camera,
             expanded_sections=expanded_sections,
         )
@@ -515,6 +564,7 @@ class UserSettingsStore:
         window_x: int | None = None,
         window_y: int | None = None,
         preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
+        maximum_joint_slices: int = _DEFAULT_MAXIMUM_JOINT_SLICES,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -529,6 +579,7 @@ class UserSettingsStore:
                 window_x=window_x,
                 window_y=window_y,
                 preview_iterations=preview_iterations,
+                maximum_joint_slices=maximum_joint_slices,
                 preview_camera=preview_camera,
                 expanded_sections=expanded_sections,
             )
@@ -546,6 +597,7 @@ class UserSettingsStore:
         window_x: int | None,
         window_y: int | None,
         preview_iterations: int,
+        maximum_joint_slices: int,
         preview_camera: Mapping[str, Any] | None,
         expanded_sections: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
@@ -565,6 +617,10 @@ class UserSettingsStore:
                 if int(preview_iterations) >= _PRECISE_PREVIEW_THRESHOLD
                 else _DEFAULT_PREVIEW_ITERATIONS
             ),
+            "maximum_joint_slices": max(
+                _MINIMUM_JOINT_SLICES,
+                min(_MAXIMUM_JOINT_SLICES, int(maximum_joint_slices)),
+            ),
             "preview_camera": dict(preview_camera or {}),
             "expanded_sections": {
                 str(name): bool(value)
@@ -579,6 +635,7 @@ class UserSettingsStore:
             "generation": defaults.to_dict(),
             "output_root": str(self.load_default_output_root()),
             "preview_iterations": _DEFAULT_PREVIEW_ITERATIONS,
+            "maximum_joint_slices": _DEFAULT_MAXIMUM_JOINT_SLICES,
             "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
         }
 

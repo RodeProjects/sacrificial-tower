@@ -163,6 +163,59 @@ Ergebnis und die vollständigen Bytes werden in einer Diagnosedatei archiviert.
 Backend-Schalter, Adaptermatrix und Doppelvalidierung sind in
 `docs/slicer_qprocess_compatibility.md` beschrieben.
 
+### Getrennte und gemeinsame Generierungsphase
+
+Jede neue Generierung beginnt unabhängig von einer vorhandenen Vorschau mit
+sechs getrennten Turm-Slices. Nur diese Vorstufe verwendet den
+Fortschrittsbalken im Hauptfenster. Beim ersten vollständigen Objekt-/Turm-Slice
+wechselt die Darstellung in `gui/generation_progress_dialog.py`. Der Worker
+meldet jeden vollständig ausgewerteten gemeinsamen Kandidaten als unveränderlichen
+`JointSliceProgress`; ausschließlich der GUI-Thread aktualisiert Bildfüllstand,
+Zähler und Bestwerte. Der Vorlauf-Fortschritt verwendet ausschließlich rechts
+im Footer dieselbe Darstellung wie der Vorbereitungsfortschritt; sein einzeiliger
+Status und der Abstand zur Aktionszeile bleiben während des Laufs höhenstabil.
+Beim Wechsel in die gemeinsame Phase wird dieser Block ausgeblendet.
+Ergebnisanzeigen zählen ausschließlich gemeinsame Slices; die sechs getrennten
+Vorläufe erscheinen nur in ihrem eigenen Fortschrittsblock.
+
+Das gemeinsame Budget ist als `maximum_joint_slices` (5–25, Standard 10)
+persistiert. Ein Lauf endet bei ausgeschöpftem Budget, einer Abweichung von
+höchstens ±0,1 Sekunden, einem Fehler, einer Stagnation über drei gemeinsame
+Slices oder einer Benutzerentscheidung. Stagnation liegt nur vor, wenn sich
+weder die Turmform noch die gemessenen Layerzeiten nennenswert verändern. Eine
+vorzeitige Übernahme setzt ein separates threadsicheres Event: Ein eventuell
+laufender Slicer-Prozess wird sicher beendet, während der letzte vollständig
+geprüfte gemeinsame Kandidat erhalten bleibt. „Fortsetzen“ startet nur das
+verbleibende gemeinsame Budget mit diesem Kandidaten als Seed; eine echte neue
+Generierung führt dagegen stets erneut die getrennte Vorstufe aus. Nach der
+Übernahme bleibt der Dialog als alleiniger Export-Einstieg erhalten: Dort kann
+der Benutzer den besten Kandidaten exportieren oder die Angleichung mit dem
+nächsten gemeinsamen Slice fortsetzen. Der Hauptfenster-Button öffnet diesen
+Entscheidungsdialog lediglich erneut.
+
+Ein Kandidat, der die feste Zielschwelle von ±0,1 Sekunden erreicht, wird vor
+der Abschlussmeldung atomar zugleich als bester Anzeige- und Exportkandidat
+markiert. Dadurch beziehen sich Generierungsdialog, Prognose und Exportbericht
+immer auf dieselbe Slicer-Auswertung. Automatische vorzeitige Abschlussgründe
+(Zielschwelle, Stagnation oder ein verwertbarer Fehlerzustand) werden unterhalb
+des besten Ergebnisses angezeigt; ein regulär ausgeschöpftes Budget und die
+manuelle Übernahme benötigen keinen zusätzlichen Hinweis.
+
+Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten relevanten
+Layerzeit von der Zielzeit das primäre Vergleichskriterium. Weitere
+Konvergenz-, Zeitüberschuss- und Materialwerte entscheiden nur bei gleicher
+Abweichung. Ein einmal gefundener Bestwert kann dadurch weder in der Anzeige
+noch im später exportierten Kandidaten durch eine größere Abweichung ersetzt
+werden.
+
+Der modale Generierungsdialog berechnet seine feste Inhaltsgröße vor dem ersten
+sichtbaren Frame und wird bei jeder inhaltlichen Höhenänderung erneut über dem
+Hauptfenster zentriert. Zielvorgabe und bisher bestes Ergebnis stehen gemeinsam
+in einer zweizeiligen Übersicht. Abbruchhinweise verwenden den Bestwert als
+Statusgrundlage: Ergebnisse innerhalb der eingestellten Toleranz erscheinen
+grün, größere Abweichungen gelb und Fehler separat rot; Trennlinien bleiben
+neutral grau.
+
 ### Windows-Prozessfehler ohne blockierende Systemdialoge
 
 `cooling_tower.windows_process` installiert beim frühesten Paketstart genau

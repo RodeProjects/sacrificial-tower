@@ -70,14 +70,14 @@ class CalibrationConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.perform_joint_final_slice, bool):
             raise ValueError("perform_joint_final_slice must be a boolean")
-        if not 1 <= self.maximum_iterations <= 12:
+        if not 1 <= self.maximum_iterations <= 31:
             raise ValueError(
                 "Die Kalibrierung benötigt mindestens einen Slicer-Durchlauf "
-                "und erlaubt höchstens zwölf Durchläufe."
+                "und erlaubt höchstens 31 Durchläufe."
             )
-        if not 1 <= self.maximum_joint_slices <= 6:
+        if not 1 <= self.maximum_joint_slices <= 25:
             raise ValueError(
-                "Die Kalibrierung erlaubt zwischen einem und sechs gemeinsamen "
+                "Die Kalibrierung erlaubt zwischen einem und 25 gemeinsamen "
                 "Slicer-Durchläufen."
             )
         if not 1 <= self.minimum_joint_slices <= self.maximum_joint_slices:
@@ -254,6 +254,17 @@ class CalibrationIteration:
 
 
 @dataclass(frozen=True, slots=True)
+class JointSliceProgress:
+    """Immutable UI update for one complete object/tower slice."""
+
+    completed_count: int
+    maximum_count: int
+    current_iteration: CalibrationIteration
+    best_iteration: CalibrationIteration
+    current_is_best: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CalibrationResult:
     state: CalibrationState
     mode: CalibrationMode
@@ -271,6 +282,8 @@ class CalibrationResult:
     configured_iteration_count: int = 0
     best_iteration_number: int | None = None
     improved_over_initial_candidate: bool = False
+    termination_reason: str | None = None
+    continuation_profile: Any | None = field(default=None, repr=False)
 
     @property
     def success(self) -> bool:
@@ -326,6 +339,7 @@ class CalibrationResult:
             "improved_over_initial_candidate": (
                 self.improved_over_initial_candidate
             ),
+            "termination_reason": self.termination_reason,
             "has_slicer_evaluated_output": self.has_slicer_evaluated_output,
             "has_usable_improvement": self.has_usable_improvement,
             "iterations": [

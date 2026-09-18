@@ -235,3 +235,16 @@ Neue Einstellungen und Zurücksetzen verwenden zentral aus
 minimaler Turmdurchmesser 5 mm, Verjüngungswinkel 55°, Objektabstand 15 mm und
 Zeit-Sicherheitsfaktor 1,0.
 Historische Migrationen behalten ihre damaligen Standardwerte.
+
+## Schema 14: maximale gemeinsame Slices
+
+13→14 ergänzt die stabile UI-Einstellung `maximum_joint_slices`. Sie steuert
+nach den sechs getrennten Turm-Slices das Budget der vollständigen gemeinsamen
+Objekt-/Turm-Slices. Der Standardwert ist 10; gespeichert und übernommen werden
+nur Ganzzahlen von 5 bis 25. Ungültige Werte fallen auf 10 zurück.
+
+Die Kompatibilitätskennung `maximum_joint_slices` verwendet den Token
+`joint-slice-budget-v1`. Die Einstellung gehört zur Vorschau-Signatur, sodass
+eine Änderung einen zuvor generierten Stand korrekt als veraltet markiert.
+Sicherung, schrittweise Migration und atomisches Schreiben entsprechen den
+vorherigen Schemata.

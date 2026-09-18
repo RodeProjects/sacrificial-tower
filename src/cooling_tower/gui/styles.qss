@@ -625,6 +625,13 @@ QLabel#preparationProgressStatus[state="complete"] {
     color: #176b45;
 }
 
+QLabel#isolatedSliceProgressDetail {
+    color: #526b7e;
+    background: transparent;
+    font-size: 9pt;
+    padding: 0 1px;
+}
+
 QProgressBar#preparationProgressBar {
     color: #294457;
     background: #dce7ed;
@@ -2814,3 +2821,118 @@ QToolButton#previewNavigationStatus:hover {
     background: rgba(57, 65, 78, 240);
     border-color: #c4cdd8;
 }
+
+/* ---------- Gemeinsame Objekt-/Turm-Generierung ---------- */
+QDialog#towerGenerationDialog,
+QDialog#jointSliceSettingsDialog {
+    background: #f5f8fb;
+}
+
+QLabel#towerGenerationTitle {
+    color: #152536;
+    font-size: 18pt;
+    font-weight: 700;
+}
+
+QLabel#towerGenerationExplanation {
+    color: #526274;
+    font-size: 10pt;
+    padding: 0 14px 2px 14px;
+}
+
+QLabel#towerGenerationCounter {
+    color: #1769aa;
+    font-size: 10.5pt;
+    font-weight: 650;
+}
+
+QFrame#towerGenerationSummary {
+    background: #ffffff;
+    border: 1px solid #d6dee8;
+    border-radius: 9px;
+}
+
+QLabel#towerGenerationMetric,
+QLabel#towerGenerationDeviation {
+    color: #152536;
+    font-weight: 700;
+}
+
+QLabel#towerGenerationDeviation[resultState="within"] {
+    color: #176b45;
+}
+
+QLabel#towerGenerationDeviation[resultState="outside"] {
+    color: #9b6411;
+}
+
+QFrame#towerGenerationErrorDivider {
+    color: #d6dee8;
+    background: #d6dee8;
+    border: none;
+    max-height: 1px;
+}
+
+QFrame#towerGenerationStopReasonDivider {
+    color: #d6dee8;
+    background: #d6dee8;
+    border: none;
+    max-height: 1px;
+}
+
+QLabel#towerGenerationStopReason {
+    color: #72510c;
+    background: #fff8df;
+    border: 1px solid #e5d5a5;
+    border-radius: 7px;
+    padding: 9px 11px;
+}
+
+QLabel#towerGenerationStopReason[resultState="within"] {
+    color: #176b45;
+    background: #edf8f2;
+    border-color: #a9d3ba;
+}
+
+QLabel#towerGenerationStopReason[resultState="outside"] {
+    color: #72510c;
+    background: #fff8df;
+    border-color: #e5d5a5;
+}
+
+QLabel#towerGenerationError {
+    color: #9f241b;
+    background: #fff1f0;
+    border: 1px solid #edc4c0;
+    border-radius: 7px;
+    padding: 10px 12px;
+}
+
+QPushButton#towerGenerationAcceptButton {
+    color: #ffffff;
+    background: #23704c;
+    border-color: #1b5e3f;
+    font-weight: 650;
+}
+QPushButton#towerGenerationAcceptButton:hover { background: #1b5e3f; }
+QPushButton#towerGenerationAcceptButton:disabled {
+    color: #eef4f0;
+    background: #8bac99;
+    border-color: #8bac99;
+}
+
+QPushButton#towerGenerationAbortButton {
+    color: #ffffff;
+    background: #b94e4e;
+    border-color: #963b3b;
+    font-weight: 650;
+}
+QPushButton#towerGenerationAbortButton:hover { background: #a94040; }
+
+QPushButton#towerGenerationContinueButton {
+    color: #ffffff;
+    background: #1769aa;
+    border-color: #12588f;
+    font-weight: 650;
+}
+QPushButton#towerGenerationContinueButton:hover { background: #12588f; }

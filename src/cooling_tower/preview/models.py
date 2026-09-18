@@ -274,6 +274,8 @@ class PreviewResult:
     project_path: Path | None = None
     project_sha256: str | None = None
     joint_sliced: bool = False
+    completed_joint_slice_count: int = 0
+    configured_joint_slice_count: int = 0
     slicer_optimized: bool = False
     calibration: Any = None
     minimum_verified_layer_time_s: float | None = None

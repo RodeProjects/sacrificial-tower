@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -52,6 +53,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpacerItem,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -76,6 +78,10 @@ from cooling_tower.gui.background_jobs import (
 )
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
+from cooling_tower.gui.generation_progress_dialog import (
+    JointSliceSettingsDialog,
+    TowerGenerationDialog,
+)
 from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.preview_dialog import PreviewDialog
@@ -199,11 +205,7 @@ _LOCKED_SLICER_STEP_TOOLTIP = (
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 GENERATION_NORMAL_SLICES = 6
-GENERATION_MINIMUM_JOINT_SLICES = 2
-GENERATION_MAXIMUM_JOINT_SLICES = 6
-GENERATION_MAXIMUM_ITERATIONS = (
-    GENERATION_NORMAL_SLICES + GENERATION_MAXIMUM_JOINT_SLICES
-)
+GENERATION_MINIMUM_JOINT_SLICES = 1
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 30.0
@@ -741,6 +743,15 @@ class MainWindow(QMainWindow):
         self._feasibility_request_id = 0
         self._preview_request_id = 0
         self._preview_cancel_requested = False
+        self._active_preview_worker: PreviewWorker | None = None
+        self._joint_generation_dialog: TowerGenerationDialog | None = None
+        self._joint_slice_settings_dialog: JointSliceSettingsDialog | None = None
+        self._joint_phase_active = False
+        self._joint_accept_requested = False
+        self._joint_resume_active = False
+        self._joint_generation_paused = False
+        self._joint_slice_offset = 0
+        self._joint_slices_completed = 0
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
@@ -797,7 +808,21 @@ class MainWindow(QMainWindow):
         )
         self.default_settings = self.settings_store.load_defaults()
         self.default_output_root = self.settings_store.load_default_output_root()
+        self.default_maximum_joint_slices = (
+            self.settings_store.load_default_maximum_joint_slices()
+        )
         initial_settings, ui_state = self.settings_store.load()
+        raw_joint_slices = ui_state.get(
+            "maximum_joint_slices",
+            self.default_maximum_joint_slices,
+        )
+        self.maximum_joint_slices = (
+            int(raw_joint_slices)
+            if isinstance(raw_joint_slices, int)
+            and not isinstance(raw_joint_slices, bool)
+            and 5 <= raw_joint_slices <= 25
+            else self.default_maximum_joint_slices
+        )
 
         self._feasibility_timer = QTimer(self)
         self._feasibility_timer.setSingleShot(True)
@@ -995,6 +1020,13 @@ class MainWindow(QMainWindow):
         )
         self.change_output_action.triggered.connect(
             self.show_additional_options
+        )
+        self.joint_slice_settings_action = self.options_menu.addAction(
+            QIcon(str(GUI_ASSET_ROOT / "settings_gear.svg")),
+            "Allgemeine Einstellungen …",
+        )
+        self.joint_slice_settings_action.triggered.connect(
+            self.show_joint_slice_settings
         )
         self.support_report_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "document.svg")),
@@ -2943,7 +2975,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Fixed,
         )
         self.export_button.setEnabled(False)
-        self.export_button.clicked.connect(self.start_export)
+        self.export_button.clicked.connect(self._on_main_export_clicked)
 
         self.settings_scroll.setWidget(content)
         root_layout.addWidget(self.settings_scroll, 1)
@@ -2978,6 +3010,83 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p %")
         self.progress_bar.hide()
+        self.isolated_progress_widget = QWidget()
+        self.isolated_progress_widget.setObjectName(
+            "isolatedSliceProgress"
+        )
+        self.isolated_progress_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        isolated_progress_layout = QVBoxLayout(
+            self.isolated_progress_widget
+        )
+        isolated_progress_layout.setContentsMargins(0, 0, 0, 0)
+        isolated_progress_layout.setSpacing(6)
+        isolated_header = QWidget()
+        isolated_header.setObjectName("preparationProgressHeader")
+        isolated_header_layout = QHBoxLayout(isolated_header)
+        isolated_header_layout.setContentsMargins(0, 0, 0, 0)
+        isolated_header_layout.setSpacing(8)
+        self.isolated_progress_icon_label = QLabel("⌛")
+        self.isolated_progress_icon_label.setObjectName("progressStatusIcon")
+        self.isolated_progress_icon_label.setProperty("prominent", True)
+        self.isolated_progress_icon_label.setProperty("state", "running")
+        self.isolated_progress_icon_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        self.isolated_progress_icon_label.setAccessibleName(
+            "Getrennte Kühlturm-Slices werden verarbeitet"
+        )
+        isolated_title = QLabel("Getrennte Kühlturm-Slices")
+        isolated_title.setObjectName("preparationProgressTitle")
+        self.isolated_progress_status_label = QLabel(
+            f"0 von {GENERATION_NORMAL_SLICES}"
+        )
+        self.isolated_progress_status_label.setObjectName(
+            "preparationProgressStatus"
+        )
+        self.isolated_progress_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        isolated_header_layout.addWidget(self.isolated_progress_icon_label)
+        isolated_header_layout.addWidget(isolated_title)
+        isolated_header_layout.addStretch(1)
+        isolated_header_layout.addWidget(
+            self.isolated_progress_status_label
+        )
+        self.isolated_progress_bar = QProgressBar()
+        self.isolated_progress_bar.setObjectName("preparationProgressBar")
+        self.isolated_progress_bar.setRange(0, 100)
+        self.isolated_progress_bar.setValue(0)
+        self.isolated_progress_bar.setFormat("%p %")
+        self.isolated_progress_bar.setAccessibleName(
+            "Fortschritt der getrennten Kühlturm-Slices"
+        )
+        self.isolated_progress_detail_label = QLabel(
+            "Die getrennte Turmoptimierung wird vorbereitet …"
+        )
+        self.isolated_progress_detail_label.setObjectName(
+            "isolatedSliceProgressDetail"
+        )
+        self.isolated_progress_detail_label.setWordWrap(False)
+        self.isolated_progress_detail_label.setFixedHeight(
+            max(
+                18,
+                self.isolated_progress_detail_label.fontMetrics().lineSpacing()
+                + 2,
+            )
+        )
+        self.isolated_progress_detail_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        isolated_progress_layout.addWidget(isolated_header)
+        isolated_progress_layout.addWidget(self.isolated_progress_bar)
+        isolated_progress_layout.addWidget(
+            self.isolated_progress_detail_label
+        )
+        self.isolated_progress_widget.hide()
         self.status_label = QLabel("Bitte STL auswählen")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
@@ -3213,8 +3322,15 @@ class MainWindow(QMainWindow):
         self.footer_action_layout = QVBoxLayout(self.footer_action_area)
         self.footer_action_layout.setContentsMargins(0, 0, 0, 0)
         self.footer_action_layout.setSpacing(8)
+        self.footer_action_layout.addWidget(self.isolated_progress_widget)
         self.footer_action_layout.addWidget(self.action_availability_widget)
-        self.footer_action_layout.addStretch(1)
+        self.footer_action_spacer = QSpacerItem(
+            0,
+            0,
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.footer_action_layout.addItem(self.footer_action_spacer)
         self.footer_action_layout.addLayout(main_actions)
 
         # Responsive layout code toggles these dividers before inserting them
@@ -4077,22 +4193,24 @@ class MainWindow(QMainWindow):
         return CalibrationConfig(
             mode=CalibrationMode.STL,
             time_tolerance_s=self.layer_time_tolerance_spin.value(),
-            maximum_iterations=GENERATION_MAXIMUM_ITERATIONS,
+            maximum_iterations=(
+                GENERATION_NORMAL_SLICES + self.maximum_joint_slices
+            ),
             object_clearance_mm=(
                 self.minimum_object_tower_distance_spin.value()
             ),
             perform_joint_final_slice=joint_slice_available,
-            maximum_joint_slices=GENERATION_MAXIMUM_JOINT_SLICES,
+            maximum_joint_slices=self.maximum_joint_slices,
             minimum_joint_slices=GENERATION_MINIMUM_JOINT_SLICES,
         )
 
     @property
     def preview_iterations(self) -> int:
-        return GENERATION_MAXIMUM_ITERATIONS
+        return GENERATION_NORMAL_SLICES + self.maximum_joint_slices
 
     @property
     def preview_joint_slices(self) -> int:
-        return GENERATION_MAXIMUM_JOINT_SLICES
+        return self.maximum_joint_slices
 
     def _profile_origin_text(self, result: ProfileMatchResult) -> str:
         if result.state is ProfileMatchState.RECONSTRUCTED:
@@ -7425,6 +7543,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "footer_action_area"):
             return
         action_widgets = (
+            self.isolated_progress_widget,
             self.open_output_button,
             self.open_stl_button,
             self.preview_action_control,
@@ -7442,6 +7561,26 @@ class MainWindow(QMainWindow):
         else:
             self.footer_vertical_divider.setVisible(has_right_content)
             self.footer_horizontal_divider.hide()
+
+    def _set_isolated_slice_progress_visible(self, visible: bool) -> None:
+        """Keep isolated-slice progress exclusively in a stable right column."""
+
+        self.isolated_progress_widget.setVisible(visible)
+        self.footer_status_widget.setVisible(not visible)
+        self.footer_action_spacer.changeSize(
+            0,
+            0,
+            QSizePolicy.Policy.Minimum,
+            (
+                QSizePolicy.Policy.Fixed
+                if visible
+                else QSizePolicy.Policy.Expanding
+            ),
+        )
+        self.footer_action_layout.invalidate()
+        self.footer_action_layout.activate()
+        self._refresh_footer_auxiliary_visibility()
+        self._schedule_footer_height_update()
 
     def _refresh_footer_responsive_layout(self, *, force: bool = False) -> None:
         """Switch between two footer columns and the narrow vertical stack."""
@@ -9891,6 +10030,46 @@ class MainWindow(QMainWindow):
             self._resize_additional_options_to_content,
         )
 
+    def show_joint_slice_settings(self) -> None:
+        dialog = JointSliceSettingsDialog(
+            self.maximum_joint_slices,
+            self,
+        )
+        dialog.value_applied.connect(self._apply_maximum_joint_slices)
+        self._joint_slice_settings_dialog = dialog
+        dialog.finished.connect(
+            lambda _result: setattr(
+                self,
+                "_joint_slice_settings_dialog",
+                None,
+            )
+        )
+        dialog.setWindowState(Qt.WindowState.WindowNoState)
+        self._show_internal_dialog_without_flash(
+            dialog,
+            self._resize_joint_slice_settings_to_content,
+        )
+
+    def _resize_joint_slice_settings_to_content(self) -> None:
+        dialog = self._joint_slice_settings_dialog
+        if dialog is None or not dialog.isVisible():
+            return
+        dialog.layout().activate()
+        dialog.adjustSize()
+        dialog.setFixedSize(dialog.sizeHint())
+        self._place_dialog_centered(dialog)
+
+    @Slot(int)
+    def _apply_maximum_joint_slices(self, value: int) -> None:
+        normalized = max(5, min(25, int(value)))
+        if normalized == self.maximum_joint_slices:
+            return
+        self.maximum_joint_slices = normalized
+        self._save_user_settings()
+        self._invalidate_preview(
+            "Die maximale Anzahl gemeinsamer Slices wurde geändert."
+        )
+
     def _resize_additional_options_to_content(self) -> None:
         dialog = self.additional_options_dialog
         if not dialog.isVisible():
@@ -11133,6 +11312,31 @@ class MainWindow(QMainWindow):
         self.preview_dialog.show()
         self.settings_scroll.ensureWidgetVisible(self.preview_dialog, 0, 18)
 
+    @property
+    def joint_generation_dialog(self) -> TowerGenerationDialog:
+        if self._joint_generation_dialog is None:
+            dialog = TowerGenerationDialog(
+                GUI_ASSET_ROOT / "tower_gen_finished.webp",
+                self,
+            )
+            dialog.accept_requested.connect(self._accept_joint_candidate)
+            dialog.export_requested.connect(
+                self._export_from_generation_dialog
+            )
+            dialog.abort_requested.connect(self.cancel_generation)
+            dialog.continue_requested.connect(self._continue_joint_generation)
+            self._joint_generation_dialog = dialog
+        return self._joint_generation_dialog
+
+    def _connect_preview_worker(self, worker: PreviewWorker) -> None:
+        self._active_preview_worker = worker
+        worker.progress.connect(self._on_preview_progress)
+        worker.joint_phase_started.connect(self._on_joint_phase_started)
+        worker.joint_progress.connect(self._on_joint_progress)
+        worker.succeeded.connect(self._on_preview_succeeded)
+        worker.failed.connect(self._on_preview_failed)
+        worker.finished.connect(self._on_preview_finished)
+
     def _place_preview_beside_main_window(self) -> None:
         return
 
@@ -11156,6 +11360,16 @@ class MainWindow(QMainWindow):
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self.preview_dialog.set_failed(german_user_message(error))
             return
+
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.allow_programmatic_close()
+            self._joint_generation_dialog.close()
+        self._joint_phase_active = False
+        self._joint_accept_requested = False
+        self._joint_resume_active = False
+        self._joint_generation_paused = False
+        self._joint_slice_offset = 0
+        self._joint_slices_completed = 0
 
         self._clear_result_notices()
         self.background_job_manager.cancel_jobs(
@@ -11183,7 +11397,15 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.progress_bar)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.show()
+        self.progress_bar.hide()
+        self.isolated_progress_bar.setValue(0)
+        self.isolated_progress_status_label.setText(
+            f"0 von {GENERATION_NORMAL_SLICES}"
+        )
+        self.isolated_progress_detail_label.setText(
+            "Die getrennte Turmoptimierung wird vorbereitet …"
+        )
+        self._set_isolated_slice_progress_visible(True)
         self._set_main_status(
             "Kühlturm wird vorbereitet …", icon="⏳", state="running"
         )
@@ -11191,10 +11413,7 @@ class MainWindow(QMainWindow):
 
         worker = PreviewWorker(request_id, request, self.preview_service)
         self._refresh_phase17_actions()
-        worker.progress.connect(self._on_preview_progress)
-        worker.succeeded.connect(self._on_preview_succeeded)
-        worker.failed.connect(self._on_preview_failed)
-        worker.finished.connect(self._on_preview_finished)
+        self._connect_preview_worker(worker)
         self.background_job_manager.start_job(
             kind=JobKind.PREVIEW,
             request_id=request_id,
@@ -11213,10 +11432,119 @@ class MainWindow(QMainWindow):
             return
         status = german_user_message(status)
         self.preview_dialog.set_progress(percent, status)
-        self._set_main_status(status, icon="⏳", state="running")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(max(0, min(100, percent)))
-        self.progress_bar.show()
+        normalized = status.casefold()
+        if self._joint_phase_active or "gemeinsamer slice" in normalized:
+            self._set_isolated_slice_progress_visible(False)
+            self._set_main_status(status, icon="⏳", state="running")
+            if not self._joint_phase_active:
+                return
+            if "ausgeführt" in normalized:
+                self.joint_generation_dialog.set_slice_progress(0.58)
+            elif "ausgewertet" in normalized or "slicer-ergebnis" in normalized:
+                self.joint_generation_dialog.set_slice_progress(0.84)
+            self.progress_bar.hide()
+            return
+        self.progress_bar.hide()
+        self._update_isolated_slice_progress(status, percent)
+
+    @staticmethod
+    def _isolated_slice_progress(status: str, fallback: int) -> int:
+        match = re.search(
+            r"getrennt(?:er|en)\w*\s+(?:Kühlturm-)?Slice\s+(\d+)\s*/\s*(\d+)",
+            status,
+            re.IGNORECASE,
+        )
+        if match is not None:
+            current, maximum = map(int, match.groups())
+            return round(max(0, current - 1) / max(1, maximum) * 100)
+        match = re.search(r"Slicer-Ergebnis\s+(\d+)\s*/", status, re.IGNORECASE)
+        if match is not None:
+            current = min(GENERATION_NORMAL_SLICES, int(match.group(1)))
+            return round(current / GENERATION_NORMAL_SLICES * 100)
+        return max(0, min(99, int(fallback)))
+
+    def _update_isolated_slice_progress(
+        self,
+        status: str,
+        fallback: int,
+    ) -> None:
+        percent = self._isolated_slice_progress(status, fallback)
+        completed = min(
+            GENERATION_NORMAL_SLICES,
+            max(0, round(percent / 100 * GENERATION_NORMAL_SLICES)),
+        )
+        running_match = re.search(
+            r"getrennt(?:er|en)\w*\s+(?:Kühlturm-)?Slice\s+"
+            r"(\d+)\s*/\s*(\d+)",
+            status,
+            re.IGNORECASE,
+        )
+        if running_match is not None:
+            current, maximum = map(int, running_match.groups())
+            completed = max(0, current - 1)
+            progress_text = (
+                f"{completed} von {maximum} · Slice {current} läuft"
+            )
+        else:
+            result_match = re.search(
+                r"Slicer-Ergebnis\s+(\d+)\s*/",
+                status,
+                re.IGNORECASE,
+            )
+            if result_match is not None:
+                completed = min(
+                    GENERATION_NORMAL_SLICES,
+                    int(result_match.group(1)),
+                )
+            progress_text = (
+                f"{completed} von {GENERATION_NORMAL_SLICES} abgeschlossen"
+            )
+        self.isolated_progress_bar.setValue(percent)
+        self.isolated_progress_status_label.setText(progress_text)
+        self.isolated_progress_detail_label.setText(status)
+        self._set_isolated_slice_progress_visible(True)
+
+    @Slot(int, int, int)
+    def _on_joint_phase_started(
+        self,
+        request_id: int,
+        completed: int,
+        _maximum_for_run: int,
+    ) -> None:
+        if request_id != self._preview_request_id or self._closing:
+            return
+        total_completed = self._joint_slice_offset + completed
+        self._joint_phase_active = True
+        self.progress_bar.setValue(100)
+        self.progress_bar.hide()
+        self._set_isolated_slice_progress_visible(False)
+        dialog = self.joint_generation_dialog
+        if not dialog.isVisible():
+            dialog.begin(
+                self.target_time_spin.value(),
+                self.layer_time_tolerance_spin.value(),
+                total_completed,
+                self.maximum_joint_slices,
+            )
+        dialog.start_slice(total_completed, self.maximum_joint_slices)
+
+    @Slot(int, object)
+    def _on_joint_progress(self, request_id: int, progress: object) -> None:
+        if request_id != self._preview_request_id or self._closing:
+            return
+        completed = self._joint_slice_offset + int(
+            getattr(progress, "completed_count", 0)
+        )
+        self._joint_slices_completed = max(
+            self._joint_slices_completed,
+            completed,
+        )
+        self.joint_generation_dialog.complete_slice(
+            completed,
+            self.maximum_joint_slices,
+            getattr(progress, "best_iteration"),
+            self.target_time_spin.value(),
+        )
 
     @Slot(int, object)
     def _on_preview_succeeded(
@@ -11231,6 +11559,13 @@ class MainWindow(QMainWindow):
             current_signature = self._current_preview_request().signature()
         except (AttributeError, KeyError, TypeError, ValueError):
             current_signature = None
+        if (
+            self._joint_resume_active
+            and current_signature is not None
+            and result.refinement_seed_signature
+            == self._current_preview_request().refinement_seed_signature()
+        ):
+            result.request_signature = current_signature
         if result.request_signature != current_signature:
             result.dispose()
             self.preview_state = (
@@ -11241,6 +11576,9 @@ class MainWindow(QMainWindow):
             self.preview_dialog.mark_stale()
             return
         previous = self.current_preview
+        if result.joint_sliced:
+            result.completed_joint_slice_count = self._joint_slices_completed
+            result.configured_joint_slice_count = self.maximum_joint_slices
         self.current_preview = result
         self.preview_state = PreviewState.CURRENT
         self._preview_cancel_requested = False
@@ -11254,10 +11592,34 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.progress_bar.hide()
+        self._set_isolated_slice_progress_visible(False)
         self._set_main_status(
             "Vorschau ist aktuell", icon="✓", state="success"
         )
         self._clear_result_notices()
+        if self._joint_phase_active and self._joint_generation_dialog is not None:
+            paused = self._joint_accept_requested
+            self._joint_generation_paused = paused
+            calibration = getattr(result, "calibration", None)
+            termination_reason = getattr(
+                calibration,
+                "termination_reason",
+                None,
+            )
+            stop_reason = self._joint_stop_reason_text(
+                termination_reason,
+                result,
+            )
+            self._joint_generation_dialog.mark_finished(
+                paused=paused,
+                can_continue=(
+                    paused
+                    and self._joint_slices_completed
+                    < self.maximum_joint_slices
+                ),
+                stop_reason=stop_reason,
+            )
+        self._joint_resume_active = False
         if previous is not None and previous is not result:
             previous.dispose()
         self._refresh_prediction()
@@ -11281,19 +11643,31 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
+        resume_failed_with_safe_candidate = bool(
+            self._joint_resume_active and self.current_preview is not None
+        )
         self.preview_state = (
-            PreviewState.STALE
+            PreviewState.CURRENT
+            if resume_failed_with_safe_candidate
+            else PreviewState.STALE
             if self.current_preview is not None
             else PreviewState.FAILED
         )
         self._preview_cancel_requested = False
-        self.preview_dialog.set_failed(german_user_message(message))
+        if self._joint_generation_dialog is not None and self._joint_phase_active:
+            self._joint_generation_dialog.show_error(
+                german_user_message(message)
+            )
+        if resume_failed_with_safe_candidate:
+            self.preview_dialog.set_preview(self.current_preview)
+        else:
+            self.preview_dialog.set_failed(german_user_message(message))
         self.preview_hint_label.setProperty("state", "warning")
         self.preview_hint_label.setText(
             "Die Generierung ist fehlgeschlagen. Es liegt kein aktueller, "
             "exportfähiger Kühlturm vor."
         )
-        self.preview_hint_label.show()
+        self.preview_hint_label.setVisible(not resume_failed_with_safe_candidate)
         self._refresh_widget_style(self.preview_hint_label)
         self.progress_bar.setProperty("task", "default")
         self._refresh_widget_style(self.progress_bar)
@@ -11306,8 +11680,46 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
+        self._set_isolated_slice_progress_visible(False)
         self._refresh_prediction()
         self._refresh_phase17_actions()
+
+    @staticmethod
+    def _joint_stop_reason_text(
+        termination_reason: str | None,
+        result: PreviewResult,
+    ) -> str | None:
+        if termination_reason == "target_tolerance":
+            target = getattr(result, "target_layer_time_s", None)
+            achieved = getattr(result, "minimum_verified_layer_time_s", None)
+            if target is not None and achieved is not None:
+                deviation = float(achieved) - float(target)
+                return (
+                    "Die Angleichung wurde vorzeitig beendet, weil die "
+                    f"Zielzeit mit {deviation:+.2f} s Abweichung innerhalb "
+                    "von ±0,10 s erreicht wurde."
+                )
+            return (
+                "Die Angleichung wurde vorzeitig beendet, weil die Zielzeit "
+                "innerhalb von ±0,10 s erreicht wurde."
+            )
+        if termination_reason == "stagnation":
+            return (
+                "Die Angleichung wurde vorzeitig beendet, weil drei "
+                "aufeinanderfolgende gemeinsame Slices weder die Turmform "
+                "noch die Layerzeiten nennenswert verändert haben."
+            )
+        if termination_reason == "error":
+            failures = tuple(
+                getattr(getattr(result, "calibration", None), "failures", ())
+            )
+            details = " ".join(
+                german_user_message(str(getattr(item, "message", item)))
+                for item in failures
+            ).strip()
+            return details or "Die Angleichung wurde wegen eines Fehlers beendet."
+        return None
+        self._joint_resume_active = False
 
     def _on_generation_button_clicked(self) -> None:
         if self.background_job_manager.has_active(JobKind.PREVIEW):
@@ -11333,10 +11745,85 @@ class MainWindow(QMainWindow):
             state="running",
         )
 
+    @Slot()
+    def _accept_joint_candidate(self) -> None:
+        if not self.background_job_manager.has_active(JobKind.PREVIEW):
+            if self._joint_generation_dialog is not None:
+                self._joint_generation_dialog.allow_programmatic_close()
+                self._joint_generation_dialog.close()
+            return
+        if self._joint_slices_completed < 1:
+            return
+        worker = self._active_preview_worker
+        if worker is None:
+            return
+        self._joint_accept_requested = True
+        worker.accept_current()
+        dialog = self.joint_generation_dialog
+        dialog.accept_button.setEnabled(False)
+        dialog.accept_button.setText("Bestes Ergebnis wird übernommen …")
+        self._set_main_status(
+            "Bester gemeinsamer Kandidat wird sicher übernommen …",
+            icon="⏳",
+            state="running",
+        )
+
+    @Slot()
+    def _continue_joint_generation(self) -> None:
+        if (
+            self.background_job_manager.has_active(JobKind.PREVIEW)
+            or self.current_preview is None
+        ):
+            return
+        remaining = self.maximum_joint_slices - self._joint_slices_completed
+        if remaining <= 0:
+            return
+        config = replace(
+            self._calibration_config(),
+            maximum_iterations=remaining,
+            maximum_joint_slices=remaining,
+            minimum_joint_slices=1,
+            perform_joint_final_slice=True,
+        )
+        try:
+            request = self._current_preview_request(
+                calibration_config=config,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            self.joint_generation_dialog.show_error(
+                german_user_message(error)
+            )
+            return
+        self._preview_request_id += 1
+        request_id = self._preview_request_id
+        self._joint_slice_offset = self._joint_slices_completed
+        self._joint_resume_active = True
+        self._joint_accept_requested = False
+        self._joint_generation_paused = False
+        self._joint_phase_active = False
+        self._preview_cancel_requested = False
+        self.preview_state = PreviewState.BUILDING
+        self.joint_generation_dialog.resume_waiting()
+        worker = PreviewWorker(
+            request_id,
+            request,
+            self.preview_service,
+            seed_preview=self.current_preview,
+        )
+        self._connect_preview_worker(worker)
+        self._refresh_phase17_actions()
+        self.background_job_manager.start_job(
+            kind=JobKind.PREVIEW,
+            request_id=request_id,
+            worker=worker,
+            parent_operation_id=f"preview-resume-{request_id}",
+        )
+
     @Slot(int)
     def _on_preview_finished(self, request_id: int) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
+        self._active_preview_worker = None
         if self.preview_state is not PreviewState.BUILDING:
             return
         self._preview_cancel_requested = False
@@ -11349,6 +11836,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
+        self._set_isolated_slice_progress_visible(False)
         if self.current_preview is not None:
             self.preview_hint_label.setProperty("state", "stale")
             self.preview_hint_label.setText(
@@ -11428,6 +11916,29 @@ class MainWindow(QMainWindow):
             worker=worker,
             parent_operation_id=f"export-{request_id}",
         )
+
+    @Slot()
+    def _on_main_export_clicked(self) -> None:
+        if (
+            self.current_preview is not None
+            and self.current_preview.joint_sliced
+            and self._joint_generation_dialog is not None
+        ):
+            dialog = self._joint_generation_dialog
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        self.start_export()
+
+    @Slot()
+    def _export_from_generation_dialog(self) -> None:
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.allow_programmatic_close()
+            self._joint_generation_dialog.close()
+        self._joint_generation_paused = False
+        self._update_responsive_action_labels()
+        self.start_export()
 
     @Slot(int, int, str)
     def _on_export_progress(
@@ -11664,7 +12175,11 @@ class MainWindow(QMainWindow):
             self.preview_button.setText("Kühlturm aktualisieren")
         else:
             self.preview_button.setText("Kühlturm generieren")
-        self.export_button.setText("Kühlturm exportieren")
+        self.export_button.setText(
+            "Generierung fortsetzen"
+            if self._joint_generation_paused
+            else "Kühlturm exportieren"
+        )
         self._fit_export_button_width()
 
     def _fit_export_button_width(self) -> None:
@@ -11714,6 +12229,8 @@ class MainWindow(QMainWindow):
     def _has_non_default_settings(self) -> bool:
         if self.collect_settings() != self.settings_store.load_defaults():
             return True
+        if self.maximum_joint_slices != self.default_maximum_joint_slices:
+            return True
         try:
             selected_output = Path(
                 self.output_root_edit.text()
@@ -11749,6 +12266,7 @@ class MainWindow(QMainWindow):
 
     def reset_defaults(self) -> None:
         self.apply_settings(self.settings_store.load_defaults())
+        self.maximum_joint_slices = self.default_maximum_joint_slices
         self.output_root_edit.setText(
             str(self.settings_store.load_default_output_root())
         )
@@ -11775,6 +12293,7 @@ class MainWindow(QMainWindow):
                 window_x=window_position.x(),
                 window_y=window_position.y(),
                 preview_iterations=self.preview_iterations,
+                maximum_joint_slices=self.maximum_joint_slices,
                 preview_camera=(
                     self._preview_dialog.canvas.camera_state()
                     if self._preview_dialog is not None

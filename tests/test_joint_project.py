@@ -82,7 +82,7 @@ class PlacementAndProjectTests(unittest.TestCase):
         store = UserSettingsStore(user, defaults)
         settings, payload = store.load()
 
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 13)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 14)
         self.assertEqual(settings.minimum_object_tower_distance_mm, 25.0)
         self.assertEqual(
             payload["generation"]["minimum_object_tower_distance_mm"],

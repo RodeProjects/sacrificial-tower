@@ -768,9 +768,9 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.notice_panel.isHidden())
         self.assertFalse(window.result_label.text())
         self.assertFalse(window.result_label.toolTip())
-        self.assertEqual(window._calibration_config().maximum_iterations, 12)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 2)
-        self.assertEqual(window._calibration_config().maximum_joint_slices, 6)
+        self.assertEqual(window._calibration_config().maximum_iterations, 16)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 1)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 10)
 
         window.output_root_edit.setText(str(self.root / "exact_output"))
         window.validate_form()
@@ -789,7 +789,7 @@ class Phase17Tests(unittest.TestCase):
         )
         self.assertEqual(
             report["calibration"]["configured_iteration_count"],
-            12,
+            16,
         )
         self.assertFalse(window.warning_text.toPlainText())
         self.assertTrue(window.notice_panel.isHidden())
@@ -899,10 +899,10 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_fast_button"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
         self.assertFalse(hasattr(window, "preview_quality_panel"))
-        self.assertEqual(window.preview_iterations, 12)
-        self.assertEqual(window._calibration_config().maximum_iterations, 12)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 2)
-        self.assertEqual(window._calibration_config().maximum_joint_slices, 6)
+        self.assertEqual(window.preview_iterations, 16)
+        self.assertEqual(window._calibration_config().maximum_iterations, 16)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 1)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 10)
         self.assertFalse(
             window._calibration_config().perform_joint_final_slice
         )
@@ -1537,6 +1537,37 @@ class Phase17Tests(unittest.TestCase):
         self.assertNotIn("Prognose bestätigt", dialog.quality_label.text())
         self.assertTrue(dialog.quality_details_toggle.isHidden())
         dialog.close()
+
+    def test_41a_joint_quality_summary_excludes_isolated_slices(self) -> None:
+        isolated = tuple(
+            SimpleNamespace(joint_slice=False) for _index in range(6)
+        )
+        joint = tuple(
+            SimpleNamespace(joint_slice=True) for _index in range(8)
+        )
+        result = SimpleNamespace(
+            calibration=SimpleNamespace(
+                configured_iteration_count=21,
+                iterations=isolated + joint,
+            ),
+            calibrated=True,
+            joint_sliced=True,
+            slicer_optimized=True,
+            completed_joint_slice_count=8,
+            configured_joint_slice_count=15,
+            minimum_verified_layer_time_s=11.05,
+            target_layer_time_s=11.0,
+            calibration_time_tolerance_s=0.25,
+        )
+
+        summary, state = PreviewDialog._quality_summary(
+            result,
+            compact=True,
+        )
+
+        self.assertEqual(state, "success")
+        self.assertIn("Gemeinsame Slices: 8 von maximal 15", summary)
+        self.assertNotIn("14 von maximal 21", summary)
 
 
 if __name__ == "__main__":

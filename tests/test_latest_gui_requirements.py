@@ -369,6 +369,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             [action.text() for action in window.options_menu.actions()],
             [
                 "Exportordner ändern",
+                "Allgemeine Einstellungen …",
                 "Support & Diagnose …",
                 "Über Kühlturm-Generator",
             ],

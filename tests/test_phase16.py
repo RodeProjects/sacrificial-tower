@@ -10,6 +10,7 @@ import unittest
 import trimesh
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -301,9 +302,11 @@ class Phase16Tests(unittest.TestCase):
             CalibrationConfig(maximum_iterations=0)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=-1)
-        self.assertEqual(CalibrationConfig(maximum_iterations=12).maximum_iterations, 12)
+        self.assertEqual(CalibrationConfig(maximum_iterations=31).maximum_iterations, 31)
         with self.assertRaises(ValueError):
-            CalibrationConfig(maximum_iterations=13)
+            CalibrationConfig(maximum_iterations=32)
+        with self.assertRaises(ValueError):
+            CalibrationConfig(maximum_iterations=31, maximum_joint_slices=26)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_joint_slices=6, minimum_joint_slices=7)
         with self.assertRaises(ValueError):
@@ -1246,6 +1249,156 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(adapter.requests[0].model_path.suffix, ".3mf")
         self.assertFalse(adapter.requests[0].temporary_overrides)
 
+    def test_joint_candidate_can_be_accepted_and_resumed_from_last_result(self) -> None:
+        source_stl = self.root / "accepted_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        accept_event = Event()
+        updates = []
+
+        def accept_first(progress) -> None:
+            updates.append(progress)
+            accept_event.set()
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=30.0),
+            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+            profile=self.profile,
+            output_directory=self.root / "accepted_joint_result",
+            config=CalibrationConfig(
+                maximum_iterations=3,
+                maximum_joint_slices=3,
+                minimum_joint_slices=1,
+                time_tolerance_s=0.01,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+            accept_best_event=accept_event,
+            joint_progress_callback=accept_first,
+        )
+
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].completed_count, 1)
+        self.assertTrue(updates[0].current_is_best)
+        self.assertIsNotNone(result.project_path)
+        self.assertTrue(result.has_usable_improvement)
+        self.assertIsNotNone(result.continuation_profile)
+        self.assertIn("vorzeitig beendet", " ".join(result.warnings))
+
+    def test_joint_calibration_stops_after_three_stagnant_slices(self) -> None:
+        source_stl = self.root / "stagnant_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        updates = []
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=30.0),
+            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+            profile=self.profile,
+            output_directory=self.root / "stagnant_joint_result",
+            config=CalibrationConfig(
+                maximum_iterations=8,
+                maximum_joint_slices=8,
+                minimum_joint_slices=1,
+                time_tolerance_s=0.01,
+                profile_change_tolerance_mm=1_000.0,
+                slicer_result_change_tolerance_s=1_000.0,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+            joint_progress_callback=updates.append,
+        )
+
+        self.assertEqual(len(updates), 3)
+        self.assertEqual(updates[-1].completed_count, 3)
+        self.assertTrue(result.has_usable_improvement)
+        self.assertIn("Stagnation", " ".join(result.warnings))
+
+    def test_target_hit_becomes_the_displayed_and_exported_best_candidate(self) -> None:
+        source_stl = self.root / "target_hit_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        updates = []
+        service = CalibrationService()
+
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(0.50, 0.05),
+            ),
+            patch.object(
+                service,
+                "_candidate_score",
+                side_effect=(
+                    (0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                    (0, 0.0, 0.0, 1.0, 1.0, 2.0),
+                ),
+            ),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+                profile=self.profile,
+                output_directory=self.root / "target_hit_joint_result",
+                config=CalibrationConfig(
+                    maximum_iterations=2,
+                    maximum_joint_slices=2,
+                    minimum_joint_slices=1,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                joint_progress_callback=updates.append,
+            )
+
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(updates[-1].current_iteration.number, 2)
+        self.assertEqual(updates[-1].best_iteration.number, 2)
+        self.assertTrue(updates[-1].current_is_best)
+        self.assertEqual(result.best_iteration_number, 2)
+        self.assertEqual(result.termination_reason, "target_tolerance")
+
+    def test_worse_joint_target_deviation_never_replaces_best_candidate(self) -> None:
+        source_stl = self.root / "monotonic_best_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        updates = []
+        service = CalibrationService()
+
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(-0.37, -0.44),
+            ),
+            patch.object(
+                service,
+                "_candidate_score",
+                side_effect=(
+                    (1, 0.37, 0.37, 1.0, 1.0, 2.0),
+                    (0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                ),
+            ),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+                profile=self.profile,
+                output_directory=self.root / "monotonic_best_joint_result",
+                config=CalibrationConfig(
+                    maximum_iterations=2,
+                    maximum_joint_slices=2,
+                    minimum_joint_slices=1,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                joint_progress_callback=updates.append,
+            )
+
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(updates[-1].current_iteration.number, 2)
+        self.assertEqual(updates[-1].best_iteration.number, 1)
+        self.assertFalse(updates[-1].current_is_best)
+        self.assertEqual(result.best_iteration_number, 1)
+
     def test_joint_stl_preview_rounds_never_reslice_the_complete_object(self) -> None:
         source_stl = self.root / "preview_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
@@ -1369,8 +1522,7 @@ class Phase16Tests(unittest.TestCase):
 
         suffixes = [request.model_path.suffix for request in adapter.requests]
         isolated_count = suffixes.count(".stl")
-        self.assertGreaterEqual(isolated_count, 2)
-        self.assertLessEqual(isolated_count, 6)
+        self.assertEqual(isolated_count, 6)
         self.assertEqual(suffixes[:isolated_count], [".stl"] * isolated_count)
         self.assertNotIn(".stl", suffixes[isolated_count:])
         self.assertGreaterEqual(suffixes.count(".3mf"), 2)

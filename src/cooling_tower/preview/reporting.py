@@ -175,6 +175,33 @@ def calibration_diagnostics(
             )
         best_iteration = best_iteration or iterations[-1]
     failure_dicts = [_failure_dict(item) for item in failures]
+    joint_iterations = tuple(
+        item
+        for item in iterations
+        if bool(getattr(item, "joint_slice", False))
+    )
+    local_best_joint_slice_number = next(
+        (
+            index
+            for index, item in enumerate(joint_iterations, start=1)
+            if item is best_iteration
+            or getattr(item, "number", None) == best_iteration_number
+        ),
+        None,
+    )
+    reported_joint_slice_count = max(
+        len(joint_iterations),
+        int(getattr(preview, "completed_joint_slice_count", 0) or 0),
+    )
+    joint_slice_offset = max(
+        0,
+        reported_joint_slice_count - len(joint_iterations),
+    )
+    best_joint_slice_number = (
+        joint_slice_offset + local_best_joint_slice_number
+        if local_best_joint_slice_number is not None
+        else None
+    )
     if intentionally_disabled:
         state_value = "disabled"
         state_explanation = _STATE_LABELS[state_value]
@@ -204,10 +231,8 @@ def calibration_diagnostics(
             not bool(getattr(item, "joint_slice", False))
             for item in iterations
         ),
-        "joint_slice_count": sum(
-            bool(getattr(item, "joint_slice", False))
-            for item in iterations
-        ),
+        "joint_slice_count": reported_joint_slice_count,
+        "best_joint_slice_number": best_joint_slice_number,
         "best_iteration_number": best_iteration_number,
         "best_maximum_remaining_deficit_s": getattr(
             best_iteration,
@@ -621,7 +646,15 @@ def build_user_report(
             )
         best_iteration = diagnostics["best_iteration_number"]
         if best_iteration is not None:
-            lines.append(f"Exportierter bester Durchlauf: {best_iteration}.")
+            if preview.joint_sliced:
+                lines.append(
+                    "Exportierter bester gemeinsamer Slice: "
+                    f"{diagnostics['best_joint_slice_number']}."
+                )
+            else:
+                lines.append(
+                    f"Exportierter bester Durchlauf: {best_iteration}."
+                )
         if not preview.joint_sliced and completed < configured:
             lines.append(
                 "Weitere Durchläufe waren nicht erforderlich, weil die "
@@ -673,8 +706,13 @@ def build_user_report(
                     f"von maximal {diagnostics['configured_iteration_count']} "
                     "getrennte Slicer-Abgleiche"
                 ),
-                f"- Exportierter bester Durchlauf: "
-                f"{diagnostics['best_iteration_number']}",
+                (
+                    "- Exportierter bester gemeinsamer Slice: "
+                    f"{diagnostics['best_joint_slice_number']}"
+                    if preview.joint_sliced
+                    else "- Exportierter bester Durchlauf: "
+                    f"{diagnostics['best_iteration_number']}"
+                ),
             )
         )
         if preview.minimum_verified_layer_time_s is not None:

@@ -593,14 +593,42 @@ class PreviewDialog(QDialog):
                 "neutral",
             )
 
-        configured = max(
+        configured_iterations = max(
             0,
             int(getattr(calibration, "configured_iteration_count", 0) or 0),
         )
         iterations = tuple(getattr(calibration, "iterations", ()) or ())
-        completed = len(iterations)
         calibrated = bool(getattr(result, "calibrated", False))
         joint_sliced = bool(getattr(result, "joint_sliced", False))
+        if joint_sliced:
+            joint_iterations = tuple(
+                item
+                for item in iterations
+                if bool(getattr(item, "joint_slice", False))
+            )
+            completed = max(
+                len(joint_iterations),
+                int(
+                    getattr(result, "completed_joint_slice_count", 0)
+                    or 0
+                ),
+            )
+            configured = max(
+                completed,
+                int(
+                    getattr(result, "configured_joint_slice_count", 0)
+                    or 0
+                ),
+            )
+            run_count_label = (
+                f"Gemeinsame Slices: {completed} von maximal {configured}"
+            )
+        else:
+            completed = len(iterations)
+            configured = configured_iterations
+            run_count_label = (
+                f"Prüfdurchläufe: {completed} von maximal {configured}"
+            )
         slicer_optimized = bool(getattr(result, "slicer_optimized", False))
         time_tolerance = float(
             getattr(result, "calibration_time_tolerance_s", 0.2)
@@ -661,7 +689,7 @@ class PreviewDialog(QDialog):
         lines = [
             "Prüfstatus der Prognose",
             headline,
-            f"Prüfdurchläufe: {completed} von maximal {configured}",
+            run_count_label,
         ]
         if difference is not None and not compact:
             relation = (

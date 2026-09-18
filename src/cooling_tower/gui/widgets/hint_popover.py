@@ -12,6 +12,14 @@ class HintPopover(QFrame):
         super().__init__(parent)
         self.setObjectName("hintPopover")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # The popover can overlap its small trigger in compact dialogs.  It
+        # must never become the mouse target there, otherwise Qt alternates
+        # Enter/Leave events on the trigger while the pointer is still over
+        # the information icon and the hint visibly flickers.
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         layout = QVBoxLayout(self)

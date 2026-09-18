@@ -832,9 +832,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_precise_button"))
         self.assertFalse(hasattr(window, "preview_quality_panel"))
         config = window._calibration_config()
-        self.assertEqual(config.maximum_iterations, 12)
-        self.assertEqual(config.minimum_joint_slices, 2)
-        self.assertEqual(config.maximum_joint_slices, 6)
+        self.assertEqual(config.maximum_iterations, 16)
+        self.assertEqual(config.minimum_joint_slices, 1)
+        self.assertEqual(config.maximum_joint_slices, 10)
         self.assertTrue(
             window.preview_action_control.isAncestorOf(
                 window.preview_button

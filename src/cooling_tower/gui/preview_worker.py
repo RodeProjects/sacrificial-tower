@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import traceback
+import re
+from threading import Event
 
 from PySide6.QtCore import Signal, Slot
 
@@ -18,17 +20,29 @@ class PreviewWorker(CancelableWorker):
     succeeded = Signal(int, object)
     failed = Signal(int, str, str)
     finished = Signal(int)
+    joint_phase_started = Signal(int, int, int)
+    joint_progress = Signal(int, object)
 
     def __init__(
         self,
         request_id: int,
         request: PreviewRequest,
         service: PreviewService,
+        seed_preview: object | None = None,
     ) -> None:
         super().__init__()
         self.request_id = request_id
         self.request = request
         self.service = service
+        self.seed_preview = seed_preview
+        self.accept_best_event = Event()
+        self._last_joint_started = 0
+
+    @Slot()
+    def accept_current(self) -> None:
+        """Stop safely and retain the best fully evaluated joint candidate."""
+
+        self.accept_best_event.set()
 
     @Slot()
     def run(self) -> None:
@@ -54,7 +68,10 @@ class PreviewWorker(CancelableWorker):
                 result = controller.execute(
                     self.request,
                     cancellation_event=self.cancellation_event,
+                    accept_best_event=self.accept_best_event,
                     progress_callback=self._report_progress,
+                    joint_progress_callback=self._report_joint_progress,
+                    seed_preview=self.seed_preview,
                 )
             except PreviewCancelled:
                 self._diagnose_cancelled("during_generation")
@@ -196,3 +213,21 @@ class PreviewWorker(CancelableWorker):
             status=status,
         )
         self.progress.emit(self.request_id, percent, status)
+        match = re.search(
+            r"Gemeinsamer Slice\s+(\d+)\s*/\s*(\d+)",
+            status,
+            re.IGNORECASE,
+        )
+        if match is not None:
+            current = int(match.group(1))
+            maximum = int(match.group(2))
+            if current != self._last_joint_started:
+                self._last_joint_started = current
+                self.joint_phase_started.emit(
+                    self.request_id,
+                    current - 1,
+                    maximum,
+                )
+
+    def _report_joint_progress(self, progress: object) -> None:
+        self.joint_progress.emit(self.request_id, progress)

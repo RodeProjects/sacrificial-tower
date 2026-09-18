@@ -425,6 +425,11 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(popover.isVisible())
         self.assertEqual(popover.label.text(), button.toolTip())
         self.assertTrue(window.rect().contains(popover.geometry()))
+        self.assertTrue(
+            popover.testAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents
+            )
+        )
 
         QApplication.sendEvent(button, QEvent(QEvent.Type.Leave))
         self.app.processEvents()
@@ -1981,8 +1986,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "slicer_prediction_button"))
         self.assertFalse(hasattr(window, "prediction_advice_label"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
-        self.assertEqual(window.preview_iterations, 12)
-        self.assertEqual(window.preview_joint_slices, 6)
+        self.assertEqual(window.preview_iterations, 16)
+        self.assertEqual(window.preview_joint_slices, 10)
         window.close()
 
     def test_left_drag_rotation_directions_are_inverted(self) -> None:

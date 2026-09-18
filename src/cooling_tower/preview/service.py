@@ -286,7 +286,9 @@ class PreviewService:
         request: PreviewRequest,
         *,
         cancellation_event: Event | None = None,
+        accept_best_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
+        joint_progress_callback: Callable[[object], None] | None = None,
         seed_preview: PreviewResult | None = None,
     ) -> PreviewResult:
         notify = progress_callback or (lambda _percent, _status: None)
@@ -315,7 +317,10 @@ class PreviewService:
                     "Der vorhandene Geometriekandidat kann für die fortgesetzte "
                     "Kalibrierung nicht sicher wiederverwendet werden."
                 )
-            seed_profile = seed_calibration.profile
+            seed_profile = (
+                getattr(seed_calibration, "continuation_profile", None)
+                or seed_calibration.profile
+            )
             seed_stl_path = seed_preview.artifact_path
         if not request.original_source_is_current():
             raise PreviewBuildError(
@@ -367,10 +372,12 @@ class PreviewService:
                     output_directory=root / "calibrated",
                     config=request.calibration_config,
                     cancellation_event=cancellation_event,
+                    accept_best_event=accept_best_event,
                     progress_callback=lambda percent, status: notify(
                         25 + round(max(0, min(100, percent)) * 0.6),
                         status,
                     ),
+                    joint_progress_callback=joint_progress_callback,
                     source_artifact=request.source_artifact,
                     precomputed_occupied_bounds=source_data.occupied_bounds,
                     seed_profile=seed_profile,
@@ -565,6 +572,20 @@ class PreviewService:
                     else None
                 ),
                 joint_sliced=joint_sliced,
+                completed_joint_slice_count=(
+                    sum(
+                        1
+                        for item in getattr(calibration, "iterations", ())
+                        if bool(getattr(item, "joint_slice", False))
+                    )
+                    if calibration is not None
+                    else 0
+                ),
+                configured_joint_slice_count=(
+                    request.calibration_config.maximum_joint_slices
+                    if joint_sliced
+                    else 0
+                ),
                 calibrated=calibrated,
                 generation_kind=generation_kind,
                 slicer_optimized=slicer_optimized,

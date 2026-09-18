@@ -164,6 +164,11 @@ SETTING_COMPATIBILITY_RULES = (
         minimum=4, maximum=8,
     ),
     SettingCompatibilityRule(
+        "maximum_joint_slices", "joint-slice-budget-v1",
+        ("maximum_joint_slices",), "int", "maximum_joint_slices",
+        minimum=5, maximum=25,
+    ),
+    SettingCompatibilityRule(
         "preview_camera.yaw_deg", "camera-yaw-degrees-v1", ("preview_camera", "yaw_deg"),
         "float", "preview_camera.yaw_deg",
     ),

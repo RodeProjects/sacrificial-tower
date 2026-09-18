@@ -41,6 +41,7 @@ from cooling_tower.models import (
     CalibrationState,
     GenerationSettings,
     LayerSliceTiming,
+    JointSliceProgress,
     OccupiedBounds,
     SliceEvaluation,
     SourceArtifact,
@@ -74,6 +75,18 @@ from cooling_tower.calibration.candidate_evaluation import (
 from cooling_tower.write_policy import ensure_writable_output
 
 ProgressCallback = Callable[[int, str], None]
+JointProgressCallback = Callable[[JointSliceProgress], None]
+JOINT_TARGET_TOLERANCE_S = 0.1
+
+
+class _CombinedCancellationEvent:
+    """Event-shaped view used to stop a slicer for cancel or early accept."""
+
+    def __init__(self, *events: Event | None) -> None:
+        self._events = tuple(event for event in events if event is not None)
+
+    def is_set(self) -> bool:
+        return any(event.is_set() for event in self._events)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +121,9 @@ class CalibrationService:
         output_directory: str | Path,
         config: CalibrationConfig | None = None,
         cancellation_event: Event | None = None,
+        accept_best_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
+        joint_progress_callback: JointProgressCallback | None = None,
         source_artifact: SourceArtifact | None = None,
         precomputed_occupied_bounds: OccupiedBounds | None = None,
         seed_profile: object | None = None,
@@ -116,6 +131,12 @@ class CalibrationService:
     ) -> CalibrationResult:
         config = config or CalibrationConfig(time_tolerance_s=settings.layer_time_tolerance_s)
         notify = progress_callback or (lambda percent, status: None)
+        notify_joint = joint_progress_callback or (lambda _progress: None)
+        animate_joint_progress = joint_progress_callback is not None
+        slicer_stop_event = _CombinedCancellationEvent(
+            cancellation_event,
+            accept_best_event,
+        )
         started = time.monotonic()
         source = Path(getattr(snapshot, "gcode_path")).resolve()
         source_hash = sha256_file(source)
@@ -262,9 +283,11 @@ class CalibrationService:
         best_project: Path | None = None
         best_deferred_project: _DeferredJointProjectExport | None = None
         best_iteration_number: int | None = None
-        best_score: tuple[int, float, float, float, float, float] | None = None
+        best_score: tuple[float, ...] | None = None
+        best_target_difference_s: float | None = None
         best_is_joint = False
-        baseline_score: tuple[int, float, float, float, float, float] | None = None
+        continuation_profile = None
+        baseline_score: tuple[float, ...] | None = None
         previous_added_times_s: dict[int, float] | None = None
         first_joint_round: int | None = None
         if joint_source_stl is not None and config.perform_joint_final_slice:
@@ -291,13 +314,15 @@ class CalibrationService:
         minimum_iteration_count = 1 if iteration_count == 1 else 2
         terminal_state = CalibrationState.LIMIT_REACHED
         warnings: list[str] = []
+        accepted_early = False
+        stagnated = False
+        joint_stagnation_count = 0
         if joint_source_stl is not None and config.perform_joint_final_slice:
             normal_slice_count = max(0, (first_joint_round or 1) - 1)
             warnings.append(
                 (
-                    f"Zuerst optimieren bis zu {normal_slice_count} getrennte "
-                    "Slices die Turmgeometrie; bei stabiler Annäherung wird "
-                    "früher zur vollständigen gemeinsamen Prüfung gewechselt. "
+                    f"Zuerst optimieren {normal_slice_count} getrennte "
+                    "Slices die Turmgeometrie. "
                     if normal_slice_count
                     else "Der vorhandene Turmkandidat wird wiederverwendet. "
                 )
@@ -402,6 +427,13 @@ class CalibrationService:
                         configured_iteration_count=config.maximum_iterations,
                         best_iteration_number=best_iteration_number,
                     )
+                if (
+                    accept_best_event is not None
+                    and accept_best_event.is_set()
+                    and best_is_joint
+                ):
+                    accepted_early = True
+                    break
                 elapsed = time.monotonic() - started
                 if elapsed > config.maximum_runtime_s:
                     failures.append(CalibrationFailure(
@@ -422,7 +454,11 @@ class CalibrationService:
                     break
                 use_seed_this_round = reuse_seed and number == 1
                 if joint_round:
-                    round_status = "Gemeinsamer Slice wird vorbereitet …"
+                    joint_number = number - (first_joint_round or number) + 1
+                    round_status = (
+                        f"Gemeinsamer Slice {joint_number}/"
+                        f"{config.maximum_joint_slices} wird vorbereitet …"
+                    )
                 elif first_joint_round is not None:
                     round_status = (
                         "Kühlturmgeometrie wird optimiert – getrennter Slice "
@@ -515,7 +551,7 @@ class CalibrationService:
                                 iteration_root / "project_diagnostics"
                             ),
                             timeout_s=config.timeout_per_slice_s,
-                            cancellation_event=cancellation_event,
+                            cancellation_event=slicer_stop_event,
                             temporary_overrides=overrides_for_slice,
                             purpose="calibration",
                             calibration_round=number,
@@ -625,7 +661,7 @@ class CalibrationService:
                     output_directory=iteration_root / "slice",
                     diagnostics_root=iteration_root / "diagnostics",
                     timeout_s=config.timeout_per_slice_s,
-                    cancellation_event=cancellation_event,
+                    cancellation_event=slicer_stop_event,
                     temporary_overrides=overrides_for_slice,
                     expected_layer_heights_mm=tuple(
                         float(getattr(layer, "height_mm")) for layer in source_layers
@@ -640,6 +676,21 @@ class CalibrationService:
                     calibration_round=number,
                 )
                 slice_result = adapter.slice_model(slice_request)
+                if cancellation_event is not None and cancellation_event.is_set():
+                    return CalibrationResult(
+                        CalibrationState.CANCELLED, config.mode, tuple(iterations),
+                        final_profile, None, None, placement,
+                        source_sha256=source_hash,
+                        configured_iteration_count=config.maximum_iterations,
+                        best_iteration_number=best_iteration_number,
+                    )
+                if (
+                    accept_best_event is not None
+                    and accept_best_event.is_set()
+                    and best_is_joint
+                ):
+                    accepted_early = True
+                    break
                 if (
                     (cancellation_event is None or not cancellation_event.is_set())
                     and self._should_retry_anycubic_profile_load(
@@ -884,13 +935,29 @@ class CalibrationService:
                     and evaluation.maximum_metadata_difference_s
                     > config.slicer_metadata_tolerance_s
                 )
-                candidate_score = self._candidate_score(
+                joint_candidate_accepted = bool(
+                    joint_round
+                    and math.isfinite(minimum_target_difference_s)
+                    and abs(minimum_target_difference_s)
+                    <= JOINT_TARGET_TOLERANCE_S
+                )
+                quality_score = self._candidate_score(
                     convergence,
                     solid,
                     source_layers=source_layers,
                     added_times_s=evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                     combined_times_s=combined_times_s,
+                )
+                # The minimum relevant layer time is the value presented to
+                # the user as the candidate result.  Make its absolute target
+                # deviation the primary rank so a visibly worse candidate can
+                # never replace an already better one.  The established
+                # convergence/material score remains the deterministic
+                # tie-breaker.
+                candidate_score = (
+                    abs(float(minimum_target_difference_s)),
+                    *quality_score,
                 )
                 if baseline_score is None:
                     baseline_score = candidate_score
@@ -911,38 +978,30 @@ class CalibrationService:
                     best_project = candidate_project
                     best_deferred_project = deferred_project
                     best_iteration_number = number
-                if (
-                    not joint_round
-                    and joint_source_stl is not None
-                    and config.perform_joint_final_slice
-                    and first_joint_round is not None
-                    and number + 1 < first_joint_round
-                    and target_time_confirmed
-                    and slicer_result_stable
-                    and convergence.profile_stable
-                    and not metadata_conflict
-                    and not solid.feasibility_issues
-                ):
-                    # Isolated slices are only a fast search stage. Once two
-                    # successive measurements and the profile itself are
-                    # stable, unused search rounds cannot improve the final
-                    # evidence; move directly to the mandatory full joint
-                    # slices without weakening their count or tolerance.
-                    first_joint_round = number + 1
-                    record_diagnostic(
-                        "calibration_joint_phase_advanced",
-                        after_isolated_round=number,
-                        saved_isolated_rounds=(
-                            normal_slice_count - number
-                        ),
+                    best_target_difference_s = minimum_target_difference_s
+                if joint_round and not metadata_conflict and best_is_joint:
+                    best_iteration = next(
+                        item
+                        for item in reversed(iterations)
+                        if item.number == best_iteration_number
                     )
-                joint_candidate_accepted = bool(
-                    joint_round
-                    and target_time_confirmed
-                    and first_joint_round is not None
-                    and number - first_joint_round + 1
-                    >= config.minimum_joint_slices
-                )
+                    notify_joint(
+                        JointSliceProgress(
+                            completed_count=(
+                                number - (first_joint_round or number) + 1
+                            ),
+                            maximum_count=config.maximum_joint_slices,
+                            current_iteration=iteration,
+                            best_iteration=best_iteration,
+                            current_is_best=candidate_is_best,
+                        )
+                    )
+                    # Keep the smooth fill transition plus the 500 ms pulse
+                    # visible before the next round resets the image.
+                    # Cancellation is checked immediately afterwards and the
+                    # UI thread itself is never blocked.
+                    if animate_joint_progress:
+                        time.sleep(0.9)
                 isolated_candidate_accepted = bool(
                     not joint_round
                     and target_time_confirmed
@@ -953,25 +1012,34 @@ class CalibrationService:
                     and not metadata_conflict
                     and not solid.feasibility_issues
                 ):
+                    selected_profile = best_profile or solid
+                    selected_stl = best_stl or candidate_stl
+                    selected_iteration_number = best_iteration_number or number
                     result = self._export_candidate(
                         state=CalibrationState.CONVERGED,
                         config=config,
                         iterations=iterations,
-                        profile=solid,
-                        candidate_stl=candidate_stl,
-                        candidate_gcode=combined_path,
-                        candidate_project=candidate_project,
-                        deferred_project=deferred_project,
+                        profile=selected_profile,
+                        candidate_stl=selected_stl,
+                        candidate_gcode=best_gcode,
+                        candidate_project=best_project,
+                        deferred_project=best_deferred_project,
                         placement=placement,
                         failures=(),
                         warnings=warnings,
                         source=source,
                         source_hash=source_hash,
                         output_directory=Path(output_directory),
-                        best_iteration_number=number,
+                        best_iteration_number=selected_iteration_number,
                         improved_over_initial_candidate=(
                             baseline_score is not None
-                            and candidate_score < baseline_score
+                            and best_score is not None
+                            and best_score < baseline_score
+                        ),
+                        termination_reason=(
+                            "target_tolerance"
+                            if joint_candidate_accepted
+                            else None
                         ),
                     )
                     notify(100, "Slicerbasierte Kalibrierung abgeschlossen")
@@ -984,6 +1052,45 @@ class CalibrationService:
                         "als zulässig voneinander ab.",
                     ))
                     break
+                if joint_round:
+                    profile_stable = bool(
+                        math.isfinite(maximum_profile_change)
+                        and maximum_profile_change
+                        <= config.profile_change_tolerance_mm
+                    )
+                    timing_stable = bool(
+                        maximum_slicer_result_change_s is not None
+                        and math.isfinite(maximum_slicer_result_change_s)
+                        and maximum_slicer_result_change_s
+                        <= config.slicer_result_change_tolerance_s
+                    )
+                    joint_stagnation_count = (
+                        joint_stagnation_count + 1
+                        if profile_stable and timing_stable
+                        else 0
+                    )
+                    # Two stable transitions mean that the last three joint
+                    # slices produced no meaningful geometric or timing
+                    # movement. Further complete-object slices would only
+                    # repeat the same candidate.
+                    joint_completed_count = (
+                        number - (first_joint_round or number) + 1
+                    )
+                    if (
+                        joint_stagnation_count >= 2
+                        and joint_completed_count >= 3
+                    ):
+                        stagnated = True
+                        record_diagnostic(
+                            "calibration_joint_stagnated",
+                            calibration_round=number,
+                            stable_transition_count=joint_stagnation_count,
+                            maximum_profile_change_mm=maximum_profile_change,
+                            maximum_slicer_result_change_s=(
+                                maximum_slicer_result_change_s
+                            ),
+                        )
+                        break
                 if (
                     convergence.deficient_layer_count > 0
                     and repeated_signatures[signature]
@@ -1072,6 +1179,12 @@ class CalibrationService:
                         ),
                         config=config,
                     )
+                    continuation_profile = build_solid_tower_profile(
+                        radius_profile,
+                        settings,
+                        tower_end_z_mm=assessment.tower_end_z_mm,
+                        object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
+                    )
                     continue
                 radius_profile, maximum_profile_change = adjust_radius_profile(
                     radius_profile,
@@ -1091,7 +1204,44 @@ class CalibrationService:
                     ),
                     config=config,
                 )
-            if not failures:
+                continuation_profile = build_solid_tower_profile(
+                    radius_profile,
+                    settings,
+                    tower_end_z_mm=assessment.tower_end_z_mm,
+                    object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
+                )
+            completed_within_configured_tolerance = bool(
+                not accepted_early
+                and not stagnated
+                and not failures
+                and best_is_joint
+                and iterations
+                and best_target_difference_s is not None
+                and abs(best_target_difference_s)
+                <= config.time_tolerance_s + 1e-9
+            )
+            termination_reason = "error" if failures else None
+            if completed_within_configured_tolerance:
+                terminal_state = CalibrationState.CONVERGED
+                termination_reason = "maximum_joint_slices"
+            elif accepted_early:
+                termination_reason = "user_accepted"
+                warnings.append(
+                    "Die gemeinsame Angleichung wurde auf Wunsch vorzeitig "
+                    "beendet. Der bis dahin beste vollständig geprüfte "
+                    "Kandidat wird verwendet."
+                )
+            elif stagnated:
+                termination_reason = "stagnation"
+                warnings.append(
+                    "Die gemeinsame Angleichung wurde wegen Stagnation "
+                    "vorzeitig beendet: Drei aufeinanderfolgende gemeinsame "
+                    "Slices ergaben weder eine nennenswerte Änderung der "
+                    "Turmform noch der gemessenen Layerzeiten. Der bis dahin beste "
+                    "Kandidat wird verwendet."
+                )
+            elif not failures:
+                termination_reason = "maximum_joint_slices"
                 last_iteration = iterations[-1] if iterations else None
                 if (
                     last_iteration is not None
@@ -1135,7 +1285,13 @@ class CalibrationService:
                 and best_stl is not None
                 and best_iteration_number is not None
             ):
-                if best_project is not None or best_deferred_project is not None:
+                if terminal_state is CalibrationState.CONVERGED:
+                    warnings.append(
+                        "Die eingestellte Höchstzahl gemeinsamer Slices wurde "
+                        "ausgeführt; der beste Kandidat liegt innerhalb der "
+                        "eingestellten Toleranz."
+                    )
+                elif best_project is not None or best_deferred_project is not None:
                     warnings.append(
                         "Die gemeinsamen Slices haben die "
                         "Zielzeit nicht vollständig bestätigt. Der gemeinsam "
@@ -1170,6 +1326,8 @@ class CalibrationService:
                     output_directory=Path(output_directory),
                     best_iteration_number=best_iteration_number,
                     improved_over_initial_candidate=improved,
+                    continuation_profile=continuation_profile,
+                    termination_reason=termination_reason,
                 )
         return CalibrationResult(
             state=terminal_state,
@@ -1181,6 +1339,7 @@ class CalibrationService:
             placement=placement,
             failures=tuple(failures),
             warnings=tuple(warnings),
+            termination_reason=("error" if failures else None),
             source_sha256=source_hash,
             configured_iteration_count=config.maximum_iterations,
             best_iteration_number=best_iteration_number,
@@ -1260,6 +1419,8 @@ class CalibrationService:
         output_directory: Path,
         best_iteration_number: int,
         improved_over_initial_candidate: bool,
+        continuation_profile: object | None = None,
+        termination_reason: str | None = None,
     ) -> CalibrationResult:
         if candidate_project is None and deferred_project is not None:
             project_factory = getattr(
@@ -1320,6 +1481,7 @@ class CalibrationService:
                     configured_iteration_count=config.maximum_iterations,
                     best_iteration_number=best_iteration_number,
                     improved_over_initial_candidate=False,
+                    termination_reason="error",
                 )
         output_directory = ensure_writable_output(output_directory)
         output_directory.mkdir(parents=True, exist_ok=True)
@@ -1371,6 +1533,8 @@ class CalibrationService:
             configured_iteration_count=config.maximum_iterations,
             best_iteration_number=best_iteration_number,
             improved_over_initial_candidate=improved_over_initial_candidate,
+            termination_reason=termination_reason,
+            continuation_profile=continuation_profile,
         )
         report_path = ensure_writable_output(output_directory / "calibration_report.json", protected_files=(source,))
         report_path.write_text(
