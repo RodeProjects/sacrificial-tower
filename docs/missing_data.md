@@ -4,10 +4,14 @@ Automatisch aus `config/legal_profile.json` und den Rechtstext-Vorlagen erstellt
 **Alle Werte ausschließlich in dieser JSON-Datei eintragen.** Die Anwendung setzt
 sie beim Öffnen der Rechtstexte ein; Vorlagen nicht zusätzlich von Hand ausfüllen.
 Nach Änderungen `python scripts/check_release_readiness.py --write-checklist`
-ausführen. `python scripts/check_release_readiness.py --release` muss anschließend
-erfolgreich sein. Nicht registrierte Felder und Platzhalter in Vorlagen blockieren
-die Prüfung ebenfalls. Die Liste erfasst die Anbieter-/Vertriebsangaben, keine
-gewöhnlichen Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
+ausführen. Für einen kommerziellen Release muss
+`python scripts/check_release_readiness.py --release` erfolgreich sein.
+Ausdrücklich gekennzeichnete, unverkäufliche Testversionen dürfen mit
+`--development-release` veröffentlicht werden; dabei bleiben die unten genannten
+Angaben offen und müssen vor dem regulären Vertrieb nachgetragen werden. Nicht
+registrierte Felder und Platzhalter in Vorlagen blockieren beide Releasearten.
+Die Liste erfasst die Anbieter-/Vertriebsangaben, keine gewöhnlichen
+Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
 
 | Status | Feld in config/legal_profile.json | Erwartete Daten | Verwendung |
 |---|---|---|---|

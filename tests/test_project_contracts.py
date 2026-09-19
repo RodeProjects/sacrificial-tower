@@ -17,7 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from check_release_readiness import EXPECTED, checklist, missing_fields
+from check_release_readiness import (
+    EXPECTED,
+    checklist,
+    development_release_blockers,
+    missing_fields,
+)
 from distribution_compliance import keep_qt_binary, copy_notice, binary_origins
 from cooling_tower.cli import build_argument_parser
 from cooling_tower.legal_documents import DOCUMENTS, render_legal_document
@@ -107,6 +112,7 @@ class ProjectContractTests(unittest.TestCase):
         for title in DOCUMENTS:
             rendered = render_legal_document(title)
             self.assertNotIn("{{", rendered)
+            self.assertNotIn("[[", rendered)
             self.assertGreater(len(rendered), 500)
         self.assertEqual((ROOT / "docs/missing_data.md").read_text(encoding="utf-8"), checklist())
 
@@ -125,6 +131,40 @@ class ProjectContractTests(unittest.TestCase):
             self.assertEqual(missing_fields(root), [])
             (root / "legal/terms.md").write_text("{{unknown_field}}", encoding="utf-8")
             self.assertTrue(missing_fields(root))
+
+    def test_development_release_defers_only_known_commercial_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "legal").mkdir()
+            profile = {key: "Ergänzte geprüfte Angabe" for key in EXPECTED}
+            for key in (
+                "provider_postal_address",
+                "provider_additional_details",
+                "support_retention_policy",
+                "commercial_terms",
+                "release_legal_review",
+            ):
+                profile[key] = f"[[{key.upper()}]]"
+            (root / "config/legal_profile.json").write_text(
+                json.dumps(profile), encoding="utf-8"
+            )
+            (root / "legal/terms.md").write_text(
+                "## Aktuelle Entwicklungsversion\n"
+                "noch nicht für den regulären Verkauf freigegebene "
+                "Entwicklungsversion",
+                encoding="utf-8",
+            )
+            self.assertEqual(development_release_blockers(root), [])
+
+            profile["provider_email"] = "[[PROVIDER_EMAIL]]"
+            (root / "config/legal_profile.json").write_text(
+                json.dumps(profile), encoding="utf-8"
+            )
+            self.assertEqual(
+                [key for key, _description in development_release_blockers(root)],
+                ["provider_email"],
+            )
 
 
 if __name__ == "__main__":

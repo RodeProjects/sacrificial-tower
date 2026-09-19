@@ -7,6 +7,14 @@ on:
         description: Version im Format x.x.x
         required: true
         type: string
+      release_kind:
+        description: Veröffentlichungsart
+        required: true
+        default: commercial
+        type: choice
+        options:
+          - commercial
+          - development
 
 permissions:
   actions: read
@@ -114,13 +122,19 @@ jobs:
           $metadata | ConvertTo-Json | Set-Content 'dist\installer\update-metadata.json' -Encoding utf8
 
       - name: Create signed update manifest
+        shell: pwsh
         env:
           UPDATE_MANIFEST_SIGNING_KEY_BASE64: ${{ secrets.UPDATE_MANIFEST_SIGNING_KEY_BASE64 }}
-        run: >-
-          python scripts/create_update_manifest.py
-          --metadata dist/installer/update-metadata.json
-          --output dist/installer/latest.json
-          --release-notes "Sacrificial Tower ${{ inputs.version }}"
+        run: |
+          if ('${{ inputs.release_kind }}' -eq 'development') {
+            $releaseNotes = 'Sacrificial Tower ${{ inputs.version }} – Entwicklungsversion für Tests und Evaluation'
+          } else {
+            $releaseNotes = 'Sacrificial Tower ${{ inputs.version }}'
+          }
+          python scripts/create_update_manifest.py `
+            --metadata dist/installer/update-metadata.json `
+            --output dist/installer/latest.json `
+            --release-notes $releaseNotes
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v5

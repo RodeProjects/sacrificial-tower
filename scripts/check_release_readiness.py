@@ -1,4 +1,4 @@
-"""List unresolved provider/release fields; --release fails closed."""
+"""Validate commercial and explicitly labelled development releases."""
 from __future__ import annotations
 import argparse
 import json
@@ -16,6 +16,18 @@ EXPECTED = {
     "commercial_terms": "Vertriebs-/Nutzungsmodell sowie konkrete Support- und Updatezusagen",
     "release_legal_review": "Datierte Freigabe mit Nachweisen: Rechtstexte, LGPL-Quell-/Binärzuordnung, Build-Tool-Lizenzberechtigung samt Runtime-Redistribution und CRA-Einordnung",
 }
+
+DEVELOPMENT_DEFERRED_FIELDS = {
+    "provider_postal_address",
+    "provider_additional_details",
+    "support_retention_policy",
+    "commercial_terms",
+    "release_legal_review",
+}
+DEVELOPMENT_TERMS_MARKERS = (
+    "## Aktuelle Entwicklungsversion",
+    "noch nicht für den regulären Verkauf freigegebene Entwicklungsversion",
+)
 
 
 def missing_fields(root: Path = ROOT) -> list[tuple[str, str]]:
@@ -36,6 +48,31 @@ def missing_fields(root: Path = ROOT) -> list[tuple[str, str]]:
     return missing
 
 
+def development_release_blockers(
+    root: Path = ROOT,
+) -> list[tuple[str, str]]:
+    """Return issues that must still block a non-commercial test release."""
+    blockers = [
+        (key, description)
+        for key, description in missing_fields(root)
+        if key not in DEVELOPMENT_DEFERRED_FIELDS
+    ]
+    terms_path = root / "legal" / "terms.md"
+    terms = terms_path.read_text(encoding="utf-8")
+    normalized_terms = re.sub(r"\s+", " ", terms)
+    for marker in DEVELOPMENT_TERMS_MARKERS:
+        normalized_marker = re.sub(r"\s+", " ", marker)
+        if normalized_marker not in normalized_terms:
+            blockers.append(
+                (
+                    str(terms_path.relative_to(root)),
+                    "Entwicklungsrelease ist nicht eindeutig als unverkäufliche "
+                    f"Entwicklungsversion gekennzeichnet: {marker!r}",
+                )
+            )
+    return blockers
+
+
 def checklist(root: Path = ROOT) -> str:
     missing = dict(missing_fields(root))
     rows = []
@@ -51,10 +88,14 @@ Automatisch aus `config/legal_profile.json` und den Rechtstext-Vorlagen erstellt
 **Alle Werte ausschließlich in dieser JSON-Datei eintragen.** Die Anwendung setzt
 sie beim Öffnen der Rechtstexte ein; Vorlagen nicht zusätzlich von Hand ausfüllen.
 Nach Änderungen `python scripts/check_release_readiness.py --write-checklist`
-ausführen. `python scripts/check_release_readiness.py --release` muss anschließend
-erfolgreich sein. Nicht registrierte Felder und Platzhalter in Vorlagen blockieren
-die Prüfung ebenfalls. Die Liste erfasst die Anbieter-/Vertriebsangaben, keine
-gewöhnlichen Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
+ausführen. Für einen kommerziellen Release muss
+`python scripts/check_release_readiness.py --release` erfolgreich sein.
+Ausdrücklich gekennzeichnete, unverkäufliche Testversionen dürfen mit
+`--development-release` veröffentlicht werden; dabei bleiben die unten genannten
+Angaben offen und müssen vor dem regulären Vertrieb nachgetragen werden. Nicht
+registrierte Felder und Platzhalter in Vorlagen blockieren beide Releasearten.
+Die Liste erfasst die Anbieter-/Vertriebsangaben, keine gewöhnlichen
+Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
 
 | Status | Feld in config/legal_profile.json | Erwartete Daten | Verwendung |
 |---|---|---|---|
@@ -72,7 +113,9 @@ Entwicklungsversion. Ein ausgefülltes kommerzielles Modell allein ändert das n
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--release", action="store_true")
+    release_kind = parser.add_mutually_exclusive_group()
+    release_kind.add_argument("--release", action="store_true")
+    release_kind.add_argument("--development-release", action="store_true")
     parser.add_argument("--write-checklist", action="store_true")
     args = parser.parse_args()
     if args.write_checklist:
@@ -82,4 +125,14 @@ if __name__ == "__main__":
         print(f"OFFEN config/legal_profile.json -> {key}: {description}")
     if not missing:
         print("Alle registrierten Anbieter- und Freigabeangaben sind ausgefüllt.")
+    if args.development_release:
+        blockers = development_release_blockers()
+        for key, description in blockers:
+            print(f"BLOCKIERT {key}: {description}")
+        if not blockers:
+            print(
+                "Entwicklungsrelease zulässig: offene Freigabeangaben bleiben "
+                "für den regulären Vertrieb verpflichtend."
+            )
+        raise SystemExit(1 if blockers else 0)
     raise SystemExit(1 if args.release and missing else 0)

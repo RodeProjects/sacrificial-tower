@@ -1,6 +1,7 @@
 param(
     [string]$SourceRepository = "RodeProjects/sacrificial-tower",
-    [string]$UpdateRepository = "RodeProjects/sacrificial-tower-updates"
+    [string]$UpdateRepository = "RodeProjects/sacrificial-tower-updates",
+    [switch]$DevelopmentRelease
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,8 +36,17 @@ function Assert-NativeSuccess {
     }
 }
 
-& $python (Join-Path $PSScriptRoot "check_release_readiness.py") --release
-Assert-NativeSuccess "Die Anbieter- und Vertriebsfreigabeprüfung"
+if ($DevelopmentRelease) {
+    & $python `
+        (Join-Path $PSScriptRoot "check_release_readiness.py") `
+        --development-release
+    Assert-NativeSuccess "Die Freigabeprüfung für Entwicklungsversionen"
+    $releaseKind = "development"
+} else {
+    & $python (Join-Path $PSScriptRoot "check_release_readiness.py") --release
+    Assert-NativeSuccess "Die Anbieter- und Vertriebsfreigabeprüfung"
+    $releaseKind = "commercial"
+}
 
 & $gh auth status
 Assert-NativeSuccess "Die GitHub-Anmeldeprüfung"
@@ -68,7 +78,8 @@ if ($localCommit -ne $remoteCommit) {
 & $gh workflow run build-update.yml `
     --repo $SourceRepository `
     --ref main `
-    -f "version=$version"
+    -f "version=$version" `
+    -f "release_kind=$releaseKind"
 Assert-NativeSuccess "Das Starten des Build-Workflows"
 
 $run = $null
@@ -148,10 +159,27 @@ try {
         --installer $installer.FullName
     Assert-NativeSuccess "Die kryptografische Prüfung des Update-Manifests"
 
-    & $gh release create $tag $installer.FullName `
-        --repo $UpdateRepository `
-        --title "Sacrificial Tower $version" `
-        --notes "Sacrificial-Tower-Update auf Version $version."
+    if ($DevelopmentRelease) {
+        $releaseTitle = "Sacrificial Tower $version (Entwicklungsversion)"
+        $releaseNotes = (
+            "Nicht für den regulären Verkauf freigegebene Entwicklungsversion " +
+            "für Tests und Evaluation. Offene Anbieter- und Vertriebsangaben " +
+            "werden vor einem kommerziellen Release nachgetragen."
+        )
+    } else {
+        $releaseTitle = "Sacrificial Tower $version"
+        $releaseNotes = "Sacrificial-Tower-Update auf Version $version."
+    }
+    $releaseArguments = @(
+        "release", "create", $tag, $installer.FullName,
+        "--repo", $UpdateRepository,
+        "--title", $releaseTitle,
+        "--notes", $releaseNotes
+    )
+    if ($DevelopmentRelease) {
+        $releaseArguments += "--prerelease"
+    }
+    & $gh @releaseArguments
     Assert-NativeSuccess "Das Erstellen des Sacrificial-Tower-Releases"
     $releaseCreated = $true
 
@@ -186,7 +214,10 @@ try {
         -Repository $UpdateRepository `
         -LatestVersion $version
     Assert-NativeSuccess 'Die automatische Release-Bereinigung'
-    Write-Host "Version $version wurde im öffentlichen Update-Kanal veröffentlicht."
+    Write-Host (
+        "Version $version wurde als $releaseKind im öffentlichen " +
+        "Update-Kanal veröffentlicht."
+    )
 } finally {
     if ($releaseCreated -and -not $manifestPublished) {
         & $gh release delete $tag `

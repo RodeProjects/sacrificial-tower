@@ -5,6 +5,17 @@ Drittanbieter-Lizenzzahlungen vertrieben werden. Die aktuelle Oberfläche und
 Nutzungsbedingungen kennzeichnen ausdrücklich eine **Entwicklungsversion**.
 Die vorhandenen technischen Maßnahmen sind keine Freigabe für den regulären Verkauf.
 
+Für Tests und Evaluation darf der bestehende öffentliche Updatekanal ausdrücklich
+gekennzeichnete **Entwicklungsreleases** transportieren. Dieser eng begrenzte Pfad
+setzt weiterhin Name, Marke, erreichbaren Kontakt, die eindeutige Kennzeichnung als
+nicht für den regulären Verkauf freigegebene Entwicklungsversion sowie sämtliche
+technischen Build-, CI-, Signatur-, Integritäts- und Lieferumfangsprüfungen voraus.
+Noch offene Anschrift-, Datenschutz-, Vertriebs- und Abschlussnachweise werden in
+der Anwendung verständlich als ausstehend angezeigt und bleiben für jeden
+kommerziellen Release verpflichtend. Entwicklungsreleases werden als GitHub-
+Prerelease und in den signierten Updatehinweisen gekennzeichnet; sie stellen keine
+kommerzielle Freigabe dar.
+
 ## Eigene Rechte und Rechtstexte
 
 Eigener Anwendungscode: [proprietäre Projektkennzeichnung](../LICENSE.md).
@@ -92,8 +103,10 @@ Aus dem lokalen Desktopbetrieb folgt keine automatische Ausnahme.
 4. Aktuellen Sicherheitspatchstand der Python-Reihe verwenden; Tests, nativen Build,
    frisches Anwendungspaket und Installerprüfungen durchführen.
 5. Inventar, Lockdatei, Quellen, Toolchain-Versionen und Prüfnachweise dauerhaft archivieren.
-6. `scripts/check_release_readiness.py --release` prüfen. Der Publish-Einstieg führt
-   diese Prüfung vor seinen Netzwerk-/Veröffentlichungsschritten aus.
+6. `scripts/check_release_readiness.py --release` prüfen. Der kommerzielle
+   Publish-Einstieg führt diese Prüfung vor seinen Netzwerk-/
+   Veröffentlichungsschritten aus. Der getrennte Entwicklungsweg verwendet
+   `--development-release` und darf die kommerzielle Freigabeprüfung nicht ersetzen.
 
 Die Prüfung blockiert fehlende und nicht registrierte Felder. Sie kann nicht
 feststellen, ob ein Mensch einen inhaltlich richtigen Freigabenachweis eingetragen

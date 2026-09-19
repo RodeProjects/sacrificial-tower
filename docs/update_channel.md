@@ -60,7 +60,20 @@ und gibt ausschließlich den öffentlichen Anteil aus.
 2. Änderungen vollständig testen, committen und auf `main` übernehmen.
 3. Den GitHub-Actions-Workflow `Tests` für exakt diesen `main`-Commit
    erfolgreich abschließen lassen.
-4. `scripts/publish_update.ps1` im normalen Windows-Benutzerkontext ausführen.
+4. Veröffentlichungsart wählen und das Skript im normalen
+   Windows-Benutzerkontext ausführen:
+   - Kommerziell freigegeben: `scripts/publish_update.ps1`
+   - Unverkäufliche Testversion: `scripts/publish_update.ps1 -DevelopmentRelease`
+
+Ein Entwicklungsrelease ist nur zulässig, solange die ausgelieferten
+Nutzungsbedingungen das Programm eindeutig als noch nicht für den regulären
+Verkauf freigegebene Entwicklungsversion kennzeichnen. Es darf ausschließlich
+die bekannten Anbieter-, Vertriebs- und Abschlussnachweise zurückstellen. Name,
+Marke und Kontakt, eine erfolgreiche `main`-CI, die Lieferumfangsprüfung,
+Installerprüfungen, Signatur und Integritätskontrollen bleiben verpflichtend.
+Das GitHub-Release wird sichtbar als Prerelease bezeichnet, und auch die
+signierten Versionshinweise nennen die Entwicklungsversion. Die offenen Angaben
+müssen vor einem kommerziellen Release nachgetragen werden.
 
 Das Skript startet den Workflow
 `Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den
