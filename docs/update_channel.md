@@ -59,17 +59,28 @@ und gibt ausschließlich den öffentlichen Anteil aus.
 1. `APP_VERSION` in `src/cooling_tower/version.py` erhöhen.
 2. Änderungen vollständig testen, committen und auf `main` übernehmen.
 3. Den GitHub-Actions-Workflow `Tests` für exakt diesen `main`-Commit
-   erfolgreich abschließen lassen.
+   erfolgreich abschließen lassen; für die unten beschriebene, ausdrücklich
+   freigegebene Zeitlimit-Ausnahme gilt der lokale Kompletttest.
 4. Veröffentlichungsart wählen und das Skript im normalen
    Windows-Benutzerkontext ausführen:
    - Kommerziell freigegeben: `scripts/publish_update.ps1`
    - Unverkäufliche Testversion: `scripts/publish_update.ps1 -DevelopmentRelease`
 
+Nach einem durch das CI-Zeitlimit abgebrochenen `Tests`-Lauf kann ein
+ausdrücklich freigegebenes Entwicklungsrelease mit
+`scripts/publish_update.ps1 -DevelopmentRelease -AllowTimedOutCI`
+veröffentlicht werden, wenn der lokale vollständige Testlauf für den
+Anwendungscode erfolgreich war. Die Ausnahme wird im Installer-Workflow
+protokolliert und ist für kommerzielle Releases nicht verfügbar. Der
+Installer-Build sowie Lieferumfangs-, Installations-, Signatur- und
+Integritätsprüfungen bleiben verpflichtend.
+
 Ein Entwicklungsrelease ist nur zulässig, solange die ausgelieferten
 Nutzungsbedingungen das Programm eindeutig als noch nicht für den regulären
 Verkauf freigegebene Entwicklungsversion kennzeichnen. Es darf ausschließlich
 die bekannten Anbieter-, Vertriebs- und Abschlussnachweise zurückstellen. Name,
-Marke und Kontakt, eine erfolgreiche `main`-CI, die Lieferumfangsprüfung,
+Marke und Kontakt, die erfolgreiche `main`-CI oder die dokumentierte
+Zeitlimit-Ausnahme, die Lieferumfangsprüfung,
 Installerprüfungen, Signatur und Integritätskontrollen bleiben verpflichtend.
 Das GitHub-Release wird sichtbar als Prerelease bezeichnet, und auch die
 signierten Versionshinweise nennen die Entwicklungsversion. Die offenen Angaben
@@ -82,9 +93,11 @@ Ed25519-Signatur sowie Installergröße und SHA-256 erneut. Erst danach erstellt
 es im öffentlichen Update-Repository ein Release und veröffentlicht exakt das
 bereits im privaten Build signierte `latest.json`.
 
-Der Installer-Workflow prüft über die GitHub-API, dass der Workflow `Tests`
-für exakt denselben Commit auf `main` als erfolgreicher Push-Lauf abgeschlossen
-wurde. Ein Lauf eines anderen Commits, Branches oder Ereignisses genügt nicht.
+Der Installer-Workflow prüft im Normalfall über die GitHub-API, dass der
+Workflow `Tests` für exakt denselben Commit auf `main` als erfolgreicher
+Push-Lauf abgeschlossen wurde. Ein Lauf eines anderen Commits, Branches oder
+Ereignisses genügt nicht. Nur bei expliziter Entwicklungsrelease-Ausnahme
+wird diese CI-Prüfung übersprungen und der Grund im Workflow protokolliert.
 Die vollständige Testsuite wird deshalb nicht ein zweites Mal im
 Installer-Workflow ausgeführt. Die nativen Prozess-Stresstests bleiben
 zusätzlich im eigenständigen Workflow `Windows-Prozess-Stresstests` isoliert.

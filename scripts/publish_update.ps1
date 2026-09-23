@@ -1,10 +1,14 @@
 param(
     [string]$SourceRepository = "RodeProjects/sacrificial-tower",
     [string]$UpdateRepository = "RodeProjects/sacrificial-tower-updates",
-    [switch]$DevelopmentRelease
+    [switch]$DevelopmentRelease,
+    [switch]$AllowTimedOutCI
 )
 
 $ErrorActionPreference = "Stop"
+if ($AllowTimedOutCI -and -not $DevelopmentRelease) {
+    throw "Die CI-Zeitlimit-Ausnahme ist nur für Entwicklungsreleases zulässig."
+}
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     $PSNativeCommandUseErrorActionPreference = $true
 }
@@ -79,7 +83,8 @@ if ($localCommit -ne $remoteCommit) {
     --repo $SourceRepository `
     --ref main `
     -f "version=$version" `
-    -f "release_kind=$releaseKind"
+    -f "release_kind=$releaseKind" `
+    -f "allow_timed_out_ci=$($AllowTimedOutCI.IsPresent.ToString().ToLowerInvariant())"
 Assert-NativeSuccess "Das Starten des Build-Workflows"
 
 $run = $null
