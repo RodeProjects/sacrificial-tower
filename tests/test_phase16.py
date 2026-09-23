@@ -33,6 +33,7 @@ from cooling_tower.calibration import (
     parse_bed_bounds,
     propose_tower_placement,
 )
+from cooling_tower.calibration.joint_project import JointProjectError
 from cooling_tower.models import (
     BedBounds,
     CalibrationConfig,
@@ -142,9 +143,13 @@ class SequencedAdapter:
 class DeferredBambuAdapter(FakeAdapter):
     adapter_id = "bambu_studio"
 
-    def __init__(self, gcode: str, *, fail_final_export: bool = False) -> None:
+    def __init__(
+        self, gcode: str, *, fail_final_export: bool = False,
+        reject_stopped_final_export: bool = False,
+    ) -> None:
         super().__init__(gcode)
         self.fail_final_export = fail_final_export
+        self.reject_stopped_final_export = reject_stopped_final_export
         self.prepared_tower_hashes: list[str] = []
         self.final_tower_hash: str | None = None
         self.project_exports = 0
@@ -177,13 +182,21 @@ class DeferredBambuAdapter(FakeAdapter):
 
     def create_joint_project(
         self,
-        _request,
+        request,
         source_model_path,
         tower_model_path,
         destination,
         **_kwargs,
     ):
         self.project_exports += 1
+        if (
+            self.reject_stopped_final_export
+            and request.cancellation_event is not None
+            and request.cancellation_event.is_set()
+        ):
+            from cooling_tower.calibration.joint_project import JointProjectError
+
+            raise JointProjectError("Der Slicer hat das gemeinsame 3MF nicht akzeptiert.")
         if self.fail_final_export:
             from cooling_tower.calibration.joint_project import JointProjectError
 
@@ -1284,6 +1297,62 @@ class Phase16Tests(unittest.TestCase):
         self.assertIsNotNone(result.continuation_profile)
         self.assertIn("vorzeitig beendet", " ".join(result.warnings))
 
+    def test_interrupted_native_3mf_export_keeps_last_complete_candidate(self) -> None:
+        source_stl = self.root / "interrupted_joint_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        accept_event = Event()
+
+        class InterruptingProjectAdapter(FakeAdapter):
+            def __init__(self, gcode, *, accept_during_second):
+                super().__init__(gcode)
+                self.accept_during_second = accept_during_second
+                self.project_attempts = 0
+
+            def create_joint_project(self, _request, _source, _tower, destination, **_kwargs):
+                self.project_attempts += 1
+                if self.project_attempts == 2:
+                    if self.accept_during_second:
+                        accept_event.set()
+                    raise JointProjectError("Der Slicer hat das gemeinsame 3MF nicht akzeptiert.")
+                destination.write_bytes(b"previously verified joint project")
+                return SimpleNamespace(path=destination.resolve())
+
+        for accept_during_second in (True, False):
+            with self.subTest(accept_during_second=accept_during_second):
+                accept_event.clear()
+                adapter = InterruptingProjectAdapter(
+                    tower_gcode(path_size=3.0, feed=30.0),
+                    accept_during_second=accept_during_second,
+                )
+                result = CalibrationService().calibrate(
+                    self.snapshot,
+                    GenerationSettings(target_layer_time_s=30.0),
+                    adapter=adapter,
+                    profile=self.profile,
+                    output_directory=self.root / f"interrupted_{accept_during_second}",
+                    config=CalibrationConfig(
+                        maximum_iterations=3,
+                        maximum_joint_slices=3,
+                        minimum_joint_slices=1,
+                        time_tolerance_s=0.01,
+                    ),
+                    source_artifact=SourceArtifact.capture(source_stl),
+                    accept_best_event=accept_event,
+                )
+                self.assertEqual(adapter.project_attempts, 2)
+                if accept_during_second:
+                    self.assertEqual(result.termination_reason, "user_accepted")
+                    self.assertEqual(result.best_iteration_number, 1)
+                    self.assertIsNotNone(result.project_path)
+                    self.assertTrue(result.project_path.is_file())
+                    self.assertFalse(result.failures)
+                else:
+                    self.assertEqual(result.termination_reason, "error")
+                    self.assertTrue(any(
+                        failure.code is CalibrationFailureCode.GEOMETRY_INVALID
+                        for failure in result.failures
+                    ))
+
     def test_joint_calibration_stops_after_three_stagnant_slices(self) -> None:
         source_stl = self.root / "stagnant_joint_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
@@ -1397,6 +1466,94 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(updates[-1].current_iteration.number, 2)
         self.assertEqual(updates[-1].best_iteration.number, 1)
         self.assertFalse(updates[-1].current_is_best)
+        self.assertEqual(result.best_iteration_number, 1)
+
+    def test_early_stop_after_worse_slice_exports_previous_best(self) -> None:
+        source_stl = self.root / "early_stop_best_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        accept_event = Event()
+        updates = []
+        service = CalibrationService()
+
+        def on_progress(progress) -> None:
+            updates.append(progress)
+            if progress.completed_count == 2:
+                accept_event.set()
+
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(0.39, -1.80),
+            ),
+            patch.object(
+                service,
+                "_candidate_score",
+                side_effect=((1, 0.39), (0, 0.0)),
+            ),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+                profile=self.profile,
+                output_directory=self.root / "early_stop_best_result",
+                config=CalibrationConfig(
+                    maximum_iterations=3,
+                    maximum_joint_slices=3,
+                    minimum_joint_slices=1,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                accept_best_event=accept_event,
+                joint_progress_callback=on_progress,
+            )
+
+        self.assertEqual(len(updates), 2)
+        self.assertFalse(updates[-1].current_is_best)
+        self.assertEqual(updates[-1].best_iteration.number, 1)
+        self.assertEqual(result.best_iteration_number, 1)
+        self.assertEqual(result.termination_reason, "user_accepted")
+        self.assertIsNotNone(result.stl_path)
+        self.assertTrue(result.stl_path.is_file())
+
+    def test_equal_joint_deviation_keeps_earlier_candidate(self) -> None:
+        source_stl = self.root / "equal_deviation_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        updates = []
+        service = CalibrationService()
+
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(0.39, -0.39),
+            ),
+            patch.object(
+                service,
+                "_candidate_score",
+                side_effect=((1, 1.0), (0, 0.0)),
+            ),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+                profile=self.profile,
+                output_directory=self.root / "equal_deviation_result",
+                config=CalibrationConfig(
+                    maximum_iterations=2,
+                    maximum_joint_slices=2,
+                    minimum_joint_slices=1,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                joint_progress_callback=updates.append,
+            )
+
+        self.assertEqual(len(updates), 2)
+        self.assertFalse(updates[-1].current_is_best)
+        self.assertEqual(updates[-1].best_iteration.number, 1)
         self.assertEqual(result.best_iteration_number, 1)
 
     def test_joint_stl_preview_rounds_never_reslice_the_complete_object(self) -> None:
@@ -1584,6 +1741,53 @@ class Phase16Tests(unittest.TestCase):
             adapter.final_tower_hash,
             hashlib.sha256(result.stl_path.read_bytes()).hexdigest(),
         )
+
+    def test_accepting_best_candidate_does_not_cancel_final_bambu_3mf(self) -> None:
+        source_stl = self.root / "accepted_deferred_bambu_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        profile = replace(
+            self.profile,
+            installation=replace(
+                self.profile.installation,
+                adapter_id="bambu_studio",
+                product_name="Synthetic Bambu Studio",
+            ),
+        )
+        adapter = DeferredBambuAdapter(
+            "EXCLUDE_OBJECT_START NAME=Cooling_tower_id_1_copy_0\n"
+            ";TYPE:Internal solid infill\n"
+            + tower_gcode(path_size=3.0, feed=30.0)
+            + "EXCLUDE_OBJECT_END NAME=Cooling_tower_id_1_copy_0\n",
+            reject_stopped_final_export=True,
+        )
+        accept_event = Event()
+
+        def accept_first(progress) -> None:
+            if progress.completed_count == 1:
+                accept_event.set()
+
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=30.0),
+            adapter=adapter,
+            profile=profile,
+            output_directory=self.root / "accepted_deferred_bambu_result",
+            config=CalibrationConfig(
+                maximum_iterations=3,
+                maximum_joint_slices=3,
+                minimum_joint_slices=1,
+                time_tolerance_s=0.01,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+            accept_best_event=accept_event,
+            joint_progress_callback=accept_first,
+        )
+
+        self.assertTrue(accept_event.is_set())
+        self.assertEqual(result.termination_reason, "user_accepted")
+        self.assertEqual(adapter.project_exports, 1)
+        self.assertIsNotNone(result.project_path)
+        self.assertTrue(result.project_path.is_file())
 
     def test_bambu_final_project_failure_never_exports_stale_container(
         self,

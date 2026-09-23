@@ -410,14 +410,14 @@ class UxImprovementTests(unittest.TestCase):
         dialog.mark_stale()
         self.assertFalse(dialog.three_quarter_button.isHidden())
         self.assertEqual(dialog.state, PreviewState.STALE)
-        self.assertIn("Vorschau veraltet", dialog.state_label.text())
+        self.assertIn("Veraltet", dialog.state_label.text())
         self.assertEqual(dialog.state_label.property("state"), "stale")
 
         window.current_preview = SimpleNamespace()
         window.preview_state = PreviewState.CURRENT
         window._invalidate_preview("Ein Wert wurde geändert.")
         self.assertTrue(window.preview_hint_label.isHidden())
-        self.assertIn("Vorschau veraltet", dialog.state_label.text())
+        self.assertIn("Veraltet", dialog.state_label.text())
         self.assertNotIn(
             "nicht mehr aktuellen Vorschau",
             dialog.quality_label.text(),

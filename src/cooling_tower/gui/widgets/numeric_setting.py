@@ -192,6 +192,7 @@ class NumericSettingWidget(QWidget):
         self._error_messages: tuple[str, ...] = ()
         self._warning_messages: tuple[str, ...] = self._message_lines(helper_text)
         self._feedback_enabled = True
+        self._limits_visible = False
 
         # The range text is made visible immediately below, before the layout
         # gets a chance to reparent it.  Without this owner Qt briefly exposes
@@ -333,6 +334,11 @@ class NumericSettingWidget(QWidget):
         self.editor.style().unpolish(self.editor)
         self.editor.style().polish(self.editor)
 
+    def set_limits_visible(self, visible: bool) -> None:
+        self._limits_visible = bool(visible)
+        self._refresh_range_label()
+        self.updateGeometry()
+
     def _refresh_range_label(self) -> None:
         maximum = self.editor.property("validationMaximum")
         parts: list[str] = []
@@ -348,7 +354,7 @@ class NumericSettingWidget(QWidget):
             text += f" {unit}"
         self.range_label.setText(text)
         self.range_label.setToolTip(text)
-        self.range_label.setVisible(self._feedback_enabled and bool(text))
+        self.range_label.setVisible(self._feedback_enabled and self._limits_visible and bool(text))
 
     def _format_bound(self, value: object) -> str:
         if isinstance(self.editor, QDoubleSpinBox):
@@ -359,7 +365,10 @@ class NumericSettingWidget(QWidget):
                     "f",
                     int(decimals),
                 )
-            return self.editor.textFromValue(float(value))
+            formatter = getattr(
+                self.editor, "stored_text_from_value", self.editor.textFromValue
+            )
+            return formatter(float(value))
         return str(int(float(value)))
 
     def refresh_range_state(self) -> None:
@@ -511,10 +520,13 @@ class NumericSettingWidget(QWidget):
                 or entered > maximum_value
             ):
                 if isinstance(self.editor, QDoubleSpinBox):
-                    minimum = self.editor.textFromValue(
+                    formatter = getattr(
+                        self.editor, "stored_text_from_value", self.editor.textFromValue
+                    )
+                    minimum = formatter(
                         float(minimum_value)
                     )
-                    maximum = self.editor.textFromValue(
+                    maximum = formatter(
                         float(maximum_value)
                     )
                 else:

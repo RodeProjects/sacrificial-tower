@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -78,9 +79,9 @@ from cooling_tower.gui.background_jobs import (
 )
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
+from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
-    TowerGenerationDialog,
 )
 from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.export_worker import ExportWorker
@@ -205,6 +206,8 @@ _LOCKED_SLICER_STEP_TOOLTIP = (
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 GENERATION_NORMAL_SLICES = 6
+GENERATION_PHASE_FADE_OUT_MS = 180
+GENERATION_PHASE_FADE_IN_MS = 220
 GENERATION_MINIMUM_JOINT_SLICES = 1
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
@@ -231,8 +234,8 @@ _PRESLICE_TIMEOUT_FORMAT = (
 )
 _PRESLICE_ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
 SETTING_UNITS = {
-    "target_layer_time_s": "s",
-    "layer_time_tolerance_s": "s",
+    "target_layer_time_s": "Sek.",
+    "layer_time_tolerance_s": "Sek.",
     "safety_factor": "",
     "minimum_outer_diameter_mm": "mm",
     "maximum_outer_diameter_mm": "mm",
@@ -379,6 +382,15 @@ def _concise_operation_failure_reason(message: object) -> str:
     if len(first_sentence) <= 150:
         return first_sentence
     return "Die Verarbeitung konnte nicht abgeschlossen werden."
+
+
+def _preview_failure_footer_reason(message: object) -> str:
+    """Keep the complete cause, except for a known cryptic slicer diagnostic."""
+
+    raw = " ".join(str(message).split())
+    if "sparse_infill_pattern" in raw.casefold() and "100" in raw:
+        return _concise_operation_failure_reason(raw)
+    return german_user_message(raw)
 
 
 def _format_grouped_footer_notice(
@@ -744,14 +756,21 @@ class MainWindow(QMainWindow):
         self._preview_request_id = 0
         self._preview_cancel_requested = False
         self._active_preview_worker: PreviewWorker | None = None
-        self._joint_generation_dialog: TowerGenerationDialog | None = None
+        self._joint_generation_dialog: GenerationPanel | None = None
         self._joint_slice_settings_dialog: JointSliceSettingsDialog | None = None
         self._joint_phase_active = False
         self._joint_accept_requested = False
         self._joint_resume_active = False
+        self._joint_resume_accept_seed_only = False
         self._joint_generation_paused = False
         self._joint_slice_offset = 0
         self._joint_slices_completed = 0
+        self._generation_phase_effect: QGraphicsOpacityEffect | None = None
+        self._generation_phase_fade_out: QPropertyAnimation | None = None
+        self._generation_phase_fade_in: QPropertyAnimation | None = None
+        self._generation_phase_transition_request_id: int | None = None
+        self._generation_phase_transition_target: tuple[int, int] | None = None
+        self._generation_phase_transition_stage: str | None = None
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
@@ -812,6 +831,7 @@ class MainWindow(QMainWindow):
             self.settings_store.load_default_maximum_joint_slices()
         )
         initial_settings, ui_state = self.settings_store.load()
+        self.show_setting_limits = ui_state.get("show_setting_limits", False) is True
         raw_joint_slices = ui_state.get(
             "maximum_joint_slices",
             self.default_maximum_joint_slices,
@@ -1014,13 +1034,6 @@ class MainWindow(QMainWindow):
         self.options_button.setAccessibleName("Menü öffnen")
         self.options_menu = QMenu(self.options_button)
         self.options_menu.setObjectName("mainOptionsMenu")
-        self.change_output_action = self.options_menu.addAction(
-            QIcon(str(GUI_ASSET_ROOT / "folder.svg")),
-            "Exportordner ändern",
-        )
-        self.change_output_action.triggered.connect(
-            self.show_additional_options
-        )
         self.joint_slice_settings_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "settings_gear.svg")),
             "Allgemeine Einstellungen …",
@@ -2066,8 +2079,8 @@ class MainWindow(QMainWindow):
             requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_requirement_rows: dict[str, tuple[QLabel, QLabel]] = {}
         source_requirement_texts = (
-            ("source_selected", "STL-Datei erfolgreich übergeben"),
-            ("source_validated", "STL-Geometrie erfolgreich geprüft"),
+            ("source_selected", "STL-Datei übergeben"),
+            ("source_validated", "STL-Geometrie geprüft"),
         )
         slicer_requirement_texts = (
             ("slicer_detected", "Verwendbarer Slicer erkannt"),
@@ -2365,13 +2378,19 @@ class MainWindow(QMainWindow):
             1.0,
             "targetLayerTime",
         )
+        self.target_time_spin.set_display_decimals(1)
         self.safety_factor_spin = self._double_spin(1.0, 10.0, 3, 0.05, "safetyFactor")
+        self.safety_factor_spin.set_display_decimals(1)
         self.layer_time_tolerance_spin = self._double_spin(0.01, 3.0, 2, 0.01, "layerTimeTolerance")
         self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
             "Gewünschte Mindest-Layerzeit",
             self.target_time_spin,
+        )
+        self._add_numeric_setting(
+            timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
+            self.layer_time_tolerance_spin,
         )
         self._add_numeric_setting(
             timing_layout,
@@ -2382,17 +2401,13 @@ class MainWindow(QMainWindow):
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
         )
-        self._add_numeric_setting(
-            timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
-            self.layer_time_tolerance_spin,
-        )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
         self.tower_need_label.setProperty("state", "pending")
         self.content_layout.addWidget(timing_group)
 
         geometry_group = SectionCard(
-            "Abmessungen",
+            "Turmgeometrie",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2403,9 +2418,11 @@ class MainWindow(QMainWindow):
         self.minimum_outer_spin = self._double_spin(
             0.002, 1000.0, 3, 1.0, "minimumOuterDiameter"
         )
+        self.minimum_outer_spin.set_display_decimals(1)
         self.maximum_outer_spin = self._double_spin(
             0.002, 1000.0, 3, 1.0, "maximumOuterDiameter"
         )
+        self.maximum_outer_spin.set_display_decimals(1)
         self.minimum_object_tower_distance_spin = self._double_spin(
             0.0, 1000.0, 1, 1.0, "minimumObjectTowerDistance"
         )
@@ -2499,8 +2516,11 @@ class MainWindow(QMainWindow):
         automatic_layout.setContentsMargins(0, 2, 0, 2)
         self.automatic_base_info_button = InfoToolButton(
             "Ist die Automatik aktiv, wird die Standfußbreite aus der "
-            "vollständig ermittelten Modellhöhe berechnet. Nach dem "
-            "Ausschalten kann der Außendurchmesser manuell eingegeben werden.",
+            "vollständig ermittelten Modellhöhe berechnet.\n\n"
+            "Nach dem Ausschalten kann der Außendurchmesser manuell eingegeben werden.\n\n"
+            "Standfußhöhe = Höhe des ersten + Höhe des zweiten Layers "
+            "(bei nur einem Layer dessen Höhe). Bei gleich hohen Layern: 2 × Layerhöhe.\n\n"
+            "Anschließend folgt bei Bedarf eine konkave Verjüngung.",
             automatic_row,
             accessible_name=(
                 "Informationen zur automatischen Standfußbreite"
@@ -2528,7 +2548,7 @@ class MainWindow(QMainWindow):
             20.0, 1000.0, 2, 1.0, "manualBaseWidth"
         )
         self.automatic_base_width_label = QLabel(
-            "Automatische Breite: mindestens 20,00 mm"
+            "Automatische Breite: mindestens 20,00 mm", self
         )
         self.automatic_base_width_label.setObjectName("calculatedHint")
         self.automatic_base_width_label.setWordWrap(True)
@@ -2562,11 +2582,11 @@ class MainWindow(QMainWindow):
         # Compatibility alias for existing integrations. The reset now belongs
         # to the manual value row and can no longer overlap or sit above it.
         self.automatic_base_reset_button = manual_base_setting.reset_button
-        stability_fields_layout.addWidget(self.automatic_base_width_label)
-        base_height_hint = QLabel("Standfußhöhe: automatisch 2 Layer; anschließend bei Bedarf konkave Verjüngung.")
+        self.automatic_base_width_label.hide()
+        base_height_hint = QLabel("Standfußhöhe: automatisch 2 Layer; anschließend bei Bedarf konkave Verjüngung.", self)
         base_height_hint.setObjectName("calculatedHint")
         base_height_hint.setWordWrap(True)
-        stability_fields_layout.addWidget(base_height_hint)
+        base_height_hint.hide()
         stability_group.refresh_collapsed_state()
         self.content_layout.addWidget(stability_group)
 
@@ -2743,7 +2763,7 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(QLabel("Aktueller Exportordner:"))
         options_layout.addLayout(output_path_layout)
         self.prediction_frame = SectionCard(
-            "Prognose",
+            "Generierung und Vorschau",
             collapsible=True,
             expanded=True,
             state=SectionState.PREVIEW,
@@ -2799,7 +2819,7 @@ class MainWindow(QMainWindow):
         prediction_grid.setColumnStretch(0, 3)
         prediction_grid.setColumnStretch(1, 2)
         self.prediction_grid = prediction_grid
-        self.prediction_primary_widget = QWidget()
+        self.prediction_primary_widget = QWidget(self)
         self.prediction_primary_widget.setObjectName(
             "predictionPrimaryColumn"
         )
@@ -2816,8 +2836,16 @@ class MainWindow(QMainWindow):
         prediction_primary_layout.addWidget(self.prediction_label)
         prediction_primary_layout.addLayout(prediction_grid)
 
-        prediction_layout.addWidget(self.prediction_primary_widget)
-        prediction_layout.addWidget(self.tower_need_label)
+        self.prediction_primary_widget.hide()
+        self.tower_need_label.hide()
+        self.generation_intro_label = QLabel(
+            "Noch kein Kühlturm generiert. Starten Sie die Generierung, "
+            "um den Fortschritt und das Ergebnis hier zu sehen."
+        )
+        self.generation_intro_label.setObjectName("generationIntroLabel")
+        self.generation_intro_label.setWordWrap(True)
+        prediction_layout.addWidget(self.generation_intro_label)
+        prediction_layout.addWidget(self.joint_generation_dialog)
         self.prediction_preview_divider = QFrame()
         self.prediction_preview_divider.setObjectName("predictionPreviewDivider")
         self.prediction_preview_divider.setFrameShape(QFrame.Shape.HLine)
@@ -2892,9 +2920,14 @@ class MainWindow(QMainWindow):
             self.content_layout.removeWidget(card)
         self.geometry_split_layout.addWidget(timing_group)
         self.geometry_split_layout.addWidget(geometry_group)
-        self.geometry_split_layout.addWidget(stability_group)
-        self.geometry_split_layout.addWidget(overhang_group)
-        self.geometry_split_layout.addWidget(self.geometry_calculation_section)
+        for old_layout in (stability_fields_layout, overhang_layout, calculation_body_layout):
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                if item.widget() is not None:
+                    geometry_layout.addWidget(item.widget())
+        stability_group.hide()
+        overhang_group.hide()
+        self.geometry_calculation_section.hide()
         self.geometry_settings_group.content_layout.addWidget(self.geometry_split)
         self.geometry_settings_group.toggled.connect(
             lambda expanded: self._sync_collapsible_content(
@@ -3023,37 +3056,11 @@ class MainWindow(QMainWindow):
         )
         isolated_progress_layout.setContentsMargins(0, 0, 0, 0)
         isolated_progress_layout.setSpacing(6)
-        isolated_header = QWidget()
-        isolated_header.setObjectName("preparationProgressHeader")
-        isolated_header_layout = QHBoxLayout(isolated_header)
-        isolated_header_layout.setContentsMargins(0, 0, 0, 0)
-        isolated_header_layout.setSpacing(8)
-        self.isolated_progress_icon_label = QLabel("⌛")
-        self.isolated_progress_icon_label.setObjectName("progressStatusIcon")
-        self.isolated_progress_icon_label.setProperty("prominent", True)
-        self.isolated_progress_icon_label.setProperty("state", "running")
-        self.isolated_progress_icon_label.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
+        self.isolated_progress_title_label = QLabel(
+            "Turmgenerierung wird vorbereitet..."
         )
-        self.isolated_progress_icon_label.setAccessibleName(
-            "Getrennte Kühlturm-Slices werden verarbeitet"
-        )
-        isolated_title = QLabel("Getrennte Kühlturm-Slices")
-        isolated_title.setObjectName("preparationProgressTitle")
-        self.isolated_progress_status_label = QLabel(
-            f"0 von {GENERATION_NORMAL_SLICES}"
-        )
-        self.isolated_progress_status_label.setObjectName(
-            "preparationProgressStatus"
-        )
-        self.isolated_progress_status_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        isolated_header_layout.addWidget(self.isolated_progress_icon_label)
-        isolated_header_layout.addWidget(isolated_title)
-        isolated_header_layout.addStretch(1)
-        isolated_header_layout.addWidget(
-            self.isolated_progress_status_label
+        self.isolated_progress_title_label.setObjectName(
+            "preparationProgressTitle"
         )
         self.isolated_progress_bar = QProgressBar()
         self.isolated_progress_bar.setObjectName("preparationProgressBar")
@@ -3069,19 +3076,12 @@ class MainWindow(QMainWindow):
         self.isolated_progress_detail_label.setObjectName(
             "isolatedSliceProgressDetail"
         )
-        self.isolated_progress_detail_label.setWordWrap(False)
-        self.isolated_progress_detail_label.setFixedHeight(
-            max(
-                18,
-                self.isolated_progress_detail_label.fontMetrics().lineSpacing()
-                + 2,
-            )
-        )
+        self.isolated_progress_detail_label.setWordWrap(True)
         self.isolated_progress_detail_label.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
-        isolated_progress_layout.addWidget(isolated_header)
+        isolated_progress_layout.addWidget(self.isolated_progress_title_label)
         isolated_progress_layout.addWidget(self.isolated_progress_bar)
         isolated_progress_layout.addWidget(
             self.isolated_progress_detail_label
@@ -3089,6 +3089,7 @@ class MainWindow(QMainWindow):
         self.isolated_progress_widget.hide()
         self.status_label = QLabel("Bitte STL auswählen")
         self.status_label.setObjectName("statusLabel")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumWidth(0)
         self.status_label.setSizePolicy(
@@ -3322,7 +3323,7 @@ class MainWindow(QMainWindow):
         self.footer_action_layout = QVBoxLayout(self.footer_action_area)
         self.footer_action_layout.setContentsMargins(0, 0, 0, 0)
         self.footer_action_layout.setSpacing(8)
-        self.footer_action_layout.addWidget(self.isolated_progress_widget)
+        self.joint_generation_dialog.layout().insertWidget(1, self.isolated_progress_widget)
         self.footer_action_layout.addWidget(self.action_availability_widget)
         self.footer_action_spacer = QSpacerItem(
             0,
@@ -3701,6 +3702,7 @@ class MainWindow(QMainWindow):
                 else info_text
             ),
         )
+        setting_widget.set_limits_visible(self.show_setting_limits)
         self._setting_widgets[setting_name] = setting_widget
         editor.valueChanged.connect(self._on_value_changed)
         setting_widget.input_state_changed.connect(
@@ -3943,6 +3945,7 @@ class MainWindow(QMainWindow):
                 "exportSuccessSummary"
             )
             self.export_success_summary_label.setWordWrap(True)
+            self.export_success_summary_label.setTextFormat(Qt.TextFormat.RichText)
             self.export_success_header_layout.addWidget(
                 self.export_success_summary_label
             )
@@ -4313,6 +4316,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._loading_phase17_state:
             return
+        self._cancel_generation_phase_transition()
         if not preserve_slicer_prediction:
             self._clear_slicer_prediction()
         self._preview_request_id += 1
@@ -4320,6 +4324,11 @@ class MainWindow(QMainWindow):
             JobKind.PREVIEW,
             reason="preview_invalidated",
         )
+        if self._joint_generation_dialog is not None and self._joint_generation_dialog._running:
+            self._joint_generation_dialog.mark_interrupted(
+                "Einstellungen geändert. Bitte mit den aktuellen Werten neu generieren."
+            )
+            self._set_isolated_slice_progress_visible(False)
         if hasattr(self, "progress_bar"):
             self.progress_bar.setProperty("task", "default")
             self._refresh_widget_style(self.progress_bar)
@@ -4384,6 +4393,10 @@ class MainWindow(QMainWindow):
             self.current_preview is not None
             and self.preview_state is PreviewState.CURRENT
         )
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.continue_button.setEnabled(
+                preview_is_current and not generation_active and block_reason is None
+            )
         export_reason = block_reason
         if export_reason is None and not preview_is_current:
             export_reason = (
@@ -4450,14 +4463,15 @@ class MainWindow(QMainWindow):
             return "Die Vorschau wird gerade erstellt."
         if self.current_source_path is None:
             return "Bitte zuerst eine STL auswählen."
+        if self._analysis_failed:
+            return self._workflow_error_message or "Die STL-Vorbereitung oder Analyse ist fehlgeschlagen. Bitte die Quellenprüfung erneut ausführen."
         if self.current_gcode_path is None:
             return "Die STL wird noch geprüft, geslict oder analysiert."
-        if self._analysis_failed:
-            return "Die STL-Vorbereitung oder Analyse ist fehlgeschlagen."
         if self.analysis_snapshot is None:
             return "Die Quelle wird noch analysiert."
         if not self._phase17_static_valid and not validation_bypassed:
-            return "Bitte ungültige oder unvollständige Eingaben korrigieren."
+            causes = list(dict.fromkeys(message for messages in self._static_field_errors.values() for message in messages))
+            return "Bitte Eingaben korrigieren: " + " ".join(causes[:3]) if causes else "Bitte ungültige oder unvollständige Eingaben korrigieren."
         if self.tower_assessment is None:
             if not validation_bypassed:
                 return "Der Kühlturmbedarf wird noch geprüft."
@@ -4467,7 +4481,8 @@ class MainWindow(QMainWindow):
             if not validation_bypassed:
                 return "Die Turmgeometrie wird noch geprüft."
         elif not self.profile_feasibility.feasible and not validation_bypassed:
-            return "Die Turmgeometrie ist mit den aktuellen Werten nicht möglich."
+            reasons = " ".join(german_user_message(issue.message) for issue in self.profile_feasibility.issues[:3])
+            return "Die Turmgeometrie ist mit den aktuellen Werten nicht möglich. " + reasons
         return None
 
     def _set_export_button_state(
@@ -7063,7 +7078,7 @@ class MainWindow(QMainWindow):
         elif section == "stability":
             automatic = self.automatic_base_checkbox.isChecked()
             self._setting_widgets["manual_base_width_mm"].setVisible(not automatic)
-            self.automatic_base_width_label.setVisible(automatic)
+            self.automatic_base_width_label.hide()
             self.automatic_base_reset_button.setVisible(not automatic)
             self.automatic_base_error_label.setVisible(
                 bool(self.automatic_base_error_label.text().strip())
@@ -7109,7 +7124,13 @@ class MainWindow(QMainWindow):
         ):
             nested_layout.invalidate()
             nested_layout.activate()
-        split_height = self.geometry_split_layout.sizeHint().height()
+        # The split layout may still cache its previous fixed height while
+        # range hints are being hidden. Measure the two visible cards directly.
+        split_height = (
+            self.timing_group.sizeHint().height()
+            + self.geometry_group.sizeHint().height()
+            + self.geometry_split_layout.spacing()
+        )
         self.geometry_split.setFixedHeight(max(0, split_height))
         self.geometry_split.updateGeometry()
         self.geometry_settings_group.content_layout.invalidate()
@@ -7563,9 +7584,10 @@ class MainWindow(QMainWindow):
             self.footer_horizontal_divider.hide()
 
     def _set_isolated_slice_progress_visible(self, visible: bool) -> None:
-        """Keep isolated-slice progress exclusively in a stable right column."""
+        """Show the preparatory phase inside the embedded generation panel."""
 
         self.isolated_progress_widget.setVisible(visible)
+        self.joint_generation_dialog.layout_changed.emit()
         self.footer_status_widget.setVisible(not visible)
         self.footer_action_spacer.changeSize(
             0,
@@ -8516,7 +8538,11 @@ class MainWindow(QMainWindow):
                 label.setProperty("state", "pending")
                 self._refresh_widget_style(label)
             self.prediction_frame.set_state(SectionState.NEUTRAL)
-            self.prediction_frame.set_summary("Schätzung ausstehend")
+            self.prediction_frame.set_summary(
+                self.joint_generation_dialog.title_label.text()
+                if not self.joint_generation_dialog.isHidden()
+                else ""
+            )
             self._refresh_prediction_advice("Schätzung ausstehend")
             self._refresh_widget_style(self.prediction_label)
             self._update_section_summaries()
@@ -8614,7 +8640,11 @@ class MainWindow(QMainWindow):
             "pending": SectionState.NEUTRAL,
         }[state]
         self.prediction_frame.set_state(card_state)
-        self.prediction_frame.set_summary(self.prediction_label.text())
+        self.prediction_frame.set_summary(
+            self.joint_generation_dialog.title_label.text()
+            if not self.joint_generation_dialog.isHidden()
+            else ""
+        )
         self._refresh_prediction_advice(estimate_kind)
         self._update_section_summaries()
 
@@ -8828,7 +8858,7 @@ class MainWindow(QMainWindow):
         self._cancel_feasibility_jobs()
         self.manual_base_width_spin.setEnabled(not automatic)
         self._setting_widgets["manual_base_width_mm"].setVisible(not automatic)
-        self.automatic_base_width_label.setVisible(automatic)
+        self.automatic_base_width_label.hide()
         self.automatic_base_reset_button.setVisible(not automatic)
         self.profile_feasibility = None
         self._invalidate_preview("Die Standfußberechnung wurde geändert.")
@@ -9964,7 +9994,7 @@ class MainWindow(QMainWindow):
     def _set_tower_need_message(self, text: str, state: str) -> None:
         self.tower_need_label.setText(text)
         self.tower_need_label.setProperty("state", state)
-        self.tower_need_label.setVisible(state != "error")
+        self.tower_need_label.hide()
         self.tower_need_label.style().unpolish(self.tower_need_label)
         self.tower_need_label.style().polish(self.tower_need_label)
 
@@ -10021,20 +10051,18 @@ class MainWindow(QMainWindow):
         return QPoint(x, y)
 
     def show_additional_options(self) -> None:
-        """Open the compact output-folder dialog over the main window."""
-
-        dialog = self.additional_options_dialog
-        dialog.setWindowState(Qt.WindowState.WindowNoState)
-        self._show_internal_dialog_without_flash(
-            dialog,
-            self._resize_additional_options_to_content,
-        )
+        self.show_joint_slice_settings()
 
     def show_joint_slice_settings(self) -> None:
         dialog = JointSliceSettingsDialog(
             self.maximum_joint_slices,
             self,
+            output_root=self.output_root_edit.text(),
+            default_output_root=str(self.default_output_root),
         )
+        dialog.output_root_applied.connect(self.output_root_edit.setText)
+        dialog.show_limits_checkbox.setChecked(self.show_setting_limits)
+        dialog.limits_applied.connect(self._apply_show_setting_limits)
         dialog.value_applied.connect(self._apply_maximum_joint_slices)
         self._joint_slice_settings_dialog = dialog
         dialog.finished.connect(
@@ -10049,6 +10077,13 @@ class MainWindow(QMainWindow):
             dialog,
             self._resize_joint_slice_settings_to_content,
         )
+
+    def _apply_show_setting_limits(self, visible: bool) -> None:
+        self.show_setting_limits = bool(visible)
+        for setting in self._setting_widgets.values():
+            setting.set_limits_visible(self.show_setting_limits)
+        self._refresh_geometry_section_layout(self.geometry_settings_group.isChecked())
+        self._save_user_settings()
 
     def _resize_joint_slice_settings_to_content(self) -> None:
         dialog = self._joint_slice_settings_dialog
@@ -10094,10 +10129,19 @@ class MainWindow(QMainWindow):
         """Show program information at its natural size with safe scrolling."""
 
         dialog = self.about_dialog
+        dialog.reset_document()
         dialog.setWindowState(Qt.WindowState.WindowNoState)
         self._show_internal_dialog_without_flash(
             dialog,
             self._resize_about_to_content,
+        )
+        self._about_initial_height = dialog.height()
+        main_frame = self.frameGeometry()
+        self._about_expansion_allowance = max(
+            0,
+            main_frame.bottom()
+            - round(main_frame.height() * 0.1)
+            - dialog.frameGeometry().bottom(),
         )
 
     def _show_export_success_dialog(
@@ -10117,12 +10161,15 @@ class MainWindow(QMainWindow):
             and math.isfinite(float(achieved))
         )
 
-        saved_files = [f"• {result.output_path.name}"]
+        saved_files = [result.output_path.name]
         project_path = getattr(result, "project_path", None)
         if project_path is not None:
-            saved_files.append(f"• {Path(project_path).name}")
+            saved_files.append(Path(project_path).name)
         self.export_success_summary_label.setText(
-            "Gespeichert:\n" + "\n".join(saved_files)
+            '<p style="margin:0">Gespeichert:</p>'
+            '<ul style="margin-top:3px; margin-bottom:0; -qt-list-indent:0">'
+            + "".join(f"<li><b>{escape(name)}</b></li>" for name in saved_files)
+            + "</ul>"
         )
         if values_are_known:
             target_value = float(target)
@@ -10202,6 +10249,9 @@ class MainWindow(QMainWindow):
         self.export_success_error_label.clear()
         self.export_success_error_label.hide()
         dialog.setWindowState(Qt.WindowState.WindowNoState)
+        # Give the native dialog its final size and approximate position before
+        # the first Show event, so Windows never paints a frame at (0, 0).
+        self._resize_export_success_dialog()
         self._show_internal_dialog_without_flash(
             dialog,
             self._resize_export_success_dialog,
@@ -10223,8 +10273,6 @@ class MainWindow(QMainWindow):
 
     def _resize_export_success_dialog(self) -> None:
         dialog = self.export_success_dialog
-        if not dialog.isVisible():
-            return
         screen = dialog.screen() or self.screen()
         target_width = EXPORT_SUCCESS_DIALOG_PREFERRED_WIDTH_PX
         if screen is not None:
@@ -10236,7 +10284,7 @@ class MainWindow(QMainWindow):
         dialog.layout().invalidate()
         dialog.layout().activate()
         dialog.setFixedHeight(max(dialog.minimumSizeHint().height(), dialog.layout().totalHeightForWidth(target_width)))
-        self._place_dialog_centered(dialog)
+        self._place_dialog_centered(dialog, allow_hidden=True)
 
     def _open_export_directory_from_success_dialog(self) -> None:
         directory = self._latest_export_directory
@@ -10373,12 +10421,19 @@ class MainWindow(QMainWindow):
         dialog = self._about_dialog
         if dialog is None or not dialog.isVisible():
             return
-        natural_height = self._about_natural_content_height(dialog.width()) + 2
-        if natural_height <= dialog.height():
-            return
+        initial_height = getattr(self, "_about_initial_height", dialog.height())
+        expansion_allowance = getattr(self, "_about_expansion_allowance", 0)
+        natural_height = (
+            initial_height
+            if dialog.about_placeholder_label.isHidden()
+            else self._about_natural_content_height(dialog.width()) + 2
+        )
 
         screen = dialog.screen() or self.screen()
-        target_height = natural_height
+        target_height = min(
+            max(initial_height, natural_height),
+            initial_height + expansion_allowance,
+        )
         frame_geometry = dialog.frameGeometry()
         frame_top_left = frame_geometry.topLeft()
         if screen is not None:
@@ -10388,7 +10443,7 @@ class MainWindow(QMainWindow):
                 frame_geometry.height() - dialog.height(),
             )
             maximum_client_height = max(
-                dialog.height(),
+                280,
                 available.bottom()
                 - frame_geometry.top()
                 + 1
@@ -10396,11 +10451,15 @@ class MainWindow(QMainWindow):
             )
             target_height = min(target_height, maximum_client_height)
 
-        if target_height > dialog.height():
+        if target_height != dialog.height():
             dialog.resize(dialog.width(), target_height)
-            # Preserve the current upper edge: newly revealed content grows
-            # only downwards until the Windows work area is exhausted.
+            # Both opening and closing preserve the chosen upper edge.
             dialog.move(frame_top_left)
+        if screen is not None:
+            overflow = dialog.frameGeometry().bottom() - available.bottom()
+            if overflow > 0:
+                dialog.resize(dialog.width(), max(280, dialog.height() - overflow))
+                dialog.move(frame_top_left)
 
     def _place_additional_options_dialog(self) -> None:
         dialog = self.additional_options_dialog
@@ -10408,8 +10467,8 @@ class MainWindow(QMainWindow):
             return
         self._place_dialog_centered(dialog)
 
-    def _place_dialog_centered(self, dialog: QDialog) -> None:
-        if not dialog.isVisible():
+    def _place_dialog_centered(self, dialog: QDialog, *, allow_hidden: bool = False) -> None:
+        if not dialog.isVisible() and not allow_hidden:
             return
         target_frame = dialog.frameGeometry()
         target_frame.moveCenter(self.frameGeometry().center())
@@ -10673,9 +10732,7 @@ class MainWindow(QMainWindow):
         self._setting_widgets["manual_base_width_mm"].setVisible(
             not settings.automatic_base_width
         )
-        self.automatic_base_width_label.setVisible(
-            settings.automatic_base_width
-        )
+        self.automatic_base_width_label.hide()
         self.automatic_base_reset_button.setVisible(
             not settings.automatic_base_width
         )
@@ -10758,6 +10815,14 @@ class MainWindow(QMainWindow):
                 f"Manuelle Standfußbreite: "
                 f"{self.manual_base_width_spin.value():.2f} mm"
             )
+        self.automatic_base_info_button.set_hint(
+            self.automatic_base_width_label.text()
+            + "\n\nAutomatische Breite = max(20 mm, 0,2 × Modellhöhe)."
+            "\n\nStandfußhöhe = Höhe des ersten + Höhe des zweiten Layers. "
+            "Bei gleich hohen Layern: 2 × Layerhöhe; bei nur einem Layer dessen Höhe."
+            "\n\nAnschließend folgt bei Bedarf eine konkave Verjüngung. "
+            "Nach Ausschalten der Automatik kann die Breite manuell eingestellt werden."
+        )
 
     def _source_height_description(self) -> str:
         if self.current_source_kind is SourceKind.STL:
@@ -10817,9 +10882,17 @@ class MainWindow(QMainWindow):
             value = float(getattr(settings, name))
             minimum = setting.editor.property("validationMinimum")
             maximum = setting.editor.property("validationMaximum")
+            unit = SETTING_UNITS.get(name, "")
+            unit_suffix = f" {unit}" if unit else ""
+            sentence_end = "" if unit.endswith(".") else "."
+            formatter = getattr(
+                setting.editor,
+                "stored_text_from_value",
+                setting.editor.textFromValue,
+            )
             if minimum is not None and value < float(minimum):
                 range_invalid_names.add(name)
-                rendered_minimum = setting.editor.textFromValue(
+                rendered_minimum = formatter(
                     float(minimum)
                     if isinstance(setting.editor, QDoubleSpinBox)
                     else int(minimum)
@@ -10828,11 +10901,11 @@ class MainWindow(QMainWindow):
                     (name,),
                     f"{self._setting_value_description(name)} liegt unter "
                     f"dem Mindestwert {rendered_minimum}"
-                    f"{f' {SETTING_UNITS.get(name)}' if SETTING_UNITS.get(name) else ''}.",
+                    f"{unit_suffix}{sentence_end}",
                 )
             elif maximum is not None and value > float(maximum):
                 range_invalid_names.add(name)
-                rendered_maximum = setting.editor.textFromValue(
+                rendered_maximum = formatter(
                     float(maximum)
                     if isinstance(setting.editor, QDoubleSpinBox)
                     else int(maximum)
@@ -10841,7 +10914,7 @@ class MainWindow(QMainWindow):
                     (name,),
                     f"{self._setting_value_description(name)} überschreitet "
                     f"den Maximalwert {rendered_maximum}"
-                    f"{f' {SETTING_UNITS.get(name)}' if SETTING_UNITS.get(name) else ''}.",
+                    f"{unit_suffix}{sentence_end}",
                 )
         for name in self._incomplete_setting_names:
             if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
@@ -11313,17 +11386,14 @@ class MainWindow(QMainWindow):
         self.settings_scroll.ensureWidgetVisible(self.preview_dialog, 0, 18)
 
     @property
-    def joint_generation_dialog(self) -> TowerGenerationDialog:
+    def joint_generation_dialog(self) -> GenerationPanel:
         if self._joint_generation_dialog is None:
-            dialog = TowerGenerationDialog(
+            dialog = GenerationPanel(
                 GUI_ASSET_ROOT / "tower_gen_finished.webp",
                 self,
             )
             dialog.accept_requested.connect(self._accept_joint_candidate)
-            dialog.export_requested.connect(
-                self._export_from_generation_dialog
-            )
-            dialog.abort_requested.connect(self.cancel_generation)
+            dialog.layout_changed.connect(self._refresh_ready_grid_layout)
             dialog.continue_requested.connect(self._continue_joint_generation)
             self._joint_generation_dialog = dialog
         return self._joint_generation_dialog
@@ -11347,26 +11417,48 @@ class MainWindow(QMainWindow):
         return
 
     def start_preview(self) -> None:
+        self._cancel_generation_phase_transition()
         self.validate_form()
         self._refresh_stl_availability()
         self._show_preview_dialog()
         if not self.preview_button.isEnabled():
-            self.preview_dialog.set_failed(
-                "Die Analyse, Geometrie oder Modusauswahl ist noch nicht exportfähig."
+            self.generation_intro_label.hide()
+            reason = self._export_block_reason(allow_validation_bypass=False)
+            message = reason or self.validation_label.text() or "Quellen- und Geometrieprüfung noch nicht abgeschlossen."
+            self.joint_generation_dialog.show_error(message)
+            self.preview_dialog.set_failed(message)
+            self._set_main_status(
+                f"Vorschau fehlgeschlagen: {_preview_failure_footer_reason(message)}",
+                icon="✕", state="error",
             )
             return
         try:
             request = self._current_preview_request()
         except (AttributeError, KeyError, TypeError, ValueError) as error:
+            self.generation_intro_label.hide()
+            self.joint_generation_dialog.show_error(german_user_message(error))
             self.preview_dialog.set_failed(german_user_message(error))
+            self._set_main_status(
+                f"Vorschau fehlgeschlagen: {_preview_failure_footer_reason(error)}",
+                icon="✕", state="error",
+            )
             return
 
         if self._joint_generation_dialog is not None:
             self._joint_generation_dialog.allow_programmatic_close()
             self._joint_generation_dialog.close()
+        simulations = []
+        if request.settings.simulate_full_tower_infill:
+            simulations.append("Turmfüllung: 100 %")
+        if getattr(request.effective_profile, "supports_simulated", False):
+            simulations.append("Stützen: aktiviert")
+        self.joint_generation_dialog.set_context(simulations)
+        self.generation_intro_label.hide()
+        self.joint_generation_dialog.begin(request.settings.target_layer_time_s, request.settings.layer_time_tolerance_s, 0, self.maximum_joint_slices)
         self._joint_phase_active = False
         self._joint_accept_requested = False
         self._joint_resume_active = False
+        self._joint_resume_accept_seed_only = False
         self._joint_generation_paused = False
         self._joint_slice_offset = 0
         self._joint_slices_completed = 0
@@ -11399,9 +11491,6 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self.isolated_progress_bar.setValue(0)
-        self.isolated_progress_status_label.setText(
-            f"0 von {GENERATION_NORMAL_SLICES}"
-        )
         self.isolated_progress_detail_label.setText(
             "Die getrennte Turmoptimierung wird vorbereitet …"
         )
@@ -11434,7 +11523,6 @@ class MainWindow(QMainWindow):
         self.preview_dialog.set_progress(percent, status)
         normalized = status.casefold()
         if self._joint_phase_active or "gemeinsamer slice" in normalized:
-            self._set_isolated_slice_progress_visible(False)
             self._set_main_status(status, icon="⏳", state="running")
             if not self._joint_phase_active:
                 return
@@ -11445,7 +11533,7 @@ class MainWindow(QMainWindow):
             self.progress_bar.hide()
             return
         self.progress_bar.hide()
-        self._update_isolated_slice_progress(status, percent)
+        self._update_isolated_slice_progress(status)
 
     @staticmethod
     def _isolated_slice_progress(status: str, fallback: int) -> int:
@@ -11466,43 +11554,71 @@ class MainWindow(QMainWindow):
     def _update_isolated_slice_progress(
         self,
         status: str,
-        fallback: int,
     ) -> None:
-        percent = self._isolated_slice_progress(status, fallback)
-        completed = min(
-            GENERATION_NORMAL_SLICES,
-            max(0, round(percent / 100 * GENERATION_NORMAL_SLICES)),
+        percent = self._isolated_slice_progress(
+            status, self.isolated_progress_bar.value()
         )
-        running_match = re.search(
-            r"getrennt(?:er|en)\w*\s+(?:Kühlturm-)?Slice\s+"
-            r"(\d+)\s*/\s*(\d+)",
-            status,
-            re.IGNORECASE,
+        self.isolated_progress_bar.setValue(
+            max(self.isolated_progress_bar.value(), percent)
         )
-        if running_match is not None:
-            current, maximum = map(int, running_match.groups())
-            completed = max(0, current - 1)
-            progress_text = (
-                f"{completed} von {maximum} · Slice {current} läuft"
-            )
-        else:
-            result_match = re.search(
-                r"Slicer-Ergebnis\s+(\d+)\s*/",
-                status,
-                re.IGNORECASE,
-            )
-            if result_match is not None:
-                completed = min(
-                    GENERATION_NORMAL_SLICES,
-                    int(result_match.group(1)),
-                )
-            progress_text = (
-                f"{completed} von {GENERATION_NORMAL_SLICES} abgeschlossen"
-            )
-        self.isolated_progress_bar.setValue(percent)
-        self.isolated_progress_status_label.setText(progress_text)
         self.isolated_progress_detail_label.setText(status)
         self._set_isolated_slice_progress_visible(True)
+
+    def _ensure_generation_phase_animation(self) -> None:
+        if self._generation_phase_effect is not None:
+            return
+        panel = self.joint_generation_dialog
+        effect = QGraphicsOpacityEffect(panel)
+        effect.setOpacity(1.0)
+        effect.setEnabled(False)
+        panel.setGraphicsEffect(effect)
+        self._generation_phase_effect = effect
+        fade_out = QPropertyAnimation(effect, b"opacity", self)
+        fade_out.setDuration(GENERATION_PHASE_FADE_OUT_MS)
+        fade_out.setStartValue(1.0)
+        fade_out.setEndValue(0.0)
+        fade_out.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        fade_out.finished.connect(self._finish_generation_phase_fade_out)
+        self._generation_phase_fade_out = fade_out
+        fade_in = QPropertyAnimation(effect, b"opacity", self)
+        fade_in.setDuration(GENERATION_PHASE_FADE_IN_MS)
+        fade_in.setStartValue(0.0)
+        fade_in.setEndValue(1.0)
+        fade_in.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        fade_in.finished.connect(self._finish_generation_phase_fade_in)
+        self._generation_phase_fade_in = fade_in
+
+    def _cancel_generation_phase_transition(self) -> None:
+        self._generation_phase_transition_stage = None
+        self._generation_phase_transition_request_id = None
+        self._generation_phase_transition_target = None
+        if self._generation_phase_fade_out is not None:
+            self._generation_phase_fade_out.stop()
+        if self._generation_phase_fade_in is not None:
+            self._generation_phase_fade_in.stop()
+        if self._generation_phase_effect is not None:
+            self._generation_phase_effect.setOpacity(1.0)
+            self._generation_phase_effect.setEnabled(False)
+
+    def _finish_generation_phase_fade_out(self) -> None:
+        if self._generation_phase_transition_stage != "out":
+            return
+        target = self._generation_phase_transition_target
+        if (
+            target is None
+            or self._generation_phase_transition_request_id != self._preview_request_id
+            or self._closing
+        ):
+            self._cancel_generation_phase_transition()
+            return
+        self._set_isolated_slice_progress_visible(False)
+        self.joint_generation_dialog.start_slice(*target)
+        self._generation_phase_transition_stage = "in"
+        self._generation_phase_fade_in.start()
+
+    def _finish_generation_phase_fade_in(self) -> None:
+        if self._generation_phase_transition_stage == "in":
+            self._cancel_generation_phase_transition()
 
     @Slot(int, int, int)
     def _on_joint_phase_started(
@@ -11514,18 +11630,38 @@ class MainWindow(QMainWindow):
         if request_id != self._preview_request_id or self._closing:
             return
         total_completed = self._joint_slice_offset + completed
+        first_joint_slice = not self._joint_phase_active
         self._joint_phase_active = True
         self.progress_bar.setValue(100)
         self.progress_bar.hide()
-        self._set_isolated_slice_progress_visible(False)
         dialog = self.joint_generation_dialog
-        if not dialog.isVisible():
+        if dialog.isHidden():
             dialog.begin(
                 self.target_time_spin.value(),
                 self.layer_time_tolerance_spin.value(),
                 total_completed,
                 self.maximum_joint_slices,
             )
+        if self._generation_phase_transition_stage == "out":
+            self._generation_phase_transition_target = (
+                total_completed, self.maximum_joint_slices
+            )
+            return
+        if (
+            first_joint_slice
+            and self.isVisible()
+            and self.isolated_progress_widget.isVisibleTo(dialog)
+        ):
+            self._ensure_generation_phase_animation()
+            self._generation_phase_transition_request_id = request_id
+            self._generation_phase_transition_target = (
+                total_completed, self.maximum_joint_slices
+            )
+            self._generation_phase_transition_stage = "out"
+            self._generation_phase_effect.setEnabled(True)
+            self._generation_phase_fade_out.start()
+            return
+        self._set_isolated_slice_progress_visible(False)
         dialog.start_slice(total_completed, self.maximum_joint_slices)
 
     @Slot(int, object)
@@ -11539,10 +11675,14 @@ class MainWindow(QMainWindow):
             self._joint_slices_completed,
             completed,
         )
+        if self._generation_phase_transition_stage == "out":
+            self._generation_phase_transition_target = (
+                completed, self.maximum_joint_slices
+            )
         self.joint_generation_dialog.complete_slice(
             completed,
             self.maximum_joint_slices,
-            getattr(progress, "best_iteration"),
+            progress.best_iteration,
             self.target_time_spin.value(),
         )
 
@@ -11555,6 +11695,7 @@ class MainWindow(QMainWindow):
         if request_id != self._preview_request_id or self._closing:
             result.dispose()
             return
+        self._cancel_generation_phase_transition()
         try:
             current_signature = self._current_preview_request().signature()
         except (AttributeError, KeyError, TypeError, ValueError):
@@ -11597,19 +11738,10 @@ class MainWindow(QMainWindow):
             "Vorschau ist aktuell", icon="✓", state="success"
         )
         self._clear_result_notices()
-        if self._joint_phase_active and self._joint_generation_dialog is not None:
+        if self._joint_generation_dialog is not None:
             paused = self._joint_accept_requested
             self._joint_generation_paused = paused
-            calibration = getattr(result, "calibration", None)
-            termination_reason = getattr(
-                calibration,
-                "termination_reason",
-                None,
-            )
-            stop_reason = self._joint_stop_reason_text(
-                termination_reason,
-                result,
-            )
+            self._joint_generation_dialog.set_achieved(result.minimum_verified_layer_time_s)
             self._joint_generation_dialog.mark_finished(
                 paused=paused,
                 can_continue=(
@@ -11617,9 +11749,9 @@ class MainWindow(QMainWindow):
                     and self._joint_slices_completed
                     < self.maximum_joint_slices
                 ),
-                stop_reason=stop_reason,
             )
         self._joint_resume_active = False
+        self._joint_resume_accept_seed_only = False
         if previous is not None and previous is not result:
             previous.dispose()
         self._refresh_prediction()
@@ -11643,6 +11775,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
+        self._cancel_generation_phase_transition()
         resume_failed_with_safe_candidate = bool(
             self._joint_resume_active and self.current_preview is not None
         )
@@ -11654,26 +11787,32 @@ class MainWindow(QMainWindow):
             else PreviewState.FAILED
         )
         self._preview_cancel_requested = False
-        if self._joint_generation_dialog is not None and self._joint_phase_active:
+        if self._joint_generation_dialog is not None:
+            if resume_failed_with_safe_candidate:
+                self._joint_slices_completed = self._joint_slice_offset
+                self._joint_generation_paused = True
+                self._joint_generation_dialog.set_achieved(self.current_preview.minimum_verified_layer_time_s)
             self._joint_generation_dialog.show_error(
-                german_user_message(message)
+                german_user_message(message),
+                retain_result=resume_failed_with_safe_candidate,
+                can_continue=(
+                    resume_failed_with_safe_candidate
+                    and self._joint_slices_completed < self.maximum_joint_slices
+                ),
             )
+        self._joint_resume_active = False
+        self._joint_resume_accept_seed_only = False
+        self._joint_phase_active = False
+        self._joint_accept_requested = False
         if resume_failed_with_safe_candidate:
             self.preview_dialog.set_preview(self.current_preview)
         else:
             self.preview_dialog.set_failed(german_user_message(message))
-        self.preview_hint_label.setProperty("state", "warning")
-        self.preview_hint_label.setText(
-            "Die Generierung ist fehlgeschlagen. Es liegt kein aktueller, "
-            "exportfähiger Kühlturm vor."
-        )
-        self.preview_hint_label.setVisible(not resume_failed_with_safe_candidate)
-        self._refresh_widget_style(self.preview_hint_label)
+        self.preview_hint_label.hide()
         self.progress_bar.setProperty("task", "default")
         self._refresh_widget_style(self.progress_bar)
         self._set_main_status(
-            "Vorschau fehlgeschlagen: "
-            f"{_concise_operation_failure_reason(message)}",
+            f"Vorschau fehlgeschlagen: {_preview_failure_footer_reason(message)}",
             icon="✕",
             state="error",
         )
@@ -11684,43 +11823,6 @@ class MainWindow(QMainWindow):
         self._refresh_prediction()
         self._refresh_phase17_actions()
 
-    @staticmethod
-    def _joint_stop_reason_text(
-        termination_reason: str | None,
-        result: PreviewResult,
-    ) -> str | None:
-        if termination_reason == "target_tolerance":
-            target = getattr(result, "target_layer_time_s", None)
-            achieved = getattr(result, "minimum_verified_layer_time_s", None)
-            if target is not None and achieved is not None:
-                deviation = float(achieved) - float(target)
-                return (
-                    "Die Angleichung wurde vorzeitig beendet, weil die "
-                    f"Zielzeit mit {deviation:+.2f} s Abweichung innerhalb "
-                    "von ±0,10 s erreicht wurde."
-                )
-            return (
-                "Die Angleichung wurde vorzeitig beendet, weil die Zielzeit "
-                "innerhalb von ±0,10 s erreicht wurde."
-            )
-        if termination_reason == "stagnation":
-            return (
-                "Die Angleichung wurde vorzeitig beendet, weil drei "
-                "aufeinanderfolgende gemeinsame Slices weder die Turmform "
-                "noch die Layerzeiten nennenswert verändert haben."
-            )
-        if termination_reason == "error":
-            failures = tuple(
-                getattr(getattr(result, "calibration", None), "failures", ())
-            )
-            details = " ".join(
-                german_user_message(str(getattr(item, "message", item)))
-                for item in failures
-            ).strip()
-            return details or "Die Angleichung wurde wegen eines Fehlers beendet."
-        return None
-        self._joint_resume_active = False
-
     def _on_generation_button_clicked(self) -> None:
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             self.cancel_generation()
@@ -11730,12 +11832,16 @@ class MainWindow(QMainWindow):
     def cancel_generation(self) -> None:
         if self._preview_cancel_requested:
             return
+        if self._joint_phase_active and self._joint_slices_completed > 0:
+            self._accept_joint_candidate()
+            return
         cancelled = self.background_job_manager.cancel_jobs(
             JobKind.PREVIEW,
             reason="user_request",
         )
         if not cancelled:
             return
+        self._cancel_generation_phase_transition()
         self._preview_cancel_requested = True
         self.preview_button.setText("Abbruch wird ausgeführt …")
         self.preview_button.setEnabled(False)
@@ -11758,7 +11864,20 @@ class MainWindow(QMainWindow):
         if worker is None:
             return
         self._joint_accept_requested = True
-        worker.accept_current()
+        if (
+            self._joint_resume_active
+            and self._joint_slices_completed == self._joint_slice_offset
+            and self.current_preview is not None
+        ):
+            # The resumed worker has no fully checked candidate yet. Keep the
+            # already accepted seed and stop this worker without accepting its
+            # incomplete slicer output.
+            self._joint_resume_accept_seed_only = True
+            self.background_job_manager.cancel_jobs(
+                JobKind.PREVIEW, reason="retained_seed_accepted"
+            )
+        else:
+            worker.accept_current()
         dialog = self.joint_generation_dialog
         dialog.accept_button.setEnabled(False)
         dialog.accept_button.setText("Bestes Ergebnis wird übernommen …")
@@ -11773,8 +11892,10 @@ class MainWindow(QMainWindow):
         if (
             self.background_job_manager.has_active(JobKind.PREVIEW)
             or self.current_preview is None
+            or self.preview_state is not PreviewState.CURRENT
         ):
             return
+        self._cancel_generation_phase_transition()
         remaining = self.maximum_joint_slices - self._joint_slices_completed
         if remaining <= 0:
             return
@@ -11798,6 +11919,7 @@ class MainWindow(QMainWindow):
         request_id = self._preview_request_id
         self._joint_slice_offset = self._joint_slices_completed
         self._joint_resume_active = True
+        self._joint_resume_accept_seed_only = False
         self._joint_accept_requested = False
         self._joint_generation_paused = False
         self._joint_phase_active = False
@@ -11823,7 +11945,30 @@ class MainWindow(QMainWindow):
     def _on_preview_finished(self, request_id: int) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
+        self._cancel_generation_phase_transition()
         self._active_preview_worker = None
+
+        if self._joint_resume_accept_seed_only and self.current_preview is not None:
+            self._joint_slices_completed = self._joint_slice_offset
+            self._joint_phase_active = False
+            self._joint_resume_active = False
+            self._joint_resume_accept_seed_only = False
+            self._joint_accept_requested = False
+            self._joint_generation_paused = True
+            self._preview_cancel_requested = False
+            self.preview_state = PreviewState.CURRENT
+            self.preview_dialog.set_preview(self.current_preview)
+            self.joint_generation_dialog.set_achieved(
+                self.current_preview.minimum_verified_layer_time_s
+            )
+            self.joint_generation_dialog.mark_finished(
+                paused=True,
+                can_continue=self._joint_slices_completed < self.maximum_joint_slices,
+            )
+            self._set_main_status("Bester gemeinsamer Kandidat übernommen", icon="✓", state="success")
+            self._refresh_prediction()
+            self._refresh_phase17_actions()
+            return
         if self.preview_state is not PreviewState.BUILDING:
             return
         self._preview_cancel_requested = False
@@ -11833,6 +11978,7 @@ class MainWindow(QMainWindow):
             else PreviewState.EMPTY
         )
         self.preview_dialog.set_cancelled()
+        self.joint_generation_dialog.mark_finished(paused=True, can_continue=False, status_text="Vor dem ersten verwertbaren gemeinsamen Slice gestoppt.", has_result=False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
@@ -11919,16 +12065,6 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_main_export_clicked(self) -> None:
-        if (
-            self.current_preview is not None
-            and self.current_preview.joint_sliced
-            and self._joint_generation_dialog is not None
-        ):
-            dialog = self._joint_generation_dialog
-            dialog.show()
-            dialog.raise_()
-            dialog.activateWindow()
-            return
         self.start_export()
 
     @Slot()
@@ -12175,11 +12311,7 @@ class MainWindow(QMainWindow):
             self.preview_button.setText("Kühlturm aktualisieren")
         else:
             self.preview_button.setText("Kühlturm generieren")
-        self.export_button.setText(
-            "Generierung fortsetzen"
-            if self._joint_generation_paused
-            else "Kühlturm exportieren"
-        )
+        self.export_button.setText("Kühlturm exportieren")
         self._fit_export_button_width()
 
     def _fit_export_button_width(self) -> None:
@@ -12267,6 +12399,7 @@ class MainWindow(QMainWindow):
     def reset_defaults(self) -> None:
         self.apply_settings(self.settings_store.load_defaults())
         self.maximum_joint_slices = self.default_maximum_joint_slices
+        self._apply_show_setting_limits(False)
         self.output_root_edit.setText(
             str(self.settings_store.load_default_output_root())
         )
@@ -12294,6 +12427,7 @@ class MainWindow(QMainWindow):
                 window_y=window_position.y(),
                 preview_iterations=self.preview_iterations,
                 maximum_joint_slices=self.maximum_joint_slices,
+                show_setting_limits=self.show_setting_limits,
                 preview_camera=(
                     self._preview_dialog.canvas.camera_state()
                     if self._preview_dialog is not None

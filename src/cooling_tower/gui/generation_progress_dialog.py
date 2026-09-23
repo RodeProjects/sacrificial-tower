@@ -15,6 +15,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QCheckBox,
+    QFileDialog,
+    QLineEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -117,10 +120,10 @@ class TowerImageProgress(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         scale = 1.0 + 0.03 * self._pulse
         available = QRectF(
-            (self.width() - 209.0) / 2.0,
-            (self.height() - 239.5) / 2.0,
-            209.0,
-            239.5,
+            self.width() * 0.035,
+            self.height() * 0.03,
+            self.width() * 0.93,
+            self.height() * 0.94,
         )
         source_size = self._pixmap.size()
         ratio = min(
@@ -543,8 +546,10 @@ class TowerGenerationDialog(QDialog):
 
 class JointSliceSettingsDialog(QDialog):
     value_applied = Signal(int)
+    limits_applied = Signal(bool)
+    output_root_applied = Signal(str)
 
-    def __init__(self, value: int, parent: QWidget | None = None) -> None:
+    def __init__(self, value: int, parent: QWidget | None = None, *, output_root: str = "", default_output_root: str = "") -> None:
         super().__init__(parent)
         self.setObjectName("jointSliceSettingsDialog")
         self.setWindowTitle("Allgemeine Einstellungen")
@@ -587,8 +592,27 @@ class JointSliceSettingsDialog(QDialog):
         )
         self.spin_box.valueChanged.connect(self._refresh_reset_button)
         row.addWidget(self.reset_button)
+        self.show_limits_checkbox = QCheckBox("Eingabegrenzen unter den Zahlenfeldern anzeigen")
+        layout.addWidget(self.show_limits_checkbox)
         self.settings_row_layout = row
         layout.addLayout(row)
+        layout.addWidget(QLabel("Exportordner"))
+        export_row = QHBoxLayout()
+        self.output_root_edit = QLineEdit(output_root)
+        self.output_root_edit.setAccessibleName("Exportordner")
+        export_row.addWidget(self.output_root_edit, 1)
+        browse = QPushButton("Auswählen …")
+        def select_output():
+            selected = QFileDialog.getExistingDirectory(self, "Exportordner auswählen", self.output_root_edit.text())
+            if selected:
+                self.output_root_edit.setText(selected)
+        browse.clicked.connect(select_output)
+        export_row.addWidget(browse)
+        reset_output = QPushButton("↺")
+        reset_output.setToolTip("Exportordner auf Standardwert zurücksetzen")
+        reset_output.clicked.connect(lambda: self.output_root_edit.setText(default_output_root))
+        export_row.addWidget(reset_output)
+        layout.addLayout(export_row)
         actions = QHBoxLayout()
         actions.addStretch(1)
         cancel = QPushButton("Abbrechen")
@@ -605,6 +629,11 @@ class JointSliceSettingsDialog(QDialog):
         self._refresh_reset_button()
 
     def accept(self) -> None:
+        if not self.output_root_edit.text().strip() and self.output_root_edit.text() != "":
+            self.output_root_edit.setFocus()
+            return
+        self.output_root_applied.emit(self.output_root_edit.text().strip())
+        self.limits_applied.emit(self.show_limits_checkbox.isChecked())
         self.value_applied.emit(self.spin_box.value())
         super().accept()
 

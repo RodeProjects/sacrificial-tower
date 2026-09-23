@@ -52,11 +52,11 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
         self.app.processEvents()
-        self.temporary.cleanup()
 
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
@@ -245,11 +245,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertTrue(window.notice_panel.isHidden())
             self.assertFalse(window.result_label.text())
             self.assertFalse(window.result_label.toolTip())
-            saved = window.export_success_summary_label.text().splitlines()
-            self.assertEqual(
-                saved,
-                ["Gespeichert:", "• tower.stl", "• druckprojekt.3mf"],
-            )
+            saved = window.export_success_summary_label.text()
+            self.assertIn("Gespeichert:</p>", saved)
+            self.assertIn("<li><b>tower.stl</b></li>", saved)
+            self.assertIn("<li><b>druckprojekt.3mf</b></li>", saved)
             usage = window.export_success_usage_label.text()
             self.assertIn("Turm-STL manuell", usage)
             self.assertIn(".3MF-Datei", usage)
@@ -303,9 +302,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
             dialog_layout = window.export_success_dialog.layout()
             self.assertEqual(dialog_layout.contentsMargins().top(), 11)
             self.assertEqual(window.export_success_header_layout.spacing(), 7)
-            self.assertEqual(
-                window.export_success_summary_label.text().splitlines(),
-                ["Gespeichert:", "• tower.stl"],
+            self.assertIn(
+                "<li><b>tower.stl</b></li>",
+                window.export_success_summary_label.text(),
             )
         finally:
             window.close()
@@ -885,16 +884,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         self.assertFalse(window.preview_dialog.isWindow())
 
-        header = window.geometry_calculation_header
-        self.assertEqual(
-            header.mapTo(window.geometry_split, header.rect().topLeft()).x(),
-            0,
-        )
+        header = window.geometry_group.header
         self.assertEqual(header.width(), window.geometry_split.width())
-        self.assertEqual(
-            window.geometry_calculation_title.geometry().bottom() + 1,
-            window.geometry_calculation_header_divider.geometry().top(),
-        )
+        self.assertTrue(window.geometry_calculation_section.isHidden())
 
         stylesheet = window.styleSheet()
         self.assertIn(
@@ -966,10 +958,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
 
         subsections = (
+            window.timing_group,
             window.geometry_group,
-            window.stability_group,
-            window.overhang_group,
-            window.geometry_calculation_section,
         )
         self.assertTrue(
             all(subsection.width() == split.width() for subsection in subsections)
@@ -988,8 +978,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.workflow.complete_preparation()
         self.app.processEvents()
         expected_units = {
-            "target_layer_time_s": "s",
-            "layer_time_tolerance_s": "s",
+            "target_layer_time_s": "Sek.",
+            "layer_time_tolerance_s": "Sek.",
             "safety_factor": "",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
@@ -1026,7 +1016,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         target.editor.lineEdit().setText("23")
         self.app.processEvents()
         self.assertTrue(target.unit_label.isVisible())
-        self.assertEqual(target.unit_label.text(), "s")
+        self.assertEqual(target.unit_label.text(), "Sek.")
         self.assertEqual(target.unit_label.width(), 44)
         self.assertGreaterEqual(target.editor.lineEdit().width(), 67)
         self.assertEqual(
@@ -1111,53 +1101,14 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertFalse(window.geometry_settings_group.isChecked())
         window.close()
 
-    def test_geometry_subsections_are_named_and_owned_by_topic(self) -> None:
+    def test_geometry_fields_share_one_named_section(self) -> None:
         window = self.window()
-        self.assertEqual(window.geometry_group.title(), "Abmessungen")
-        self.assertEqual(window.stability_group.title(), "Standfuß")
-        self.assertEqual(window.overhang_group.title(), "Überhänge")
-
-        for name in ("manual_base_width_mm",):
-            self.assertTrue(
-                window.stability_group.isAncestorOf(
-                    window._setting_widgets[name]
-                )
-            )
-            self.assertFalse(
-                window.overhang_group.isAncestorOf(
-                    window._setting_widgets[name]
-                )
-            )
-        for name in (
-            "maximum_expansion_angle_deg",
-            "maximum_contraction_angle_deg",
-        ):
-            self.assertTrue(
-                window.overhang_group.isAncestorOf(
-                    window._setting_widgets[name]
-                )
-            )
-            self.assertFalse(
-                window.stability_group.isAncestorOf(
-                    window._setting_widgets[name]
-                )
-            )
-        self.assertTrue(
-            window.geometry_split.isAncestorOf(
-                window.geometry_calculation_section
-            )
-        )
-        self.assertFalse(
-            window.stability_group.isAncestorOf(
-                window.geometry_calculation_section
-            )
-        )
-        self.assertFalse(
-            window.overhang_group.isAncestorOf(
-                window.geometry_calculation_section
-            )
-        )
-        window.close()
+        self.addCleanup(window.close)
+        self.assertEqual(window.geometry_group.title(), "Turmgeometrie")
+        for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "mesh_segments", "local_reference_window"):
+            self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
+        self.assertTrue(window.stability_group.isHidden())
+        self.assertTrue(window.overhang_group.isHidden())
 
     def test_single_column_prediction_order_survives_state_and_width_changes(
         self,

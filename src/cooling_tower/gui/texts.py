@@ -3,8 +3,8 @@ from __future__ import annotations
 
 SETTING_INFO_TEXTS = {
     "layer_time_tolerance_s": (
-        "Zulässige Abweichung von der gewünschten Layerzeit nach oben und unten. "
-        "Bereich: 0,01 bis 3 Sekunden; Standard: 0,2 Sekunden. "
+        "Zulässige Abweichung von der gewünschten Layerzeit nach oben und unten.\n\n"
+        "Bereich: 0,01 bis 3 Sekunden;\n\nStandard: 0,2 Sekunden.\n\n"
         "Eine kleinere Toleranz kann mehr Kalibrierungsdurchläufe benötigen."
     ),
     "target_layer_time_s": (

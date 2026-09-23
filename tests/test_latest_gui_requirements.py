@@ -87,11 +87,11 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
         self.app.processEvents()
-        self.temporary.cleanup()
 
     def window(self) -> MainWindow:
         return MainWindow(user_settings_path=self.root / "settings.json")
@@ -118,10 +118,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window.geometry_split_layout.sizeHint().height(),
         )
         sections = (
+            window.timing_group,
             window.geometry_group,
-            window.stability_group,
-            window.overhang_group,
-            window.geometry_calculation_section,
         )
         for previous, following in zip(sections, sections[1:]):
             self.assertEqual(
@@ -213,6 +211,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_setting_feedback_waits_for_both_workflow_prerequisites(self) -> None:
         window = self.window()
+        window._apply_show_setting_limits(True)
         window.target_time_spin.setValue(0.0)
         window.maximum_expansion_angle_spin.setValue(51.0)
         self.complete_source_step(window)
@@ -239,6 +238,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_ranges_are_visible_and_layer_time_is_limited_to_30_seconds(self) -> None:
         window = self.window()
+        window._apply_show_setting_limits(True)
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
@@ -247,7 +247,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         for setting in window._setting_widgets.values():
             self.assertTrue(setting.range_label.text().strip())
             self.assertFalse(setting.range_label.isHidden())
-        self.assertIn("Max. 30,00 s", window._setting_widgets[
+        self.assertIn("Max. 30,00 Sek.", window._setting_widgets[
             "target_layer_time_s"
         ].range_label.text())
         window.target_time_spin.setValue(121.0)
@@ -258,7 +258,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "30,00",
             window.validation_label.text(),
         )
-        self.assertIn("Gewünschte Mindest-Layerzeit: 121,00 s", window.validation_label.text())
+        self.assertIn("Gewünschte Mindest-Layerzeit: 121,0 Sek.", window.validation_label.text())
         window.close()
 
     def test_safety_factor_has_no_unit_in_field_or_related_texts(self) -> None:
@@ -368,7 +368,6 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             [action.text() for action in window.options_menu.actions()],
             [
-                "Exportordner ändern",
                 "Allgemeine Einstellungen …",
                 "Support & Diagnose …",
                 "Über Kühlturm-Generator",
@@ -396,44 +395,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         window.close()
 
-    def test_output_folder_dialog_width_and_reset_follow_install_defaults(self) -> None:
+    def test_output_folder_is_in_general_settings(self) -> None:
         window = self.window()
-        window.resize(720, 800)
-        window.show()
-        self.app.processEvents()
-
-        window.change_output_action.trigger()
-        self.app.processEvents()
-        self.assertEqual(window.additional_options_dialog.width(), 600)
-        self.assertLess(
-            window.additional_options_dialog.width(), window.width()
-        )
-        self.assertFalse(window.output_browse_button.icon().isNull())
-        self.assertFalse(window.output_root_reset_button.icon().isNull())
-        self.assertLessEqual(
-            window.additional_options_dialog.width(), window.width()
-        )
-        self.assertFalse(window.preview_hint_label.text())
-        self.assertTrue(window.preview_hint_label.isHidden())
-        self.assertNotIn(
-            "Die Vorschau ist optional",
-            window.preview_hint_label.text(),
-        )
-
-        window.additional_options_dialog.close()
-        window.resize(550, 800)
-        self.app.processEvents()
-        window.show_additional_options()
-        self.app.processEvents()
-        self.assertEqual(window.additional_options_dialog.width(), 600)
-
-        window.output_root_edit.setText(str(self.root / "custom-output"))
+        self.addCleanup(window.close)
+        window.joint_slice_settings_action.trigger()
+        dialog = window._joint_slice_settings_dialog
+        self.assertEqual(dialog.output_root_edit.text(), window.output_root_edit.text())
+        dialog.output_root_edit.setText(str(self.root / "custom-output"))
+        dialog.accept()
+        self.assertEqual(window.output_root_edit.text(), str(self.root / "custom-output"))
         window._reset_output_root()
-        self.assertEqual(
-            Path(window.output_root_edit.text()),
-            window.settings_store.load_default_output_root(),
-        )
-        window.close()
+        self.assertEqual(Path(window.output_root_edit.text()), window.settings_store.load_default_output_root())
 
     def test_program_information_contains_requested_icons_and_scrolling(self) -> None:
         window = self.window()
@@ -581,7 +553,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             (window.show_about_dialog, lambda: window.about_dialog),
             (
                 window.show_additional_options,
-                lambda: window.additional_options_dialog,
+                lambda: window._joint_slice_settings_dialog,
             ),
         ):
             opener()
@@ -949,7 +921,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             window.validation_label.text().splitlines(),
             [
-                "Gewünschte Mindest-Layerzeit: 29,00 s",
+                "Gewünschte Mindest-Layerzeit: 29,0 Sek.",
                 "• Maximaler Aufweitungswinkel reicht nicht aus.",
                 "• Standfußbreite reicht nicht aus.",
                 "• Eingestellter größter Außendurchmesser von 40,00 mm reicht nicht aus.",
@@ -963,7 +935,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             Qt.TextFormat.RichText,
         )
         self.assertIn(
-            "<b>Gewünschte Mindest-Layerzeit: 29,00 s</b>",
+            "<b>Gewünschte Mindest-Layerzeit: 29,0 Sek.</b>",
             window.validation_label._rendered_html,
         )
         self.assertIn(
@@ -1348,24 +1320,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertNotIn("40,00 mm", window.validation_label.text())
         window.close()
 
-    def test_tower_need_message_has_no_redundant_prediction_footnote(self) -> None:
+    def test_initial_generation_area_has_no_prediction_footnote(self) -> None:
         window = self.window()
-
-        self.assertEqual(
-            window.timing_group.content_layout.indexOf(
-                window.tower_need_label
-            ),
-            -1,
-        )
-        prediction_layout = window.prediction_frame.content_layout
-        tower_index = prediction_layout.indexOf(window.tower_need_label)
-        self.assertGreaterEqual(tower_index, 0)
-        self.assertFalse(hasattr(window, "layer_time_check_hint"))
-        self.assertIs(
-            window.tower_need_label.parentWidget(),
-            window.prediction_frame.content_widget,
-        )
-        window.close()
+        self.addCleanup(window.close)
+        self.assertTrue(window.tower_need_label.isHidden())
+        self.assertTrue(window.prediction_primary_widget.isHidden())
+        self.assertTrue(window.joint_generation_dialog.isHidden())
+        self.assertTrue(window.prediction_frame.isAncestorOf(window.preview_dialog))
 
     def test_failed_feasibility_check_replaces_old_calculated_errors(self) -> None:
         window = self.window()

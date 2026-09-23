@@ -197,10 +197,8 @@ class Phase18UiTests(unittest.TestCase):
             window.ready_left_column.isAncestorOf(window.geometry_settings_group)
         )
         geometry_sections = (
+            window.timing_group,
             window.geometry_group,
-            window.stability_group,
-            window.overhang_group,
-            window.geometry_calculation_section,
         )
         self.assertEqual(
             [section.y() for section in geometry_sections],
@@ -463,13 +461,13 @@ class Phase18UiTests(unittest.TestCase):
             geometry.content_widget.isAncestorOf(window.local_window_spin)
         )
         self.assertTrue(
-            window.geometry_calculation_section.isAncestorOf(
+            window.geometry_group.isAncestorOf(
                 window.mesh_segments_spin
             )
         )
         self.assertTrue(
             window.geometry_split.isAncestorOf(
-                window.geometry_calculation_section
+                window.geometry_group
             )
         )
         self.assertFalse(
@@ -512,51 +510,9 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(window.mesh_segments_spin.isHidden())
         self.assertFalse(window.local_window_spin.isHidden())
         self.assertGreater(geometry.content_widget.height(), 0)
-        self.assertEqual(
-            window.geometry_calculation_title.font().pointSizeF(),
-            window.geometry_group.title_label.font().pointSizeF(),
-        )
-        self.assertEqual(
-            [
-                window.geometry_group.title_label.font().pointSizeF(),
-                window.stability_group.title_label.font().pointSizeF(),
-                window.overhang_group.title_label.font().pointSizeF(),
-                window.geometry_calculation_title.font().pointSizeF(),
-            ],
-            [11.5, 11.5, 11.5, 11.5],
-        )
-        self.assertEqual(
-            window.geometry_settings_group.title_label.font().pointSizeF(),
-            12.0,
-        )
-        self.assertEqual(
-            window.geometry_calculation_title.font().weight(),
-            window.geometry_group.title_label.font().weight(),
-        )
-        calculation_title_image = (
-            window.geometry_calculation_header.grab().toImage()
-        )
-        self.assertEqual(
-            calculation_title_image.pixelColor(
-                calculation_title_image.width() // 2,
-                5,
-            ).name(),
-            "#f5f7f9",
-        )
-        calculation_divider_image = (
-            window.geometry_calculation_header_divider.grab().toImage()
-        )
-        self.assertEqual(
-            calculation_divider_image.pixelColor(
-                calculation_divider_image.width() // 2,
-                0,
-            ).name(),
-            "#e0e5ea",
-        )
-        self.assertLessEqual(
-            window.geometry_calculation_section.geometry().bottom(),
-            window.geometry_split.contentsRect().bottom(),
-        )
+        self.assertEqual(window.geometry_group.title_label.font().pointSizeF(), 11.5)
+        self.assertEqual(window.geometry_settings_group.title_label.font().pointSizeF(), 12.0)
+        self.assertTrue(window.geometry_calculation_section.isHidden())
         stylesheet = window.styleSheet()
         geometry_subsection_selector = (
             'QWidget#geometrySettingsSplit '
@@ -567,11 +523,7 @@ class Phase18UiTests(unittest.TestCase):
             "background: #ffffff;",
             stylesheet[stylesheet.index(geometry_subsection_selector):],
         )
-        for subsection in (
-            window.geometry_group,
-            window.stability_group,
-            window.overhang_group,
-        ):
+        for subsection in (window.geometry_group,):
             header_image = subsection.header.grab().toImage()
             body_image = subsection.content_widget.grab().toImage()
             self.assertEqual(
@@ -611,19 +563,19 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(geometry.state(), SectionState.ERROR)
         window._refresh_collapsible_error_badges({})
 
-        window.change_output_action.trigger()
+        window.joint_slice_settings_action.trigger()
         self.app.processEvents()
-        self.assertTrue(window.additional_options_dialog.isVisible())
+        dialog = window._joint_slice_settings_dialog
+        self.assertTrue(dialog.isVisible())
         self.assertEqual(
-            window.additional_options_dialog.windowTitle(),
-            "Exportordner ändern",
+            dialog.windowTitle(),
+            "Allgemeine Einstellungen",
         )
         dialog_labels = {
             label.text()
-            for label in window.additional_options_dialog.findChildren(QLabel)
+            for label in dialog.findChildren(QLabel)
         }
-        self.assertIn("Exportordner ändern", dialog_labels)
-        self.assertIn("Aktueller Exportordner:", dialog_labels)
+        self.assertIn("Exportordner", dialog_labels)
         self.assertNotIn(
             "Hier legen Sie programmweite Ausgabeoptionen fest.",
             dialog_labels,
@@ -644,11 +596,11 @@ class Phase18UiTests(unittest.TestCase):
         window.move(40, 0)
         window.show()
         self.app.processEvents()
-        window.change_output_action.trigger()
+        window.joint_slice_settings_action.trigger()
         QTest.qWait(30)
         self.app.processEvents()
-        dialog = window.additional_options_dialog
-        self.assertEqual(dialog.width(), 600)
+        dialog = window._joint_slice_settings_dialog
+        self.assertGreaterEqual(dialog.width(), 650)
         self.assertEqual(dialog.height(), dialog.layout().sizeHint().height())
         self.assertLess(dialog.height(), window.height() // 2)
         self.assertLessEqual(
@@ -1039,14 +991,14 @@ class Phase18UiTests(unittest.TestCase):
             window.source_guide.text(),
             "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
         )
-        self.assertEqual(window.geometry_group.title(), "Abmessungen")
+        self.assertEqual(window.geometry_group.title(), "Turmgeometrie")
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
         self.assertEqual(
             window.subtitle_label.text(),
             "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
         )
-        self.assertEqual(window.prediction_frame.title(), "Prognose")
+        self.assertEqual(window.prediction_frame.title(), "Generierung und Vorschau")
         self.assertEqual(window.preparation_tabs.count(), 2)
         self.assertEqual(window.preparation_tabs.tabText(0), "1. Dateiübergabe")
         self.assertEqual(
@@ -1247,7 +1199,7 @@ class Phase18UiTests(unittest.TestCase):
         for button in camera_buttons:
             self.assertGreaterEqual(
                 button.width(),
-                button.fontMetrics().horizontalAdvance(button.text()) + 28,
+                button.fontMetrics().horizontalAdvance(button.text()) + 18,
             )
         self.assertAlmostEqual(
             window.preview_dialog.canvas.zoom,
@@ -1488,7 +1440,7 @@ class Phase18UiTests(unittest.TestCase):
 
         self.assertEqual(dialog.canvas.yaw_deg, 0.0)
         self.assertEqual(dialog.canvas.pitch_deg, 89.0)
-        self.assertEqual(dialog.canvas.zoom, 1.0)
+        self.assertAlmostEqual(dialog.canvas.zoom, 1.0 / 1.2)
         self.assertEqual(dialog.canvas.pan_x, 0.0)
         self.assertEqual(dialog.canvas.pan_y, 0.0)
         self.assertEqual(changed.count(), 1)
@@ -1515,10 +1467,10 @@ class Phase18UiTests(unittest.TestCase):
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
         inline = window._setting_widgets["target_layer_time_s"].message_label.text()
-        self.assertNotIn("Gewünschte Mindest-Layerzeit: 0,00 s", inline)
-        self.assertIn("Mindestwert 0,01 s", inline)
-        self.assertIn("Gewünschte Mindest-Layerzeit: 0,00 s", window.validation_label.text())
-        self.assertIn("Mindestwert 0,01 s", window.validation_label.text())
+        self.assertNotIn("Gewünschte Mindest-Layerzeit: 0,0 Sek.", inline)
+        self.assertIn("Mindestwert 0,01 Sek.", inline)
+        self.assertIn("Gewünschte Mindest-Layerzeit: 0,0 Sek.", window.validation_label.text())
+        self.assertIn("Mindestwert 0,01 Sek.", window.validation_label.text())
         self.assertNotIn("must be", window.validation_label.text().casefold())
         window.close()
 
@@ -1710,7 +1662,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
         self.assertTrue(window.mesh_segments_spin.isVisible())
         self.assertTrue(window.local_window_spin.isVisible())
-        self.assertTrue(window.geometry_calculation_section.isVisible())
+        self.assertTrue(window.geometry_group.isVisible())
+        self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
 
     def test_geometry_dropdown_first_open_is_complete_when_stacked(self) -> None:
@@ -1733,7 +1686,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertGreaterEqual(body.height(), body.sizeHint().height() - 2)
         self.assertTrue(window.mesh_segments_spin.isVisible())
         self.assertTrue(window.local_window_spin.isVisible())
-        self.assertTrue(window.geometry_calculation_section.isVisible())
+        self.assertTrue(window.geometry_group.isVisible())
+        self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
 
     def test_reset_action_is_hidden_until_settings_are_editable(self) -> None:

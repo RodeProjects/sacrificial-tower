@@ -624,7 +624,14 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
             self.assertIsNotNone(result.project_path)
             assert result.project_path is not None
             self.assertTrue(result.project_path.is_file())
-            self.assertLessEqual(abs(joint_minima[-1] - 10.0), 0.2)
+            best_joint_iteration = next(
+                item for item in joint_iterations
+                if item.number == result.best_iteration_number
+            )
+            best_minimum = min(
+                best_joint_iteration.evaluation.combined_time_by_layer.values()
+            )
+            self.assertLessEqual(abs(best_minimum - 10.0), 0.2)
 
         self.assertEqual(self._hash(source), source_hash)
         self.assertEqual(

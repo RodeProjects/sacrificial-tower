@@ -7,11 +7,12 @@ from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 14
+SETTINGS_SCHEMA_VERSION = 15
 _CONFIG_METADATA_KEYS = {
     "settings_schema_version",
     "default_output_root",
     "maximum_joint_slices",
+    "show_setting_limits",
     "setting_compatibility",
 }
 

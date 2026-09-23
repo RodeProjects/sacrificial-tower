@@ -2,11 +2,12 @@ from __future__ import annotations
 from pathlib import Path
 from html import escape
 from PySide6.QtCore import Qt, QSize, Signal, QUrl
-from PySide6.QtGui import QFontMetrics, QResizeEvent, QIcon, QPixmap, QTextDocument
+from PySide6.QtGui import QFontMetrics, QIcon, QPixmap, QTextDocument
 from PySide6.QtWidgets import QDialog, QWidget, QLabel, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QSizePolicy
 from cooling_tower.version import APP_NAME, APP_SUBTITLE, APP_VERSION_LABEL
 from cooling_tower.legal_documents import legal_profile, render_legal_document
 from cooling_tower.runtime_paths import RESOURCE_ROOT
+from cooling_tower.gui.widgets.chevron_button import ChevronButton
 
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 ABOUT_DIALOG_MINIMUM_WIDTH_PX = 450
@@ -77,7 +78,7 @@ class _ResponsiveLegalButtonGrid(QWidget):
         widths = [
             QFontMetrics(button.font()).horizontalAdvance(button.text())
             + button.iconSize().width()
-            + 30
+            + 55
             for button in self.buttons
         ]
         spacing = max(0, self.grid.horizontalSpacing())
@@ -118,6 +119,19 @@ class _ResponsiveLegalButtonGrid(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         self._relayout(event.size().width())
         super().resizeEvent(event)
+
+
+class _LegalDocumentButton(ChevronButton):
+    """Keep the document chevron aligned at the far right of the button."""
+
+    def __init__(self, caption: str, parent: QWidget | None = None) -> None:
+        super().__init__(caption, parent)
+
+    def set_document_open(self, opened: bool) -> None:
+        self.set_opened(opened)
+        self.setAccessibleDescription(
+            "Dokument geöffnet" if opened else "Dokument geschlossen"
+        )
 
 
 class AboutDialog(QDialog):
@@ -265,7 +279,7 @@ class AboutDialog(QDialog):
         )
         self.about_legal_buttons: list[QPushButton] = []
         for icon_name, caption in legal_specs:
-            button = QPushButton(caption)
+            button = _LegalDocumentButton(caption)
             button.setObjectName("aboutLegalButton")
             button.setIcon(QIcon(str(GUI_ASSET_ROOT / icon_name)))
             button.setIconSize(QSize(18, 18))
@@ -283,6 +297,7 @@ class AboutDialog(QDialog):
         content_layout.addWidget(self.about_legal_grid)
 
         self.about_document_label = QLabel()
+        self._shown_document_title: str | None = None
         # Preserve the previous public widget handle during the dialog extraction.
         self.about_placeholder_label = self.about_document_label
         self.about_placeholder_label.setObjectName("aboutPlaceholder")
@@ -399,6 +414,9 @@ class AboutDialog(QDialog):
         )
 
     def show_document(self, title: str) -> None:
+        if self._shown_document_title == title:
+            self.reset_document()
+            return
         try:
             text = render_legal_document(title)
         except (OSError, ValueError, KeyError) as error:
@@ -416,5 +434,19 @@ class AboutDialog(QDialog):
         )
         self.about_document_label.setOpenExternalLinks(True)
         self.about_placeholder_label.show()
+        self._shown_document_title = title
+        self._sync_legal_button_chevrons()
         self.about_content_layout.invalidate()
         self.content_changed.emit()
+
+    def reset_document(self) -> None:
+        self._shown_document_title = None
+        self._sync_legal_button_chevrons()
+        self.about_document_label.clear()
+        self.about_placeholder_label.hide()
+        self.about_content_layout.invalidate()
+        self.content_changed.emit()
+
+    def _sync_legal_button_chevrons(self) -> None:
+        for button in self.about_legal_buttons:
+            button.set_document_open(button.text() == self._shown_document_title)

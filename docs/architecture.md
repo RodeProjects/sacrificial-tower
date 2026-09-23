@@ -166,15 +166,26 @@ Backend-Schalter, Adaptermatrix und Doppelvalidierung sind in
 ### Getrennte und gemeinsame Generierungsphase
 
 Jede neue Generierung beginnt unabhängig von einer vorhandenen Vorschau mit
-sechs getrennten Turm-Slices. Nur diese Vorstufe verwendet den
-Fortschrittsbalken im Hauptfenster. Beim ersten vollständigen Objekt-/Turm-Slice
-wechselt die Darstellung in `gui/generation_progress_dialog.py`. Der Worker
+sechs getrennten Turm-Slices. Der eingebettete Bereich „Generierung und
+Vorschau“ verwendet `gui/generation_panel.py`; es öffnet sich kein separates
+Generierungsfenster. Der Worker
 meldet jeden vollständig ausgewerteten gemeinsamen Kandidaten als unveränderlichen
-`JointSliceProgress`; ausschließlich der GUI-Thread aktualisiert Bildfüllstand,
-Zähler und Bestwerte. Der Vorlauf-Fortschritt verwendet ausschließlich rechts
-im Footer dieselbe Darstellung wie der Vorbereitungsfortschritt; sein einzeiliger
-Status und der Abstand zur Aktionszeile bleiben während des Laufs höhenstabil.
-Beim Wechsel in die gemeinsame Phase wird dieser Block ausgeblendet.
+`JointSliceProgress`; ausschließlich der GUI-Thread aktualisiert Zähler und
+intern die Werte des bisher besten vollständig ausgewerteten Kandidaten.
+Die getrennten Slices bilden die Vorbereitungsphase. Währenddessen zeigt der
+eingebettete Bereich ausschließlich „Turmgenerierung wird vorbereitet...“, einen
+über alle sechs getrennten Slices fortlaufenden Gesamtfortschrittsbalken und den
+aktuellen Arbeitsschritt. Das Turmbild und gemeinsame Ergebniswerte bleiben
+verborgen. Beim Wechsel in die gemeinsame Phase verschwindet der gesamte
+Vorbereitungsblock; an seiner Stelle erscheinen das fortschreitende Turmbild,
+Slice-Zähler und die Angaben zum bislang besten gemeinsamen Kandidaten. Der
+Übergang blendet erst die Vorbereitung aus, tauscht bei unsichtbarem Inhalt die
+Ansicht und blendet danach die gemeinsame Phase ein. Bei Abbruch, Fehler oder
+einem neuen Lauf wird eine laufende Animation gestoppt und die normale
+Deckkraft wiederhergestellt.
+Ein Abbruch vor dem ersten verwertbaren gemeinsamen Slice meldet seinen Grund
+im Statusbereich unten links; ohne Kandidaten bleibt die Ergebnisansicht
+verborgen. Beim Fortsetzen bleibt die gemeinsame Ergebnisansicht sichtbar.
 Ergebnisanzeigen zählen ausschließlich gemeinsame Slices; die sechs getrennten
 Vorläufe erscheinen nur in ihrem eigenen Fortschrittsblock.
 
@@ -188,25 +199,54 @@ laufender Slicer-Prozess wird sicher beendet, während der letzte vollständig
 geprüfte gemeinsame Kandidat erhalten bleibt. „Fortsetzen“ startet nur das
 verbleibende gemeinsame Budget mit diesem Kandidaten als Seed; eine echte neue
 Generierung führt dagegen stets erneut die getrennte Vorstufe aus. Nach der
-Übernahme bleibt der Dialog als alleiniger Export-Einstieg erhalten: Dort kann
-der Benutzer den besten Kandidaten exportieren oder die Angleichung mit dem
-nächsten gemeinsamen Slice fortsetzen. Der Hauptfenster-Button öffnet diesen
-Entscheidungsdialog lediglich erneut.
+Übernahme bleibt das Ergebnis im Hauptfenster erhalten. Der Export-Button führt
+direkt zum Export; Fortsetzen steht separat beim Generierungsergebnis. Ein
+Benutzerstopp nach dem ersten gemeinsamen Kandidaten verwendet denselben sicheren
+Übernahmeweg. Ein dadurch unterbrochener 3MF-Projektbau gilt nicht als echte
+Slicer-Ablehnung, sofern ein früherer vollständig geprüfter Kandidat vorliegt.
+Der finale Projektbau des übernommenen Kandidaten bleibt vom Übernahme-Event
+unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor dem ersten
+verwertbaren Kandidaten wird der Lauf ohne exportfähiges Ergebnis abgebrochen.
 
 Ein Kandidat, der die feste Zielschwelle von ±0,1 Sekunden erreicht, wird vor
 der Abschlussmeldung atomar zugleich als bester Anzeige- und Exportkandidat
-markiert. Dadurch beziehen sich Generierungsdialog, Prognose und Exportbericht
-immer auf dieselbe Slicer-Auswertung. Automatische vorzeitige Abschlussgründe
-(Zielschwelle, Stagnation oder ein verwertbarer Fehlerzustand) werden unterhalb
-des besten Ergebnisses angezeigt; ein regulär ausgeschöpftes Budget und die
-manuelle Übernahme benötigen keinen zusätzlichen Hinweis.
+markiert. Nach Abschluss beziehen sich Generierungsanzeige und Exportbericht
+auf dieselbe Slicer-Auswertung. Während des Laufs bleibt der bislang beste
+Kandidat intern und in der Ergebnisanzeige erhalten; schlechtere Folgeslices
+ändern nur den Fortschrittszähler.
+Beim erneuten Stoppen einer Fortsetzung vor dem ersten neuen vollständig
+geprüften gemeinsamen Slice bleibt der bereits übernommene Kandidat erhalten.
+Ein fehlgeschlagener Fortsetzungslauf lässt das zuvor exportfähige Ergebnis
+und, bei verbleibendem Slice-Budget, die Fortsetzungsoption verfügbar.
+Fehler der Generierung erscheinen mit ihrer vollständigen Ursache nur im
+Statusbereich unten links. Der Ergebnisbereich zeigt bei erhaltenem Kandidaten
+weiterhin dessen Werte und mögliche Aktionen, aber keinen zweiten Fehlertext.
+
+Die zweispaltige Anzeige enthält kürzeste gemeinsame Layerzeit/Ziel/Toleranz,
+vorzeichenbehaftete Abweichung und Ergebnis einschließlich tatsächlich aktivierter
+Simulationen (Stützen und/oder 100-%-Turmfüllung). Nur erreichte Zeit und
+Abweichung werden abhängig von der Toleranz eingefärbt; Zielzeit und Toleranz
+bleiben neutral. Die Ansichtsbuttons über der 3D-Vorschau stehen in einer Zeile.
+Außerhalb der Toleranz wird
+nach zusätzlicher Abweichung unterschieden: bis einschließlich 0,5 s „leicht“,
+über 0,5 bis einschließlich 1 s ohne Verstärkung, über 1 s „stärker“.
+Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen.
+Aktuell/veraltet
+steht als Badge direkt neben „3D-Vorschau“.
+
+„Turm-Einstellungen“ gliedert sich in „Kühlzeit und Qualität“ sowie
+„Turmgeometrie“. Eingabegrenzen sind standardmäßig verborgen und lassen sich
+in „Allgemeine Einstellungen“ wieder einblenden. Dort befinden sich außerdem
+das Slice-Budget und der Exportordner; ein eigener Exportordner-Menüpunkt entfällt.
+Das Ausblenden verkleinert die gesamte Einstellungskarte. Einige Zahlenfelder
+zeigen zur besseren Lesbarkeit eine Nachkommastelle, während gespeicherte Werte
+und Validierungsgrenzen ihre bisherige Präzision behalten.
 
 Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten relevanten
-Layerzeit von der Zielzeit das primäre Vergleichskriterium. Weitere
-Konvergenz-, Zeitüberschuss- und Materialwerte entscheiden nur bei gleicher
-Abweichung. Ein einmal gefundener Bestwert kann dadurch weder in der Anzeige
-noch im später exportierten Kandidaten durch eine größere Abweichung ersetzt
-werden.
+Layerzeit von der Zielzeit das Vergleichskriterium. Bei gleicher Abweichung
+bleibt der zuerst vollständig geprüfte Kandidat bestehen. Weder die Anzeige
+noch der später exportierte Kandidat können durch einen gleichen oder
+schlechteren Folgeslice ersetzt werden.
 
 Der modale Generierungsdialog berechnet seine feste Inhaltsgröße vor dem ersten
 sichtbaren Frame und wird bei jeder inhaltlichen Höhenänderung erneut über dem

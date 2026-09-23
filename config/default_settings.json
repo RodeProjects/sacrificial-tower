@@ -1,5 +1,5 @@
 {
-  "settings_schema_version": 14,
+  "settings_schema_version": 15,
   "maximum_joint_slices": 10,
   "layer_time_tolerance_s": 0.25,
   "default_output_root": "output",

@@ -446,6 +446,7 @@ class PreviewCanvas(QWidget):
         # remaining visually indistinguishable from a vertical top-down view.
         self.pitch_deg = 89.0
         self.fit_objects(emit=False)
+        self.zoom = 1.0 / 1.2
         self._emit_camera()
 
     def _emit_camera(self) -> None:
@@ -675,8 +676,8 @@ class PreviewCanvas(QWidget):
             painter.setPen(QColor("#aeb7c5"))
             painter.drawText(
                 self.rect(),
-                Qt.AlignmentFlag.AlignCenter,
-                "Noch keine Vorschau erstellt",
+                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                "Noch kein Kühlturm generiert.\nDie Vorschau erscheint nach der Generierung.",
             )
             return
 

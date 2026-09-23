@@ -19,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSizePolicy
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
@@ -38,10 +38,11 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
-        self.temporary.cleanup()
+        self.app.processEvents()
 
     def test_image_progress_and_best_timing_are_presented(self) -> None:
         dialog = TowerGenerationDialog(
@@ -210,69 +211,19 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
         dialog.close()
 
-    def test_generation_dialog_is_content_sized_and_centered_immediately(self) -> None:
-        window = MainWindow(
-            user_settings_path=self.root / "settings.json",
-            enable_update_check=False,
-            enable_startup_slicer_discovery=False,
-        )
-        window.setGeometry(100, 80, 1200, 900)
-        window.showMaximized()
-        self.app.processEvents()
-        dialog = window.joint_generation_dialog
-        dialog.setWindowState(Qt.WindowState.WindowMaximized)
-
-        dialog.begin(12.0, 0.25, 0, 15)
-        self.app.processEvents()
-
-        self.assertFalse(dialog.isMaximized())
-        self.assertEqual(dialog.width(), 610)
-        self.assertLessEqual(
-            (
-                dialog.frameGeometry().center()
-                - window.frameGeometry().center()
-            ).manhattanLength(),
-            2,
-        )
-        iteration = SimpleNamespace(
-            evaluation=SimpleNamespace(
-                layer_timings=(
-                    SimpleNamespace(combined_layer_time_s=12.04),
-                )
-            )
-        )
-        dialog.complete_slice(1, 15, iteration, 12.0)
-        self.app.processEvents()
-        self.assertLessEqual(
-            (
-                dialog.frameGeometry().center()
-                - window.frameGeometry().center()
-            ).manhattanLength(),
-            2,
-        )
-        dialog.mark_finished(
-            paused=True,
-            can_continue=True,
-            stop_reason=(
-                "Die Zielzeit wurde mit +0,04 s Abweichung erreicht."
-            ),
-        )
-        self.app.processEvents()
-        self.assertEqual(
-            dialog.stop_reason_label.property("resultState"),
-            "within",
-        )
-        self.assertEqual(dialog.best_deviation_value.text(), "(+0.04 s)")
-        self.assertLessEqual(
-            (
-                dialog.frameGeometry().center()
-                - window.frameGeometry().center()
-            ).manhattanLength(),
-            2,
-        )
-        dialog.allow_programmatic_close()
-        dialog.close()
-        window.close()
+    def test_generation_panel_is_embedded_and_keeps_preview_accessible(self) -> None:
+        window = MainWindow(user_settings_path=self.root / "settings.json", enable_update_check=False, enable_startup_slicer_discovery=False)
+        self.addCleanup(window.close)
+        panel = window.joint_generation_dialog
+        panel.begin(12.0, 0.25, 0, 15)
+        self.assertFalse(panel.isWindow())
+        self.assertTrue(window.prediction_frame.isAncestorOf(panel))
+        self.assertLess(panel.image_progress.width(), 120)
+        panel.set_achieved(12.04)
+        panel.mark_finished(paused=True, can_continue=True)
+        self.assertEqual(panel.best_deviation_value.text(), "+0.04 s")
+        self.assertEqual(panel.title_label.text(), "Generierung gestoppt")
+        self.assertFalse(panel.continue_button.isHidden())
 
     def test_schema_13_migrates_joint_slice_default(self) -> None:
         user_path = self.root / "settings.json"
@@ -290,10 +241,10 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         _settings, state = store.load()
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 14)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 15)
         self.assertEqual(state["maximum_joint_slices"], 10)
         migrated = json.loads(user_path.read_text(encoding="utf-8"))
-        self.assertEqual(migrated["settings_schema_version"], 14)
+        self.assertEqual(migrated["settings_schema_version"], 15)
         self.assertIsNotNone(store.last_migration_backup)
 
     def test_main_menu_uses_persisted_joint_slice_budget(self) -> None:
@@ -322,34 +273,21 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         window.close()
 
-    def test_joint_export_is_reopened_from_main_and_started_in_dialog(self) -> None:
-        window = MainWindow(
-            user_settings_path=self.root / "settings.json",
-            enable_update_check=False,
-            enable_startup_slicer_discovery=False,
-        )
-        dialog = window.joint_generation_dialog
-        dialog.begin(9.0, 0.25, 1, 10)
-        dialog.mark_finished(paused=True, can_continue=True)
-        window.current_preview = SimpleNamespace(
-            joint_sliced=True,
-            dispose=lambda: None,
-        )
+    def test_joint_export_starts_directly_from_main(self) -> None:
+        window = MainWindow(user_settings_path=self.root / "settings.json", enable_update_check=False, enable_startup_slicer_discovery=False)
+        self.addCleanup(window.close)
+        panel = window.joint_generation_dialog
+        panel.begin(9.0, 0.25, 1, 10)
+        panel.mark_finished(paused=True, can_continue=True)
         window._joint_generation_paused = True
         window._update_responsive_action_labels()
-        self.assertEqual(window.export_button.text(), "Generierung fortsetzen")
-
+        self.assertEqual(window.export_button.text(), "Kühlturm exportieren")
         with patch.object(window, "start_export") as start_export:
             window._on_main_export_clicked()
-            start_export.assert_not_called()
-            self.assertTrue(dialog.isVisible())
-            dialog.accept_button.click()
             start_export.assert_called_once_with()
+        self.assertTrue(panel.accept_button.isHidden())
 
-        self.assertFalse(dialog.isVisible())
-        window.close()
-
-    def test_isolated_slice_progress_uses_right_footer_preparation_style(self) -> None:
+    def test_isolated_slice_progress_shows_overall_preparation_progress(self) -> None:
         window = MainWindow(
             user_settings_path=self.root / "settings.json",
             enable_update_check=False,
@@ -366,7 +304,10 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertTrue(window.progress_bar.isHidden())
         self.assertFalse(window.isolated_progress_widget.isHidden())
         self.assertTrue(window.footer_status_widget.isHidden())
-        self.assertEqual(window.isolated_progress_icon_label.text(), "⌛")
+        self.assertEqual(
+            window.isolated_progress_title_label.text(),
+            "Turmgenerierung wird vorbereitet...",
+        )
         self.assertEqual(
             window.footer_action_spacer.sizePolicy().verticalPolicy(),
             QSizePolicy.Policy.Fixed,
@@ -377,8 +318,8 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         self.assertEqual(window.isolated_progress_bar.value(), 17)
         self.assertIn(
-            "1 von 6 · Slice 2 läuft",
-            window.isolated_progress_status_label.text(),
+            "Getrennter Slice 2/6",
+            window.isolated_progress_detail_label.text(),
         )
         self.assertGreater(
             window.isolated_progress_detail_label.mapTo(
@@ -390,39 +331,56 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 QPoint(0, 0),
             ).y(),
         )
-        first_height = window.footer_action_layout.sizeHint().height()
-
         window._on_preview_progress(
             window._preview_request_id,
             25,
             "Slicer und Profil werden für die Kalibrierung vorbereitet …",
         )
         self.app.processEvents()
-        self.assertEqual(
-            window.footer_action_layout.sizeHint().height(),
-            first_height,
-        )
+        self.assertEqual(window.isolated_progress_bar.value(), 17)
         self.assertTrue(window.footer_status_widget.isHidden())
+
+        window._on_preview_progress(
+            window._preview_request_id,
+            30,
+            "Slicer-Ergebnis 2/21 wird ausgewertet …",
+        )
+        self.assertEqual(window.isolated_progress_bar.value(), 33)
+        window._on_preview_progress(
+            window._preview_request_id,
+            40,
+            "Getrennter Slice 3/6 wird ausgeführt …",
+        )
+        self.assertEqual(window.isolated_progress_bar.value(), 33)
+        window._on_preview_progress(
+            window._preview_request_id,
+            50,
+            "Slicer-Ergebnis 6/21 wird ausgewertet …",
+        )
+        self.assertEqual(window.isolated_progress_bar.value(), 100)
 
         window._on_preview_progress(
             window._preview_request_id,
             50,
             "Gemeinsamer Slice 1/10 wird vorbereitet …",
         )
-        self.assertTrue(window.isolated_progress_widget.isHidden())
-        self.assertFalse(window.footer_status_widget.isHidden())
-        self.assertEqual(
-            window.footer_action_spacer.sizePolicy().verticalPolicy(),
-            QSizePolicy.Policy.Expanding,
-        )
+        self.assertFalse(window.isolated_progress_widget.isHidden())
+        self.assertTrue(window.footer_status_widget.isHidden())
 
         window._on_joint_phase_started(
             window._preview_request_id,
             0,
             window.maximum_joint_slices,
         )
-        self.app.processEvents()
+        self.assertFalse(window.isolated_progress_widget.isHidden())
+        fade_in_done = QSignalSpy(window._generation_phase_fade_in.finished)
+        self.assertTrue(fade_in_done.wait(1500))
         self.assertTrue(window.isolated_progress_widget.isHidden())
+        self.assertFalse(window.footer_status_widget.isHidden())
+        self.assertEqual(
+            window.footer_action_spacer.sizePolicy().verticalPolicy(),
+            QSizePolicy.Policy.Expanding,
+        )
         window.joint_generation_dialog.allow_programmatic_close()
         window.joint_generation_dialog.close()
         window.close()

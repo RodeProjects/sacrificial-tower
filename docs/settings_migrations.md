@@ -248,3 +248,19 @@ Die Kompatibilitätskennung `maximum_joint_slices` verwendet den Token
 eine Änderung einen zuvor generierten Stand korrekt als veraltet markiert.
 Sicherung, schrittweise Migration und atomisches Schreiben entsprechen den
 vorherigen Schemata.
+
+## Schema 15: optionale Eingabegrenzen
+
+14→15 ergänzt `show_setting_limits` mit Standard `false`. Die Einstellung
+steuert ausschließlich die Darstellung der Grenzwerte unter Zahlenfeldern;
+Validierungen bleiben unverändert aktiv. Nur echte boolesche Werte werden
+akzeptiert, Zeichenketten und Zahlen fallen auf `false` zurück. Bei verborgenen
+Grenzen reserviert das Layout keinen Platz für die Hinweiszeile.
+
+Der Kompatibilitätstoken lautet `numeric-limits-visibility-v1`. Eine Übernahme
+nach Downgrade setzt gleichen Token und booleschen Typ voraus; numerische
+Wertebereiche und Einheiten sind für diese Darstellungseinstellung nicht
+anwendbar. Die bestehenden Schutzregeln für Sicherung, atomare Speicherung,
+beschädigte, extern geänderte und neuere Dateien bleiben erhalten. Die Verlagerung
+des Exportordners in die allgemeinen Einstellungen ändert dessen gespeichertes
+Format nicht.

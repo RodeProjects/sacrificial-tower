@@ -164,6 +164,10 @@ SETTING_COMPATIBILITY_RULES = (
         minimum=4, maximum=8,
     ),
     SettingCompatibilityRule(
+        "show_setting_limits", "numeric-limits-visibility-v1",
+        ("show_setting_limits",), "bool", "show_setting_limits",
+    ),
+    SettingCompatibilityRule(
         "maximum_joint_slices", "joint-slice-budget-v1",
         ("maximum_joint_slices",), "int", "maximum_joint_slices",
         minimum=5, maximum=25,

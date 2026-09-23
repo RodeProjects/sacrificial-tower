@@ -1612,6 +1612,14 @@ QPushButton#aboutLegalButton {
     background: #ffffff;
     border-color: #b6c9d8;
     text-align: left;
+    padding-right: 32px;
+}
+
+QLabel#disclosureChevron {
+    color: #405266;
+    background: transparent;
+    font-size: 13pt;
+    font-weight: 700;
 }
 
 QPushButton#aboutLegalButton:hover {
@@ -2079,6 +2087,32 @@ QCheckBox:hover {
     color: #0f5d91;
     background: #f1f7fb;
     border-radius: 5px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background: #ffffff;
+    border: 1px solid #71879a;
+    border-radius: 3px;
+}
+
+QCheckBox::indicator:hover {
+    background: #ffffff;
+    border-color: #1769aa;
+}
+QCheckBox::indicator:pressed {
+    background: #eef5fa;
+    border-color: #105784;
+}
+QCheckBox::indicator:checked {
+    image: url("__CHECKBOX_CHECK_ICON__");
+    background: #1769aa;
+    border-color: #105784;
+}
+QCheckBox::indicator:checked:hover {
+    background: #105b93;
+    border-color: #0d4c7e;
 }
 
 QCheckBox#simulateFullTowerInfill,
@@ -2674,7 +2708,7 @@ QLabel#previewLegendTitle {
 QPushButton#previewCameraButton {
     min-height: 34px;
     padding: 6px;
-    font-size: 8.5pt;
+    font-size: 10.5pt;
 }
 
 QToolButton#previewNavigationToggle {
@@ -2936,3 +2970,69 @@ QPushButton#towerGenerationContinueButton {
     font-weight: 650;
 }
 QPushButton#towerGenerationContinueButton:hover { background: #12588f; }
+
+/* Embedded generation: hover-only navigation chrome and compact state badge. */
+QToolButton#previewNavigationStatus {
+    background: transparent;
+    border: 1px solid transparent;
+}
+QToolButton#previewNavigationStatus:hover {
+    background: rgba(34, 39, 48, 215);
+    border: 1px solid rgba(198, 207, 218, 120);
+}
+QWidget#generationPanel QLabel#towerGenerationTitle { font-size: 13pt; }
+QLabel#generationIntroLabel {
+    color: #526274;
+    padding: 5px 2px 7px 2px;
+}
+QPushButton#generationContinueButton {
+    color: #174a70;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e4f3ff, stop: 1 #c4e1f8);
+    border-color: #9dc9e8;
+    font-weight: 650;
+}
+QPushButton#generationContinueButton:hover {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #eef8ff, stop: 1 #d1eafa);
+    border-color: #78b5dc;
+}
+QPushButton#generationContinueButton:pressed {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #bfddf4, stop: 1 #e0f1fd);
+}
+QPushButton#generationContinueButton:disabled {
+    color: #8995a0;
+    background: #edf0f2;
+    border-color: #d8dee3;
+}
+QPushButton#generationAcceptButton {
+    color: #20583d;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e7f8ed, stop: 1 #c7e9d3);
+    border-color: #a4d5b6;
+    font-weight: 650;
+}
+QPushButton#generationAcceptButton:hover {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #effbf3, stop: 1 #d3efdc);
+    border-color: #81c59d;
+}
+QPushButton#generationAcceptButton:pressed {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #bddfc9, stop: 1 #e2f6e9);
+}
+QPushButton#generationAcceptButton:disabled {
+    color: #8995a0;
+    background: #edf0f2;
+    border-color: #d8dee3;
+}
+QLabel#generationResultDescription {
+    padding-top: 3px;
+    padding-bottom: 3px;
+}
+QWidget#embeddedPreviewPanel QLabel#previewStateLabel {
+    padding: 3px 8px;
+    border-radius: 7px;
+    font-size: 9pt;
+}

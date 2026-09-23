@@ -53,11 +53,17 @@ class PreviewDialog(QDialog):
         if embedded:
             section_title = QLabel("3D-Vorschau")
             section_title.setObjectName("embeddedPreviewTitle")
-            layout.addWidget(section_title)
+            title_row = QHBoxLayout()
+            title_row.addWidget(section_title)
+            layout.addLayout(title_row)
         self.state_label = QLabel("Vorschau wurde noch nicht erstellt.")
         self.state_label.setObjectName("previewStateLabel")
         self.state_label.setWordWrap(True)
-        layout.addWidget(self.state_label)
+        if embedded:
+            title_row.addWidget(self.state_label)
+            title_row.addStretch()
+        else:
+            layout.addWidget(self.state_label)
         if embedded:
             # The empty canvas already carries the initial explanatory text.
             # Avoid repeating the same information directly above it.
@@ -98,7 +104,7 @@ class PreviewDialog(QDialog):
         preview_info_layout.addWidget(self.layers_info_label, 1, 0)
         preview_info_layout.addWidget(self.bed_info_label, 1, 1)
         preview_info_layout.setColumnStretch(0, 1)
-        preview_info_layout.setColumnStretch(1, 1)
+        preview_info_layout.setColumnStretch(1, 0)
         preview_frame_layout.addWidget(self.preview_info_header)
         preview_frame_layout.addWidget(self.canvas, 1)
 
@@ -146,19 +152,22 @@ class PreviewDialog(QDialog):
             self.top_button,
         ):
             button.setObjectName("previewCameraButton")
+            font = button.font()
+            font.setPointSizeF(10.5)
+            button.setFont(font)
             button.setSizePolicy(
-                QSizePolicy.Policy.MinimumExpanding,
+                QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Fixed,
             )
             button.setMinimumWidth(
-                button.fontMetrics().horizontalAdvance(button.text()) + 28
+                button.fontMetrics().horizontalAdvance(button.text()) + 18
             )
             button.setToolTip(button.text())
             camera_layout.addWidget(button, 1)
         layout.addLayout(camera_layout)
         layout.addWidget(self.preview_frame, 1)
         self.navigation_hint = QLabel(
-            "Interaktive Maussteuerung über die Schaltfläche oben rechts in der "
+            "Interaktive Maussteuerung über die Schaltfläche oben links in der "
             "Vorschau aktivieren."
         )
         self.navigation_hint.setObjectName("helpText")
@@ -523,6 +532,14 @@ class PreviewDialog(QDialog):
         super().closeEvent(event)
 
     def _refresh_state_style(self) -> None:
+        if self.embedded:
+            full_text = self.state_label.text()
+            self.state_label.setToolTip(full_text)
+            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
+            self.state_label.setText(captions.get(self.state, full_text))
+            self.state_label.setVisible(
+                self.state not in {PreviewState.EMPTY, PreviewState.FAILED}
+            )
         style = self.state_label.style()
         style.unpolish(self.state_label)
         style.polish(self.state_label)
@@ -535,6 +552,14 @@ class PreviewDialog(QDialog):
         self._preview_controls_visible = visible
         for widget in self._preview_only_controls:
             widget.setVisible(visible)
+        if self.embedded:
+            frame_height = self.canvas.minimumHeight()
+            if visible:
+                frame_height += (
+                    self.preview_info_header.sizeHint().height()
+                    + self.legend_widget.sizeHint().height()
+                )
+            self.preview_frame.setMinimumHeight(frame_height + 2)
         if visible:
             self.details_label.setVisible(not self.embedded)
             self.quality_label.setVisible(bool(self.quality_label.text().strip()))

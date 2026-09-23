@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QLocale, Qt, QTimer
 from PySide6.QtGui import QFontMetrics, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -82,6 +82,26 @@ class WheelSafeSpinBox(QSpinBox):
 
 class WheelSafeDoubleSpinBox(QDoubleSpinBox):
     """Keep decimal values stable when the surrounding form is scrolled."""
+
+    def set_display_decimals(self, decimals: int) -> None:
+        """Round only the visible text; keep Qt's value precision unchanged."""
+
+        self._display_decimals = decimals
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        display_decimals = getattr(self, "_display_decimals", None)
+        if display_decimals is None:
+            return super().textFromValue(value)
+        locale = QLocale(self.locale())
+        locale.setNumberOptions(
+            locale.numberOptions() | QLocale.NumberOption.OmitGroupSeparator
+        )
+        return locale.toString(float(value), "f", display_decimals)
+
+    def stored_text_from_value(self, value: float) -> str:
+        """Use the original precision for bounds and validation messages."""
+
+        return super().textFromValue(value)
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         event.ignore()

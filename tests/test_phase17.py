@@ -496,7 +496,7 @@ class Phase17Tests(unittest.TestCase):
             "Einstellungen geändert",
         )
         self.assertTrue(window.preview_hint_label.isHidden())
-        self.assertIn("Vorschau veraltet", window.preview_dialog.state_label.text())
+        self.assertIn("Veraltet", window.preview_dialog.state_label.text())
         window.profile_feasibility = ProfileFeasibilityAssessment(True, True)
         window.validate_form()
         self.assertFalse(window.export_button.isEnabled())
@@ -508,7 +508,7 @@ class Phase17Tests(unittest.TestCase):
         window.validate_form()
         self.assertEqual(window.preview_state, PreviewState.CURRENT)
         self.assertEqual(window.preview_dialog.state, PreviewState.CURRENT)
-        self.assertIn("Vorschau ist aktuell", window.preview_dialog.state_label.text())
+        self.assertIn("Aktuell", window.preview_dialog.state_label.text())
         self.assertTrue(window.preview_hint_label.isHidden())
         self.assertTrue(window.export_button.isEnabled())
         window.current_preview = None

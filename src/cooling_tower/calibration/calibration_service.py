@@ -585,7 +585,13 @@ class CalibrationService:
                             use_cli_assemble_list = True
                             deferred_project = _DeferredJointProjectExport(
                                 adapter=adapter,
-                                request=project_request,
+                                # The final export must finish after a user
+                                # accepts the best candidate. Only a genuine
+                                # cancellation may interrupt that export.
+                                request=replace(
+                                    project_request,
+                                    cancellation_event=cancellation_event,
+                                ),
                                 source_model_path=joint_source_stl,
                                 occupied=occupied_bounds,
                                 placement=placement,
@@ -629,6 +635,16 @@ class CalibrationService:
                                 ),
                             )
                     except JointProjectError as error:
+                        if (
+                            accept_best_event is not None
+                            and accept_best_event.is_set()
+                            and best_is_joint
+                        ):
+                            # A user stop can interrupt native 3MF creation.
+                            # The last complete joint candidate remains valid;
+                            # the interrupted export is not a slicer rejection.
+                            accepted_early = True
+                            break
                         failures.append(CalibrationFailure(
                             CalibrationFailureCode.GEOMETRY_INVALID,
                             str(error),
@@ -952,9 +968,9 @@ class CalibrationService:
                 # The minimum relevant layer time is the value presented to
                 # the user as the candidate result.  Make its absolute target
                 # deviation the primary rank so a visibly worse candidate can
-                # never replace an already better one.  The established
-                # convergence/material score remains the deterministic
-                # tie-breaker.
+                # never replace an already better one. Equal deviations keep
+                # the earlier fully evaluated candidate stable in both the
+                # live display and the eventual export.
                 candidate_score = (
                     abs(float(minimum_target_difference_s)),
                     *quality_score,
@@ -966,7 +982,11 @@ class CalibrationService:
                     or (joint_round and not best_is_joint)
                     or (
                         joint_round == best_is_joint
-                        and candidate_score < best_score
+                        and (
+                            candidate_score[0] < best_score[0] - 1e-9
+                            if joint_round
+                            else candidate_score < best_score
+                        )
                     )
                 )
                 if not metadata_conflict and candidate_is_best:

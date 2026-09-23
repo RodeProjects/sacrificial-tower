@@ -88,22 +88,8 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.assertTrue(
             window.ready_left_column.isAncestorOf(window.geometry_settings_group)
         )
-        self.assertEqual(
-            [
-                window.geometry_group.y(),
-                window.stability_group.y(),
-                window.overhang_group.y(),
-                window.geometry_calculation_section.y(),
-            ],
-            sorted(
-                [
-                    window.geometry_group.y(),
-                    window.stability_group.y(),
-                    window.overhang_group.y(),
-                    window.geometry_calculation_section.y(),
-                ]
-            ),
-        )
+        self.assertLess(window.timing_group.y(), window.geometry_group.y())
+        self.assertEqual(window.geometry_split_layout.count(), 2)
         window.resize(800, 900)
         QTest.qWait(30)
         self.app.processEvents()

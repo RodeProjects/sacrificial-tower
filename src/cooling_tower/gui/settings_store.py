@@ -298,12 +298,20 @@ def _migrate_settings_13_to_14(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_14_to_15(payload: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(payload)
+    migrated["show_setting_limits"] = False
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     normalized: dict[str, Any] = {
         "generation": _generation_values(nested.get("generation")),
     }
 
+    normalized["show_setting_limits"] = nested.get("show_setting_limits", False) is True
     output_root = nested.get("output_root")
     if isinstance(output_root, str) and output_root.strip():
         normalized["output_root"] = output_root
@@ -408,6 +416,7 @@ _USER_SETTINGS_MIGRATIONS = {
     11: _migrate_settings_11_to_12,
     12: _migrate_settings_12_to_13,
     13: _migrate_settings_13_to_14,
+    14: _migrate_settings_14_to_15,
 }
 
 
@@ -531,6 +540,7 @@ class UserSettingsStore:
         window_y: int | None = None,
         preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
         maximum_joint_slices: int = _DEFAULT_MAXIMUM_JOINT_SLICES,
+        show_setting_limits: bool = False,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -543,6 +553,7 @@ class UserSettingsStore:
             window_y=window_y,
             preview_iterations=preview_iterations,
             maximum_joint_slices=maximum_joint_slices,
+            show_setting_limits=show_setting_limits,
             preview_camera=preview_camera,
             expanded_sections=expanded_sections,
         )
@@ -565,6 +576,7 @@ class UserSettingsStore:
         window_y: int | None = None,
         preview_iterations: int = _DEFAULT_PREVIEW_ITERATIONS,
         maximum_joint_slices: int = _DEFAULT_MAXIMUM_JOINT_SLICES,
+        show_setting_limits: bool = False,
         preview_camera: Mapping[str, Any] | None = None,
         expanded_sections: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -580,6 +592,7 @@ class UserSettingsStore:
                 window_y=window_y,
                 preview_iterations=preview_iterations,
                 maximum_joint_slices=maximum_joint_slices,
+                show_setting_limits=show_setting_limits,
                 preview_camera=preview_camera,
                 expanded_sections=expanded_sections,
             )
@@ -598,6 +611,7 @@ class UserSettingsStore:
         window_y: int | None,
         preview_iterations: int,
         maximum_joint_slices: int,
+        show_setting_limits: bool = False,
         preview_camera: Mapping[str, Any] | None,
         expanded_sections: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
@@ -621,6 +635,7 @@ class UserSettingsStore:
                 _MINIMUM_JOINT_SLICES,
                 min(_MAXIMUM_JOINT_SLICES, int(maximum_joint_slices)),
             ),
+            "show_setting_limits": show_setting_limits is True,
             "preview_camera": dict(preview_camera or {}),
             "expanded_sections": {
                 str(name): bool(value)
