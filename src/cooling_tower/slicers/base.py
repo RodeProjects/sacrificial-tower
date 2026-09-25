@@ -57,6 +57,11 @@ _SLICER_RETURN_CODE_EXPLANATIONS = {
         "Der Slicer hat die Modellgeometrie abgelehnt und konnte daraus "
         "keinen zuverlässig verarbeitbaren G-Code erzeugen."
     ),
+    -61: (
+        "Im wirksamen Filamentprofil ist für den gewählten Druckbett-Typ "
+        "keine verwendbare Betttemperatur hinterlegt. Bitte Filamentprofil "
+        "und Druckbett-Typ prüfen oder eine passende Profilkombination wählen."
+    ),
     -17: (
         "Das ausgewählte Prozessprofil ist mit dem Maschinenprofil nicht "
         "kompatibel."

@@ -63,9 +63,9 @@ class UiRedesignTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_quality_label"))
         self.assertFalse(hasattr(window, "preview_fast_button"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
-        self.assertEqual(window._calibration_config().maximum_iterations, 16)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 1)
-        self.assertEqual(window._calibration_config().maximum_joint_slices, 10)
+        self.assertEqual(window._calibration_config().maximum_iterations, 18)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
         self.assertFalse(hasattr(window, "layer_time_check_hint"))
         _ = window.export_success_dialog
         self.assertIn(
@@ -123,7 +123,7 @@ class UiRedesignTests(unittest.TestCase):
             window.validation_label.text().splitlines(),
             [
                 "Minimaler Turmdurchmesser: 0,0 mm",
-                "• Liegt unter dem Mindestwert 0,002 mm.",
+                "• Liegt unter dem Mindestwert 3,0 mm.",
             ],
         )
         window.close()

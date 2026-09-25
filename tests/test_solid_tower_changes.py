@@ -68,6 +68,35 @@ def radius_layer(
 
 
 class SolidSettingsMigrationTests(unittest.TestCase):
+    def test_new_diameter_limits_migrate_with_backup(self) -> None:
+        for version, minimum, maximum, expected in (
+            (5, 2.0, 4.0, (3.0, 5.0)),
+            (17, 100.0, 100.0, (99.0, 100.0)),
+            (17, 80.0, 50.0, (49.0, 50.0)),
+        ):
+            with self.subTest(version=version, diameters=(minimum, maximum)):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    user = root / "user.json"
+                    original = json.dumps({
+                        "settings_schema_version": version,
+                        "generation": {
+                            "minimum_outer_diameter_mm": minimum,
+                            "maximum_outer_diameter_mm": maximum,
+                        },
+                    }).encode()
+                    user.write_bytes(original)
+                    store = UserSettingsStore(
+                        user, PROJECT_ROOT / "config" / "default_settings.json"
+                    )
+                    settings, _ = store.load()
+                    self.assertEqual(
+                        (settings.minimum_outer_diameter_mm,
+                         settings.maximum_outer_diameter_mm),
+                        expected,
+                    )
+                    self.assertEqual(store.last_migration_backup.read_bytes(), original)
+
     def test_public_settings_contain_only_diameter_and_solid_controls(self) -> None:
         settings = GenerationSettings()
         payload = settings.to_dict()
@@ -240,7 +269,7 @@ class SolidSettingsMigrationTests(unittest.TestCase):
 class SolidGeometryTests(unittest.TestCase):
     def test_profile_and_mesh_have_no_inner_contour(self) -> None:
         radius_profile = TowerRadiusProfile(
-            config=TowerProfileConfig(10.0, 1.0, 5.0, 20.0, 3),
+            config=TowerProfileConfig(10.0, 5.0, 20.0, 3),
             global_seconds_per_deposition_mm=0.1,
             layers=(
                 radius_layer(index=1, z=0.2, calculated_radius=5.0, radius=5.0),
@@ -251,7 +280,6 @@ class SolidGeometryTests(unittest.TestCase):
             minimum_outer_diameter_mm=10.0,
             maximum_outer_diameter_mm=40.0,
             base_height_mm=0.0,
-            mesh_segments=16,
         )
         profile = build_solid_tower_profile(
             radius_profile,
@@ -274,7 +302,7 @@ class SolidGeometryTests(unittest.TestCase):
 
     def test_initial_geometry_limit_does_not_block_infill_aware_test_slice(self) -> None:
         radius_profile = TowerRadiusProfile(
-            config=TowerProfileConfig(10.0, 1.0, 5.0, 20.0, 3),
+            config=TowerProfileConfig(10.0, 5.0, 20.0, 3),
             global_seconds_per_deposition_mm=0.1,
             layers=(
                 radius_layer(index=1, z=1.0, calculated_radius=80.0, radius=20.0),

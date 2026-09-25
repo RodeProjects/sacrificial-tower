@@ -250,10 +250,7 @@ def adjust_radius_profile(
             replace(
                 item,
                 time_deficit_s=required_added,
-                additional_path_mm=(
-                    new_path / profile.config.safety_factor
-                    if profile.config.safety_factor > 0.0 else new_path
-                ),
+                additional_path_mm=new_path,
                 safety_adjusted_path_mm=new_path,
                 calculated_radius_mm=radius,
                 radius_mm=radius,

@@ -20,6 +20,7 @@ from cooling_tower.tower.mesh_generator import (
     MeshGenerationError,
     StlExportResult,
     TowerMeshConfig,
+    automatic_mesh_segments,
     TriangleMesh,
     generate_tower_mesh,
     validate_mesh_config,
@@ -48,7 +49,6 @@ from cooling_tower.services.reporting_service import (
 
 DEFAULT_PREVIEW_COUNT = 10
 DEFAULT_CSV_PATH = Path("output/layer_analysis.csv")
-DEFAULT_SAFETY_FACTOR = GENERATION_DEFAULTS["safety_factor"]
 DEFAULT_MINIMUM_DIAMETER_MM = GENERATION_DEFAULTS["minimum_outer_diameter_mm"]
 DEFAULT_MAXIMUM_DIAMETER_MM = GENERATION_DEFAULTS["maximum_outer_diameter_mm"]
 DEFAULT_MINIMUM_OBJECT_TOWER_DISTANCE_MM = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"]
@@ -62,7 +62,6 @@ DEFAULT_MANUAL_BASE_WIDTH_MM = GENERATION_DEFAULTS["manual_base_width_mm"]
 DEFAULT_EXPANSION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
 DEFAULT_CONTRACTION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
 DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"]
-DEFAULT_MESH_SEGMENTS = GENERATION_DEFAULTS["mesh_segments"]
 FLOAT_EPSILON = 1e-12
 
 
@@ -103,16 +102,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Minimum desired layer time in seconds. Supplying this "
             "option enables the Phase-2 radius calculation."
-        ),
-    )
-
-    parser.add_argument(
-        "--safety-factor",
-        type=float,
-        default=DEFAULT_SAFETY_FACTOR,
-        help=(
-            "Multiplier applied to the required additional path. "
-            f"Default: {DEFAULT_SAFETY_FACTOR}"
         ),
     )
 
@@ -265,16 +254,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Root directory for timestamped generation runs. "
             "Default: output"
-        ),
-    )
-
-    parser.add_argument(
-        "--mesh-segments",
-        type=int,
-        default=DEFAULT_MESH_SEGMENTS,
-        help=(
-            "Number of circular segments per profile ring. "
-            f"Default: {DEFAULT_MESH_SEGMENTS}"
         ),
     )
 
@@ -460,7 +439,6 @@ def write_layer_csv(
                 "reference_start_layer",
                 "reference_end_layer",
                 "additional_path_mm",
-                "safety_adjusted_path_mm",
                 "calculated_radius_mm",
                 "tower_radius_mm",
                 "radius_limit",
@@ -614,9 +592,6 @@ def write_layer_csv(
                         "additional_path_mm": format_csv_float(
                             radius_layer.additional_path_mm
                         ),
-                        "safety_adjusted_path_mm": format_csv_float(
-                            radius_layer.safety_adjusted_path_mm
-                        ),
                         "calculated_radius_mm": format_csv_float(
                             radius_layer.calculated_radius_mm
                         ),
@@ -745,7 +720,7 @@ def print_radius_layer(layer: LayerRadiusRecord) -> None:
         f"{layer.time_deficit_s:>10.3f}  "
         f"{format_optional_float(layer.seconds_per_deposition_mm, 5):>10}  "
         f"{layer.time_factor_source:>8}  "
-        f"{layer.safety_adjusted_path_mm:>12.3f}  "
+        f"{layer.additional_path_mm:>12.3f}  "
         f"{layer.radius_mm:>10.3f}  "
         f"{layer.radius_limit:>8}"
     )
@@ -812,10 +787,6 @@ def print_radius_profile_summary(
         f"{config.target_layer_time_s:.3f} s"
     )
     print(
-        f"Safety factor:                      "
-        f"{config.safety_factor:.3f}"
-    )
-    print(
         f"Allowed radius range:               "
         f"{config.minimum_radius_mm:.3f} to "
         f"{config.maximum_radius_mm:.3f} mm"
@@ -845,8 +816,8 @@ def print_radius_profile_summary(
         layer.time_factor_source == "unavailable"
         for layer in layers
     )
-    total_safety_adjusted_path_mm = sum(
-        layer.safety_adjusted_path_mm
+    total_added_path_mm = sum(
+        layer.additional_path_mm
         for layer in layers
     )
     estimated_target_miss_count = sum(
@@ -882,8 +853,8 @@ def print_radius_profile_summary(
         f"{unavailable_reference_count}"
     )
     print(
-        f"Total safety-adjusted added path:   "
-        f"{total_safety_adjusted_path_mm:.3f} mm"
+        f"Total added path:             "
+        f"{total_added_path_mm:.3f} mm"
     )
     print(
         f"Calculated radius range:            "
@@ -1310,7 +1281,6 @@ def main() -> int:
         try:
             settings = GenerationSettings(
                 target_layer_time_s=arguments.target_time,
-                safety_factor=arguments.safety_factor,
                 minimum_outer_diameter_mm=arguments.minimum_diameter,
                 maximum_outer_diameter_mm=arguments.maximum_diameter,
                 minimum_object_tower_distance_mm=(
@@ -1340,7 +1310,6 @@ def main() -> int:
                 maximum_expansion_angle_deg=arguments.expansion_angle,
                 maximum_contraction_angle_deg=arguments.contraction_angle,
                 local_reference_window=arguments.local_window,
-                mesh_segments=arguments.mesh_segments,
             )
             result = GenerationService(arguments.output_root).generate(
                 gcode_path=arguments.gcode,
@@ -1394,7 +1363,6 @@ def main() -> int:
         if arguments.target_time is not None:
             profile_config = TowerProfileConfig(
                 target_layer_time_s=arguments.target_time,
-                safety_factor=arguments.safety_factor,
                 minimum_radius_mm=arguments.minimum_diameter / 2.0,
                 maximum_radius_mm=arguments.maximum_diameter / 2.0,
                 local_time_factor_window=arguments.local_window,
@@ -1418,9 +1386,7 @@ def main() -> int:
             validate_stability_config(stability_config)
 
             if arguments.output_stl is not None:
-                mesh_config = TowerMeshConfig(
-                    segment_count=arguments.mesh_segments
-                )
+                mesh_config = TowerMeshConfig()
                 validate_mesh_config(mesh_config)
 
         gcode_path = validate_gcode_path(arguments.gcode)
@@ -1467,6 +1433,7 @@ def main() -> int:
             )
 
             if mesh_config is not None:
+                mesh_config = TowerMeshConfig(automatic_mesh_segments(stable_profile))
                 tower_mesh = generate_tower_mesh(
                     profile=stable_profile,
                     config=mesh_config,

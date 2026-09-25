@@ -78,28 +78,18 @@ def _generation_rule(
 SETTING_COMPATIBILITY_RULES = (
     _generation_rule(
         "layer_time_tolerance_s", "layer-time-tolerance-seconds-v1", "float",
-        minimum=0.01, maximum=3.0,
+        minimum=0.1, maximum=3.0,
     ),
     _generation_rule(
-        "target_layer_time_s", "duration-seconds-v1", "float", minimum=0.01, maximum=30.0
-    ),
-    _generation_rule(
-        "safety_factor", "dimensionless-factor-v1", "float", minimum=1.0, maximum=10.0
+        "target_layer_time_s", "duration-seconds-v1", "float", minimum=5.0, maximum=30.0
     ),
     _generation_rule(
         "minimum_outer_diameter_mm", "outer-diameter-mm-v1", "float",
-        group="generation.solid-geometry-v1", minimum=0.002, maximum=1000.0,
+        group="generation.solid-geometry-v1", minimum=3.0, maximum=99.0,
     ),
     _generation_rule(
         "maximum_outer_diameter_mm", "outer-diameter-mm-v1", "float",
-        group="generation.solid-geometry-v1", minimum=0.002, maximum=1000.0,
-    ),
-    _generation_rule(
-        "minimum_object_tower_distance_mm",
-        "object-tower-edge-distance-mm-v1",
-        "float",
-        minimum=0.0,
-        maximum=1000.0,
+        group="generation.solid-geometry-v1", minimum=5.0, maximum=100.0,
     ),
     _generation_rule(
         "simulate_full_tower_infill", "full-tower-infill-simulation-v1", "bool",
@@ -143,9 +133,6 @@ SETTING_COMPATIBILITY_RULES = (
     ),
     _generation_rule(
         "local_reference_window", "layer-window-count-v1", "int", minimum=1, maximum=999
-    ),
-    _generation_rule(
-        "mesh_segments", "circle-segment-count-v1", "int", minimum=3, maximum=512
     ),
     SettingCompatibilityRule(
         "output_root", "output-directory-path-v1", ("output_root",), "string", "output_root"
@@ -249,7 +236,7 @@ def _group_is_valid(group: str, payload: Mapping[str, Any]) -> bool:
             maximum_outer = float(generation["maximum_outer_diameter_mm"])
         except (KeyError, TypeError, ValueError):
             return False
-        return 0.0 < minimum_outer <= maximum_outer
+        return 3.0 <= minimum_outer <= 99.0 and max(5.0, minimum_outer + 1.0) <= maximum_outer <= 100.0
     if group == "generation.base-v1":
         generation = payload.get("generation")
         if not isinstance(generation, Mapping):

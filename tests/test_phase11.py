@@ -296,7 +296,7 @@ class SettingsSchemaTests(unittest.TestCase):
                     "settings_schema_version": SETTINGS_SCHEMA_VERSION,
                     "generation": {
                         "target_layer_time_s": "invalid",
-                        "safety_factor": 1.25,
+                        "layer_time_tolerance_s": 1.25,
                     },
                 }
             ),
@@ -309,7 +309,7 @@ class SettingsSchemaTests(unittest.TestCase):
             settings.target_layer_time_s,
             GenerationSettings().target_layer_time_s,
         )
-        self.assertEqual(settings.safety_factor, 1.25)
+        self.assertEqual(settings.layer_time_tolerance_s, 1.25)
         self.assertIsNotNone(self.store.last_migration_backup)
 
     def test_future_schema_uses_separate_journal_and_preserves_original(self) -> None:
@@ -467,7 +467,7 @@ class NumericSettingWidgetTests(GuiCase):
             self.window.geometry_settings_group,
         ):
             group.setChecked(True)
-        self.assertEqual(len(self.window._setting_widgets), 11)
+        self.assertEqual(len(self.window._setting_widgets), 8)
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
             self.assertIn("Standardwert", setting.reset_button.toolTip())
@@ -696,24 +696,124 @@ class NumericSettingWidgetTests(GuiCase):
 
 
 class LiveValidationTests(GuiCase):
+    def test_global_reset_restarts_feasibility_for_analyzed_source(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((1.0,) * 60)
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+        snapshot = self.window.analysis_snapshot
+
+        self.window.target_time_spin.setValue(10.0)
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+        previous_request_id = self.window._feasibility_request_id
+        self.window.reset_defaults()
+
+        self.assertIs(self.window.analysis_snapshot, snapshot)
+        self.assertGreater(self.window._feasibility_request_id, previous_request_id)
+        self.window._on_feasibility_succeeded(
+            previous_request_id,
+            ProfileFeasibilityAssessment(tower_required=True, feasible=False),
+        )
+        self.assertIsNone(self.window.profile_feasibility)
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+        self.assertNotIn(
+            "Die Turmgeometrie wird noch geprüft",
+            self.window.export_availability_label.text(),
+        )
+
+    def test_global_reset_keeps_local_window_valid_for_short_source(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((1.0, 2.0, 3.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+
+        self.window.target_time_spin.setValue(10.0)
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+        self.window.reset_defaults()
+
+        self.assertEqual(self.window.local_window_spin.value(), 3)
+        self.assertNotIn("local_reference_window", self.window._static_field_errors)
+        self.wait_until(lambda: self.window.profile_feasibility is not None)
+
     def test_no_tower_hint_is_live_and_generation_stays_disabled(self) -> None:
         self.window.target_time_spin.setValue(1.0)
         self.feed_snapshot((1.0, 2.0, 3.0))
         self.assertIn("Kein Kühlturm erforderlich", self.window.tower_need_label.text())
         self.assertNotIn("Layer", self.window.tower_need_label.text())
+        self.assertFalse(self.window.tower_need_label.isHidden())
         self.assertFalse(self.window.preview_button.isEnabled())
 
+    def test_no_tower_requires_confirmation_and_explains_observed_time(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((31.0, 32.0, 33.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.app.processEvents()
+
+        reason = self.window.export_availability_label.text()
+        self.assertIn("Kein Kühlturm erforderlich", reason)
+        self.assertIn("9.00 s", reason)
+        self.assertIn("31.000 s", reason)
+        self.assertTrue(self.window.preview_button.isEnabled())
+        with patch.object(self.window, "_ask_no_tower_confirmation", return_value=False) as ask, \
+             patch.object(self.window, "_show_preview_dialog") as show_dialog:
+            self.window.start_preview()
+        ask.assert_called_once()
+        self.assertIn("31.000 s", ask.call_args.args[0])
+        show_dialog.assert_not_called()
+        self.assertFalse(self.window._force_no_tower_generation)
+        self.assertFalse(self.window.background_job_manager.has_active(JobKind.PREVIEW))
+
+    def test_confirmed_unnecessary_tower_requests_force_generation(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((31.0, 32.0, 33.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.app.processEvents()
+
+        def inspect_request():
+            self.assertTrue(self.window._force_no_tower_generation)
+            raise ValueError("Testabbruch nach Bestätigung")
+
+        with patch.object(self.window, "_ask_no_tower_confirmation", return_value=True), \
+             patch.object(self.window, "_show_preview_dialog"), \
+             patch.object(self.window, "_current_preview_request", side_effect=inspect_request) as request:
+            self.window.start_preview()
+        request.assert_called_once()
+
+    def test_no_tower_reason_precedes_other_invalid_settings(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((8.0, 9.0, 10.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.window.target_time_spin.setValue(8.0)
+        self.app.processEvents()
+
+        self.assertFalse(self.window.tower_assessment.tower_required)
+        self.assertTrue(self.window.preview_button.isEnabled())
+        self.assertIn(
+            "Kein Kühlturm erforderlich",
+            self.window.export_availability_label.text(),
+        )
+
     def test_target_change_reassesses_need_without_new_file_analysis(self) -> None:
-        self.window.target_time_spin.setValue(1.0)
+        self.window.target_time_spin.setValue(5.0)
         self.feed_snapshot((1.0, 2.0, 3.0))
         snapshot = self.window.analysis_snapshot
-        self.window.target_time_spin.setValue(2.0)
+        self.window.target_time_spin.setValue(6.0)
         self.wait_until(lambda: self.window.profile_feasibility is not None)
         self.assertIs(self.window.analysis_snapshot, snapshot)
         self.assertTrue(self.window.tower_assessment.tower_required)
 
     def test_base_preview_uses_complete_object_not_short_tower_height(self) -> None:
-        self.window.target_time_spin.setValue(2.0)
+        self.window.target_time_spin.setValue(5.0)
         self.feed_snapshot(
             (1.0, 10.0, 10.0),
             layer_heights=(0.2, 0.2, 199.6),
@@ -726,7 +826,7 @@ class LiveValidationTests(GuiCase):
         self.assertIn("40.00 mm", self.window.automatic_base_width_label.text())
 
     def test_feasible_tower_still_waits_for_stl_and_slicer(self) -> None:
-        self.window.target_time_spin.setValue(2.0)
+        self.window.target_time_spin.setValue(5.0)
         self.feed_snapshot((1.0, 1.0, 1.0))
         self.wait_until(lambda: self.window.profile_feasibility is not None)
         self.assertTrue(self.window.profile_feasibility.feasible)
@@ -736,7 +836,7 @@ class LiveValidationTests(GuiCase):
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
-        self.window.maximum_outer_spin.setValue(500.0)
+        self.window.maximum_outer_spin.setValue(100.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
         self.wait_until(
@@ -764,7 +864,7 @@ class LiveValidationTests(GuiCase):
         self.window.maximum_expansion_angle_spin.setValue(20.0)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.manual_base_width_spin.setValue(20.0)
-        self.window.maximum_outer_spin.setValue(500.0)
+        self.window.maximum_outer_spin.setValue(100.0)
         self.feed_snapshot((29.0, 1.0, 40.0))
         self.window.target_time_spin.setValue(30.0)
         self.wait_until(
@@ -775,7 +875,7 @@ class LiveValidationTests(GuiCase):
         self.window.validate_form()
         setting = self.window._setting_widgets["target_layer_time_s"]
         self.assertFalse(bool(setting.editor.property("invalid")))
-        self.window.target_time_spin.setValue(2.0)
+        self.window.target_time_spin.setValue(5.0)
         self.wait_until(
             lambda: self.window.profile_feasibility is not None
             and self.window.profile_feasibility.feasible
@@ -783,7 +883,7 @@ class LiveValidationTests(GuiCase):
         self.assertFalse(bool(setting.editor.property("invalid")))
         self.assertEqual(setting.message_label.text(), "")
 
-    def test_related_settings_do_not_replace_the_changed_error_trigger(self) -> None:
+    def test_related_settings_are_reported_without_invalidating_a_field(self) -> None:
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
@@ -798,16 +898,14 @@ class LiveValidationTests(GuiCase):
             required_value=8,
             achievable_value=6,
         )
-        self.window._last_changed_setting_name = "target_layer_time_s"
-        self.window._feasibility_field_errors = (
-            self.window._field_errors_for_issues((issue,))
-        )
+        self.window._feasibility_issues = (issue,)
+        self.window._feasibility_field_errors = {}
+        self.window._feasibility_issue_summaries = [issue.message]
         self.window.validate_form()
         target = self.window._setting_widgets["target_layer_time_s"]
-        self.assertTrue(bool(target.editor.property("invalid")))
-        self.assertNotIn("Mögliche Lösungen", target.message_label.text())
-        self.assertNotIn("Betroffen", target.message_label.text())
-        self.assertTrue(target.message_label.text().strip())
+        self.assertFalse(bool(target.editor.property("invalid")))
+        self.assertFalse(target.message_label.text().strip())
+        self.assertIn(issue.message, self.window.validation_label.text())
         for name in (
             "maximum_outer_diameter_mm",
             "maximum_expansion_angle_deg",
@@ -820,7 +918,7 @@ class LiveValidationTests(GuiCase):
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
         self.window.minimum_outer_spin.setValue(30)
-        self.window.maximum_outer_spin.setValue(10)
+        self.window.maximum_outer_spin.setValue(1001)
         self.assertFalse(bool(self.window.minimum_outer_spin.property("invalid")))
         self.assertTrue(bool(self.window.maximum_outer_spin.property("invalid")))
         self.assertTrue(
@@ -828,7 +926,6 @@ class LiveValidationTests(GuiCase):
                 "maximum_outer_diameter_mm"
             ].message_label.text()
         )
-        self.assertIn("Minimaler Turmdurchmesser", self.window.validation_label.text())
         self.assertIn("Maximaler Turmdurchmesser", self.window.validation_label.text())
         self.assertFalse(self.window.preview_button.isEnabled())
 
@@ -861,7 +958,6 @@ class LiveValidationTests(GuiCase):
         snapshot = make_snapshot(self.source, (1.0, 1.0, 1.0))
         settings = GenerationSettings(
             target_layer_time_s=2.0,
-            safety_factor=1.1,
         )
         assessment = assess_tower_need(snapshot, settings)
         unexpected = self.root / "unexpected_output"

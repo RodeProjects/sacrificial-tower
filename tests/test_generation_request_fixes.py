@@ -1,0 +1,450 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
+
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+from cooling_tower.calibration.gcode_integration import (
+    GCodeIntegrationError,
+    propose_tower_placement,
+)
+from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.preview_dialog import PreviewDialog
+from cooling_tower.gui.settings_store import UserSettingsStore
+from cooling_tower.models import BedBounds, OccupiedBounds
+from cooling_tower.preview import (
+    LineSegment3D,
+    OutputMode,
+    Point3D,
+    PreviewScene,
+    PreviewState,
+)
+from cooling_tower.tower.mesh_generator import automatic_mesh_segments
+
+
+class AutomaticGeometryTests(unittest.TestCase):
+    def test_segments_follow_current_widest_diameter(self) -> None:
+        for diameter, expected in ((10, 16), (30, 27), (30.2, 28), (150, 128)):
+            with self.subTest(diameter=diameter):
+                profile = SimpleNamespace(points=(SimpleNamespace(radius_mm=diameter / 2),))
+                self.assertEqual(automatic_mesh_segments(profile), expected)
+                solid = SimpleNamespace(points=(SimpleNamespace(outer_radius_mm=diameter / 2),))
+                self.assertEqual(automatic_mesh_segments(solid), expected)
+
+    def test_placement_uses_midpoint_of_farthest_usable_side(self) -> None:
+        placement = propose_tower_placement(
+            BedBounds(0, 200, 0, 100),
+            OccupiedBounds(20, 60, 20, 80),
+            tower_radius_mm=30,
+            object_clearance_mm=0,
+            edge_clearance_mm=0,
+        )
+        self.assertEqual((placement.center_x_mm, placement.center_y_mm), (130, 50))
+        self.assertGreaterEqual(placement.center_x_mm - 30 - 60, 5)
+        self.assertGreaterEqual(200 - placement.center_x_mm - 30, 5)
+        self.assertEqual(placement.clearance_mm, 5)
+
+    def test_placement_rejects_maximum_radius_without_five_mm_clearance(self) -> None:
+        with self.assertRaises(GCodeIntegrationError):
+            propose_tower_placement(
+                BedBounds(0, 100, 0, 100),
+                OccupiedBounds(45, 55, 45, 55),
+                tower_radius_mm=18,
+                object_clearance_mm=0,
+                edge_clearance_mm=0,
+            )
+
+    def test_placement_clamps_cross_axis_when_object_touches_bed_edge(self) -> None:
+        placement = propose_tower_placement(
+            BedBounds(0, 250, 0, 250),
+            OccupiedBounds(0, 13, 0, 10),
+            tower_radius_mm=5,
+            object_clearance_mm=5,
+            edge_clearance_mm=5,
+        )
+        self.assertEqual(placement.center_x_mm, 10)
+        self.assertEqual(placement.center_y_mm, 130)
+
+
+class GenerationUiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.window = MainWindow(
+            user_settings_path=Path(self.temp.name) / "settings.json",
+            enable_update_check=False,
+            enable_startup_slicer_discovery=False,
+        )
+        self.addCleanup(self.window.close)
+
+    def _ready(self) -> None:
+        window = self.window
+        window.resize(800, 900)
+        window.show()
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded("STL", analysis_complete=True)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        self.app.processEvents()
+
+    def test_footer_actions_fit_and_height_shrinks_after_resizing(self) -> None:
+        self._ready()
+        window = self.window
+        window.open_run_button.show()
+        narrow_height = None
+        for width in (1360, 1194, 1024, 760, 1360):
+            with self.subTest(width=width):
+                window.resize(width, 900)
+                window._update_responsive_action_labels()
+                window._fit_footer_height()
+                self.app.processEvents()
+                window._fit_footer_height()
+                self.app.processEvents()
+                self.assertEqual(window.footer.height(), window.footer.minimumHeight())
+                self.assertEqual(window.footer.height(), window.footer.maximumHeight())
+                self.assertIs(window.reset_button.parentWidget(), window.footer_message_area)
+                self.assertLessEqual(
+                    window.reset_button.mapTo(window.footer, QPoint(0, 0)).x(),
+                    window.open_output_button.mapTo(window.footer, QPoint(0, 0)).x(),
+                )
+                self.assertNotIn("\n", window.open_run_button.text())
+                if width == 760:
+                    narrow_height = window.footer.height()
+                elif narrow_height is not None:
+                    self.assertLess(window.footer.height(), narrow_height)
+                buttons = [
+                    button for button in (
+                        window.open_output_button,
+                        window.open_stl_button,
+                        window.open_run_button,
+                        window.preview_action_control,
+                    ) if button.isVisible()
+                ]
+                rects = [
+                    button.geometry().translated(
+                        button.parentWidget().mapTo(window.footer, QPoint(0, 0))
+                    ) for button in buttons
+                ]
+                for rect in rects:
+                    self.assertTrue(window.footer.rect().contains(rect))
+                for i, first in enumerate(rects):
+                    for second in rects[i + 1:]:
+                        self.assertFalse(first.intersects(second))
+
+    def test_manual_row_and_messages_expand_then_shrink_geometry(self) -> None:
+        self._ready()
+        window = self.window
+        original_height = window.geometry_settings_group.height()
+        window.automatic_base_checkbox.setChecked(False)
+        self.app.processEvents()
+        self.assertTrue(window._setting_widgets["manual_base_width_mm"].isVisible())
+        self.assertGreater(window.geometry_settings_group.height(), original_height)
+
+        window.target_time_spin.setValue(100)
+        window.manual_base_width_spin.setValue(9)
+        window.maximum_expansion_angle_spin.setValue(60)
+        window.validate_form()
+        for _ in range(3):
+            self.app.processEvents()
+        expanded_height = window.geometry_settings_group.height()
+        self.assertTrue(window._setting_widgets["target_layer_time_s"].message_label.isVisible())
+        self.assertTrue(window._setting_widgets["manual_base_width_mm"].message_label.isVisible())
+        self.assertTrue(window.maximum_expansion_angle_setting.message_label.isVisible())
+
+        for first, second in (
+            ("target_layer_time_s", "layer_time_tolerance_s"),
+            ("manual_base_width_mm", "maximum_expansion_angle_deg"),
+            ("maximum_expansion_angle_deg", "maximum_contraction_angle_deg"),
+        ):
+            upper = window._setting_widgets[first]
+            lower = window._setting_widgets[second]
+            upper_top = upper.mapTo(window, QPoint(0, 0)).y()
+            lower_top = lower.mapTo(window, QPoint(0, 0)).y()
+            self.assertLessEqual(upper_top + upper.height(), lower_top, first)
+            message = upper.message_label
+            if message.isVisible():
+                message_top = message.mapTo(window, QPoint(0, 0)).y()
+                self.assertLessEqual(message_top + message.height(), lower_top, first)
+
+        window.target_time_spin.setValue(9)
+        window.manual_base_width_spin.setValue(20)
+        window.maximum_expansion_angle_spin.setValue(50)
+        window.automatic_base_checkbox.setChecked(True)
+        for _ in range(3):
+            self.app.processEvents()
+        self.assertTrue(window._setting_widgets["manual_base_width_mm"].isHidden())
+        self.assertLess(window.geometry_settings_group.height(), expanded_height)
+        self.assertEqual(
+            window.geometry_settings_group.height(),
+            window.geometry_settings_group.sizeHint().height(),
+        )
+
+    def test_feedback_reserves_space_and_keeps_lower_controls_clickable(self) -> None:
+        self._ready()
+        window = self.window
+        window.automatic_base_checkbox.setChecked(False)
+        window.target_time_spin.setValue(100)
+        window.manual_base_width_spin.setValue(19)
+        window.maximum_expansion_angle_spin.setValue(60)
+        window.validate_form()
+
+        for width, height in ((800, 900), (1952, 1279)):
+            window.resize(width, height)
+            for _ in range(3):
+                self.app.processEvents()
+            for first, second in (
+                ("target_layer_time_s", "layer_time_tolerance_s"),
+                ("manual_base_width_mm", "maximum_expansion_angle_deg"),
+                ("maximum_expansion_angle_deg", "maximum_contraction_angle_deg"),
+            ):
+                upper = window._setting_widgets[first]
+                lower = window._setting_widgets[second]
+                self.assertLessEqual(
+                    upper.mapTo(window, QPoint(0, upper.height())).y(),
+                    lower.mapTo(window, QPoint(0, 0)).y(),
+                    (width, first),
+                )
+                self.assertLessEqual(
+                    upper.message_container.geometry().bottom() + 1,
+                    upper.height(),
+                    (width, first),
+                )
+
+        row = window._setting_widgets["manual_base_width_mm"]
+        for control in (row.editor, row.reset_button, row.info_button):
+            point = control.mapTo(
+                window, QPoint(control.width() - 7, control.height() - 7)
+            )
+            self.assertIs(window.childAt(point), control)
+
+        QTest.mouseClick(
+            row.editor,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(row.editor.width() - 7, row.editor.height() - 7),
+        )
+        self.app.processEvents()
+        self.assertEqual(window.manual_base_width_spin.value(), 18)
+        QTest.mouseClick(
+            row.reset_button,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(
+                row.reset_button.width() - 7,
+                row.reset_button.height() - 7,
+            ),
+        )
+        self.app.processEvents()
+        self.assertEqual(window.manual_base_width_spin.value(), 20)
+
+    def test_full_infill_is_first_geometry_setting_without_checkbox_tooltip(self) -> None:
+        self._ready()
+        first_row = self.window.geometry_fields_layout.itemAt(0).widget()
+        self.assertIs(
+            first_row.layout().itemAt(0).widget(),
+            self.window.full_infill_checkbox,
+        )
+        self.assertEqual(self.window.automatic_base_checkbox.toolTip(), "")
+
+    def test_many_wrapped_errors_and_warnings_reflow_every_row(self) -> None:
+        self._ready()
+        window = self.window
+        window.automatic_base_checkbox.setChecked(False)
+        self.app.processEvents()
+        rows = tuple(
+            row for row in window._setting_widgets.values() if row.isVisible()
+        )
+        for row in rows:
+            row.set_error(
+                "Dieser ungültige Wert überschreitet die zulässige eigene "
+                "Eingabegrenze deutlich und muss korrigiert werden."
+            )
+            row.set_warning(
+                "Zusätzlicher Hinweis zu dieser Einstellung mit einem "
+                "bewusst längeren Text für den automatischen Zeilenumbruch."
+            )
+        for width, height in ((800, 900), (1952, 1279)):
+            window.resize(width, height)
+            window._refresh_geometry_section_layout(True)
+            self.app.processEvents()
+            for layout in (
+                window.timing_group.content_layout,
+                window.geometry_fields_layout,
+            ):
+                children = tuple(
+                    layout.itemAt(index).widget()
+                    for index in range(layout.count())
+                    if layout.itemAt(index).widget() is not None
+                    and layout.itemAt(index).widget().isVisible()
+                )
+                for upper, lower in zip(children, children[1:]):
+                    self.assertLessEqual(
+                        upper.geometry().bottom() + 1,
+                        lower.geometry().top(),
+                        (width, upper.objectName()),
+                    )
+                self.assertLessEqual(
+                    children[-1].geometry().bottom() + 1,
+                    layout.parentWidget().height(),
+                    width,
+                )
+            for row in rows:
+                self.assertLessEqual(
+                    row.message_container.geometry().bottom() + 1,
+                    row.height(),
+                    (width, row.setting_name),
+                )
+
+        manual = window._setting_widgets["manual_base_width_mm"]
+        manual.set_error("Erster Fehler\nZweiter Fehler\nDritter Fehler\nVierter Fehler")
+        window._refresh_geometry_section_layout(True)
+        manual.message_expand_button.setChecked(True)
+        self.app.processEvents()
+        following = window._setting_widgets["maximum_expansion_angle_deg"]
+        self.assertLessEqual(
+            manual.geometry().bottom() + 1,
+            following.geometry().top(),
+        )
+        manual.message_expand_button.setChecked(False)
+        self.app.processEvents()
+
+        expanded_height = window.geometry_settings_group.height()
+        for row in rows:
+            row.set_error(None)
+            row.set_warning(None)
+        window._refresh_geometry_section_layout(True)
+        self.app.processEvents()
+        self.assertLess(window.geometry_settings_group.height(), expanded_height)
+
+    def test_abort_discards_retained_candidate_and_allows_fresh_generation(self) -> None:
+        self._ready()
+        window = self.window
+        previous = SimpleNamespace(dispose=Mock())
+        window.current_preview = previous
+        window.preview_state = PreviewState.BUILDING
+        window._joint_resume_active = True
+        window._preview_cancel_requested = True
+        window._on_preview_finished(window._preview_request_id)
+        self.assertIsNone(window.current_preview)
+        previous.dispose.assert_called_once_with()
+        self.assertEqual(window.preview_state, PreviewState.EMPTY)
+        self.assertEqual(window.preview_button.text(), "Kühlturm generieren")
+        self.assertEqual(
+            window.generation_intro_label.text(),
+            "Die Generierung wurde manuell abgebrochen.\n"
+            "Der bisherige Kühlturm wurde verworfen.",
+        )
+
+    def test_result_precedes_simulation_and_export_is_offered_after_finish(self) -> None:
+        panel = self.window.joint_generation_dialog
+        result_layout = panel.result_label.parentWidget().layout()
+        self.assertIs(result_layout.itemAt(0).widget(), panel.result_label)
+        self.assertIs(result_layout.itemAt(1).widget(), panel.simulation_label)
+        panel.begin(10, 0.25, 0, 10)
+        panel.start_slice(0, 10)
+        panel.mark_finished(paused=False, can_continue=False)
+        self.assertFalse(panel.export_button.isHidden())
+
+
+class PreviewCircleSegmentTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_segment_count_sits_above_height_without_moving_navigation(self) -> None:
+        dialog = PreviewDialog(embedded=True)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        self.app.processEvents()
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        scene = PreviewScene(
+            object_segments=(segment,),
+            tower_segments=(segment,),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(20, 20),
+            source_segment_count=1,
+            displayed_segment_count=1,
+            tower_height_mm=5,
+            tower_circle_segments=30,
+        )
+        dialog.set_preview(SimpleNamespace(scene=scene, output_mode=OutputMode.STL))
+        self.app.processEvents()
+        labels = (
+            dialog.tower_circle_segments_info_label,
+            dialog.height_info_label,
+            dialog.bed_info_label,
+        )
+        self.assertIn("Turm-Kreissegmente: ", labels[0].text())
+        self.assertIn(">30</span>", labels[0].text())
+        for upper, lower in zip(labels, labels[1:]):
+            self.assertLess(upper.geometry().bottom(), lower.geometry().top())
+        self.assertLess(
+            labels[-1].geometry().bottom(), dialog.preview_info_header.height()
+        )
+        canvas_y = dialog.canvas.mapTo(dialog, QPoint(0, 0)).y()
+        navigation_y = dialog.canvas.navigation_toggle.mapTo(dialog, QPoint(0, 0)).y()
+        dialog.set_preview(
+            SimpleNamespace(
+                scene=replace(scene, tower_circle_segments=64),
+                output_mode=OutputMode.STL,
+            )
+        )
+        self.app.processEvents()
+        self.assertIn(">64</span>", labels[0].text())
+        self.assertEqual(dialog.canvas.mapTo(dialog, QPoint(0, 0)).y(), canvas_y)
+        self.assertEqual(
+            dialog.canvas.navigation_toggle.mapTo(dialog, QPoint(0, 0)).y(),
+            navigation_y,
+        )
+        self.assertIs(
+            dialog.canvas.navigation_toggle.parentWidget(), dialog.preview_frame
+        )
+        self.assertEqual(
+            navigation_y - canvas_y,
+            10 - dialog.layers_info_label.fontMetrics().lineSpacing(),
+        )
+        toggle_center = dialog.canvas.navigation_toggle.geometry().center()
+        self.assertIs(
+            dialog.preview_frame.childAt(toggle_center),
+            dialog.canvas.navigation_toggle,
+        )
+
+
+class SettingsMigrationTests(unittest.TestCase):
+    def test_schema_15_removes_retired_controls_with_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            user_path = Path(directory) / "settings.json"
+            original = json.dumps({
+                "settings_schema_version": 15,
+                "generation": {
+                    "safety_factor": 1.5,
+                    "mesh_segments": 32,
+                    "minimum_object_tower_distance_mm": 50,
+                },
+            }).encode("utf-8")
+            user_path.write_bytes(original)
+            store = UserSettingsStore(user_path, ROOT / "config" / "default_settings.json")
+            settings, payload = store.load()
+            self.assertEqual(payload["settings_schema_version"], 18)
+            self.assertNotIn("safety_factor", payload["generation"])
+            self.assertNotIn("mesh_segments", payload["generation"])
+            self.assertEqual(settings.minimum_object_tower_distance_mm, 5)
+            self.assertIsNotNone(store.last_migration_backup)
+            self.assertEqual(store.last_migration_backup.read_bytes(), original)

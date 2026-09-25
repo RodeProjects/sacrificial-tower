@@ -66,6 +66,7 @@ from cooling_tower.slicers import (
     SlicerSupportLevel,
 )
 from cooling_tower.slicers.profile_models import ProfileMatchState
+from cooling_tower.tower.mesh_generator import automatic_mesh_segments
 
 
 def source_gcode(layer_count: int = 4, moves_per_layer: int = 4) -> str:
@@ -455,6 +456,35 @@ class Phase17Tests(unittest.TestCase):
             result.scene.tower_layer_count,
             len(result.calibration.profile.layers),
         )
+        self.assertEqual(
+            result.scene.tower_circle_segments,
+            automatic_mesh_segments(result.calibration.profile),
+        )
+        result.dispose()
+
+    def test_joint_slice_preview_reuses_object_lines_and_builds_current_tower(self) -> None:
+        class ReportingCalibrator(SyntheticSuccessfulCalibrator):
+            def calibrate(self, snapshot, settings, **kwargs):
+                result = super().calibrate(snapshot, settings, **kwargs)
+                kwargs["joint_progress_callback"](SimpleNamespace(
+                    current_profile=result.profile,
+                    placement=result.placement,
+                ))
+                return result
+
+        scenes = []
+        result = PreviewService(ReportingCalibrator()).prepare(
+            self.request(), joint_scene_callback=scenes.append
+        )
+        self.assertEqual(len(scenes), 1)
+        self.assertIs(scenes[0].object_segments, result.scene.object_segments)
+        self.assertTrue(scenes[0].tower_segments)
+        self.assertEqual(scenes[0].tower_center_xy_mm, (80.0, 20.0))
+        self.assertEqual(scenes[0].tower_layer_count, result.scene.tower_layer_count)
+        self.assertEqual(
+            scenes[0].tower_circle_segments,
+            automatic_mesh_segments(result.calibration.profile),
+        )
         result.dispose()
 
     def test_13_large_toolpath_is_strictly_bounded(self) -> None:
@@ -768,9 +798,9 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.notice_panel.isHidden())
         self.assertFalse(window.result_label.text())
         self.assertFalse(window.result_label.toolTip())
-        self.assertEqual(window._calibration_config().maximum_iterations, 16)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 1)
-        self.assertEqual(window._calibration_config().maximum_joint_slices, 10)
+        self.assertEqual(window._calibration_config().maximum_iterations, 18)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
 
         window.output_root_edit.setText(str(self.root / "exact_output"))
         window.validate_form()
@@ -789,7 +819,7 @@ class Phase17Tests(unittest.TestCase):
         )
         self.assertEqual(
             report["calibration"]["configured_iteration_count"],
-            16,
+            18,
         )
         self.assertFalse(window.warning_text.toPlainText())
         self.assertTrue(window.notice_panel.isHidden())
@@ -899,10 +929,10 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_fast_button"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
         self.assertFalse(hasattr(window, "preview_quality_panel"))
-        self.assertEqual(window.preview_iterations, 16)
-        self.assertEqual(window._calibration_config().maximum_iterations, 16)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 1)
-        self.assertEqual(window._calibration_config().maximum_joint_slices, 10)
+        self.assertEqual(window.preview_iterations, 18)
+        self.assertEqual(window._calibration_config().maximum_iterations, 18)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
         self.assertFalse(
             window._calibration_config().perform_joint_final_slice
         )
@@ -929,11 +959,24 @@ class Phase17Tests(unittest.TestCase):
                 maximum_joint_slices=5,
             )
         )
+        resumed = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=3,
+                perform_joint_final_slice=True,
+                maximum_joint_slices=3,
+                completed_joint_slices_before_run=5,
+            )
+        )
 
         self.assertNotEqual(fast.signature(), exact.signature())
+        self.assertNotEqual(exact.signature(), resumed.signature())
         self.assertEqual(
             fast.refinement_seed_signature(),
             exact.refinement_seed_signature(),
+        )
+        self.assertEqual(
+            exact.refinement_seed_signature(),
+            resumed.refinement_seed_signature(),
         )
 
     def test_exact_preview_build_reuses_matching_fast_preview_artifact(self) -> None:
@@ -1026,6 +1069,32 @@ class Phase17Tests(unittest.TestCase):
             fast_preview.artifact_path,
         )
         self.assertTrue(exact_preview.joint_sliced)
+        resumed_request = self.request(
+            calibration_config=CalibrationConfig(
+                maximum_iterations=3,
+                perform_joint_final_slice=True,
+                maximum_joint_slices=3,
+                completed_joint_slices_before_run=5,
+            ),
+            adapter=object(),
+            effective_profile=profile,
+            source_artifact=artifact,
+        )
+        resumed_preview = service.prepare(
+            resumed_request,
+            seed_preview=exact_preview,
+        )
+        self.assertEqual(len(calibrator.calls), 3)
+        self.assertIs(
+            calibrator.calls[2]["seed_profile"],
+            exact_preview.calibration.profile,
+        )
+        self.assertEqual(
+            calibrator.calls[2]["seed_stl_path"],
+            exact_preview.artifact_path,
+        )
+        self.assertTrue(resumed_preview.joint_sliced)
+        resumed_preview.dispose()
         exact_preview.dispose()
         fast_preview.dispose()
 
@@ -1123,7 +1192,7 @@ class Phase17Tests(unittest.TestCase):
                 effective_profile=object(),
             )
 
-    def test_33_main_actions_are_in_one_bottom_bar(self) -> None:
+    def test_33_main_actions_fit_in_the_bottom_bar(self) -> None:
         window = self.window()
         window.resize(1100, 800)
         window.show()
@@ -1179,7 +1248,7 @@ class Phase17Tests(unittest.TestCase):
             action_x[window.open_stl_button],
             action_x[window.preview_action_control],
         )
-        self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
+        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
         self.assertEqual(
             window.reset_button.height(),
             window.options_button.height(),
@@ -1193,7 +1262,15 @@ class Phase17Tests(unittest.TestCase):
                 window.preview_action_control,
             )
         }
-        self.assertEqual(len(button_bottoms), 1)
+        self.assertEqual(len(button_bottoms), 2)
+        self.assertLess(
+            window.open_stl_button.mapTo(
+                window, window.open_stl_button.rect().bottomLeft()
+            ).y(),
+            window.preview_action_control.mapTo(
+                window, window.preview_action_control.rect().topLeft()
+            ).y(),
+        )
         window.close()
 
     def test_34_output_folder_button_uses_compact_label_when_needed(self) -> None:
@@ -1201,7 +1278,7 @@ class Phase17Tests(unittest.TestCase):
         window.show()
         window.resize(1000, 700)
         self.app.processEvents()
-        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
+        self.assertEqual(window.open_stl_button.text(), "Letzter Export")
         window.resize(720, 640)
         self.app.processEvents()
         self.assertEqual(window.open_stl_button.text(), "Letzter Export")
@@ -1328,7 +1405,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertIn("korrigieren", ready.export_availability_label.text())
         ready.close()
 
-    def test_39_dev_checkbox_hides_input_errors_and_unblocks_export(self) -> None:
+    def test_39_invalid_input_cannot_bypass_validation(self) -> None:
         window = self.ready_window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -1336,14 +1413,9 @@ class Phase17Tests(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        title_layout = window.reset_button.parentWidget().layout().itemAt(0).layout()
-        self.assertLess(
-            title_layout.indexOf(window.validation_bypass_checkbox),
-            title_layout.indexOf(window.reset_button),
-        )
-        self.assertFalse(window.validation_bypass_checkbox.isChecked())
+        self.assertFalse(hasattr(window, "validation_bypass_checkbox"))
 
-        window.maximum_outer_spin.setValue(1.0)
+        window.maximum_outer_spin.setValue(1001.0)
         window.validate_form()
         self.app.processEvents()
         maximum_outer_setting = window._setting_widgets[
@@ -1353,74 +1425,6 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.validation_label.text().strip())
         self.assertFalse(window.export_button.isEnabled())
 
-        window.validation_bypass_checkbox.setChecked(True)
-        self.app.processEvents()
-        self.assertFalse(maximum_outer_setting.editor.property("invalid"))
-        self.assertFalse(window.validation_label.text().strip())
-        self.assertTrue(window.error_panel.isHidden())
-        self.assertFalse(window.action_availability_widget.isVisible())
-        self.assertFalse(window.export_button.isEnabled())
-        self.assertFalse(window.preview_button.isEnabled())
-
-        window.validation_bypass_checkbox.setChecked(False)
-        self.app.processEvents()
-        self.assertTrue(maximum_outer_setting.editor.property("invalid"))
-        self.assertTrue(window.validation_label.text().strip())
-        self.assertFalse(window.export_button.isEnabled())
-        window.close()
-
-    def test_40_dev_checkbox_visual_states_keep_size_and_contrast(self) -> None:
-        window = self.ready_window()
-        self.complete_source_step(window)
-        window.workflow.slicer_succeeded("Testslicer")
-        window.workflow.complete_preparation()
-        window.show()
-        self.app.processEvents()
-        checkbox = window.validation_bypass_checkbox
-
-        stylesheet = window.styleSheet()
-        selector = "QCheckBox#validationBypassCheckBox,"
-        style_block = stylesheet[
-            stylesheet.index(selector):
-            stylesheet.index("QCheckBox#automaticBaseWidth,")
-        ]
-        self.assertNotIn("__CHECKBOX_CHECK_ICON__", stylesheet)
-        self.assertIn("QCheckBox#validationBypassCheckBox:focus", style_block)
-        self.assertIn("border: 1px solid transparent;", style_block)
-        self.assertNotIn("border: 2px", style_block)
-        self.assertIn("background: #e5f0f8;", style_block)
-        self.assertIn("background: #ffffff;", style_block)
-        self.assertIn("width: 16px;", style_block)
-        self.assertIn("height: 16px;", style_block)
-
-        def dimensions() -> tuple:
-            return (
-                checkbox.geometry(),
-                checkbox.size(),
-                checkbox.sizeHint(),
-                checkbox.minimumSizeHint(),
-            )
-
-        initial = dimensions()
-        QTest.mouseMove(checkbox, QPoint(4, checkbox.height() // 2))
-        self.app.processEvents()
-        self.assertEqual(dimensions(), initial)
-
-        QTest.mousePress(
-            checkbox,
-            Qt.MouseButton.LeftButton,
-            pos=QPoint(4, checkbox.height() // 2),
-        )
-        self.app.processEvents()
-        self.assertEqual(dimensions(), initial)
-        QTest.mouseRelease(
-            checkbox,
-            Qt.MouseButton.LeftButton,
-            pos=QPoint(4, checkbox.height() // 2),
-        )
-        checkbox.setFocus()
-        self.app.processEvents()
-        self.assertEqual(dimensions(), initial)
         window.close()
 
     def test_41_preview_quality_summary_explains_selected_passes_and_refreshes(self) -> None:

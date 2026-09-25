@@ -208,7 +208,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
             window.reset_button.text(),
             "Standardwerte wiederherstellen",
         )
-        self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
+        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
         self.assertEqual(window.export_button.text(), "Kühlturm exportieren")
         window.current_preview = SimpleNamespace()
         window.preview_state = PreviewState.CURRENT

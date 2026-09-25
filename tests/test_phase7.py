@@ -57,7 +57,6 @@ class SettingsAndValidationTests(GuiTestCase):
     def test_all_generation_settings_are_reachable_and_roundtrip(self) -> None:
         expected = GenerationSettings(
             target_layer_time_s=30.0,
-            safety_factor=1.2,
             minimum_outer_radius_mm=7.0,
             maximum_outer_radius_mm=25.0,
             minimum_wall_thickness_mm=0.9,
@@ -72,7 +71,6 @@ class SettingsAndValidationTests(GuiTestCase):
             maximum_radius_change_per_mm_z=0.4,
             maximum_wall_change_per_mm_z=0.45,
             local_reference_window=7,
-            mesh_segments=48,
         )
         self.window.apply_settings(expected)
         self.assertEqual(self.window.collect_settings(), expected)
@@ -82,7 +80,7 @@ class SettingsAndValidationTests(GuiTestCase):
         self.window.full_infill_checkbox.setChecked(True)
         text = self.window.full_infill_info_button.toolTip()
         self.assertEqual(text, before)
-        self.assertIn("100 % Turmfüllung", text)
+        self.assertIn("100%-Füllung", text)
         self.assertIn("Aktiviert", text)
         self.assertIn("Deaktiviert", text)
         self.assertNotIn("Aktuell aktiviert", text)
@@ -118,7 +116,6 @@ class SharedServiceTests(GuiTestCase):
     def test_cli_and_gui_settings_generate_identical_profiles(self) -> None:
         configured = GenerationSettings(
             target_layer_time_s=5.0,
-            safety_factor=1.0,
             minimum_outer_diameter_mm=4.0,
             maximum_outer_diameter_mm=40.0,
             minimum_base_radius_mm=3.0,
@@ -128,7 +125,6 @@ class SharedServiceTests(GuiTestCase):
             minimum_radius_height_factor=0.0,
             maximum_radius_change_per_mm_z=2.0,
             local_reference_window=3,
-            mesh_segments=8,
         )
         self.window.apply_settings(configured)
         gui_result = GenerationService(self.root / "gui_output").generate(
@@ -141,7 +137,6 @@ class SharedServiceTests(GuiTestCase):
             str(PROJECT_ROOT / "cli_main.py"),
             "--gcode", str(self.gcode),
             "--target-time", "5",
-            "--safety-factor", "1",
             "--minimum-diameter", "4",
             "--maximum-diameter", "40",
             "--minimum-base-radius", "3",
@@ -151,7 +146,6 @@ class SharedServiceTests(GuiTestCase):
             "--minimum-radius-height-factor", "0",
             "--maximum-radius-change", "2",
             "--local-window", "3",
-            "--mesh-segments", "8",
             "--output-root", str(cli_output),
             "--preview", "0",
         )

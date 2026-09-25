@@ -28,14 +28,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 
 
-DEFAULT_MAXIMUM_JOINT_SLICES = 10
+DEFAULT_MAXIMUM_JOINT_SLICES = 12
 GENERATION_DIALOG_WIDTH_PX = 610
 JOINT_SLICE_HINT = (
     "Die Angleichung endet spätestens nach dieser Anzahl gemeinsamer Slices – "
-    "oder früher bei höchstens ±0,1 s Zielabweichung, manueller Übernahme "
+    "oder früher bei höchstens ±0,09 s Zielabweichung, manueller Übernahme "
     "oder ausbleibender Verbesserung."
 )
 
@@ -177,6 +178,8 @@ class TowerGenerationDialog(QDialog):
         self._primary_mode = "accept"
         self._tolerance_s = 0.0
         self._best_deviation_s: float | None = None
+        self._minimum_joint_slices = 5
+        self._completed_joint_slices = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 22, 26, 22)
@@ -190,9 +193,9 @@ class TowerGenerationDialog(QDialog):
             "Objekt und Kühlturm werden jetzt gemeinsam geslicet; weil sich dabei "
             "Geschwindigkeiten, Beschleunigungen und Kühlzeiten gegenseitig "
             "beeinflussen, wird die Turmform schrittweise an Ihre Zielzeit "
-            "angeglichen. Sind Sie mit dem bisher besten Ergebnis zufrieden, "
-            "können Sie das bisher beste Ergebnis jederzeit übernehmen und "
-            "anschließend exportieren."
+            "angeglichen. Die ersten fünf gemeinsamen Slices sind Pflicht. "
+            "Danach können Sie das bisher beste Ergebnis übernehmen und anschließend "
+            "exportieren."
         )
         self.explanation_label.setObjectName("towerGenerationExplanation")
         self.explanation_label.setWordWrap(True)
@@ -306,7 +309,14 @@ class TowerGenerationDialog(QDialog):
         layout.activate()
         self._fit_and_center()
 
-    def begin(self, target_s: float, tolerance_s: float, completed: int, maximum: int) -> None:
+    def begin(
+        self,
+        target_s: float,
+        tolerance_s: float,
+        completed: int,
+        maximum: int,
+        minimum_joint_slices: int = 5,
+    ) -> None:
         # A newly created owned dialog can briefly inherit the maximized
         # native state of its main window on Windows.  Clear that state before
         # its first show so the reveal filter only ever exposes the natural
@@ -316,6 +326,8 @@ class TowerGenerationDialog(QDialog):
         self._allow_close = False
         self._tolerance_s = max(0.0, float(tolerance_s))
         self._best_deviation_s = None
+        self._minimum_joint_slices = minimum_joint_slices
+        self._completed_joint_slices = completed
         self.target_value.setText(
             f"{target_s:.2f} s (± {tolerance_s:.2f} s Toleranz)"
         )
@@ -325,7 +337,8 @@ class TowerGenerationDialog(QDialog):
         self.image_progress.set_fill(0.0)
         self._set_best_metrics_visible(False)
         self._primary_mode = "accept"
-        self.accept_button.setEnabled(completed > 0)
+        self.accept_button.setVisible(completed >= minimum_joint_slices)
+        self.accept_button.setEnabled(completed >= minimum_joint_slices)
         self.accept_button.setText("Bestes Ergebnis übernehmen")
         self.abort_button.setText("Generierung abbrechen")
         self.continue_button.hide()
@@ -360,11 +373,13 @@ class TowerGenerationDialog(QDialog):
         best_iteration: object,
         target_s: float,
     ) -> None:
+        self._completed_joint_slices = completed
         self.counter_label.setText(
             f"{completed} von {maximum} gemeinsamen Slices abgeschlossen"
         )
         self.image_progress.animate_fill(1.0, pulse_when_finished=True)
-        self.accept_button.setEnabled(True)
+        self.accept_button.setVisible(completed >= self._minimum_joint_slices)
+        self.accept_button.setEnabled(completed >= self._minimum_joint_slices)
         timings = tuple(
             getattr(getattr(best_iteration, "evaluation", None), "layer_timings", ())
         )
@@ -414,6 +429,7 @@ class TowerGenerationDialog(QDialog):
         self.continue_button.setVisible(paused and can_continue)
         self._primary_mode = "export"
         self.accept_button.setText("Kühlturm exportieren")
+        self.accept_button.show()
         self.accept_button.setEnabled(True)
         self.abort_button.setText("Schließen")
         if status_text:
@@ -441,7 +457,12 @@ class TowerGenerationDialog(QDialog):
         self.stop_reason_divider.hide()
         self.stop_reason_label.hide()
         self.accept_button.setText("Bestes Ergebnis übernehmen")
-        self.accept_button.setEnabled(True)
+        self.accept_button.setVisible(
+            self._completed_joint_slices >= self._minimum_joint_slices
+        )
+        self.accept_button.setEnabled(
+            self._completed_joint_slices >= self._minimum_joint_slices
+        )
         self.abort_button.setText("Generierung abbrechen")
         self._fit_and_center()
 
@@ -455,6 +476,7 @@ class TowerGenerationDialog(QDialog):
         self.stop_reason_divider.hide()
         self.stop_reason_label.hide()
         self._primary_mode = "accept"
+        self.accept_button.hide()
         self.accept_button.setEnabled(False)
         self.abort_button.setText("Schließen")
         self._fit_and_center()
@@ -549,12 +571,23 @@ class JointSliceSettingsDialog(QDialog):
     limits_applied = Signal(bool)
     output_root_applied = Signal(str)
 
-    def __init__(self, value: int, parent: QWidget | None = None, *, output_root: str = "", default_output_root: str = "") -> None:
+    def __init__(
+        self,
+        value: int,
+        parent: QWidget | None = None,
+        *,
+        output_root: str = "",
+        default_output_root: str = "",
+        default_maximum_joint_slices: int = DEFAULT_MAXIMUM_JOINT_SLICES,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("jointSliceSettingsDialog")
         self.setWindowTitle("Allgemeine Einstellungen")
         self.setModal(True)
         self.setMinimumWidth(650)
+        self.default_maximum_joint_slices = max(
+            5, min(25, int(default_maximum_joint_slices))
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
@@ -563,16 +596,24 @@ class JointSliceSettingsDialog(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
         row = QHBoxLayout()
+        row.setSpacing(METRICS.setting_info_text_gap_px)
         self.info_button = InfoToolButton(
             JOINT_SLICE_HINT,
             self,
             accessible_name="Informationen zur maximalen Anzahl gemeinsamer Slices",
             object_name="settingInfoButton",
-            diameter_px=24,
+            diameter_px=METRICS.setting_info_diameter_px,
         )
-        row.addWidget(self.info_button)
+        row.addWidget(self.info_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.maximum_joint_slices_label = QLabel("Max. gemeinsame Slices:")
-        row.addWidget(self.maximum_joint_slices_label)
+        self.maximum_joint_slices_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        row.addWidget(
+            self.maximum_joint_slices_label,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
         self.spin_box = QSpinBox()
         self.spin_box.setObjectName("maximumJointSlicesSpin")
         self.spin_box.setRange(5, 25)
@@ -584,11 +625,14 @@ class JointSliceSettingsDialog(QDialog):
         self.reset_button = QPushButton("↺")
         self.reset_button.setObjectName("settingResetButton")
         self.reset_button.setAccessibleName(
-            "Gemeinsame Slices auf den Standardwert 10 zurücksetzen"
+            "Gemeinsame Slices auf den Standardwert "
+            f"{self.default_maximum_joint_slices} zurücksetzen"
         )
-        self.reset_button.setToolTip("Auf Standardwert 10 zurücksetzen")
+        self.reset_button.setToolTip(
+            f"Auf Standardwert {self.default_maximum_joint_slices} zurücksetzen"
+        )
         self.reset_button.clicked.connect(
-            lambda: self.spin_box.setValue(DEFAULT_MAXIMUM_JOINT_SLICES)
+            lambda: self.spin_box.setValue(self.default_maximum_joint_slices)
         )
         self.spin_box.valueChanged.connect(self._refresh_reset_button)
         row.addWidget(self.reset_button)
@@ -638,7 +682,7 @@ class JointSliceSettingsDialog(QDialog):
         super().accept()
 
     def _refresh_reset_button(self) -> None:
-        modified = self.spin_box.value() != DEFAULT_MAXIMUM_JOINT_SLICES
+        modified = self.spin_box.value() != self.default_maximum_joint_slices
         self.reset_button.setEnabled(modified)
         self.reset_button.setProperty("modified", modified)
         style = self.reset_button.style()

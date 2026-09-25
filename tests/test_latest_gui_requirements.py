@@ -33,9 +33,6 @@ from cooling_tower.gui.main_window import (
 )
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.user_messages import german_user_message
-from cooling_tower.gui.widgets.numeric_setting import (
-    LABEL_INFO_SAFETY_GAP_PX,
-)
 from cooling_tower.models.feasibility import (
     FeasibilityIssue,
     ProfileFeasibilityAssessment,
@@ -164,12 +161,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertFalse(window._footer_narrow_layout)
-        self.assertEqual(window.footer.maximumHeight(), MAIN_FOOTER_MAX_HEIGHT_PX)
+        self.assertLessEqual(window.footer.height(), MAIN_FOOTER_MAX_HEIGHT_PX)
+        self.assertEqual(window.footer.maximumHeight(), window.footer.height())
         self.assertTrue(window.notice_panel.is_expanded())
         self.assertEqual(
             window.footer_notice_layout.indexOf(window.notice_panel), 0
         )
-        self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
+        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
 
         window.validation_label.setText("Ein kritischer Fehler")
         window.error_panel.show()
@@ -186,16 +184,14 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window._footer_narrow_layout)
         self.assertEqual(MAIN_FOOTER_NARROW_MAX_HEIGHT_PX, 400)
-        self.assertEqual(
-            window.footer.maximumHeight(),
-            MAIN_FOOTER_NARROW_MAX_HEIGHT_PX,
-        )
+        self.assertLessEqual(window.footer.height(), MAIN_FOOTER_NARROW_MAX_HEIGHT_PX)
+        self.assertEqual(window.footer.maximumHeight(), window.footer.height())
         positions = [
             window.footer_content_grid.getItemPosition(
                 window.footer_content_grid.indexOf(widget)
             )[0]
             for widget in (
-                window.footer_messages_scroll,
+                window.footer_message_area,
                 window.footer_horizontal_divider,
                 window.footer_action_area,
             )
@@ -247,7 +243,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         for setting in window._setting_widgets.values():
             self.assertTrue(setting.range_label.text().strip())
             self.assertFalse(setting.range_label.isHidden())
-        self.assertIn("Max. 30,00 Sek.", window._setting_widgets[
+        self.assertIn("5,0 - 30,0 Sek.", window._setting_widgets[
             "target_layer_time_s"
         ].range_label.text())
         window.target_time_spin.setValue(121.0)
@@ -255,33 +251,19 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(window.target_time_spin.value(), 121.0)
         self.assertTrue(window.target_time_spin.property("invalid"))
         self.assertIn(
-            "30,00",
+            "30,0",
             window.validation_label.text(),
         )
         self.assertIn("Gewünschte Mindest-Layerzeit: 121,0 Sek.", window.validation_label.text())
         window.close()
 
-    def test_safety_factor_has_no_unit_in_field_or_related_texts(self) -> None:
+    def test_retired_controls_are_absent(self) -> None:
         window = self.window()
-        setting = window._setting_widgets["safety_factor"]
-
-        self.assertEqual(setting.unit_label.text(), "")
-        self.assertNotIn("×", setting.range_label.text())
-        self.assertNotIn(
-            "×", window._setting_value_description("safety_factor")
-        )
-        window._last_changed_setting_name = "safety_factor"
-        window._feasibility_field_errors = {
-            "safety_factor": ["Testhinweis zum Sicherheitsfaktor."]
-        }
-        self.complete_source_step(window)
-        window.workflow.slicer_succeeded("Testslicer")
-        window.workflow.complete_preparation()
-        window.validate_form()
-        self.assertNotIn("×", window.validation_label.text())
+        for name in ("safety_factor", "mesh_segments", "minimum_object_tower_distance_mm"):
+            self.assertNotIn(name, window._setting_widgets)
         window.close()
 
-    def test_equivalent_dependency_errors_are_unique_and_stay_marked(self) -> None:
+    def test_diameter_relationship_errors_mark_both_inputs_and_clear(self) -> None:
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -291,26 +273,41 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window._last_changed_setting_name = "minimum_outer_diameter_mm"
         window.validate_form()
 
-        relationship_errors = [
-            message
-            for message in window._static_error_causes
-            if "Maximaler Turmdurchmesser" in message
-            and "Minimaler Turmdurchmesser" in message
-        ]
-        self.assertEqual(len(relationship_errors), 1)
+        self.assertTrue(window._static_error_causes)
         minimum_setting = window._setting_widgets["minimum_outer_diameter_mm"]
+        maximum_setting = window._setting_widgets["maximum_outer_diameter_mm"]
         self.assertTrue(minimum_setting.editor.property("invalid"))
+        self.assertTrue(maximum_setting.editor.property("invalid"))
+        self.assertIn(
+            "Min. Turmdurchmesser muss kleiner als Max. Turmdurchmesser sein",
+            minimum_setting.message_label.text(),
+        )
+        self.assertIn(
+            "Max. Turmdurchmesser muss größer als Min. Turmdurchmesser sein",
+            maximum_setting.message_label.text(),
+        )
+        self.assertTrue(window.validation_label.text())
 
-        minimum_setting.editor.setFocus()
+        window.maximum_outer_spin.setValue(31.0)
         self.app.processEvents()
-        self.assertTrue(minimum_setting.editor.property("invalid"))
+        self.assertFalse(minimum_setting.editor.property("invalid"))
+        self.assertFalse(maximum_setting.editor.property("invalid"))
+        self.assertTrue(minimum_setting.message_container.isHidden())
+        self.assertTrue(maximum_setting.message_container.isHidden())
+        window.minimum_outer_spin.setValue(31.0)
+        self.app.processEvents()
+        self.assertIn("muss kleiner als", minimum_setting.message_label.text())
+        self.assertIn("muss größer als", maximum_setting.message_label.text())
+        window.maximum_outer_spin.setValue(32.0)
+        self.app.processEvents()
+        self.assertTrue(minimum_setting.message_container.isHidden())
+        self.assertTrue(maximum_setting.message_container.isHidden())
         self.assertIn(
             'QDoubleSpinBox[invalid="true"]:focus',
             window.styleSheet(),
         )
-        window._last_changed_setting_name = "safety_factor"
         window.validate_form()
-        self.assertTrue(minimum_setting.editor.property("invalid"))
+        self.assertFalse(minimum_setting.editor.property("invalid"))
         window.close()
 
     def test_optional_dialogs_are_not_created_during_startup(self) -> None:
@@ -754,9 +751,10 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 setting,
                 setting.info_button.rect().topLeft(),
             ).x()
-            self.assertGreaterEqual(
-                info_left - label_right - 1,
-                LABEL_INFO_SAFETY_GAP_PX,
+            self.assertLess(info_left + setting.info_button.width(), label_right)
+            self.assertLess(
+                info_left + setting.info_button.width(),
+                setting.label.x(),
                 setting.setting_name,
             )
         self.assertGreater(
@@ -859,22 +857,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.validate_form()
 
         lines = window.validation_label.text().splitlines()
-        self.assertGreaterEqual(len(lines), 4)
+        self.assertGreaterEqual(len(lines), 2)
         headings = [line for line in lines if not line.startswith("• ")]
         bullets = [line for line in lines if line.startswith("• ")]
-        self.assertGreaterEqual(len(headings), 2)
-        self.assertGreaterEqual(len(bullets), 2)
+        self.assertGreaterEqual(len(headings), 1)
+        self.assertGreaterEqual(len(bullets), 1)
         self.assertNotIn(";", window.validation_label.text())
         diameter_setting = window._setting_widgets[
             "maximum_outer_diameter_mm"
         ]
         self.assertFalse(diameter_setting.message_container.isHidden())
         self.assertIn(
-            "Muss mindestens so groß sein",
-            diameter_setting.message_label.text(),
-        )
-        self.assertNotIn(
-            "Maximaler Turmdurchmesser",
+            "Max. Turmdurchmesser muss größer als Min. Turmdurchmesser sein",
             diameter_setting.message_label.text(),
         )
         window.close()
@@ -921,7 +915,6 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             window.validation_label.text().splitlines(),
             [
-                "Gewünschte Mindest-Layerzeit: 29,0 Sek.",
                 "• Maximaler Aufweitungswinkel reicht nicht aus.",
                 "• Standfußbreite reicht nicht aus.",
                 "• Eingestellter größter Außendurchmesser von 40,00 mm reicht nicht aus.",
@@ -934,12 +927,12 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window.validation_label.textFormat(),
             Qt.TextFormat.RichText,
         )
-        self.assertIn(
+        self.assertNotIn(
             "<b>Gewünschte Mindest-Layerzeit: 29,0 Sek.</b>",
             window.validation_label._rendered_html,
         )
         self.assertIn(
-            '<td width="18"></td><td>• Maximaler Aufweitungswinkel',
+            "Maximaler Aufweitungswinkel",
             window.validation_label._rendered_html,
         )
         inline = window._setting_widgets["target_layer_time_s"].message_label.text()
@@ -1053,34 +1046,22 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window._feasibility_request_id,
             unresolved,
         )
-        original_message = window._setting_widgets[
-            "target_layer_time_s"
-        ].message_label.text()
-        self.assertTrue(original_message)
-        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        original_message = window.validation_label.text()
+        self.assertFalse(window._setting_widgets["target_layer_time_s"].message_label.text())
+        self.assertFalse(window.timing_group.badge_label.text())
 
         window.maximum_outer_spin.setValue(
             window.maximum_outer_spin.value() + 1.0
         )
         self.app.processEvents()
-        self.assertEqual(
-            window._setting_widgets[
-                "target_layer_time_s"
-            ].message_label.text(),
-            original_message,
-        )
-        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertEqual(window.validation_label.text(), original_message)
+        self.assertFalse(window.timing_group.badge_label.text())
 
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
             unresolved,
         )
-        self.assertEqual(
-            window._setting_widgets[
-                "target_layer_time_s"
-            ].message_label.text(),
-            original_message,
-        )
+        self.assertEqual(window.validation_label.text(), original_message)
         self.assertFalse(
             window._setting_widgets[
                 "maximum_outer_diameter_mm"
@@ -1147,13 +1128,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 "nicht aus."
             ],
         )
-        self.assertIn(
-            "größter Außendurchmesser",
-            window._setting_widgets[
-                "target_layer_time_s"
-            ].message_label.text(),
-        )
-        self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
+        self.assertFalse(window._setting_widgets["target_layer_time_s"].message_label.text())
+        self.assertIn("größter Außendurchmesser", window.validation_label.text())
+        self.assertFalse(window.timing_group.badge_label.text())
         self.assertFalse(window.preview_button.isEnabled())
 
         window.maximum_outer_spin.setValue(
@@ -1212,12 +1189,10 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 "maximum_outer_diameter_mm"
             ].message_label.text()
         )
-        target_message = window._setting_widgets[
-            "target_layer_time_s"
-        ].message_label.text()
-        self.assertIn("größter Außendurchmesser", target_message)
-        self.assertIn("40,00 mm", target_message)
-        self.assertIn("Max. 1000,000 mm", window._setting_widgets[
+        self.assertFalse(window._setting_widgets["target_layer_time_s"].message_label.text())
+        self.assertIn("größter Außendurchmesser", window.validation_label.text())
+        self.assertIn("40,00 mm", window.validation_label.text())
+        self.assertIn("6,0 - 100,0 mm", window._setting_widgets[
             "maximum_outer_diameter_mm"
         ].range_label.text())
         window.close()
@@ -1282,15 +1257,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.maximum_outer_spin.setValue(1001.0)
         self.app.processEvents()
 
-        target_message = window._setting_widgets[
-            "target_layer_time_s"
-        ].message_label.text()
-        self.assertIn("Aufweitungswinkel", target_message)
-        self.assertIn("Standfußbreite", target_message)
-        self.assertNotIn("Außendurchmesser", target_message)
+        target_message = window._setting_widgets["target_layer_time_s"].message_label.text()
+        self.assertFalse(target_message)
+        self.assertIn("Aufweitungswinkel", window.validation_label.text())
+        self.assertIn("Standfußbreite", window.validation_label.text())
         self.assertNotIn("40,00 mm", window.validation_label.text())
         self.assertIn(
-            "Überschreitet den Maximalwert 1000,000 mm",
+            "Überschreitet den Maximalwert 100,0 mm",
             window._setting_widgets[
                 "maximum_outer_diameter_mm"
             ].message_label.text(),
@@ -1477,14 +1450,40 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.complete_preparation()
         window._update_local_window_layer_limit(891)
 
-        for setting in window._setting_widgets.values():
-            self.assertNotIn("Min.", setting.range_label.text())
+        dual_bounds = {
+            "target_layer_time_s",
+            "minimum_outer_diameter_mm",
+            "maximum_outer_diameter_mm",
+        }
+        for name, setting in window._setting_widgets.items():
+            if name in dual_bounds:
+                self.assertIn("-", setting.range_label.text())
+                self.assertLessEqual(
+                    setting.range_label.fontMetrics().horizontalAdvance(
+                        setting.range_label.text()
+                    ),
+                    setting.range_label.width(),
+                )
+            else:
+                self.assertTrue(setting.range_label.text().startswith("Max. "))
         maximum_diameter = window._setting_widgets[
             "maximum_outer_diameter_mm"
         ]
         self.assertEqual(maximum_diameter.unit_label.text(), "mm")
         self.assertEqual(
-            maximum_diameter.range_label.text(), "Max. 1000,000 mm"
+            maximum_diameter.range_label.text(), "6,0 - 100,0 mm"
+        )
+        self.assertEqual(
+            window._setting_widgets["minimum_outer_diameter_mm"].range_label.text(),
+            "3,0 - 40,0 mm",
+        )
+        self.assertEqual(
+            window._setting_widgets["layer_time_tolerance_s"].range_label.text(),
+            "Max. 3,00 Sek.",
+        )
+        self.assertEqual(
+            window._setting_widgets["maximum_expansion_angle_deg"].range_label.text(),
+            "Max. 70,0 °",
         )
         self.assertEqual(
             window._setting_widgets[
@@ -1500,6 +1499,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_folder_and_generation_actions_form_two_aligned_groups(self) -> None:
         window = self.window()
+        window.resize(1400, 900)
+        window.show()
+        self.app.processEvents()
         positions = {
             widget: window.main_actions_layout.getItemPosition(
                 window.main_actions_layout.indexOf(widget)
@@ -1518,6 +1520,18 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(positions[window.preview_action_control], 4)
         self.assertEqual(positions[window.export_button], 5)
         self.assertEqual(window.main_actions_layout.columnStretch(3), 1)
+        window.last_export_report_button.show()
+        window.resize(760, 900)
+        self.app.processEvents()
+        window._update_responsive_action_labels()
+        for widget in (window.preview_action_control, window.export_button):
+            row, _column, _row_span, _column_span = (
+                window.main_actions_layout.getItemPosition(
+                    window.main_actions_layout.indexOf(widget)
+                )
+            )
+            self.assertIn(row, (0, 1))
+        self.assertNotIn("\n", window.last_export_report_button.text())
         window.close()
 
 

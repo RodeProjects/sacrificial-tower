@@ -138,6 +138,10 @@ class SupportSimulationTests(unittest.TestCase):
                         dialog.simulate_button.click()
                     if action == 'accept':
                         restart.assert_called_once_with(simulate_supports=True)
+                        self.assertIsNone(window._workflow_error_message)
+                        self.assertFalse(window._analysis_failed)
+                        self.assertNotIn('Kein G-Code', window.validation_label.text())
+                        self.assertEqual(window.profile_diagnostics.toPlainText(), '')
                     else:
                         restart.assert_not_called()
             finally:

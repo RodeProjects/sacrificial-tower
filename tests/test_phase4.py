@@ -518,8 +518,6 @@ class Phase4CliTests(unittest.TestCase):
                     "3",
                     "--output-stl",
                     str(stl_path),
-                    "--mesh-segments",
-                    "8",
                     "--preview",
                     "0",
                     "--csv",

@@ -31,6 +31,7 @@ from cooling_tower.slicers import (
 )
 from cooling_tower.models import SlicerFamily
 from cooling_tower.slicers.base import BaseSlicerAdapter
+from cooling_tower.slicers.process import ProcessOutcome
 from cooling_tower.windows_process import (
     WINDOWS_PROCESS_ERROR_MODE_FLAGS,
     configure_windows_process_policy,
@@ -175,6 +176,21 @@ class QProcessBackendTests(unittest.TestCase):
                 reason = BaseSlicerAdapter._failure_reason(outcome, ())
                 self.assertIn("erste Schicht", reason)
                 self.assertNotIn("abgestürzt", reason)
+
+    def test_bambu_bed_profile_error_has_actionable_explanation(self) -> None:
+        for return_code in (-61, 0xFFFFFFC3):
+            with self.subTest(return_code=return_code):
+                outcome = ProcessOutcome(
+                    command=("bambu-studio",),
+                    return_code=return_code,
+                    stdout="",
+                    stderr="",
+                    duration_s=0.4,
+                )
+                reason = BaseSlicerAdapter._failure_reason(outcome, ())
+                self.assertIn("Filamentprofil", reason)
+                self.assertIn("Druckbett-Typ", reason)
+                self.assertNotIn("nicht näher beschrieben", reason)
 
     def test_timeout_and_cross_thread_cancel_finish_before_return(self) -> None:
         timeout = self.run_backend(

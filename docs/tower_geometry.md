@@ -21,6 +21,40 @@ Original-Layer und dient zum Zuschneiden der Analyse.
 `SolidTowerProfile.printable_layer_count` zählt die Turmlayer. Die Vorschau verwendet diese Zahl;
 zusätzliche Mesh-Ringe für gekrümmte Flächen sind keine Drucklayer.
 
+## Ablauf eines Generierungslaufs
+
+1. Nach der Quellprüfung liefert der Vorslice die tatsächlichen Layerhöhen,
+   Layerzeiten und Druckbahnen des Originalobjekts. Aus dem lokalen Zeitfenster
+   wird für jeden benötigten Layer eine erste Außenradius-Schätzung abgeleitet.
+   Der frühere Zeit-Sicherheitsfaktor entfällt: Wände, Füllung und weitere
+   Slicer-Effekte werden anhand der folgenden Testslices gemessen, statt die
+   geschätzte Zusatzzeit pauschal zu vergrößern.
+2. Die Bedarfsprüfung bestimmt das Turmende. Erst danach werden Standfuß,
+   Mindest- und Höchstdurchmesser, zukünftige Radiusspitzen sowie Aufweitungs-
+   und Verjüngungsregeln zu einem durchgehenden Vollkörperprofil verbunden.
+   Die Schätzung ist noch kein Nachweis, dass die gewünschte Layerzeit erreicht
+   wurde; unerreichbare Radien bleiben als Diagnose sichtbar.
+3. Die Platzierung reserviert den **maximal erlaubten** Turmdurchmesser und die
+   nötigen Sicherheitsabstände. Der Kandidat wird als geschlossenes STL mit
+   automatisch bestimmter Kreissegmentzahl gebaut. Sechs getrennte Turm-Slices
+   liefern die günstige Vorstufe; danach messen gemeinsame Objekt-/Turm-Slices
+   die tatsächlich erzielten Layerzeiten. Die Einzelheiten der Phasen, des
+   Kandidatenvergleichs und der Übernahme stehen in
+   [Architektur](architecture.md#getrennte-und-gemeinsame-generierungsphase).
+4. Die Kalibrierung passt das Radiusprofil anhand der gemessenen Zusatzzeiten
+   an und baut den nächsten Kandidaten erneut nach denselben Geometrie- und
+   Platzierungsregeln. Mindestens fünf gemeinsame Slices werden vollständig
+   ausgewertet; das Standardbudget beträgt zwölf. Der beste Kandidat wird
+   nach der absoluten Abweichung der kürzesten relevanten gemeinsamen
+   Layerzeit gewählt. Ein späterer gleich guter Kandidat verdrängt ihn nicht.
+
+Ein Turm beginnt stets am Druckbett. Genügen alle Objektlayer bereits der
+Zielzeit, erzeugt der reguläre Lauf keine Turmdatei. Nach ausdrücklicher
+Bestätigung kann dennoch ein Turm über die gesamte Modellhöhe erzeugt werden.
+Endet der Bedarf früher, wird auch
+der Turm nach der unten beschriebenen Schlusslayerregel gekürzt; oberhalb
+davon entstehen keine unnötigen Turmlayer.
+
 ## Durchmesser und Übergänge
 
 `tower/solid_profile.py` baut den geschlossenen Vollkörper.
@@ -88,11 +122,31 @@ Das exportierte gemeinsame Projekt übernimmt die 100-%-Füllung objektspezifisc
 
 ## Vorschau und Bedienung
 
+Die Platzierung reserviert vor dem ersten gemeinsamen Slice den angegebenen
+maximalen Turmdurchmesser einschließlich eines nötigen Standfußes und eines
+aktiven Brims. Aus den über alle Höhen ermittelten Außenmaßen des Originalobjekts
+wird die größte freie Distanz zu einer Druckbettseite gewählt; der Turmmittelpunkt
+liegt mittig in diesem Zwischenraum. Blockieren eine Ausschlussfläche oder die
+Mindestabstände diese Seite, wird die nächste freie Seite geprüft. Zu Objekt und
+Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
+maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
+
+Die Kreissegmentzahl wird pro Kandidat aus dessen größtem aktuellen Durchmesser
+berechnet: `ceil(0,9 × Durchmesser in mm)`, auf 16 bis 128 begrenzt.
+Alle Ringe eines STL verwenden dieselbe Segmentzahl,
+damit das Netz geschlossen bleibt. Getrennte und gemeinsame Slices verwenden
+dieselbe Regel; eine veränderte Kandidatenbreite kann die Auflösung im nächsten
+Kalibrierungsdurchlauf ändern.
+Die 3D-Vorschau zeigt die für den dargestellten Kandidaten verwendete Zahl als
+„Turm-Kreissegmente“ oberhalb der Höhenangabe an.
+
 Nach jeder abgeschlossenen Generierung wird die Seitenansicht neu eingepasst.
 Sie richtet sich nach der Platzierung von Objekt und Turm, sodass beide möglichst
 nebeneinander sichtbar sind. Die Vorderansicht liegt dazu um 90° gedreht.
 Höhen und Layeranzahlen werden getrennt für Originalobjekt und Turm angezeigt.
 Die Navigationsanzeige und ihr Symbol schalten denselben Navigationszustand um.
+Beide liegen als Overlay eine Zeilenhöhe oberhalb der Canvas-Standardposition;
+die Bedienelemente bleiben dabei über den Vorschauinformationen anklickbar.
 
 Nach Abschluss der Datei-/Slicer-Vorbereitung enthält das gemeinsame Dropdown
 „Turm-Einstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge, Auflösung und

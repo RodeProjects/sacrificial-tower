@@ -20,7 +20,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QDialog, QSizePolicy
+from PySide6.QtWidgets import QApplication, QDialog
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui.generation_progress_dialog import (
@@ -66,7 +66,8 @@ class GenerationProgressDialogTests(unittest.TestCase):
             dialog.explanation_label.text(),
         )
         self.assertIn(
-            "das bisher beste Ergebnis jederzeit übernehmen und anschließend "
+            "Die ersten fünf gemeinsamen Slices sind Pflicht. "
+            "Danach können Sie das bisher beste Ergebnis übernehmen und anschließend "
             "exportieren",
             dialog.explanation_label.text(),
         )
@@ -87,6 +88,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         self.assertIn("0 von 10", dialog.counter_label.text())
         self.assertFalse(dialog.accept_button.isEnabled())
+        self.assertTrue(dialog.accept_button.isHidden())
 
         iteration = SimpleNamespace(
             evaluation=SimpleNamespace(
@@ -96,15 +98,18 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 )
             )
         )
-        dialog.complete_slice(1, 10, iteration, 9.0)
+        dialog.complete_slice(4, 10, iteration, 9.0)
+        self.assertTrue(dialog.accept_button.isHidden())
+        dialog.complete_slice(5, 10, iteration, 9.0)
         self.assertTrue(dialog.accept_button.isEnabled())
+        self.assertFalse(dialog.accept_button.isHidden())
         self.assertEqual(dialog.best_minimum_value.text(), "8.95 s")
         self.assertEqual(dialog.best_deviation_value.text(), "(−0.05 s)")
         self.assertEqual(
             dialog.best_deviation_value.property("resultState"),
             "within",
         )
-        self.assertIn("1 von 10", dialog.counter_label.text())
+        self.assertIn("5 von 10", dialog.counter_label.text())
 
         dialog.set_slice_progress(0.58)
         self.assertGreaterEqual(
@@ -147,7 +152,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 )
             )
         )
-        dialog.complete_slice(1, 10, iteration, 9.0)
+        dialog.complete_slice(5, 10, iteration, 9.0)
         dialog.mark_finished(
             paused=False,
             can_continue=False,
@@ -168,7 +173,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(dialog.spin_box.minimum(), 5)
         self.assertEqual(dialog.spin_box.maximum(), 25)
         self.assertGreaterEqual(dialog.minimumWidth(), 650)
-        self.assertIn("±0,1 s", dialog.info_button.toolTip())
+        self.assertIn("±0,09 s", dialog.info_button.toolTip())
         self.assertEqual(
             dialog.maximum_joint_slices_label.text(),
             "Max. gemeinsame Slices:",
@@ -184,6 +189,30 @@ class GenerationProgressDialogTests(unittest.TestCase):
             dialog.settings_row_layout.indexOf(dialog.reset_button),
         )
         dialog.show()
+        self.app.processEvents()
+        self.assertEqual(dialog.info_button.width(), 19)
+        self.assertEqual(dialog.info_button.height(), 19)
+        self.assertEqual(
+            dialog.maximum_joint_slices_label.mapTo(
+                dialog, dialog.maximum_joint_slices_label.rect().topLeft()
+            ).x()
+            - dialog.info_button.mapTo(
+                dialog, dialog.info_button.rect().topRight()
+            ).x()
+            - 1,
+            10,
+        )
+        self.assertLessEqual(
+            abs(
+                dialog.info_button.mapTo(
+                    dialog, dialog.info_button.rect().center()
+                ).y()
+                - dialog.maximum_joint_slices_label.mapTo(
+                    dialog, dialog.maximum_joint_slices_label.rect().center()
+                ).y()
+            ),
+            1,
+        )
         QApplication.sendEvent(
             dialog.info_button,
             QEvent(QEvent.Type.Enter),
@@ -198,7 +227,8 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         self.assertTrue(dialog.reset_button.isEnabled())
         dialog.reset_button.click()
-        self.assertEqual(dialog.spin_box.value(), 10)
+        self.assertEqual(dialog.spin_box.value(), 12)
+        self.assertIn("Standardwert 12", dialog.reset_button.toolTip())
         self.assertFalse(dialog.reset_button.isEnabled())
 
         applied: list[int] = []
@@ -241,11 +271,27 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         _settings, state = store.load()
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 15)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 18)
         self.assertEqual(state["maximum_joint_slices"], 10)
         migrated = json.loads(user_path.read_text(encoding="utf-8"))
-        self.assertEqual(migrated["settings_schema_version"], 15)
+        self.assertEqual(migrated["settings_schema_version"], 18)
         self.assertIsNotNone(store.last_migration_backup)
+
+    def test_current_joint_slice_default_and_fallback_are_twelve(self) -> None:
+        store = UserSettingsStore(
+            self.root / "new-settings.json",
+            PROJECT_ROOT / "config/default_settings.json",
+        )
+        self.assertEqual(store.load_default_maximum_joint_slices(), 12)
+        self.assertEqual(
+            store._default_payload(store.load_defaults())["maximum_joint_slices"],
+            12,
+        )
+        missing_defaults = UserSettingsStore(
+            self.root / "other-settings.json",
+            self.root / "missing-defaults.json",
+        )
+        self.assertEqual(missing_defaults.load_default_maximum_joint_slices(), 12)
 
     def test_main_menu_uses_persisted_joint_slice_budget(self) -> None:
         user_path = self.root / "settings.json"
@@ -293,6 +339,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
+        self.addCleanup(window.close)
         window.show()
         window._on_preview_progress(
             window._preview_request_id,
@@ -308,10 +355,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             window.isolated_progress_title_label.text(),
             "Turmgenerierung wird vorbereitet...",
         )
-        self.assertEqual(
-            window.footer_action_spacer.sizePolicy().verticalPolicy(),
-            QSizePolicy.Policy.Fixed,
-        )
+        self.assertEqual(window.footer_action_layout.count(), 2)
         self.assertEqual(
             window.isolated_progress_bar.objectName(),
             "preparationProgressBar",
@@ -377,10 +421,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertTrue(fade_in_done.wait(1500))
         self.assertTrue(window.isolated_progress_widget.isHidden())
         self.assertFalse(window.footer_status_widget.isHidden())
-        self.assertEqual(
-            window.footer_action_spacer.sizePolicy().verticalPolicy(),
-            QSizePolicy.Policy.Expanding,
-        )
+        self.assertEqual(window.footer_action_layout.count(), 2)
         window.joint_generation_dialog.allow_programmatic_close()
         window.joint_generation_dialog.close()
         window.close()

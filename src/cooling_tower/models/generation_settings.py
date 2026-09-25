@@ -29,7 +29,6 @@ class GenerationSettings:
     """
 
     target_layer_time_s: float
-    safety_factor: float
     layer_time_tolerance_s: float
 
     minimum_outer_diameter_mm: float
@@ -50,7 +49,6 @@ class GenerationSettings:
     maximum_contraction_angle_deg: float
 
     local_reference_window: int
-    mesh_segments: int
 
     _legacy_minimum_wall_thickness_mm: float = field(
         repr=False, compare=False
@@ -71,7 +69,6 @@ class GenerationSettings:
     def __init__(
         self,
         target_layer_time_s: float = GENERATION_DEFAULTS["target_layer_time_s"],
-        safety_factor: float = GENERATION_DEFAULTS["safety_factor"],
         minimum_outer_diameter_mm: float | object = _UNSET,
         maximum_outer_diameter_mm: float | object = _UNSET,
         minimum_object_tower_distance_mm: float = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"],
@@ -86,7 +83,6 @@ class GenerationSettings:
         maximum_expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"],
         maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
-        mesh_segments: int = GENERATION_DEFAULTS["mesh_segments"],
         layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"],
         **legacy: Any,
     ) -> None:
@@ -113,7 +109,6 @@ class GenerationSettings:
 
         public_values = {
             "target_layer_time_s": target_layer_time_s,
-            "safety_factor": safety_factor,
             "layer_time_tolerance_s": layer_time_tolerance_s,
             "minimum_outer_diameter_mm": minimum_outer_diameter_mm,
             "maximum_outer_diameter_mm": maximum_outer_diameter_mm,
@@ -129,7 +124,6 @@ class GenerationSettings:
             "maximum_expansion_angle_deg": maximum_expansion_angle_deg,
             "maximum_contraction_angle_deg": maximum_contraction_angle_deg,
             "local_reference_window": local_reference_window,
-            "mesh_segments": mesh_segments,
         }
         for name, value in public_values.items():
             object.__setattr__(self, name, value)

@@ -194,6 +194,17 @@ def build_solid_tower_profile(
         last_layer_z - effective_base_height,
         max(minimum_taper_height, min(5.0, 0.025 * base_reference_height)),
     )
+    if calculated_base_outer > settings.maximum_outer_radius_mm + EPSILON:
+        raise ProfileFeasibilityError(
+            FeasibilityIssue(
+                code="BASE_WIDTH_TOO_LARGE",
+                message="Die Standfußbreite überschreitet den maximalen Turmdurchmesser.",
+                affected_z_mm=0.0,
+                related_setting_names=("maximum_outer_diameter_mm",),
+                required_value=2.0 * calculated_base_outer,
+                achievable_value=settings.maximum_outer_diameter_mm,
+            )
+        )
     supports = _build_raw_supports(
         phase2_profile=phase2_profile,
         total_height_mm=total_height,

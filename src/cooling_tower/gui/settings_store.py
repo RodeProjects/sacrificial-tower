@@ -50,7 +50,8 @@ _DEFAULT_PREVIEW_ITERATIONS = 4
 _MINIMUM_PREVIEW_ITERATIONS = 4
 _MAXIMUM_PREVIEW_ITERATIONS = 8
 _PRECISE_PREVIEW_THRESHOLD = 5
-_DEFAULT_MAXIMUM_JOINT_SLICES = 10
+_DEFAULT_MAXIMUM_JOINT_SLICES = 12
+_SCHEMA_14_DEFAULT_MAXIMUM_JOINT_SLICES = 10
 _MINIMUM_JOINT_SLICES = 5
 _MAXIMUM_JOINT_SLICES = 25
 _WINDOW_SIZE_KEYS = {"width", "height"}
@@ -102,6 +103,7 @@ def _generation_values(values: object) -> dict[str, Any]:
             and math.isfinite(float(value))
         ):
             normalized[name] = float(value)
+    normalized["minimum_object_tower_distance_mm"] = 5.0
     return normalized
 
 
@@ -292,7 +294,7 @@ def _migrate_settings_13_to_14(payload: dict[str, Any]) -> dict[str, Any]:
     migrated = dict(payload)
     migrated.setdefault(
         "maximum_joint_slices",
-        _DEFAULT_MAXIMUM_JOINT_SLICES,
+        _SCHEMA_14_DEFAULT_MAXIMUM_JOINT_SLICES,
     )
     migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
     return migrated
@@ -305,10 +307,95 @@ def _migrate_settings_14_to_15(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_15_to_16(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove retired controls and fix the internal object clearance at 5 mm."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    generation.pop("safety_factor", None)
+    generation.pop("mesh_segments", None)
+    generation["minimum_object_tower_distance_mm"] = 5.0
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_16_to_17(payload: dict[str, Any]) -> dict[str, Any]:
+    """Raise the persisted target and tolerance floors without losing valid values."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    for name, old_minimum, new_minimum in (
+        ("target_layer_time_s", 0.01, 5.0),
+        ("layer_time_tolerance_s", 0.01, 0.1),
+    ):
+        value = generation.get(name)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and old_minimum <= value < new_minimum
+        ):
+            generation[name] = new_minimum
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_17_to_18(payload: dict[str, Any]) -> dict[str, Any]:
+    """Constrain stored diameters while retaining the chosen maximum where possible."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    for name, lower, upper in (
+        ("minimum_outer_diameter_mm", 3.0, 99.0),
+        ("maximum_outer_diameter_mm", 5.0, 100.0),
+    ):
+        value = generation.get(name)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        ):
+            generation[name] = min(upper, max(lower, float(value)))
+    minimum = generation.get(
+        "minimum_outer_diameter_mm",
+        _GENERATION_DEFAULTS["minimum_outer_diameter_mm"],
+    )
+    maximum = generation.get(
+        "maximum_outer_diameter_mm",
+        _GENERATION_DEFAULTS["maximum_outer_diameter_mm"],
+    )
+    if (
+        not isinstance(minimum, (int, float))
+        or isinstance(minimum, bool)
+        or not math.isfinite(float(minimum))
+    ):
+        minimum = _GENERATION_DEFAULTS["minimum_outer_diameter_mm"]
+    if (
+        not isinstance(maximum, (int, float))
+        or isinstance(maximum, bool)
+        or not math.isfinite(float(maximum))
+    ):
+        maximum = _GENERATION_DEFAULTS["maximum_outer_diameter_mm"]
+    if minimum + 1.0 > maximum:
+        generation["minimum_outer_diameter_mm"] = max(3.0, maximum - 1.0)
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
+    generation = _generation_values(nested.get("generation"))
+    for name, minimum, maximum in (
+        ("target_layer_time_s", 5.0, 30.0),
+        ("layer_time_tolerance_s", 0.1, 3.0),
+        ("minimum_outer_diameter_mm", 3.0, 99.0),
+        ("maximum_outer_diameter_mm", 5.0, 100.0),
+    ):
+        value = generation.get(name)
+        if value is not None and not minimum <= value <= maximum:
+            generation.pop(name)
     normalized: dict[str, Any] = {
-        "generation": _generation_values(nested.get("generation")),
+        "generation": generation,
     }
 
     normalized["show_setting_limits"] = nested.get("show_setting_limits", False) is True
@@ -417,6 +504,9 @@ _USER_SETTINGS_MIGRATIONS = {
     12: _migrate_settings_12_to_13,
     13: _migrate_settings_13_to_14,
     14: _migrate_settings_14_to_15,
+    15: _migrate_settings_15_to_16,
+    16: _migrate_settings_16_to_17,
+    17: _migrate_settings_17_to_18,
 }
 
 
@@ -650,7 +740,7 @@ class UserSettingsStore:
             "generation": defaults.to_dict(),
             "output_root": str(self.load_default_output_root()),
             "preview_iterations": _DEFAULT_PREVIEW_ITERATIONS,
-            "maximum_joint_slices": _DEFAULT_MAXIMUM_JOINT_SLICES,
+            "maximum_joint_slices": self.load_default_maximum_joint_slices(),
             "setting_compatibility": dict(SETTING_COMPATIBILITY_CATALOG),
         }
 

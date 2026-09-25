@@ -73,7 +73,6 @@ class OutputServiceTests(unittest.TestCase):
             expected = GenerationSettings(
                 target_layer_time_s=17.5,
                 wall_path_width_mm=0.45,
-                mesh_segments=48,
             )
             service.write_settings(paths, expected)
             self.assertEqual(load_generation_settings(paths.settings_path), expected)
@@ -130,7 +129,6 @@ class GenerationServiceTests(unittest.TestCase):
                 minimum_base_radius_mm=3.0,
                 base_height_mm=0.2,
                 base_margin_mm=1.0,
-                mesh_segments=8,
             )
             progress: list[int] = []
 
@@ -177,8 +175,6 @@ class GenerationServiceTests(unittest.TestCase):
                     "3",
                     "--base-height",
                     "0.2",
-                    "--mesh-segments",
-                    "8",
                     "--output-root",
                     str(output),
                     "--preview",

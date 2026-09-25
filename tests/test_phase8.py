@@ -40,7 +40,6 @@ from cooling_tower.tower.wall_calculator import calculate_wall_path_length
 def base_settings(**changes: object) -> GenerationSettings:
     result = GenerationSettings(
         target_layer_time_s=10.0,
-        safety_factor=1.0,
         minimum_outer_radius_mm=5.0,
         maximum_outer_radius_mm=10.0,
         minimum_wall_thickness_mm=0.8,
@@ -55,7 +54,6 @@ def base_settings(**changes: object) -> GenerationSettings:
         maximum_radius_change_per_mm_z=100.0,
         maximum_wall_change_per_mm_z=100.0,
         local_reference_window=3,
-        mesh_segments=16,
     )
     return replace(result, **changes)
 
@@ -195,7 +193,6 @@ class EdgeCaseTests(unittest.TestCase):
                     maximum_outer_radius_mm=20.0,
                     minimum_inner_radius_mm=1.0,
                     minimum_base_radius_mm=3.0,
-                    mesh_segments=8,
                 ),
             )
             self.assertEqual(result.layer_count, 2)
@@ -257,7 +254,6 @@ class ReportingAndLaunchTests(unittest.TestCase):
                     maximum_outer_radius_mm=20.0,
                     minimum_inner_radius_mm=1.0,
                     minimum_base_radius_mm=3.0,
-                    mesh_segments=8,
                 ),
             )
             report = build_generation_report(result)

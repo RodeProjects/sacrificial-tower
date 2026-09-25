@@ -385,7 +385,7 @@ class Phase13TimingEvidenceTests(unittest.TestCase):
         self.assertEqual(final.best_evidence_kind, "final_combined_gcode")
         self.assertEqual(final.best_available_combined_time_s, 14.5)
 
-    def test_layer_state_builder_applies_safety_only_to_required_added_time(self) -> None:
+    def test_layer_state_builder_uses_exact_required_added_time(self) -> None:
         class Layer:
             index = 4
             total_time_s = 11.0
@@ -393,11 +393,10 @@ class Phase13TimingEvidenceTests(unittest.TestCase):
         state = build_layer_timing_states(
             (Layer(),),
             target_time_s=15.0,
-            safety_factor=1.25,
             sliced_tower_times_s={4: 3.0},
         )[0]
         self.assertEqual(state.source_time_s, 11.0)
-        self.assertEqual(state.required_added_time_s, 5.0)
+        self.assertEqual(state.required_added_time_s, 4.0)
         self.assertEqual(state.sliced_tower_time_s, 3.0)
         self.assertEqual(state.remaining_deficit_s, 1.0)
 

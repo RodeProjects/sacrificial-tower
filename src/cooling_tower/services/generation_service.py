@@ -22,6 +22,7 @@ from cooling_tower.tower.solid_profile import (
 )
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
+    automatic_mesh_segments,
     generate_solid_tower_mesh,
     validate_mesh_config,
     write_binary_stl,
@@ -171,7 +172,9 @@ class GenerationService:
         )
         notify(60, "Verkürztes Turmprofil wird berechnet")
 
-        mesh = generate_solid_tower_mesh(solid_profile, mesh_config)
+        mesh = generate_solid_tower_mesh(
+            solid_profile, TowerMeshConfig(automatic_mesh_segments(solid_profile))
+        )
         export = write_binary_stl(mesh, paths.stl_path)
         notify(80, "STL und Berichte werden gespeichert")
 
@@ -337,14 +340,11 @@ class GenerationService:
     ) -> tuple[TowerProfileConfig, TowerMeshConfig]:
         profile_config = TowerProfileConfig(
             target_layer_time_s=settings.target_layer_time_s,
-            safety_factor=settings.safety_factor,
             minimum_radius_mm=settings.minimum_outer_radius_mm,
             maximum_radius_mm=settings.maximum_outer_radius_mm,
             local_time_factor_window=settings.local_reference_window,
         )
-        mesh_config = TowerMeshConfig(
-            segment_count=settings.mesh_segments
-        )
+        mesh_config = TowerMeshConfig()
         validate_profile_config(profile_config)
         validate_solid_settings(settings)
         validate_mesh_config(mesh_config)

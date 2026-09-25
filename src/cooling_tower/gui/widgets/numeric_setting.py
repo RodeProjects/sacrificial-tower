@@ -6,7 +6,6 @@ from PySide6.QtCore import QEvent, QLocale, Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -21,7 +20,6 @@ from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 
 
 NumericEditor = QDoubleSpinBox | QSpinBox
-LABEL_INFO_SAFETY_GAP_PX = 30
 
 
 class NumericSettingWidget(QWidget):
@@ -104,28 +102,9 @@ class NumericSettingWidget(QWidget):
             self,
             accessible_name=f"Informationen zu {label}",
             object_name="settingInfoButton",
-            diameter_px=24,
+            diameter_px=METRICS.setting_info_diameter_px,
         )
         self.info_button.setVisible(bool(info_text))
-        self.info_slot = QWidget(self)
-        self.info_slot.setFixedSize(
-            LABEL_INFO_SAFETY_GAP_PX + 24,
-            METRICS.form_control_height_px,
-        )
-        info_layout = QHBoxLayout(self.info_slot)
-        info_layout.setContentsMargins(
-            LABEL_INFO_SAFETY_GAP_PX,
-            0,
-            0,
-            0,
-        )
-        info_layout.setSpacing(0)
-        info_layout.addWidget(
-            self.info_button,
-            0,
-            Qt.AlignmentFlag.AlignCenter,
-        )
-        self.info_slot.setVisible(bool(info_text))
 
         self.reset_button = QPushButton("↺")
         self.reset_button.setObjectName("settingResetButton")
@@ -202,20 +181,22 @@ class NumericSettingWidget(QWidget):
         self.range_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self.range_label.setFixedWidth(METRICS.form_editor_width_px)
+        # Long bounds may extend left of the editor while their right edge
+        # stays aligned with the editor's right edge.
+        self.range_label.setFixedWidth(METRICS.form_editor_width_px + 30)
         self.range_label.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
         )
         self._refresh_range_label()
 
-        layout.addWidget(self.label, 0, 0)
         layout.addWidget(
-            self.info_slot,
+            self.info_button,
             0,
-            1,
-            Qt.AlignmentFlag.AlignBottom,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
+        layout.addWidget(self.label, 0, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(
             editor,
             0,
@@ -235,10 +216,16 @@ class NumericSettingWidget(QWidget):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
         )
         layout.addWidget(self.message_container, 2, 0, 1, 4)
-        # The label consumes all available width up to the fixed 30 px safety
-        # gap before the centered information control.
-        layout.setColumnStretch(0, 1)
-        layout.setColumnStretch(1, 0)
+        # Keep the editor and reset controls fixed while the label uses the
+        # remaining width to the right of the information icon.
+        layout.setColumnStretch(0, 0)
+        layout.setColumnMinimumWidth(
+            0,
+            METRICS.setting_info_diameter_px
+            + METRICS.setting_info_text_gap_px
+            - METRICS.form_control_gap_px,
+        )
+        layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 0)
         layout.setColumnStretch(3, 0)
 
@@ -337,14 +324,23 @@ class NumericSettingWidget(QWidget):
     def set_limits_visible(self, visible: bool) -> None:
         self._limits_visible = bool(visible)
         self._refresh_range_label()
+        self._sync_content_height()
         self.updateGeometry()
 
     def _refresh_range_label(self) -> None:
+        minimum = self.editor.property("validationMinimum")
         maximum = self.editor.property("validationMaximum")
-        parts: list[str] = []
-        if maximum is not None:
-            parts.append(f"Max. {self._format_bound(maximum)}")
-        text = "  ·  ".join(parts)
+        show_minimum = minimum is not None and bool(
+            self.editor.property("rangeLabelShowMinimum")
+        )
+        if show_minimum and maximum is not None:
+            text = f"{self._format_bound(minimum)} - {self._format_bound(maximum)}"
+        elif show_minimum:
+            text = f"Min. {self._format_bound(minimum)}"
+        elif maximum is not None:
+            text = f"Max. {self._format_bound(maximum)}"
+        else:
+            text = ""
         unit = self.unit_label.text().strip()
         if (
             text
@@ -358,23 +354,35 @@ class NumericSettingWidget(QWidget):
 
     def _format_bound(self, value: object) -> str:
         if isinstance(self.editor, QDoubleSpinBox):
-            decimals = self.editor.property("rangeLabelDecimals")
-            if decimals is not None:
-                return self.editor.locale().toString(
-                    float(value),
-                    "f",
-                    int(decimals),
-                )
-            formatter = getattr(
-                self.editor, "stored_text_from_value", self.editor.textFromValue
-            )
-            return formatter(float(value))
+            return self.editor.textFromValue(float(value))
         return str(int(float(value)))
 
     def refresh_range_state(self) -> None:
         """Refresh a range line after a data-dependent bound changed."""
 
         self._refresh_range_label()
+        self._sync_content_height()
+        self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_content_height()
+
+    def _sync_content_height(self) -> None:
+        """Reserve wrapped feedback height before the parent lays out siblings."""
+
+        layout = self.layout()
+        if layout is None:
+            return
+        layout.invalidate()
+        width = max(1, self.width())
+        required = (
+            layout.heightForWidth(width)
+            if layout.hasHeightForWidth()
+            else layout.sizeHint().height()
+        )
+        if self.minimumHeight() != required:
+            self.setMinimumHeight(required)
         self.updateGeometry()
 
     def set_warning(self, message: str | None) -> None:
@@ -415,6 +423,7 @@ class NumericSettingWidget(QWidget):
             self.message_expand_button.hide()
             self.message_container.hide()
             self.message_container.updateGeometry()
+            self._sync_content_height()
             self.updateGeometry()
             return
 
@@ -463,6 +472,7 @@ class NumericSettingWidget(QWidget):
         )
         self.message_container.setVisible(bool(visible or hidden))
         self.message_container.updateGeometry()
+        self._sync_content_height()
         self.updateGeometry()
 
     def _set_message_details_expanded(self, expanded: bool) -> None:
@@ -476,12 +486,12 @@ class NumericSettingWidget(QWidget):
             else "Weitere Hinweise zu diesem Wert anzeigen"
         )
         self.message_container.updateGeometry()
+        self._sync_content_height()
         self.updateGeometry()
 
     def set_info_text(self, message: str) -> None:
         self.info_button.set_hint(message)
         self.info_button.setVisible(bool(message))
-        self.info_slot.setVisible(bool(message))
         self.info_button.updateGeometry()
         self.updateGeometry()
 
@@ -520,15 +530,8 @@ class NumericSettingWidget(QWidget):
                 or entered > maximum_value
             ):
                 if isinstance(self.editor, QDoubleSpinBox):
-                    formatter = getattr(
-                        self.editor, "stored_text_from_value", self.editor.textFromValue
-                    )
-                    minimum = formatter(
-                        float(minimum_value)
-                    )
-                    maximum = formatter(
-                        float(maximum_value)
-                    )
+                    minimum = self.editor.textFromValue(float(minimum_value))
+                    maximum = self.editor.textFromValue(float(maximum_value))
                 else:
                     minimum = str(int(minimum_value))
                     maximum = str(int(maximum_value))

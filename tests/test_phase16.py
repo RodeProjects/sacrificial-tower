@@ -322,6 +322,16 @@ class Phase16Tests(unittest.TestCase):
             CalibrationConfig(maximum_iterations=31, maximum_joint_slices=26)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_joint_slices=6, minimum_joint_slices=7)
+        self.assertEqual(
+            CalibrationConfig(
+                maximum_joint_slices=1,
+                minimum_joint_slices=5,
+                completed_joint_slices_before_run=5,
+            ).completed_joint_slices_before_run,
+            5,
+        )
+        with self.assertRaises(ValueError):
+            CalibrationConfig(completed_joint_slices_before_run=-1)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_runtime_s=float("inf"))
         with self.assertRaises(ValueError):
@@ -554,7 +564,7 @@ class Phase16Tests(unittest.TestCase):
     def _radius_profile(self):
         return build_tower_radius_profile(
             self.snapshot.layers,
-            TowerProfileConfig(5.0, 1.1, 5.0, 40.0, 3),
+            TowerProfileConfig(5.0, 5.0, 40.0, 3),
         )
 
     def test_05_profile_adjuster_grows_insufficient_layers(self) -> None:
@@ -1139,6 +1149,24 @@ class Phase16Tests(unittest.TestCase):
         self.assertIsNone(result.stl_path)
         self.assertFalse(output.exists())
 
+    def test_22b_confirmed_no_deficit_generates_tower(self) -> None:
+        output = self.root / "forced_tower"
+        original = self.source.read_bytes()
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=0.001),
+            adapter=FakeAdapter(tower_gcode()),
+            profile=self.profile,
+            output_directory=output,
+            config=CalibrationConfig(mode=CalibrationMode.STL, maximum_iterations=2),
+            force_tower=True,
+        )
+        self.assertTrue(result.success, result.failures)
+        self.assertIsNotNone(result.stl_path)
+        self.assertTrue(result.stl_path.is_file())
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertTrue(any("ausdrücklichen Wunsch" in warning for warning in result.warnings))
+
     def test_23_slicer_failure_is_safe_and_leaves_no_user_result(self) -> None:
         output = self.root / "failed"
         result = CalibrationService().calibrate(
@@ -1422,8 +1450,136 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(updates[-1].current_iteration.number, 2)
         self.assertEqual(updates[-1].best_iteration.number, 2)
         self.assertTrue(updates[-1].current_is_best)
+        self.assertTrue(updates[-1].current_profile.points)
+        self.assertIsNotNone(updates[-1].placement)
         self.assertEqual(result.best_iteration_number, 2)
         self.assertEqual(result.termination_reason, "target_tolerance")
+
+    def test_joint_target_stop_waits_until_sixth_slice_and_includes_009_boundary(self) -> None:
+        source_stl = self.root / "joint_minimum_target_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        service = CalibrationService()
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(0.05, 0.05, 0.05, 0.05, 0.05, 0.0901, 0.09),
+            ),
+            patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_minimum_target_result",
+                config=CalibrationConfig(
+                    maximum_iterations=7,
+                    maximum_joint_slices=7,
+                    minimum_joint_slices=5,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+            )
+        self.assertEqual(len(adapter.requests), 7)
+        self.assertEqual(result.termination_reason, "target_tolerance")
+
+    def test_resumed_generation_checks_target_on_sixth_total_joint_slice(self) -> None:
+        source_stl = self.root / "joint_resumed_target_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        service = CalibrationService()
+        with (
+            patch.object(service, "_minimum_target_difference", return_value=0.05),
+            patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_resumed_target_result",
+                config=CalibrationConfig(
+                    maximum_iterations=2,
+                    maximum_joint_slices=2,
+                    minimum_joint_slices=5,
+                    completed_joint_slices_before_run=5,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+            )
+        self.assertEqual(len(adapter.requests), 1)
+        self.assertEqual(result.termination_reason, "target_tolerance")
+
+    def test_progress_names_separate_and_joint_slices_independently(self) -> None:
+        source_stl = self.root / "phase_progress_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        messages: list[str] = []
+
+        CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=30.0),
+            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+            profile=self.profile,
+            output_directory=self.root / "phase_progress_result",
+            config=CalibrationConfig(
+                maximum_iterations=8,
+                maximum_joint_slices=2,
+                minimum_joint_slices=1,
+                time_tolerance_s=0.01,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+            progress_callback=lambda _percent, message: messages.append(message),
+        )
+
+        self.assertTrue(any(
+            "Getrennter Kühlturm-Slice 2/6 wird ausgewertet" in message
+            for message in messages
+        ))
+        self.assertTrue(any(
+            "Gemeinsamer Slice 1/2 wird ausgeführt" in message
+            for message in messages
+        ))
+        self.assertTrue(any(
+            "Gemeinsamer Slice 1/2 wird ausgewertet" in message
+            for message in messages
+        ))
+
+    def test_early_accept_request_waits_for_fifth_complete_joint_slice(self) -> None:
+        source_stl = self.root / "joint_minimum_accept_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        accept_event = Event()
+        service = CalibrationService()
+
+        def request_early_accept(progress) -> None:
+            if progress.completed_count == 1:
+                accept_event.set()
+
+        with (
+            patch.object(service, "_minimum_target_difference", return_value=1.0),
+            patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
+            patch("cooling_tower.calibration.calibration_service.time.sleep"),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_minimum_accept_result",
+                config=CalibrationConfig(
+                    maximum_iterations=6,
+                    maximum_joint_slices=6,
+                    minimum_joint_slices=5,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                accept_best_event=accept_event,
+                joint_progress_callback=request_early_accept,
+            )
+        self.assertEqual(len(adapter.requests), 5)
+        self.assertEqual(result.termination_reason, "user_accepted")
 
     def test_worse_joint_target_deviation_never_replaces_best_candidate(self) -> None:
         source_stl = self.root / "monotonic_best_joint_source.stl"

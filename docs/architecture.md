@@ -187,35 +187,58 @@ Ein Abbruch vor dem ersten verwertbaren gemeinsamen Slice meldet seinen Grund
 im Statusbereich unten links; ohne Kandidaten bleibt die Ergebnisansicht
 verborgen. Beim Fortsetzen bleibt die gemeinsame Ergebnisansicht sichtbar.
 Ergebnisanzeigen zählen ausschließlich gemeinsame Slices; die sechs getrennten
-Vorläufe erscheinen nur in ihrem eigenen Fortschrittsblock.
+Vorläufe erscheinen nur in ihrem eigenen Fortschrittsblock. Vorbereitung,
+Ausführung und Auswertung benennen jeweils den aktuellen getrennten oder
+gemeinsamen Slice mit dem Zähler dieser Phase. Bei einer Fortsetzung zeigt der
+Footer für gemeinsame Slices den bisherigen Gesamtzähler an.
 
-Das gemeinsame Budget ist als `maximum_joint_slices` (5–25, Standard 10)
-persistiert. Ein Lauf endet bei ausgeschöpftem Budget, einer Abweichung von
-höchstens ±0,1 Sekunden, einem Fehler, einer Stagnation über drei gemeinsame
-Slices oder einer Benutzerentscheidung. Stagnation liegt nur vor, wenn sich
-weder die Turmform noch die gemessenen Layerzeiten nennenswert verändern. Eine
-vorzeitige Übernahme setzt ein separates threadsicheres Event: Ein eventuell
+Das gemeinsame Budget ist als `maximum_joint_slices` (5–25, Standard 12)
+persistiert. Die ersten fünf gemeinsamen Slices sind verpflichtend. Erst ab
+dem sechsten Slice beendet eine absolute Zielabweichung von höchstens 0,09
+Sekunden den Lauf vorzeitig; ein größerer ungerundeter Wert läuft weiter.
+Auch Stagnation und die manuelle Übernahme dürfen erst nach fünf vollständig
+geprüften gemeinsamen Slices zum vorzeitigen Abschluss führen. Stagnation liegt
+vor, wenn sich weder die Turmform noch die gemessenen Layerzeiten nennenswert
+verändern. Ein Lauf endet außerdem bei ausgeschöpftem Budget oder einem Fehler.
+Eine vorzeitige Übernahme setzt ein separates threadsicheres Event: Ein eventuell
 laufender Slicer-Prozess wird sicher beendet, während der letzte vollständig
 geprüfte gemeinsame Kandidat erhalten bleibt. „Fortsetzen“ startet nur das
-verbleibende gemeinsame Budget mit diesem Kandidaten als Seed; eine echte neue
-Generierung führt dagegen stets erneut die getrennte Vorstufe aus. Nach der
-Übernahme bleibt das Ergebnis im Hauptfenster erhalten. Der Export-Button führt
-direkt zum Export; Fortsetzen steht separat beim Generierungsergebnis. Ein
-Benutzerstopp nach dem ersten gemeinsamen Kandidaten verwendet denselben sicheren
-Übernahmeweg. Ein dadurch unterbrochener 3MF-Projektbau gilt nicht als echte
-Slicer-Ablehnung, sofern ein früherer vollständig geprüfter Kandidat vorliegt.
+verbleibende gemeinsame Budget mit diesem Kandidaten als Seed. Die bereits
+abgeschlossenen gemeinsamen Slices werden dabei für Mindestanzahl und
+Zielschwelle weitergezählt, sodass der erste neue Slice nach fünf Pflicht-Slices
+bereits der sechste insgesamt ist. Der Abschlusszähler gehört dabei nicht zur
+Geometriekompatibilität des Seeds. Eine echte neue Generierung führt dagegen
+stets erneut die getrennte Vorstufe aus. „Angleichung fortsetzen“ erscheint ab
+dem fünften gemeinsamen Slice zunächst deaktiviert und ist nur bei einem
+vorzeitig übernommenen Zwischenstand mit verbleibendem Slice-Budget bedienbar.
+Beim Fortsetzen wird es wieder deaktiviert. Nach der Übernahme bleibt das Ergebnis
+im Hauptfenster erhalten. Neben „Angleichung
+fortsetzen“ erscheint dann im Generierungsergebnis rechts „Kühlturm exportieren“;
+beide Export-Schaltflächen starten denselben Export und verwenden dieselbe Optik.
+Der Footer-Button bleibt während der gesamten Generierung „Generierung abbrechen“.
+Ein ausdrücklicher Abbruch verwirft auch einen zuvor übernommenen Kandidaten samt
+Vorschau und ermöglicht sofort einen neuen Lauf mit unveränderten Einstellungen.
+Nur „Bestes bisheriges Ergebnis übernehmen“ im Generierungsbereich hält einen
+Kandidaten für Export und mögliche Fortsetzung fest. Während des Abbruchs zeigt
+der Footer-Button deaktiviert „Abbruch wird ausgeführt …“.
 Der finale Projektbau des übernommenen Kandidaten bleibt vom Übernahme-Event
-unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor dem ersten
-verwertbaren Kandidaten wird der Lauf ohne exportfähiges Ergebnis abgebrochen.
+unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor Abschluss des fünften
+gemeinsamen Slices wird der Lauf ohne exportfähiges Ergebnis abgebrochen.
 
-Ein Kandidat, der die feste Zielschwelle von ±0,1 Sekunden erreicht, wird vor
+Ein Kandidat, der ab dem sechsten gemeinsamen Slice die feste Zielschwelle von
+höchstens 0,09 Sekunden erreicht, wird vor
 der Abschlussmeldung atomar zugleich als bester Anzeige- und Exportkandidat
 markiert. Nach Abschluss beziehen sich Generierungsanzeige und Exportbericht
 auf dieselbe Slicer-Auswertung. Während des Laufs bleibt der bislang beste
 Kandidat intern und in der Ergebnisanzeige erhalten; schlechtere Folgeslices
-ändern nur den Fortschrittszähler.
-Beim erneuten Stoppen einer Fortsetzung vor dem ersten neuen vollständig
-geprüften gemeinsamen Slice bleibt der bereits übernommene Kandidat erhalten.
+ändern nur den Fortschrittszähler. Die Seitenansicht zeigt nach jedem erfolgreich
+geprüften gemeinsamen Slice die Form des aktuellen Kandidaten. Dafür werden
+die bereits vorbereiteten Objektlinien und das Turmprofil verwendet; es ist kein
+zusätzlicher Slicer-Lauf nötig. Während der Generierung bleiben Navigation und
+Ansichtsbuttons gesperrt. Bei einem fehlgeschlagenen Lauf wird die vorherige
+Ergebnisvorschau wiederhergestellt, sofern eine vorhanden war.
+Beim erneuten Stoppen einer Fortsetzung wird auch der zuvor übernommene
+Kandidat verworfen.
 Ein fehlgeschlagener Fortsetzungslauf lässt das zuvor exportfähige Ergebnis
 und, bei verbleibendem Slice-Budget, die Fortsetzungsoption verfügbar.
 Fehler der Generierung erscheinen mit ihrer vollständigen Ursache nur im
@@ -223,8 +246,10 @@ Statusbereich unten links. Der Ergebnisbereich zeigt bei erhaltenem Kandidaten
 weiterhin dessen Werte und mögliche Aktionen, aber keinen zweiten Fehlertext.
 
 Die zweispaltige Anzeige enthält kürzeste gemeinsame Layerzeit/Ziel/Toleranz,
-vorzeichenbehaftete Abweichung und Ergebnis einschließlich tatsächlich aktivierter
-Simulationen (Stützen und/oder 100-%-Turmfüllung). Nur erreichte Zeit und
+vorzeichenbehaftete Abweichung, zuerst das Ergebnis und danach tatsächlich
+aktivierte Simulationen (Stützen und/oder 100-%-Turmfüllung). Nach manueller
+Übernahme und nach regulärem Abschluss steht dort „Kühlturm exportieren“.
+Nur erreichte Zeit und
 Abweichung werden abhängig von der Toleranz eingefärbt; Zielzeit und Toleranz
 bleiben neutral. Die Ansichtsbuttons über der 3D-Vorschau stehen in einer Zeile.
 Außerhalb der Toleranz wird
@@ -234,13 +259,49 @@ Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
-„Turm-Einstellungen“ gliedert sich in „Kühlzeit und Qualität“ sowie
-„Turmgeometrie“. Eingabegrenzen sind standardmäßig verborgen und lassen sich
+„Turm-Einstellungen“ gliedert sich in „Layerzeit und Toleranz“ sowie
+„Turmgeometrie“; „100% Turmfüllung simulieren“ steht dort an erster Stelle.
+Die Untergrenze der gewünschten Mindest-Layerzeit beträgt nach einem gültigen
+Pre-Slice höchstens dann die kürzeste ermittelte Layerzeit des Originalobjekts
+plus 0,5 s, auf die nächste sichtbare Zehntelsekunde aufgerundet, wenn
+dieser Wert über 5 s liegt. Sonst sowie ohne gültige oder innerhalb des
+Zielbereichs bis 30 s nutzbare Messung beträgt sie 5 s. Bei eingeblendeten
+Eingabegrenzen stehen Mindest- und Höchstwert gekürzt als
+„Minimum - Maximum Einheit“ unter dem Feld; einzelne Höchstwerte behalten
+die Beschriftung „Max.“. Die Nachkommastellen entsprechen denen des
+jeweiligen Eingabefelds. Ein
+bereits eingegebener kleinerer Wert bleibt sichtbar und wird als ungültig
+markiert. Die Layerzeit-Toleranz beginnt bei ±0,1 s.
+Der minimale Turmdurchmesser hat weiterhin 5 mm als Voreinstellung und liegt
+zwischen 3 mm und dem kleineren Wert aus aktuellem Maximaldurchmesser und
+99 mm. Der Maximaldurchmesser liegt zwischen
+dem größeren Wert aus 5 mm und `Minimaldurchmesser + 1 mm` sowie 100 mm.
+Überschreitungen werden direkt beim jeweiligen Durchmesserfeld angezeigt und
+verschwinden nach einer gültigen Korrektur.
+Wenn alle analysierten Schichten die eingestellte Zielzeit bereits erreichen,
+nennen der Einstellungsbereich und die Aktionsmeldung Zielzeit und kürzeste
+gemessene Schichtzeit als Grund. Ein Klick auf „Kühlturm generieren“ zeigt dann
+eine Bestätigung mit dem Hinweis auf zusätzlichen Material- und Zeitbedarf.
+Nach Bestätigung wird ein Turm über die gesamte Modellhöhe erzwungen; dabei
+darf allein die durch die aktuelle Messung erhöhte Zielzeit-Untergrenze für
+diesen Lauf unterschritten werden. Andere Eingabefehler bleiben gesperrt.
+Eingabegrenzen sind standardmäßig verborgen und lassen sich
 in „Allgemeine Einstellungen“ wieder einblenden. Dort befinden sich außerdem
 das Slice-Budget und der Exportordner; ein eigener Exportordner-Menüpunkt entfällt.
 Das Ausblenden verkleinert die gesamte Einstellungskarte. Einige Zahlenfelder
-zeigen zur besseren Lesbarkeit eine Nachkommastelle, während gespeicherte Werte
-und Validierungsgrenzen ihre bisherige Präzision behalten.
+zeigen zur besseren Lesbarkeit eine Nachkommastelle; die Speicherpräzision
+bleibt erhalten. Die Eingabeprüfung
+ist stets aktiv; eine Dev-Umgehung existiert nicht. Fehlermeldungen an den
+Einstellungen prüfen jeweils nur den eigenen Wert und wachsen mit dem Inhalt,
+ohne die Bedienelemente zu überdecken.
+
+„Standardwerte wiederherstellen“ befindet sich links unten im Footer. Nach dem
+Zurücksetzen wird das lokale Zeitfenster an die analysierte Layerzahl angepasst
+und die Geometrieprüfung mit den neuen Werten erneut gestartet. Rechts
+bleiben Exportordner, letzter Export, Exportbericht und die aktuelle Hauptaktion
+als Gruppen erhalten. Ihre Anordnung richtet sich nach der verfügbaren Breite;
+der Footer nimmt nur die für Meldungen und Aktionen erforderliche Höhe ein und
+verkleinert sich auch nach einer Rückvergrößerung des Fensters.
 
 Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten relevanten
 Layerzeit von der Zielzeit das Vergleichskriterium. Bei gleicher Abweichung
@@ -248,13 +309,13 @@ bleibt der zuerst vollständig geprüfte Kandidat bestehen. Weder die Anzeige
 noch der später exportierte Kandidat können durch einen gleichen oder
 schlechteren Folgeslice ersetzt werden.
 
-Der modale Generierungsdialog berechnet seine feste Inhaltsgröße vor dem ersten
-sichtbaren Frame und wird bei jeder inhaltlichen Höhenänderung erneut über dem
-Hauptfenster zentriert. Zielvorgabe und bisher bestes Ergebnis stehen gemeinsam
-in einer zweizeiligen Übersicht. Abbruchhinweise verwenden den Bestwert als
+Der eingebettete Generierungsbereich zeigt Zielvorgabe und bisher bestes
+Ergebnis gemeinsam an. Abbruchhinweise verwenden den Bestwert als
 Statusgrundlage: Ergebnisse innerhalb der eingestellten Toleranz erscheinen
 grün, größere Abweichungen gelb und Fehler separat rot; Trennlinien bleiben
-neutral grau.
+neutral grau. Nach einem ausdrücklichen Abbruch steht oberhalb der Trennlinie
+„Die Generierung wurde manuell abgebrochen.“ und direkt darunter „Der bisherige
+Kühlturm wurde verworfen.“
 
 ### Windows-Prozessfehler ohne blockierende Systemdialoge
 

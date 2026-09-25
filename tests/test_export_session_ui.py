@@ -71,7 +71,7 @@ class ExportSessionUiTests(unittest.TestCase):
             self.assertEqual(window.export_success_cancel_button.text(), "Schließen")
             self.assertEqual(
                 window.last_export_report_button.text(),
-                "Letzten Exportbericht\nöffnen",
+                "Letzten Exportbericht öffnen",
             )
             self.assertFalse(window.last_export_report_button.isHidden())
             self.assertEqual(
@@ -129,6 +129,21 @@ class ExportSessionUiTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_exported_generation_notice_preserves_preview_meaning(self) -> None:
+        window = self.window()
+        try:
+            with patch.object(window, "_setting_feedback_is_available", return_value=True):
+                window._set_export_button_state(
+                    False, "Dieser Generierungsstand wurde bereits exportiert."
+                )
+            self.assertEqual(
+                window.export_availability_label.text(),
+                "Erneuter Export nicht nötig: Dieser Generierungsstand wurde bereits exportiert.",
+            )
+            self.assertFalse(window.export_button.isEnabled())
+        finally:
+            window.close()
+
     def test_report_action_uses_its_own_column_and_two_readable_lines(self) -> None:
         window = self.window()
         try:
@@ -147,11 +162,11 @@ class ExportSessionUiTests(unittest.TestCase):
             self.assertEqual(column, export_folder_column + 1)
             self.assertEqual(
                 window.last_export_report_button.text().splitlines(),
-                ["Letzten Exportbericht", "öffnen"],
+                ["Letzten Exportbericht öffnen"],
             )
             self.assertGreaterEqual(
                 window.last_export_report_button.sizeHint().height(),
-                2 * window.last_export_report_button.fontMetrics().lineSpacing(),
+                window.last_export_report_button.fontMetrics().lineSpacing(),
             )
             window.show()
             window.footer.show()
@@ -161,6 +176,7 @@ class ExportSessionUiTests(unittest.TestCase):
                 window.open_stl_button,
                 window.last_export_report_button,
                 window.preview_action_control,
+                window.preview_button,
             ):
                 widget.show()
             window.export_button.hide()
@@ -182,7 +198,12 @@ class ExportSessionUiTests(unittest.TestCase):
                 ]
                 self.assertTrue(all(rect.right() < window.width() for rect in bounds))
                 self.assertTrue(
-                    all(left.right() < right.left() for left, right in zip(bounds, bounds[1:]))
+                    all(
+                        left.right() < right.left()
+                        if left.top() == right.top()
+                        else left.bottom() < right.top()
+                        for left, right in zip(bounds, bounds[1:])
+                    )
                 )
         finally:
             window.close()

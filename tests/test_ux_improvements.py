@@ -19,6 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QTextDocument, QTextFormat, QTextTable
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -123,23 +124,170 @@ class UxImprovementTests(unittest.TestCase):
         window = self.window()
         hint = window.full_infill_info_button.toolTip()
         self.assertIn("<table", hint)
+        self.assertIn("Sollte ich diese Einstellung aktivieren?", hint)
+        self.assertIn("Welchen Druckertyp habe ich?", hint)
         self.assertIn("Aktiviert", hint)
         self.assertIn("Deaktiviert", hint)
-        self.assertIn("nur der Turm", hint)
+        self.assertIn("nur für den Kühlturm", hint)
         self.assertIn("Bettschubser", hint)
         self.assertIn("Druckbett bewegt das Modell", hint)
         self.assertIn("CoreXY", hint)
         self.assertIn("Druckkopf übernimmt", hint)
-        self.assertIn("Materialverbrauch", hint)
+        self.assertIn("<b>Aktivierung empfohlen.</b>", hint)
+        self.assertIn("etwas mehr Material", hint)
+        self.assertIn("wird schmaler", hint)
+        self.assertNotIn("oft schmalerer", hint.casefold())
         self.assertIn('align="center"', hint)
-        self.assertNotIn("bgcolor=\"#e8eef4\"", hint)
-        self.assertEqual(hint.count("border-bottom: 1px solid #91a7bb"), 3)
-        self.assertNotIn("Aktiviert<br>", hint)
-        self.assertNotIn("Deaktiviert<br>", hint)
-        self.assertGreaterEqual(hint.count("&nbsp;&nbsp;&nbsp;&nbsp;&#8226;"), 2)
+        self.assertEqual(hint.count("<tr>"), 3)
         self.assertNotIn("Aktuell aktiviert", hint)
         self.assertNotIn("Aktuell deaktiviert", hint)
         self.assertFalse(hasattr(window, "full_infill_hint"))
+        window.close()
+
+    def test_01b_full_infill_hint_has_balanced_spacing_and_column_padding(self) -> None:
+        window = self.window()
+        document = QTextDocument()
+        document.setHtml(window.full_infill_info_button.toolTip())
+        blocks = {}
+        block = document.firstBlock()
+        while block.isValid():
+            blocks[block.text()] = block.blockFormat()
+            block = block.next()
+        first_question = blocks["Sollte ich diese Einstellung aktivieren?"]
+        type_question = blocks["Welchen Druckertyp habe ich?"]
+        answer = next(
+            format_
+            for text, format_ in blocks.items()
+            if "Bettschubser: Das Druckbett bewegt" in text
+        )
+        self.assertEqual(type_question.alignment(), Qt.AlignmentFlag.AlignHCenter)
+        self.assertEqual(first_question.bottomMargin(), 10)
+        self.assertEqual(type_question.bottomMargin(), first_question.bottomMargin())
+        self.assertEqual(answer.bottomMargin(), first_question.bottomMargin())
+        hint = window.full_infill_info_button.toolTip()
+        self.assertIn("Die 100%-Füllung gilt nur", hint)
+        self.assertEqual(hint.count("<u>"), 3)
+        self.assertEqual(hint.count("</u>"), 3)
+
+        frames = document.rootFrame().begin()
+        table = None
+        while not frames.atEnd():
+            frame = frames.currentFrame()
+            if isinstance(frame, QTextTable):
+                table = frame
+                break
+            frames += 1
+        self.assertIsNotNone(table)
+        layout = document.documentLayout()
+        answer_block = document.firstBlock()
+        while answer_block.isValid() and "Bettschubser:" not in answer_block.text():
+            answer_block = answer_block.next()
+        table_header = table.cellAt(0, 0).firstCursorPosition().block()
+        last_row_bottom = max(
+            layout.blockBoundingRect(
+                table.cellAt(table.rows() - 1, column).firstCursorPosition().block()
+            ).bottom()
+            for column in range(table.columns())
+        )
+        final_paragraph = document.lastBlock()
+        self.assertEqual(
+            layout.blockBoundingRect(table_header).top()
+            - layout.blockBoundingRect(answer_block).bottom(),
+            layout.blockBoundingRect(final_paragraph).top() - last_row_bottom,
+        )
+        for row in range(table.rows()):
+            first_cell = table.cellAt(row, 0).format()
+            self.assertEqual(
+                first_cell.property(QTextFormat.Property.TableCellLeftPadding),
+                0,
+            )
+            for column in (1, 2):
+                cell = table.cellAt(row, column).format()
+                self.assertGreaterEqual(
+                    cell.property(QTextFormat.Property.TableCellLeftPadding),
+                    12,
+                )
+                self.assertGreaterEqual(
+                    cell.property(QTextFormat.Property.TableCellRightPadding),
+                    12,
+                )
+        window.close()
+
+    def test_setting_info_icons_precede_controls(self) -> None:
+        window = self.window()
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "referenz.stl geprüft", analysis_complete=True
+        )
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.resize(1300, 900)
+        window.show()
+        self.app.processEvents()
+        for setting in window._setting_widgets.values():
+            self.assertEqual(setting.info_button.width(), 19)
+            self.assertEqual(setting.info_button.height(), 19)
+            if not setting.isVisible() or setting.info_button.isHidden():
+                continue
+            info_right = setting.info_button.mapTo(
+                window, setting.info_button.rect().topRight()
+            ).x()
+            label_left = setting.label.mapTo(
+                window, setting.label.rect().topLeft()
+            ).x()
+            self.assertEqual(label_left - info_right - 1, 10)
+            self.assertLess(
+                setting.info_button.mapTo(window, setting.info_button.rect().center()).x(),
+                setting.label.mapTo(window, setting.label.rect().center()).x(),
+            )
+            self.assertLessEqual(
+                abs(
+                    setting.info_button.mapTo(window, setting.info_button.rect().center()).y()
+                    - setting.label.mapTo(window, setting.label.rect().center()).y()
+                ),
+                1,
+            )
+        for info_button, checkbox in (
+            (window.full_infill_info_button, window.full_infill_checkbox),
+            (window.automatic_base_info_button, window.automatic_base_checkbox),
+        ):
+            self.assertEqual(info_button.width(), 19)
+            self.assertEqual(info_button.height(), 19)
+            self.assertEqual(
+                checkbox.mapTo(window, checkbox.rect().topLeft()).x()
+                - info_button.mapTo(window, info_button.rect().topRight()).x()
+                - 1,
+                10,
+            )
+            self.assertLess(
+                info_button.mapTo(window, info_button.rect().center()).x(),
+                checkbox.mapTo(window, checkbox.rect().topLeft()).x(),
+                checkbox.objectName(),
+            )
+            self.assertLessEqual(
+                abs(
+                    info_button.mapTo(window, info_button.rect().center()).y()
+                    - checkbox.mapTo(window, checkbox.rect().center()).y()
+                ),
+                1,
+            )
+        self.assertEqual(window.output_root_info_button.width(), 19)
+        window.close()
+
+    def test_01c_automatic_base_hint_explains_width_and_shape_without_manual_mode(self) -> None:
+        window = self.window()
+        hint = window.automatic_base_info_button.toolTip()
+        document = QTextDocument()
+        document.setHtml(hint)
+        text = document.toPlainText()
+        self.assertIn("Wie breit wird der Standfuß?", text)
+        self.assertIn("Wie ist der Standfuß geformt?", text)
+        self.assertIn("mindestens 20 mm", text)
+        self.assertIn("ein Fünftel der Objekthöhe", text)
+        self.assertIn("150 mm Höhe sind das 30 mm", text)
+        self.assertIn("ersten zwei Drucklayer", text)
+        self.assertIn("nach innen gebogenen", text)
+        self.assertNotIn("manuell", text.casefold())
         window.close()
 
     def test_01a_full_infill_checkbox_does_not_move_on_hover(self) -> None:

@@ -17,6 +17,7 @@ from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.models import GenerationSettings
 from cooling_tower.preview import PreviewExportResult, OutputMode
 from cooling_tower.settings_compatibility import merge_compatible_setting_changes
+from test_phase9 import make_snapshot
 
 
 class LayerTimeToleranceTests(unittest.TestCase):
@@ -36,7 +37,7 @@ class LayerTimeToleranceTests(unittest.TestCase):
         return store.save(settings, output_root='output', window_width=900, window_height=900)
 
     def test_direct_and_multistep_migration_backup_and_roundtrip(self):
-        for version in (0, 8, 10, 11):
+        for version in (0, 8, 10, 11, 16):
             with self.subTest(version=version):
                 original = json.dumps({'settings_schema_version': version,
                     'generation': {'target_layer_time_s': 12.0, 'base_height_mm': 7.0}}).encode()
@@ -49,8 +50,8 @@ class LayerTimeToleranceTests(unittest.TestCase):
                 self.assertNotIn('base_height_mm', payload['generation'])
                 self.assertNotIn('base_height_mm', settings.to_dict())
                 self.assertEqual(store.last_migration_backup.read_bytes(), original)
-                self.save(store, replace(settings, layer_time_tolerance_s=0.01))
-                self.assertEqual(self.store().load()[0].layer_time_tolerance_s, 0.01)
+                self.save(store, replace(settings, layer_time_tolerance_s=0.1))
+                self.assertEqual(self.store().load()[0].layer_time_tolerance_s, 0.1)
                 self.save(store, replace(settings, layer_time_tolerance_s=3.0))
                 self.assertEqual(self.store().load()[0].layer_time_tolerance_s, 3.0)
 
@@ -86,9 +87,10 @@ class LayerTimeToleranceTests(unittest.TestCase):
         self.assertNotIn('base_height_mm', obsolete.payload['generation'])
         stable_id = 'generation.layer_time_tolerance_s'
         for value, token, accepted in (
-            (0.01, 'layer-time-tolerance-seconds-v1', True),
+            (0.1, 'layer-time-tolerance-seconds-v1', True),
             (3.0, 'layer-time-tolerance-seconds-v1', True),
-            (0.009, 'layer-time-tolerance-seconds-v1', False),
+            (0.01, 'layer-time-tolerance-seconds-v1', False),
+            (0.099, 'layer-time-tolerance-seconds-v1', False),
             (3.01, 'layer-time-tolerance-seconds-v1', False),
             (True, 'layer-time-tolerance-seconds-v1', False),
             ('0.5', 'layer-time-tolerance-seconds-v1', False),
@@ -112,7 +114,8 @@ class LayerTimeToleranceTests(unittest.TestCase):
                     self.assertEqual(settings.target_layer_time_s, expected)
                     self.assertEqual(store.last_migration_backup.read_bytes(), original)
         stable_id = 'generation.target_layer_time_s'
-        for value, token in ((31, 'duration-seconds-v1'), (0, 'duration-seconds-v1'),
+        for value, token in ((31, 'duration-seconds-v1'), (4.99, 'duration-seconds-v1'),
+                             (0, 'duration-seconds-v1'),
                              (True, 'duration-seconds-v1'), ('9', 'duration-seconds-v1'),
                              (9000, 'duration-milliseconds-v1')):
             result = merge_compatible_setting_changes(
@@ -121,12 +124,53 @@ class LayerTimeToleranceTests(unittest.TestCase):
             self.assertNotIn(stable_id, result.accepted_ids)
             self.assertEqual(result.payload['generation']['target_layer_time_s'], 9)
 
+    def test_new_time_floors_migrate_directly_and_through_older_schemas(self):
+        for version in (10, 16):
+            with self.subTest(version=version):
+                original = json.dumps({'settings_schema_version': version,
+                    'generation': {'target_layer_time_s': 2.0,
+                                   'layer_time_tolerance_s': 0.01}}).encode()
+                self.path.write_bytes(original)
+                store = self.store()
+                settings, _ = store.load()
+                self.assertEqual(settings.target_layer_time_s, 5.0)
+                self.assertEqual(settings.layer_time_tolerance_s, 0.1)
+                self.assertEqual(store.last_migration_backup.read_bytes(), original)
+
+    def test_preslice_target_floor_and_fallback(self):
+        window = MainWindow(user_settings_path=self.path, enable_update_check=False,
+                            enable_startup_slicer_discovery=False)
+        try:
+            self.assertEqual(window.timing_group.title_label.text(), 'Layerzeit und Toleranz')
+            self.assertEqual(window.target_time_spin.property('validationMinimum'), 5.0)
+            snapshot = make_snapshot(self.path.parent / 'source.gcode', (8.123, 11.0))
+            window._adopt_common_analysis_snapshot(snapshot)
+            self.assertEqual(window.target_time_spin.property('validationMinimum'), 8.7)
+            range_text = window._setting_widgets['target_layer_time_s'].range_label.text()
+            self.assertEqual(range_text, '8,7-30,0 Sek.')
+            window.target_time_spin.setValue(8.6)
+            window.validate_form()
+            self.assertTrue(window._static_field_errors['target_layer_time_s'])
+            window.target_time_spin.setValue(8.7)
+            window.validate_form()
+            self.assertNotIn('target_layer_time_s', window._static_field_errors)
+
+            for observed in (1.0, float('nan'), -1.0, 29.6):
+                window.analysis_snapshot = replace(snapshot, minimum_layer_time_s=observed)
+                window.validate_form()
+                self.assertEqual(window.target_time_spin.property('validationMinimum'), 5.0)
+            window.analysis_snapshot = None
+            window.validate_form()
+            self.assertEqual(window.target_time_spin.property('validationMinimum'), 5.0)
+        finally:
+            window.close()
+
     def test_ui_config_export_list_and_tolerance_boundary(self):
         window = MainWindow(user_settings_path=self.path, enable_update_check=False,
                             enable_startup_slicer_discovery=False)
         try:
             spin = window.layer_time_tolerance_spin
-            self.assertEqual((spin.property('validationMinimum'), spin.property('validationMaximum'), spin.value()), (0.01, 3.0, 0.25))
+            self.assertEqual((spin.property('validationMinimum'), spin.property('validationMaximum'), spin.value()), (0.1, 3.0, 0.25))
             spin.setValue(0.37)
             self.assertEqual(window.collect_settings().layer_time_tolerance_s, 0.37)
             self.assertEqual(window._calibration_config().time_tolerance_s, 0.37)

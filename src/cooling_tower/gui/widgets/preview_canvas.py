@@ -111,7 +111,22 @@ class PreviewCanvas(QWidget):
         )
         self.navigation_status_label.setMinimumHeight(30)
         self.navigation_status_label.hide()
+        self._navigation_overlay_parent: QWidget = self
+        self._navigation_upward_offset = 0
         self.set_navigation_enabled(False)
+
+    def set_navigation_overlay_parent(
+        self, parent: QWidget, *, upward_offset: int = 0
+    ) -> None:
+        """Allow navigation controls to straddle the canvas header safely."""
+
+        self._navigation_overlay_parent = parent
+        self._navigation_upward_offset = max(0, upward_offset)
+        self.navigation_toggle.setParent(parent)
+        self.navigation_status_label.setParent(parent)
+        self._position_navigation_toggle()
+        self.navigation_toggle.raise_()
+        self.navigation_status_label.raise_()
 
     def set_scene(
         self,
@@ -197,10 +212,15 @@ class PreviewCanvas(QWidget):
 
     def _position_navigation_toggle(self) -> None:
         margin = 10
-        self.navigation_toggle.move(margin, margin)
+        canvas_origin = self.mapTo(
+            self._navigation_overlay_parent, QPoint(0, 0)
+        )
+        x = canvas_origin.x() + margin
+        y = canvas_origin.y() + margin - self._navigation_upward_offset
+        self.navigation_toggle.move(x, y)
         self.navigation_status_label.move(
             self.navigation_toggle.geometry().right() + 7,
-            margin
+            y
             + max(
                 0,
                 (

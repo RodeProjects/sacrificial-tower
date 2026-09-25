@@ -161,7 +161,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         editors = (
             window.target_time_spin,
-            window.safety_factor_spin,
+            window.layer_time_tolerance_spin,
             window.maximum_outer_spin,
         )
         self.assertEqual(
@@ -173,17 +173,61 @@ class Phase18UiTests(unittest.TestCase):
                 )
             },
         )
-        row = window._setting_widgets["safety_factor"]
+        row = window._setting_widgets["layer_time_tolerance_s"]
         grid = row.layout()
-        self.assertEqual(grid.getItemPosition(grid.indexOf(row.label))[:2], (0, 0))
-        self.assertEqual(grid.columnStretch(0), 1)
-        self.assertEqual(grid.columnStretch(1), 0)
+        self.assertEqual(grid.getItemPosition(grid.indexOf(row.info_button))[:2], (0, 0))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(row.label))[:2], (0, 1))
+        self.assertEqual(grid.columnStretch(0), 0)
+        self.assertEqual(grid.columnStretch(1), 1)
         self.assertEqual(grid.getItemPosition(grid.indexOf(row.editor))[:2], (0, 2))
         self.assertEqual(
             grid.getItemPosition(grid.indexOf(row.reset_button))[:2],
             (0, 3),
         )
         self.assertEqual(window.timing_group.state(), SectionState.NEUTRAL)
+        window.close()
+
+    def test_header_border_only_appears_below_top_of_real_scroll_range(self) -> None:
+        window = self.window()
+        window.resize(1400, 1400)
+        window.show()
+        self.app.processEvents()
+        scrollbar = window.settings_scroll.verticalScrollBar()
+        self.assertEqual(scrollbar.maximum(), scrollbar.minimum())
+        self.assertFalse(window.main_header.property("scrolled"))
+        footer_border = window.footer.grab().toImage().pixelColor(
+            window.footer.width() // 2, 0
+        )
+
+        window.settings_content.setMinimumHeight(
+            window.settings_scroll.viewport().height() + 300
+        )
+        self.app.processEvents()
+        self.assertGreater(scrollbar.maximum(), scrollbar.minimum())
+        self.assertFalse(window.main_header.property("scrolled"))
+        header_pixel = lambda: window.main_header.grab().toImage().pixelColor(
+            window.main_header.width() // 2, window.main_header.height() - 1
+        )
+        self.assertNotEqual(header_pixel(), footer_border)
+
+        scrollbar.setValue(scrollbar.minimum() + 1)
+        self.app.processEvents()
+        self.assertTrue(window.main_header.property("scrolled"))
+        self.assertEqual(header_pixel(), footer_border)
+
+        scrollbar.setValue(scrollbar.minimum())
+        self.app.processEvents()
+        self.assertFalse(window.main_header.property("scrolled"))
+        self.assertNotEqual(header_pixel(), footer_border)
+
+        scrollbar.setValue(scrollbar.maximum())
+        self.app.processEvents()
+        self.assertTrue(window.main_header.property("scrolled"))
+        window._refresh_settings_content_minimum_height()
+        self.app.processEvents()
+        self.assertEqual(scrollbar.maximum(), scrollbar.minimum())
+        self.assertFalse(window.main_header.property("scrolled"))
+        self.assertNotEqual(header_pixel(), footer_border)
         window.close()
 
     def test_ready_columns_and_single_geometry_column_are_independently_sized(self) -> None:
@@ -410,7 +454,7 @@ class Phase18UiTests(unittest.TestCase):
         button = window.full_infill_info_button
         self.assertEqual(
             (button.width(), button.height()),
-            (24, 24),
+            (19, 19),
         )
         self.assertTrue(button.toolTip())
         self.assertIn("border-radius: 16px", window.styleSheet())
@@ -455,15 +499,7 @@ class Phase18UiTests(unittest.TestCase):
             [card.title() for card in window.findChildren(SectionCard)],
         )
         self.assertTrue(
-            geometry.content_widget.isAncestorOf(window.mesh_segments_spin)
-        )
-        self.assertTrue(
             geometry.content_widget.isAncestorOf(window.local_window_spin)
-        )
-        self.assertTrue(
-            window.geometry_group.isAncestorOf(
-                window.mesh_segments_spin
-            )
         )
         self.assertTrue(
             window.geometry_split.isAncestorOf(
@@ -474,10 +510,6 @@ class Phase18UiTests(unittest.TestCase):
             window.stability_group.isAncestorOf(
                 window.geometry_calculation_section
             )
-        )
-        self.assertEqual(
-            window._setting_widgets["mesh_segments"].label.text(),
-            "Kreissegmente",
         )
         self.assertEqual(
             window._setting_widgets["local_reference_window"].label.text(),
@@ -507,7 +539,6 @@ class Phase18UiTests(unittest.TestCase):
         window.ready_grid.show()
         self.app.processEvents()
         self.assertFalse(geometry.content_widget.isHidden())
-        self.assertFalse(window.mesh_segments_spin.isHidden())
         self.assertFalse(window.local_window_spin.isHidden())
         self.assertGreater(geometry.content_widget.height(), 0)
         self.assertEqual(window.geometry_group.title_label.font().pointSizeF(), 11.5)
@@ -557,7 +588,7 @@ class Phase18UiTests(unittest.TestCase):
             "#1769aa",
         )
         window._refresh_collapsible_error_badges(
-            {"mesh_segments": ["Ungültige Segmentanzahl"]}
+            {"local_reference_window": ["Ungültiges Zeitfenster"]}
         )
         self.assertEqual(geometry.badge_label.text(), "1 Fehler")
         self.assertEqual(geometry.state(), SectionState.ERROR)
@@ -1436,6 +1467,17 @@ class Phase18UiTests(unittest.TestCase):
         changed = QSignalSpy(dialog.canvas.camera_changed)
 
         self.assertEqual(dialog.top_button.text(), "Draufsicht")
+        self.assertFalse(dialog.top_button.isEnabled())
+        dialog.canvas.set_scene(PreviewScene(
+            object_segments=(LineSegment3D(Point3D(0, 0, 0), Point3D(1, 1, 1)),),
+            tower_segments=(LineSegment3D(Point3D(10, 10, 0), Point3D(10, 10, 1)),),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(10, 10),
+            source_segment_count=1,
+            displayed_segment_count=1,
+            tower_height_mm=1,
+        ))
+        dialog.mark_current()
         dialog.top_button.click()
 
         self.assertEqual(dialog.canvas.yaw_deg, 0.0)
@@ -1468,9 +1510,9 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         inline = window._setting_widgets["target_layer_time_s"].message_label.text()
         self.assertNotIn("Gewünschte Mindest-Layerzeit: 0,0 Sek.", inline)
-        self.assertIn("Mindestwert 0,01 Sek.", inline)
+        self.assertIn("Mindestwert 5,0 Sek.", inline)
         self.assertIn("Gewünschte Mindest-Layerzeit: 0,0 Sek.", window.validation_label.text())
-        self.assertIn("Mindestwert 0,01 Sek.", window.validation_label.text())
+        self.assertIn("Mindestwert 5,0 Sek.", window.validation_label.text())
         self.assertNotIn("must be", window.validation_label.text().casefold())
         window.close()
 
@@ -1660,7 +1702,6 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertTrue(window.minimum_outer_spin.isVisible())
         self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
-        self.assertTrue(window.mesh_segments_spin.isVisible())
         self.assertTrue(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
@@ -1684,7 +1725,6 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(body.isHidden())
         self.assertGreaterEqual(body.height(), body.sizeHint().height() - 2)
-        self.assertTrue(window.mesh_segments_spin.isVisible())
         self.assertTrue(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
@@ -1742,15 +1782,15 @@ class Phase18UiTests(unittest.TestCase):
         self.assertIn("Vorsicht", setting.secondary_message_label.text())
         self.assertIn("Maximalwert 70,0 °", window.validation_label.text())
 
-        integer_setting = window._setting_widgets["mesh_segments"]
-        window.mesh_segments_spin.lineEdit().setText("2")
+        integer_setting = window._setting_widgets["local_reference_window"]
+        window.local_window_spin.lineEdit().setText("0")
         self.app.processEvents()
-        self.assertEqual(window.mesh_segments_spin.value(), 2)
-        self.assertIn("Mindestwert 3", integer_setting.message_label.text())
-        window.mesh_segments_spin.lineEdit().setText("513")
+        self.assertEqual(window.local_window_spin.value(), 0)
+        self.assertIn("Mindestwert 1", integer_setting.message_label.text())
+        window.local_window_spin.lineEdit().setText("1000")
         self.app.processEvents()
-        self.assertEqual(window.mesh_segments_spin.value(), 513)
-        self.assertIn("Maximalwert 512", integer_setting.message_label.text())
+        self.assertEqual(window.local_window_spin.value(), 1000)
+        self.assertIn("Maximalwert 999", integer_setting.message_label.text())
         window.close()
 
     def test_footer_explains_causes_without_solution_suggestions(self) -> None:
@@ -1866,19 +1906,16 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         geometry = window.geometry_settings_group
         self.assertTrue(geometry.isChecked())
-        self.assertFalse(window.mesh_segments_spin.isHidden())
         self.assertFalse(window.local_window_spin.isHidden())
         geometry.set_expanded(False, animated=True)
         QTest.qWait(METRICS.animation_duration_ms + 40)
         self.app.processEvents()
         self.assertTrue(geometry.content_widget.isHidden())
-        self.assertFalse(window.mesh_segments_spin.isVisible())
         self.assertFalse(window.local_window_spin.isVisible())
         geometry.set_expanded(True, animated=True)
         QTest.qWait(METRICS.animation_duration_ms + 40)
         self.app.processEvents()
         self.assertFalse(geometry.content_widget.isHidden())
-        self.assertFalse(window.mesh_segments_spin.isHidden())
         self.assertFalse(window.local_window_spin.isHidden())
         window.close()
 
@@ -1889,7 +1926,8 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.app.processEvents()
         self.assertTrue(window.footer.isHidden())
-        self.assertEqual(window.footer.maximumHeight(), 350)
+        self.assertLessEqual(window.footer.height(), 350)
+        self.assertEqual(window.footer.maximumHeight(), window.footer.height())
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Layoutprüfung")
         window.workflow.complete_preparation()
@@ -1932,7 +1970,7 @@ class Phase18UiTests(unittest.TestCase):
                     )
                 )
             )
-        self.assertEqual(window.reset_button.parent().objectName(), "mainHeader")
+        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
         window.close()
 
     def test_manual_slicer_prediction_action_is_removed(self) -> None:
@@ -1940,8 +1978,8 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "slicer_prediction_button"))
         self.assertFalse(hasattr(window, "prediction_advice_label"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
-        self.assertEqual(window.preview_iterations, 16)
-        self.assertEqual(window.preview_joint_slices, 10)
+        self.assertEqual(window.preview_iterations, 18)
+        self.assertEqual(window.preview_joint_slices, 12)
         window.close()
 
     def test_left_drag_rotation_directions_are_inverted(self) -> None:

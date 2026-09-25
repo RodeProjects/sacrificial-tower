@@ -48,6 +48,7 @@ class PreviewBuildController(QObject):
         progress_callback: Callable[[int, str], None],
         accept_best_event: Event | None = None,
         joint_progress_callback: Callable[[object], None] | None = None,
+        joint_scene_callback: Callable[[object], None] | None = None,
         seed_preview: PreviewResult | None = None,
     ) -> PreviewResult:
         self._assert_owner_thread()
@@ -65,6 +66,7 @@ class PreviewBuildController(QObject):
                     accept_best_event=accept_best_event,
                     progress_callback=progress,
                     joint_progress_callback=joint_progress_callback,
+                    joint_scene_callback=joint_scene_callback,
                 )
             else:
                 result = self.service.prepare(
@@ -73,6 +75,7 @@ class PreviewBuildController(QObject):
                     accept_best_event=accept_best_event,
                     progress_callback=progress,
                     joint_progress_callback=joint_progress_callback,
+                    joint_scene_callback=joint_scene_callback,
                     seed_preview=seed_preview,
                 )
         except PreviewCancelled:

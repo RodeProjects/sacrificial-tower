@@ -19,11 +19,8 @@ def assess_tower_need(
 ) -> TowerNeedAssessment:
     """Determine whether a tower is needed and where its mesh must end."""
     target = settings.target_layer_time_s
-    safety_factor = settings.safety_factor
     if not math.isfinite(target) or target <= 0.0:
         raise ValueError("Target layer time must be greater than zero.")
-    if not math.isfinite(safety_factor) or safety_factor < 1.0:
-        raise ValueError("Safety factor must be at least 1.0.")
     if not snapshot.layers:
         raise ValueError("A tower assessment requires printable layers.")
 
@@ -42,7 +39,6 @@ def assess_tower_need(
         return TowerNeedAssessment(
             tower_required=False,
             target_layer_time_s=target,
-            safety_factor=safety_factor,
             deficit_layer_count=0,
             first_deficit_layer_index=None,
             last_deficit_layer_index=None,
@@ -74,7 +70,6 @@ def assess_tower_need(
     return TowerNeedAssessment(
         tower_required=True,
         target_layer_time_s=target,
-        safety_factor=safety_factor,
         deficit_layer_count=len(deficit_positions),
         first_deficit_layer_index=first_layer.index,
         last_deficit_layer_index=last_layer.index,

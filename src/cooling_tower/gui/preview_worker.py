@@ -22,6 +22,7 @@ class PreviewWorker(CancelableWorker):
     finished = Signal(int)
     joint_phase_started = Signal(int, int, int)
     joint_progress = Signal(int, object)
+    joint_scene = Signal(int, object)
 
     def __init__(
         self,
@@ -71,6 +72,7 @@ class PreviewWorker(CancelableWorker):
                     accept_best_event=self.accept_best_event,
                     progress_callback=self._report_progress,
                     joint_progress_callback=self._report_joint_progress,
+                    joint_scene_callback=self._report_joint_scene,
                     seed_preview=self.seed_preview,
                 )
             except PreviewCancelled:
@@ -231,3 +233,6 @@ class PreviewWorker(CancelableWorker):
 
     def _report_joint_progress(self, progress: object) -> None:
         self.joint_progress.emit(self.request_id, progress)
+
+    def _report_joint_scene(self, scene: object) -> None:
+        self.joint_scene.emit(self.request_id, scene)

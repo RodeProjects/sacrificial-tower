@@ -68,6 +68,7 @@ class PreviewScene:
     object_height_mm: float | None = None
     object_layer_count: int | None = None
     tower_layer_count: int | None = None
+    tower_circle_segments: int | None = None
 
 
 def _json_value(value: Any) -> Any:
@@ -108,6 +109,7 @@ class PreviewRequest:
         repr=False,
     )
     maximum_object_segments: int = 60_000
+    force_tower: bool = False
 
     def __post_init__(self) -> None:
         if self.maximum_object_segments < 100:
@@ -210,6 +212,7 @@ class PreviewRequest:
                 self.snapshot, "file_modified_ns", None
             ),
             "settings": self.settings.to_dict(),
+            "force_tower": self.force_tower,
             "output_mode": self.output_mode.value,
             "slicer_identity_key": self.slicer_identity_key,
             "profile_fingerprint": self.profile_fingerprint,
@@ -243,6 +246,7 @@ class PreviewRequest:
             "maximum_iterations",
             "maximum_joint_slices",
             "minimum_joint_slices",
+            "completed_joint_slices_before_run",
             "perform_joint_final_slice",
         ):
             calibration.pop(key, None)

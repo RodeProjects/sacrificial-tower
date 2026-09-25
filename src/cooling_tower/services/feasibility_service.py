@@ -42,7 +42,6 @@ def assess_profile_feasibility(
 
     profile_config = TowerProfileConfig(
         target_layer_time_s=settings.target_layer_time_s,
-        safety_factor=settings.safety_factor,
         minimum_radius_mm=settings.minimum_outer_radius_mm,
         maximum_radius_mm=settings.maximum_outer_radius_mm,
         local_time_factor_window=settings.local_reference_window,

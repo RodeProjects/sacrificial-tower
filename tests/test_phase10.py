@@ -52,7 +52,6 @@ from cooling_tower.tower.wall_calculator import calculate_wall_path_length
 def settings(**changes: object) -> GenerationSettings:
     configured = GenerationSettings(
         target_layer_time_s=10.0,
-        safety_factor=1.0,
         minimum_outer_radius_mm=5.0,
         maximum_outer_radius_mm=10.0,
         minimum_wall_thickness_mm=0.8,
@@ -66,7 +65,6 @@ def settings(**changes: object) -> GenerationSettings:
         maximum_contraction_angle_deg=50.0,
         maximum_wall_change_per_mm_z=100.0,
         local_reference_window=3,
-        mesh_segments=24,
     )
     return replace(configured, **changes)
 

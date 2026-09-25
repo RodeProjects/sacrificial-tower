@@ -28,6 +28,19 @@ class TowerMeshConfig:
     segment_count: int = 32
 
 
+def automatic_mesh_segments(profile: object) -> int:
+    """Use 0.9 segments/mm per candidate to keep every STL ring watertight."""
+    radii = [
+        float(
+            getattr(point, "outer_radius_mm", getattr(point, "radius_mm", math.nan))
+        )
+        for point in profile.points
+    ]
+    if not radii or any(not math.isfinite(radius) or radius <= 0 for radius in radii):
+        raise MeshGenerationError("The tower profile needs finite positive radii.")
+    return max(16, min(128, math.ceil(1.8 * max(radii))))
+
+
 @dataclass(frozen=True, slots=True)
 class TriangleMesh:
     vertices: tuple[Vector3, ...]

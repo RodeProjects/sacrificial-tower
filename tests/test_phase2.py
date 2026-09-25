@@ -60,7 +60,7 @@ def make_layer(
 
 
 class TowerRadiusProfileTests(unittest.TestCase):
-    def test_deficit_safety_factor_and_radius_limits(self) -> None:
+    def test_deficit_and_radius_limits(self) -> None:
         layers = (
             make_layer(
                 1,
@@ -83,7 +83,6 @@ class TowerRadiusProfileTests(unittest.TestCase):
         )
         config = TowerProfileConfig(
             target_layer_time_s=30.0,
-            safety_factor=1.10,
             minimum_radius_mm=6.0,
             maximum_radius_mm=40.0,
             local_time_factor_window=3,
@@ -104,19 +103,19 @@ class TowerRadiusProfileTests(unittest.TestCase):
 
         self.assertAlmostEqual(second.time_deficit_s, 10.0)
         self.assertAlmostEqual(second.additional_path_mm, 100.0)
-        self.assertAlmostEqual(second.safety_adjusted_path_mm, 110.0)
+        self.assertAlmostEqual(second.safety_adjusted_path_mm, 100.0)
         self.assertAlmostEqual(
             second.calculated_radius_mm,
-            110.0 / math.tau,
+            100.0 / math.tau,
         )
         self.assertAlmostEqual(
             second.radius_mm,
-            110.0 / math.tau,
+            100.0 / math.tau,
         )
         self.assertEqual(second.radius_limit, "none")
         self.assertAlmostEqual(
             second.estimated_combined_layer_time_s,
-            31.0,
+            30.0,
         )
 
         self.assertAlmostEqual(third.time_deficit_s, 1.0)
@@ -134,7 +133,6 @@ class TowerRadiusProfileTests(unittest.TestCase):
         )
         config = TowerProfileConfig(
             target_layer_time_s=100.0,
-            safety_factor=1.10,
             minimum_radius_mm=6.0,
             maximum_radius_mm=40.0,
             local_time_factor_window=1,
@@ -356,10 +354,6 @@ class TowerRadiusProfileTests(unittest.TestCase):
             TowerProfileConfig(target_layer_time_s=0.0),
             TowerProfileConfig(
                 target_layer_time_s=5.0,
-                safety_factor=0.9,
-            ),
-            TowerProfileConfig(
-                target_layer_time_s=5.0,
                 minimum_radius_mm=0.0,
             ),
             TowerProfileConfig(
@@ -393,7 +387,6 @@ class Phase2OutputTests(unittest.TestCase):
             layers,
             TowerProfileConfig(
                 target_layer_time_s=30.0,
-                safety_factor=1.10,
                 local_time_factor_window=1,
             ),
         )
@@ -420,12 +413,12 @@ class Phase2OutputTests(unittest.TestCase):
         self.assertEqual(row["radius_limit"], "none")
         self.assertAlmostEqual(float(row["time_deficit_s"]), 10.0)
         self.assertAlmostEqual(
-            float(row["safety_adjusted_path_mm"]),
-            110.0,
+            float(row["additional_path_mm"]),
+            100.0,
         )
         self.assertAlmostEqual(
             float(row["tower_radius_mm"]),
-            110.0 / math.tau,
+            100.0 / math.tau,
             places=5,
         )
 
@@ -480,8 +473,6 @@ class Phase2OutputTests(unittest.TestCase):
                     str(gcode_path),
                     "--target-time",
                     "5",
-                    "--safety-factor",
-                    "1.0",
                     "--minimum-radius",
                     "1",
                     "--maximum-radius",

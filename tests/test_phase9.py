@@ -56,12 +56,9 @@ SAMPLE_GCODE = "\n".join(
 
 def generation_settings(
     target_layer_time_s: float,
-    *,
-    safety_factor: float = 1.0,
 ) -> GenerationSettings:
     return GenerationSettings(
         target_layer_time_s=target_layer_time_s,
-        safety_factor=safety_factor,
         minimum_outer_radius_mm=3.0,
         maximum_outer_radius_mm=20.0,
         minimum_wall_thickness_mm=0.8,
@@ -76,7 +73,6 @@ def generation_settings(
         maximum_radius_change_per_mm_z=10.0,
         maximum_wall_change_per_mm_z=10.0,
         local_reference_window=3,
-        mesh_segments=12,
     )
 
 
@@ -236,18 +232,10 @@ class TowerNeedAssessmentTests(unittest.TestCase):
         self.assertAlmostEqual(assessment.tower_end_z_mm, 0.65)
         self.assertEqual(assessment.tower_layer_count, 3)
 
-    def test_safety_factor_changes_capacity_not_need_decision(self) -> None:
+    def test_no_tower_when_source_already_meets_target(self) -> None:
         snapshot = make_snapshot(self.source, (5.0, 6.0))
-        first = assess_tower_need(
-            snapshot,
-            generation_settings(5.0, safety_factor=1.0),
-        )
-        second = assess_tower_need(
-            snapshot,
-            generation_settings(5.0, safety_factor=2.0),
-        )
-        self.assertFalse(first.tower_required)
-        self.assertFalse(second.tower_required)
+        result = assess_tower_need(snapshot, generation_settings(5.0))
+        self.assertFalse(result.tower_required)
 
 
 class AnalysisCacheTests(unittest.TestCase):

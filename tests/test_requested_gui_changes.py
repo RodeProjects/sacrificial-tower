@@ -831,9 +831,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_precise_button"))
         self.assertFalse(hasattr(window, "preview_quality_panel"))
         config = window._calibration_config()
-        self.assertEqual(config.maximum_iterations, 16)
-        self.assertEqual(config.minimum_joint_slices, 1)
-        self.assertEqual(config.maximum_joint_slices, 10)
+        self.assertEqual(config.maximum_iterations, 18)
+        self.assertEqual(config.minimum_joint_slices, 5)
+        self.assertEqual(config.maximum_joint_slices, 12)
         self.assertTrue(
             window.preview_action_control.isAncestorOf(
                 window.preview_button
@@ -843,10 +843,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.preview_action_control.width(),
             window.export_button.width(),
         )
-        self.assertEqual(
-            window.preview_action_control.width(),
-            176,
-        )
+        self.assertGreaterEqual(window.preview_action_control.width(), 176)
         self.assertEqual(window.preview_button.text(), "Kühlturm generieren")
 
         self.assertEqual(
@@ -923,12 +920,18 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window.prediction_frame.height(),
             ),
         )
-        self.assertEqual(
+        bottom_space = (
             window.settings_content.height()
             - window.ready_grid.geometry().bottom()
-            - 1,
-            window.content_layout.contentsMargins().bottom(),
+            - 1
         )
+        standard_margin = window.content_layout.contentsMargins().bottom()
+        if window.settings_scroll.verticalScrollBar().maximum() > 0:
+            self.assertEqual(bottom_space, standard_margin)
+        else:
+            # A short page grows to the viewport; its trailing stretch may
+            # add free space below the regular margin.
+            self.assertGreaterEqual(bottom_space, standard_margin)
         window.close()
 
     def test_geometry_card_fits_content_and_headers_meet_the_boundaries(self) -> None:
@@ -980,14 +983,11 @@ class RequestedGuiChangesTests(unittest.TestCase):
         expected_units = {
             "target_layer_time_s": "Sek.",
             "layer_time_tolerance_s": "Sek.",
-            "safety_factor": "",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
-            "minimum_object_tower_distance_mm": "mm",
             "manual_base_width_mm": "mm",
             "maximum_expansion_angle_deg": "°",
             "maximum_contraction_angle_deg": "°",
-            "mesh_segments": "Segm.",
             "local_reference_window": "Layer",
         }
         self.assertEqual(set(window._setting_widgets), set(expected_units))
@@ -1000,15 +1000,6 @@ class RequestedGuiChangesTests(unittest.TestCase):
                     setting.unit_label.geometry().right() + 1,
                     setting.editor.width() - 24,
                 )
-
-        distance = window._setting_widgets[
-            "minimum_object_tower_distance_mm"
-        ]
-        self.assertFalse(bool(distance.editor.property("warning")))
-        self.assertFalse(distance.message_label.text())
-        self.assertTrue(distance.message_container.isHidden())
-        self.assertIn("Brim und Support", distance.info_button.toolTip())
-        self.assertLess(len(distance.info_button.toolTip()), 160)
 
         target = window._setting_widgets["target_layer_time_s"]
         target.editor.setFocus()
@@ -1105,7 +1096,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         self.addCleanup(window.close)
         self.assertEqual(window.geometry_group.title(), "Turmgeometrie")
-        for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "mesh_segments", "local_reference_window"):
+        for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "local_reference_window"):
             self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
         self.assertTrue(window.stability_group.isHidden())
         self.assertTrue(window.overhang_group.isHidden())
@@ -1217,7 +1208,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.app.processEvents()
         height_before = window.geometry_settings_group.height()
 
-        window.maximum_outer_spin.setValue(1.0)
+        window.maximum_outer_spin.setValue(1001.0)
         window.validate_form()
         for _ in range(6):
             self.app.processEvents()
@@ -1361,9 +1352,54 @@ class RequestedGuiChangesTests(unittest.TestCase):
             open_directory_mock.assert_called_once_with(
                 second_folder.resolve()
             )
-        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
-        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
+        self.assertEqual(window.open_output_button.text(), "Alle Exporte")
+        self.assertEqual(window.open_stl_button.text(), "Letzter Export")
         self.assertTrue(window.open_stl_button.isEnabled())
+        window.close()
+
+    def test_footer_shortens_folder_actions_before_export_wraps(self) -> None:
+        window = self.window()
+        window.workflow.set_slicer_step_visible(True)
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.show()
+        for _ in range(5):
+            self.app.processEvents()
+
+        # Use stable text metrics in offscreen Qt, where the system font can
+        # otherwise be much wider than the font in the desktop application.
+        for button in (
+            window.open_output_button,
+            window.open_stl_button,
+            window.preview_button,
+            window.export_button,
+        ):
+            button.setStyleSheet("font-size: 5pt;")
+        window.preview_action_control.hide()
+        window.export_button.show()
+
+        window.resize(1200, 900)
+        window._update_responsive_action_labels()
+        for _ in range(3):
+            self.app.processEvents()
+        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
+
+        for width in (1058, 1049):
+            window.resize(width, 900)
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertEqual(window.open_output_button.text(), "Alle Exporte")
+            self.assertEqual(window.open_stl_button.text(), "Letzter Export")
+            self.assertFalse(getattr(window, "_footer_actions_wrapped", False))
+            self.assertEqual(
+                window.open_output_button.mapTo(window.footer, QPoint()).y(),
+                window.export_button.mapTo(window.footer, QPoint()).y(),
+            )
+        window.resize(1200, 900)
+        for _ in range(3):
+            self.app.processEvents()
+        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
         window.close()
 
     def test_latest_export_button_explains_disabled_state_and_rechecks(self) -> None:

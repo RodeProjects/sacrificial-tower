@@ -167,14 +167,11 @@ def build_layer_timing_states(
     layers: Sequence[object],
     *,
     target_time_s: float,
-    safety_factor: float = 1.0,
     sliced_tower_times_s: Mapping[int, float] | None = None,
     final_combined_times_s: Mapping[int, float] | None = None,
 ) -> tuple[LayerTimingState, ...]:
     if not math.isfinite(target_time_s) or target_time_s < 0.0:
         raise ValueError("Target layer time must be finite and non-negative.")
-    if not math.isfinite(safety_factor) or safety_factor < 0.0:
-        raise ValueError("Safety factor must be finite and non-negative.")
     sliced = sliced_tower_times_s or {}
     final = final_combined_times_s or {}
     states: list[LayerTimingState] = []
@@ -186,10 +183,7 @@ def build_layer_timing_states(
                 layer_index=layer_index,
                 source_time_s=source_time,
                 target_time_s=target_time_s,
-                required_added_time_s=(
-                    max(0.0, target_time_s - source_time)
-                    * safety_factor
-                ),
+                required_added_time_s=max(0.0, target_time_s - source_time),
                 sliced_tower_time_s=sliced.get(layer_index),
                 final_combined_time_s=final.get(layer_index),
             )

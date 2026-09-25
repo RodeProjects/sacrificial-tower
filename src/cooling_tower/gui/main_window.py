@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayoutItem,
     QLineEdit,
     QMainWindow,
     QMenu,
@@ -54,7 +55,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSpacerItem,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -208,7 +208,7 @@ _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 GENERATION_NORMAL_SLICES = 6
 GENERATION_PHASE_FADE_OUT_MS = 180
 GENERATION_PHASE_FADE_IN_MS = 220
-GENERATION_MINIMUM_JOINT_SLICES = 1
+GENERATION_MINIMUM_JOINT_SLICES = 5
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 30.0
@@ -236,52 +236,72 @@ _PRESLICE_ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
 SETTING_UNITS = {
     "target_layer_time_s": "Sek.",
     "layer_time_tolerance_s": "Sek.",
-    "safety_factor": "",
     "minimum_outer_diameter_mm": "mm",
     "maximum_outer_diameter_mm": "mm",
-    "minimum_object_tower_distance_mm": "mm",
     "manual_base_width_mm": "mm",
     "maximum_expansion_angle_deg": "°",
     "maximum_contraction_angle_deg": "°",
-    "mesh_segments": "Segm.",
     "local_reference_window": "Layer",
 }
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 
 FULL_INFILL_HINT_HTML = """
-<p align="center" style="margin-bottom: 8px;"><b>100 % Turmfüllung im Vergleich</b></p>
-<table width="100%" cellspacing="0" cellpadding="5" border="0">
+<p align="center" style="margin-top:0; margin-bottom:10px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
+<p style="margin-top:0; margin-bottom:10px;">Das hängt davon ab, ob Ihr Drucker ein Bettschubser oder ein CoreXY-Drucker ist.</p>
+<p align="center" style="margin-top:0; margin-bottom:10px;"><b>Welchen Druckertyp habe ich?</b></p>
+<p style="margin-top:0; margin-bottom:10px;">
+&#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell horizontal vor und zurück.<br>
+&#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die horizontalen X/Y-Bewegungen; das Bett fährt dabei nicht hin und her.</p>
+<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:12px;">
   <tr>
-    <th style="border-bottom: 1px solid #91a7bb;" align="left">Modus</th>
-    <th style="border-bottom: 1px solid #91a7bb;" align="left">Vorteile</th>
-    <th style="border-bottom: 1px solid #91a7bb;" align="left">Nachteile</th>
+    <th align="left" style="padding:4px 12px 4px 0;"><u>Druckertyp</u></th>
+    <th align="left" style="padding:4px 12px;"><u>Aktiviert: Vorteil / Nachteil</u></th>
+    <th align="left" style="padding:4px 12px;"><u>Deaktiviert: Vorteil / Nachteil</u></th>
   </tr>
   <tr>
-    <td valign="top"><b>Aktiviert</b></td>
-    <td valign="top">&#8226; meist schmalerer Turm<br>&#8226; bei Bettschubsern tendenziell sicherer, weil der Turm durch Bettbewegungen weniger stark zum Schwingen angeregt wird<br>&#8226; nur der Turm erhält objektspezifisch 100 % Füllung; das Druckobjekt bleibt unverändert</td>
-    <td valign="top">&#8226; meist etwas höherer Materialverbrauch</td>
+    <td valign="top" style="padding:4px 12px 4px 0;"><b>Bettschubser</b></td>
+    <td valign="top" style="padding:4px 12px;"><b>Aktivierung empfohlen.</b><br>Der Turm bleibt gleich breit oder wird schmaler und stabiler; etwas mehr Material.</td>
+    <td valign="top" style="padding:4px 12px;">Weniger Material; ein breiterer Turm kann stärker schwingen.</td>
   </tr>
   <tr>
-    <td valign="top"><b>Deaktiviert</b></td>
-    <td valign="top">&#8226; verwendet Fülldichte und Füllmuster des Prozessprofils<br>&#8226; meist geringerer Materialverbrauch</td>
-    <td valign="top">&#8226; meist breiterer Turm<br>&#8226; bei Bettschubsern anfälliger für Schwingungen</td>
+    <td valign="top" style="padding:4px 12px 4px 0;"><b>CoreXY</b></td>
+    <td valign="top" style="padding:4px 12px;">Der Turm bleibt gleich breit oder wird schmaler; etwas mehr Material.</td>
+    <td valign="top" style="padding:4px 12px;">Meist weniger Material; der Turm kann breiter sein. Häufig ausreichend.</td>
   </tr>
 </table>
-<p><b>Welchen Druckertyp habe ich?</b><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell während des Drucks horizontal vor und zurück – je nach Bauart entlang der X-, meist jedoch der Y-Achse.<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die schnellen X/Y-Bewegungen; das Druckbett wird nicht horizontal hin- und hergeschoben. Hier ist 100 % Turmfüllung meist optional.</p>
+<p>Die 100%-Füllung gilt nur für den Kühlturm, nicht für das Druckobjekt.</p>
 """.strip()
 
 FULL_INFILL_HINT_ACCESSIBLE = (
-    "100 Prozent Turmfüllung im Vergleich. Aktiviert: meist schmalerer Turm "
-    "und bei Bettschubsern tendenziell sicherer, aber meist etwas mehr "
-    "Material. Deaktiviert: Füllung aus dem Prozessprofil und meist weniger "
-    "Material, aber ein meist breiterer und bei Bettschubsern stärker "
-    "schwingungsanfälliger Turm. Ein Bettschubser bewegt das Druckbett mit "
-    "dem Modell horizontal vor und zurück, je nach Bauart entlang der X-, "
-    "meist jedoch der Y-Achse. Bei CoreXY übernimmt der Druckkopf "
-    "die schnellen X- und Y-Bewegungen; das Bett wird nicht horizontal "
-    "hin- und hergeschoben."
+    "Sollte ich diese Einstellung aktivieren? Das hängt vom Druckertyp ab. "
+    "Beim Bettschubser bewegt das Bett das Modell horizontal; die Aktivierung "
+    "ist empfohlen, weil der Turm gleich breit bleibt oder schmaler und "
+    "stabiler wird und weniger schwingt. "
+    "Sie benötigt etwas mehr Material. Bei CoreXY bewegt der Druckkopf sich "
+    "horizontal; die Aktivierung ist meist optional. Deaktiviert braucht der "
+    "Turm meist weniger Material, kann aber breiter sein. Die volle Füllung "
+    "betrifft nur den Kühlturm."
+)
+
+AUTOMATIC_BASE_HINT_HTML = """
+<p><b>Wie breit wird der Standfuß?</b></p>
+<p>Die Breite richtet sich nach der gesamten Höhe des Originalobjekts:
+mindestens 20 mm. Ist das Objekt höher als 100 mm, beträgt die
+Standfußbreite ein Fünftel der Objekthöhe. Bei 150 mm Höhe sind das 30 mm.</p>
+<p><b>Wie ist der Standfuß geformt?</b></p>
+<p>Der gerade untere Teil ist so hoch wie die ersten zwei Drucklayer.
+Hat der Turm nur einen Layer, entspricht er dessen Höhe.
+Darüber wird der Turm bei Bedarf mit einem sanften, nach innen gebogenen
+Übergang schmaler.</p>
+""".strip()
+
+AUTOMATIC_BASE_HINT_ACCESSIBLE = (
+    "Die automatische Standfußbreite richtet sich nach der gesamten Höhe "
+    "des Originalobjekts. Sie beträgt mindestens 20 Millimeter. Bei einem "
+    "Objekt über 100 Millimeter Höhe beträgt sie ein Fünftel der Höhe. "
+    "Der gerade untere Teil ist zwei Drucklayer hoch, bei nur einem Layer "
+    "entsprechend dessen Höhe. Danach verjüngt sich der Turm bei Bedarf "
+    "sanft nach innen."
 )
 
 
@@ -755,6 +775,7 @@ class MainWindow(QMainWindow):
         self._feasibility_request_id = 0
         self._preview_request_id = 0
         self._preview_cancel_requested = False
+        self._force_no_tower_generation = False
         self._active_preview_worker: PreviewWorker | None = None
         self._joint_generation_dialog: GenerationPanel | None = None
         self._joint_slice_settings_dialog: JointSliceSettingsDialog | None = None
@@ -980,7 +1001,9 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
 
         header = QWidget()
+        self.main_header = header
         header.setObjectName("mainHeader")
+        header.setProperty("scrolled", False)
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(22, 18, 22, 8)
         header_layout.setSpacing(4)
@@ -1000,26 +1023,8 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Fixed,
         )
         self.reset_button.clicked.connect(self.request_reset_defaults)
-        self.validation_bypass_checkbox = QCheckBox(
-            "Eingabeprüfung umgehen (Dev)"
-        )
-        self.validation_bypass_checkbox.setObjectName(
-            "validationBypassCheckBox"
-        )
-        self.validation_bypass_checkbox.setToolTip(
-            "Nur zu Entwicklungszwecken: Unterdrückt Eingabefehler und "
-            "erlaubt den Export auch mit ungültigen Einstellungen."
-        )
-        self.validation_bypass_checkbox.setAccessibleName(
-            "Eingabeprüfung zu Entwicklungszwecken umgehen"
-        )
-        self.validation_bypass_checkbox.toggled.connect(
-            self._on_validation_bypass_toggled
-        )
         title_row.addWidget(title)
         title_row.addStretch(1)
-        title_row.addWidget(self.validation_bypass_checkbox)
-        title_row.addWidget(self.reset_button)
         self.options_button = QToolButton()
         self.options_button.setObjectName("optionsButton")
         self.options_button.setText("")
@@ -1100,6 +1105,9 @@ class MainWindow(QMainWindow):
         )
         self.settings_scroll.verticalScrollBar().rangeChanged.connect(
             self._on_settings_scroll_range_changed
+        )
+        self.settings_scroll.verticalScrollBar().valueChanged.connect(
+            self._refresh_header_scroll_border
         )
         content = QWidget()
         content.setObjectName("settingsContent")
@@ -2361,7 +2369,7 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(workflow_group)
 
         timing_group = SectionCard(
-            "Kühlzeit und Qualität",
+            "Layerzeit und Toleranz",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2372,16 +2380,15 @@ class MainWindow(QMainWindow):
         timing_group.setProperty("bodyHover", False)
         timing_layout = timing_group.content_layout
         self.target_time_spin = self._double_spin(
-            0.01,
+            5.0,
             MAXIMUM_TARGET_LAYER_TIME_S,
             2,
             1.0,
             "targetLayerTime",
         )
         self.target_time_spin.set_display_decimals(1)
-        self.safety_factor_spin = self._double_spin(1.0, 10.0, 3, 0.05, "safetyFactor")
-        self.safety_factor_spin.set_display_decimals(1)
-        self.layer_time_tolerance_spin = self._double_spin(0.01, 3.0, 2, 0.01, "layerTimeTolerance")
+        self.target_time_spin.setProperty("rangeLabelShowMinimum", True)
+        self.layer_time_tolerance_spin = self._double_spin(0.1, 3.0, 2, 0.01, "layerTimeTolerance")
         self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
@@ -2392,18 +2399,14 @@ class MainWindow(QMainWindow):
             timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
             self.layer_time_tolerance_spin,
         )
-        self._add_numeric_setting(
-            timing_layout,
-            "safety_factor",
-            "Zeit-Sicherheitsfaktor",
-            self.safety_factor_spin,
-        )
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
         )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
         self.tower_need_label.setProperty("state", "pending")
+        timing_layout.addWidget(self.tower_need_label)
+        self.tower_need_label.hide()
         self.content_layout.addWidget(timing_group)
 
         geometry_group = SectionCard(
@@ -2416,16 +2419,15 @@ class MainWindow(QMainWindow):
         geometry_layout = geometry_group.content_layout
         self.geometry_fields_layout = geometry_layout
         self.minimum_outer_spin = self._double_spin(
-            0.002, 1000.0, 3, 1.0, "minimumOuterDiameter"
+            3.0, 40.0, 3, 1.0, "minimumOuterDiameter"
         )
         self.minimum_outer_spin.set_display_decimals(1)
+        self.minimum_outer_spin.setProperty("rangeLabelShowMinimum", True)
         self.maximum_outer_spin = self._double_spin(
-            0.002, 1000.0, 3, 1.0, "maximumOuterDiameter"
+            5.0, 100.0, 3, 1.0, "maximumOuterDiameter"
         )
         self.maximum_outer_spin.set_display_decimals(1)
-        self.minimum_object_tower_distance_spin = self._double_spin(
-            0.0, 1000.0, 1, 1.0, "minimumObjectTowerDistance"
-        )
+        self.maximum_outer_spin.setProperty("rangeLabelShowMinimum", True)
         self._add_numeric_setting(
             geometry_layout,
             "minimum_outer_diameter_mm",
@@ -2438,40 +2440,34 @@ class MainWindow(QMainWindow):
             "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
-        self._add_numeric_setting(
-            geometry_layout,
-            "minimum_object_tower_distance_mm",
-            "Mindestabstand zu Objekt",
-            self.minimum_object_tower_distance_spin,
-        )
         self.full_infill_checkbox = QCheckBox(
-            "100 % Turmfüllung simulieren"
+            "100% Turmfüllung simulieren"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
         full_infill_row = QWidget()
         full_infill_layout = QHBoxLayout(full_infill_row)
         full_infill_layout.setContentsMargins(0, 2, 0, 2)
-        full_infill_layout.setSpacing(6)
+        full_infill_layout.setSpacing(METRICS.setting_info_text_gap_px)
         self.full_infill_info_button = InfoToolButton(
             FULL_INFILL_HINT_HTML,
             full_infill_row,
             accessible_name="Informationen zur 100-%-Turmfüllung",
             accessible_hint=FULL_INFILL_HINT_ACCESSIBLE,
             object_name="settingInfoButton",
-            diameter_px=24,
-        )
-        full_infill_layout.addWidget(
-            self.full_infill_checkbox,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
+            diameter_px=METRICS.setting_info_diameter_px,
         )
         full_infill_layout.addWidget(
             self.full_infill_info_button,
             0,
             Qt.AlignmentFlag.AlignVCenter,
         )
+        full_infill_layout.addWidget(
+            self.full_infill_checkbox,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
         full_infill_layout.addStretch(1)
-        geometry_layout.addWidget(full_infill_row)
+        geometry_layout.insertWidget(0, full_infill_row)
         geometry_group.refresh_collapsed_state()
         self.content_layout.addWidget(geometry_group)
 
@@ -2507,37 +2503,35 @@ class MainWindow(QMainWindow):
         self.automatic_base_checkbox.setFixedHeight(
             METRICS.form_control_height_px
         )
-        self.automatic_base_checkbox.setToolTip(
-            "Die Standfußbreite wird aus der vollständig ermittelten "
-            "Modellhöhe abgeleitet."
-        )
         automatic_row = QWidget()
         automatic_layout = QGridLayout(automatic_row)
         automatic_layout.setContentsMargins(0, 2, 0, 2)
+        automatic_layout.setHorizontalSpacing(METRICS.setting_info_text_gap_px)
         self.automatic_base_info_button = InfoToolButton(
-            "Ist die Automatik aktiv, wird die Standfußbreite aus der "
-            "vollständig ermittelten Modellhöhe berechnet.\n\n"
-            "Nach dem Ausschalten kann der Außendurchmesser manuell eingegeben werden.\n\n"
-            "Standfußhöhe = Höhe des ersten + Höhe des zweiten Layers "
-            "(bei nur einem Layer dessen Höhe). Bei gleich hohen Layern: 2 × Layerhöhe.\n\n"
-            "Anschließend folgt bei Bedarf eine konkave Verjüngung.",
+            AUTOMATIC_BASE_HINT_HTML,
             automatic_row,
             accessible_name=(
                 "Informationen zur automatischen Standfußbreite"
             ),
+            accessible_hint=AUTOMATIC_BASE_HINT_ACCESSIBLE,
             object_name="settingInfoButton",
-            diameter_px=24,
+            diameter_px=METRICS.setting_info_diameter_px,
         )
         self.automatic_base_error_label = QLabel()
         self.automatic_base_error_label.setObjectName("settingMessage")
         self.automatic_base_error_label.setWordWrap(True)
         self.automatic_base_error_label.hide()
-        automatic_layout.addWidget(self.automatic_base_checkbox, 0, 0)
         automatic_layout.addWidget(
             self.automatic_base_info_button,
             0,
-            1,
+            0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        automatic_layout.addWidget(
+            self.automatic_base_checkbox,
+            0,
+            1,
+            Qt.AlignmentFlag.AlignVCenter,
         )
         automatic_layout.addWidget(
             self.automatic_base_error_label, 1, 0, 1, 2
@@ -2614,11 +2608,6 @@ class MainWindow(QMainWindow):
         overhang_group.refresh_collapsed_state()
         self.content_layout.addWidget(overhang_group)
 
-        self.mesh_segments_spin = WheelSafeSpinBox()
-        self.mesh_segments_spin.setObjectName("meshSegments")
-        self.mesh_segments_spin.setProperty("validationMinimum", 3)
-        self.mesh_segments_spin.setProperty("validationMaximum", 512)
-        self.mesh_segments_spin.setRange(-1_000_000_000, 1_000_000_000)
         self.local_window_spin = WheelSafeSpinBox()
         self.local_window_spin.setObjectName("localReferenceWindow")
         self.local_window_spin.setProperty("validationMinimum", 1)
@@ -2684,12 +2673,6 @@ class MainWindow(QMainWindow):
         calculation_body_layout.setSpacing(4)
         self._add_numeric_setting(
             calculation_body_layout,
-            "mesh_segments",
-            "Kreissegmente",
-            self.mesh_segments_spin,
-        )
-        self._add_numeric_setting(
-            calculation_body_layout,
             "local_reference_window",
             "Layer im lokalen Zeitfenster",
             self.local_window_spin,
@@ -2709,6 +2692,7 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(options_title)
 
         output_path_layout = QGridLayout()
+        output_path_layout.setHorizontalSpacing(METRICS.setting_info_text_gap_px)
         self.output_root_info_button = InfoToolButton(
             "Basisordner für Zeitstempel-Unterordner, STL-Dateien, Berichte "
             "und Fehlerprotokolle. Vorhandene Ausgabedateien werden nicht "
@@ -2716,7 +2700,7 @@ class MainWindow(QMainWindow):
             self.additional_options_content,
             accessible_name="Informationen zum aktuellen Exportordner",
             object_name="settingInfoButton",
-            diameter_px=24,
+            diameter_px=METRICS.setting_info_diameter_px,
         )
         self.output_root_edit = QLineEdit()
         self.output_root_edit.setObjectName("outputRoot")
@@ -3176,7 +3160,7 @@ class MainWindow(QMainWindow):
             Qt.WidgetAttribute.WA_AlwaysShowToolTips,
             True,
         )
-        self.open_run_button = QPushButton("Letzten Exportbericht\nöffnen")
+        self.open_run_button = QPushButton("Letzten Exportbericht öffnen")
         self.open_run_button.setObjectName("openExportReportButton")
         self.open_run_button.setAccessibleName(
             "Letzten Exportbericht öffnen"
@@ -3318,6 +3302,17 @@ class MainWindow(QMainWindow):
         )
         self._refresh_footer_notice_layout()
 
+        self.footer_message_area = QWidget()
+        self.footer_message_area.setObjectName("footerMessageArea")
+        self.footer_message_layout = QVBoxLayout(self.footer_message_area)
+        self.footer_message_layout.setContentsMargins(0, 0, 0, 0)
+        self.footer_message_layout.setSpacing(8)
+        self.footer_message_layout.addWidget(self.footer_messages_scroll)
+        self.footer_message_layout.addStretch(1)
+        self.footer_message_layout.addWidget(
+            self.reset_button, 0, Qt.AlignmentFlag.AlignLeft
+        )
+
         self.footer_action_area = QWidget()
         self.footer_action_area.setObjectName("footerActionArea")
         self.footer_action_layout = QVBoxLayout(self.footer_action_area)
@@ -3325,13 +3320,6 @@ class MainWindow(QMainWindow):
         self.footer_action_layout.setSpacing(8)
         self.joint_generation_dialog.layout().insertWidget(1, self.isolated_progress_widget)
         self.footer_action_layout.addWidget(self.action_availability_widget)
-        self.footer_action_spacer = QSpacerItem(
-            0,
-            0,
-            QSizePolicy.Policy.Minimum,
-            QSizePolicy.Policy.Expanding,
-        )
-        self.footer_action_layout.addItem(self.footer_action_spacer)
         self.footer_action_layout.addLayout(main_actions)
 
         # Responsive layout code toggles these dividers before inserting them
@@ -3413,7 +3401,6 @@ class MainWindow(QMainWindow):
         for widget in (
             self.open_output_button,
             self.open_stl_button,
-            self.validation_bypass_checkbox,
             self.reset_button,
             self.preview_action_control,
             self.preview_button,
@@ -3643,15 +3630,6 @@ class MainWindow(QMainWindow):
         workflow = getattr(self, "workflow", None)
         return workflow is not None and workflow.stage == WorkflowStage.READY
 
-    def _input_validation_is_bypassed(self) -> bool:
-        checkbox = getattr(self, "validation_bypass_checkbox", None)
-        return checkbox is not None and checkbox.isChecked()
-
-    def _on_validation_bypass_toggled(self, _checked: bool) -> None:
-        """Refresh validation feedback and export access for the dev override."""
-
-        self.validate_form()
-
     @staticmethod
     def _double_spin(
         minimum: float,
@@ -3710,6 +3688,13 @@ class MainWindow(QMainWindow):
         )
         setting_widget.reset_performed.connect(
             self._on_individual_reset
+        )
+        setting_widget.message_expand_button.toggled.connect(
+            lambda _expanded: self._refresh_geometry_section_layout(
+                self.geometry_settings_group.isChecked()
+            )
+            if hasattr(self, "geometry_settings_group")
+            else None
         )
         layout.addWidget(setting_widget)
         return setting_widget
@@ -4199,9 +4184,8 @@ class MainWindow(QMainWindow):
             maximum_iterations=(
                 GENERATION_NORMAL_SLICES + self.maximum_joint_slices
             ),
-            object_clearance_mm=(
-                self.minimum_object_tower_distance_spin.value()
-            ),
+            object_clearance_mm=5.0,
+            bed_edge_clearance_mm=5.0,
             perform_joint_final_slice=joint_slice_available,
             maximum_joint_slices=self.maximum_joint_slices,
             minimum_joint_slices=GENERATION_MINIMUM_JOINT_SLICES,
@@ -4306,6 +4290,7 @@ class MainWindow(QMainWindow):
                 if self.source_preslice_result is not None
                 else None
             ),
+            force_tower=self._force_no_tower_generation,
         )
 
     def _invalidate_preview(
@@ -4316,6 +4301,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._loading_phase17_state:
             return
+        self._force_no_tower_generation = False
         self._cancel_generation_phase_transition()
         if not preserve_slicer_prediction:
             self._clear_slicer_prediction()
@@ -4386,7 +4372,7 @@ class MainWindow(QMainWindow):
             generation_active and not self._preview_cancel_requested
         ) or (
             not generation_active
-            and self._export_block_reason(allow_validation_bypass=False) is None
+            and self._generation_block_reason() is None
         )
         self.preview_button.setEnabled(preview_enabled)
         preview_is_current = bool(
@@ -4447,14 +4433,7 @@ class MainWindow(QMainWindow):
             and signature == self._last_exported_preview_signature
         )
 
-    def _export_block_reason(
-        self,
-        *,
-        allow_validation_bypass: bool = True,
-    ) -> str | None:
-        validation_bypassed = (
-            allow_validation_bypass and self._input_validation_is_bypassed()
-        )
+    def _export_block_reason(self) -> str | None:
         if self.background_job_manager.has_active(JobKind.EXPORT):
             return "Ein Export wird bereits ausgeführt."
         if self.background_job_manager.has_active(JobKind.SLICER_PREDICTION):
@@ -4469,21 +4448,62 @@ class MainWindow(QMainWindow):
             return "Die STL wird noch geprüft, geslict oder analysiert."
         if self.analysis_snapshot is None:
             return "Die Quelle wird noch analysiert."
-        if not self._phase17_static_valid and not validation_bypassed:
+        no_tower = (
+            self.tower_assessment is not None
+            and not self.tower_assessment.tower_required
+        )
+        if no_tower and not self._force_no_tower_generation:
+            return self._no_tower_required_reason(
+                self.tower_assessment, self.analysis_snapshot
+            )
+        if not self._phase17_static_valid and not (
+            no_tower and self._force_no_tower_generation
+            and self._only_target_minimum_blocks_generation()
+        ):
             causes = list(dict.fromkeys(message for messages in self._static_field_errors.values() for message in messages))
             return "Bitte Eingaben korrigieren: " + " ".join(causes[:3]) if causes else "Bitte ungültige oder unvollständige Eingaben korrigieren."
         if self.tower_assessment is None:
-            if not validation_bypassed:
-                return "Der Kühlturmbedarf wird noch geprüft."
-        elif not self.tower_assessment.tower_required:
-            return "Für die aktuellen Werte ist kein Kühlturm erforderlich."
+            return "Der Kühlturmbedarf wird noch geprüft."
+        if no_tower:
+            return None
         if self.profile_feasibility is None:
-            if not validation_bypassed:
-                return "Die Turmgeometrie wird noch geprüft."
-        elif not self.profile_feasibility.feasible and not validation_bypassed:
+            return "Die Turmgeometrie wird noch geprüft."
+        elif not self.profile_feasibility.feasible:
             reasons = " ".join(german_user_message(issue.message) for issue in self.profile_feasibility.issues[:3])
             return "Die Turmgeometrie ist mit den aktuellen Werten nicht möglich. " + reasons
         return None
+
+    def _only_target_minimum_blocks_generation(self) -> bool:
+        """Allow a confirmed unnecessary tower without bypassing other errors."""
+        value = self.target_time_spin.value()
+        minimum = float(self.target_time_spin.property("validationMinimum"))
+        errors = self._static_field_errors
+        target_errors = errors.get("target_layer_time_s", ())
+        return bool(
+            5.0 <= value < minimum <= MAXIMUM_TARGET_LAYER_TIME_S
+            and not self._incomplete_setting_names
+            and not self._workflow_error_message
+            and target_errors
+            and set(errors) == {"target_layer_time_s"}
+            and len(self._static_error_causes) == len(target_errors)
+        )
+
+    def _generation_block_reason(self) -> str | None:
+        reason = self._export_block_reason()
+        assessment = self.tower_assessment
+        if (
+            assessment is not None
+            and not assessment.tower_required
+            and self.analysis_snapshot is not None
+            and reason == self._no_tower_required_reason(
+                assessment, self.analysis_snapshot
+            )
+        ):
+            if self._phase17_static_valid or self._only_target_minimum_blocks_generation():
+                return None
+            causes = list(dict.fromkeys(self._static_error_causes))
+            return "Bitte Eingaben korrigieren: " + " ".join(causes[:3])
+        return reason
 
     def _set_export_button_state(
         self,
@@ -4491,6 +4511,8 @@ class MainWindow(QMainWindow):
         reason: str | None = None,
     ) -> None:
         self.export_button.setEnabled(enabled)
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.export_button.setEnabled(enabled)
         if not self._setting_feedback_is_available():
             self.export_availability_label.clear()
             self.action_availability_widget.hide()
@@ -4506,9 +4528,18 @@ class MainWindow(QMainWindow):
         message = german_user_message(
             reason or "Die aktuellen Voraussetzungen sind noch nicht erfüllt."
         )
-        self.export_availability_label.setText(
-            f"Export/Vorschau nicht möglich: {message}"
-        )
+        if message == "Dieser Generierungsstand wurde bereits exportiert.":
+            self.export_availability_label.setText(
+                "Erneuter Export nicht nötig: Dieser Generierungsstand wurde bereits exportiert."
+            )
+        elif message.startswith("Kein Kühlturm erforderlich:"):
+            self.export_availability_label.setText(
+                f"Generierung nur nach Bestätigung: {message}"
+            )
+        else:
+            self.export_availability_label.setText(
+                f"Export/Vorschau nicht möglich: {message}"
+            )
         self.export_availability_label.show()
         self.action_availability_widget.show()
         self._refresh_footer_auxiliary_visibility()
@@ -6779,7 +6810,12 @@ class MainWindow(QMainWindow):
             return
         self.profile_match_result = replace(match, user_confirmed=True, requires_confirmation=False)
         self.confirmed_profile_context = confirmation
+        self._workflow_error_message = None
+        self._analysis_failed = False
+        self._set_profile_notice()
+        self.profile_diagnostics.clear()
         self.start_source_preslice(simulate_supports=True)
+        self.validate_form()
 
     @Slot(int)
     def _on_source_preslice_cancelled(self, request_id: int) -> None:
@@ -7089,6 +7125,8 @@ class MainWindow(QMainWindow):
     def _refresh_geometry_section_layout(
         self,
         expanded: bool,
+        *,
+        _second_pass: bool = False,
     ) -> None:
         """Publish the complete single-column geometry-card size."""
 
@@ -7107,6 +7145,9 @@ class MainWindow(QMainWindow):
         ):
             subsection.setMinimumHeight(0)
             subsection.setMaximumHeight(16777215)
+            if isinstance(subsection, SectionCard):
+                subsection.content_widget.setMinimumHeight(0)
+                subsection.content_widget.setMaximumHeight(16777215)
         self.timing_group.content_layout.setContentsMargins(20, 10, 20, 10)
         self.geometry_fields_layout.setContentsMargins(20, 10, 20, 10)
         self.stability_fields_layout.setContentsMargins(20, 10, 20, 10)
@@ -7124,6 +7165,21 @@ class MainWindow(QMainWindow):
         ):
             nested_layout.invalidate()
             nested_layout.activate()
+        for subsection in (self.timing_group, self.geometry_group):
+            body = subsection.content_widget
+            body_layout = subsection.content_layout
+            # This card already computes each row's height from its live width.
+            # Qt's box layout can retain old positions after several rows gain
+            # wrapped feedback at once, so place these rows from that same
+            # measurement instead of letting stale geometry overlap controls.
+            body_layout.setEnabled(False)
+            required = self._visible_vbox_height(body_layout, body.width())
+            body.setFixedHeight(max(0, required))
+            self._position_visible_vbox_children(body_layout, body.width())
+            body.updateGeometry()
+            subsection.layout().invalidate()
+            subsection.layout().activate()
+            subsection.updateGeometry()
         # The split layout may still cache its previous fixed height while
         # range hints are being hidden. Measure the two visible cards directly.
         split_height = (
@@ -7155,7 +7211,69 @@ class MainWindow(QMainWindow):
             )
         self.ready_grid.refresh_layout()
         self._refresh_ready_grid_layout()
-        # All subsection heights are calculated from their one-column layout.
+        # Hiding a wrapped hint can change the available body width only after
+        # the parent card has been laid out. Re-measure once at that final width
+        # so the section shrinks immediately as well as growing immediately.
+        if not _second_pass and any(
+            subsection.content_widget.height()
+            != self._visible_vbox_height(
+                subsection.content_layout, subsection.content_widget.width()
+            )
+            for subsection in (self.timing_group, self.geometry_group)
+        ):
+            self._refresh_geometry_section_layout(expanded, _second_pass=True)
+
+    @staticmethod
+    def _visible_vbox_height(layout: QVBoxLayout, width: int) -> int:
+        """Measure live child heights without Qt's stale height-for-width cache."""
+
+        margins = layout.contentsMargins()
+        child_width = max(1, width - margins.left() - margins.right())
+        heights: list[int] = []
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None or item.isEmpty():
+                continue
+            heights.append(MainWindow._visible_vbox_item_height(item, child_width))
+        return (
+            margins.top()
+            + margins.bottom()
+            + sum(heights)
+            + layout.spacing() * max(0, len(heights) - 1)
+        )
+
+    @staticmethod
+    def _visible_vbox_item_height(item: QLayoutItem, width: int) -> int:
+        widget = item.widget()
+        if widget is not None:
+            preferred = (
+                widget.heightForWidth(width)
+                if widget.hasHeightForWidth()
+                else widget.sizeHint().height()
+            )
+            height = min(widget.maximumHeight(), max(widget.minimumHeight(), preferred))
+        else:
+            height = (
+                item.heightForWidth(width)
+                if item.hasHeightForWidth()
+                else item.sizeHint().height()
+            )
+        return max(0, height)
+
+    @staticmethod
+    def _position_visible_vbox_children(layout: QVBoxLayout, width: int) -> None:
+        """Place rows at the measured offsets, including wrapped feedback."""
+
+        margins = layout.contentsMargins()
+        child_width = max(1, width - margins.left() - margins.right())
+        y = margins.top()
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None or item.isEmpty():
+                continue
+            height = MainWindow._visible_vbox_item_height(item, child_width)
+            item.setGeometry(QRect(margins.left(), y, child_width, height))
+            y += height + layout.spacing()
 
     def _refresh_slicer_section_layout(self, _expanded: bool | None = None) -> None:
         """Publish the current Slicer height without retaining stale minima."""
@@ -7368,8 +7486,18 @@ class MainWindow(QMainWindow):
         _minimum: int,
         _maximum: int,
     ) -> None:
+        self._refresh_header_scroll_border()
         self._update_slicer_combo_widths()
         QTimer.singleShot(0, self._update_slicer_combo_widths)
+
+    def _refresh_header_scroll_border(self) -> None:
+        scrollbar = self.settings_scroll.verticalScrollBar()
+        scrolled = (
+            scrollbar.maximum() > scrollbar.minimum()
+            and scrollbar.value() > scrollbar.minimum()
+        )
+        if self._set_boolean_style_property(self.main_header, "scrolled", scrolled):
+            self.main_header.update()
 
     def _refresh_ready_grid_layout(self) -> None:
         """Refresh the shared grid without changing any sibling card state."""
@@ -7589,16 +7717,6 @@ class MainWindow(QMainWindow):
         self.isolated_progress_widget.setVisible(visible)
         self.joint_generation_dialog.layout_changed.emit()
         self.footer_status_widget.setVisible(not visible)
-        self.footer_action_spacer.changeSize(
-            0,
-            0,
-            QSizePolicy.Policy.Minimum,
-            (
-                QSizePolicy.Policy.Fixed
-                if visible
-                else QSizePolicy.Policy.Expanding
-            ),
-        )
         self.footer_action_layout.invalidate()
         self.footer_action_layout.activate()
         self._refresh_footer_auxiliary_visibility()
@@ -7623,7 +7741,7 @@ class MainWindow(QMainWindow):
             self.footer_vertical_divider.hide()
             self.footer_horizontal_divider.show()
             self.footer_content_grid.addWidget(
-                self.footer_messages_scroll,
+                self.footer_message_area,
                 0,
                 0,
                 1,
@@ -7642,7 +7760,7 @@ class MainWindow(QMainWindow):
             self.footer_horizontal_divider.hide()
             self.footer_vertical_divider.show()
             self.footer_content_grid.addWidget(
-                self.footer_messages_scroll,
+                self.footer_message_area,
                 0,
                 0,
                 1,
@@ -7718,15 +7836,35 @@ class MainWindow(QMainWindow):
         self.footer_status_widget.setMinimumHeight(status_natural_height)
         self.footer_messages_layout.invalidate()
         self.footer_messages_layout.activate()
-        left_natural_height = max(
+        messages_natural_height = max(
             0,
             self.footer_messages_layout.heightForWidth(left_width)
             if self.footer_messages_layout.hasHeightForWidth()
             else self.footer_messages_layout.sizeHint().height(),
             self.footer_messages_layout.minimumSize().height(),
         )
-        right_natural_height = max(
-            0, self.footer_action_layout.sizeHint().height()
+        left_natural_height = (
+            messages_natural_height
+            + self.footer_message_layout.spacing()
+            + self.reset_button.height()
+        )
+        action_height = self.main_actions_layout.sizeHint().height()
+        notice_height = (
+            max(
+                0,
+                self.action_availability_widget.layout().heightForWidth(
+                    max(1, self.footer_action_area.width())
+                ),
+            )
+            if not self.action_availability_widget.isHidden()
+            else 0
+        )
+        right_natural_height = (
+            action_height
+            + notice_height
+            + (self.footer_action_layout.spacing() if notice_height else 0)
+            if not self.footer_action_area.isHidden()
+            else 0
         )
         inner_maximum = max(
             0, maximum_height - margins.top() - margins.bottom()
@@ -7744,13 +7882,15 @@ class MainWindow(QMainWindow):
         else:
             visible_left_height = min(left_natural_height, inner_maximum)
             content_height = max(visible_left_height, right_natural_height)
-        self.footer_messages_content.setMinimumHeight(left_natural_height)
-        self.footer_messages_scroll.setFixedHeight(visible_left_height)
+        self.footer_messages_content.setMinimumHeight(messages_natural_height)
+        self.footer_messages_scroll.setFixedHeight(
+            max(0, visible_left_height - self.footer_message_layout.spacing()
+                - self.reset_button.height())
+        )
         self.footer_action_area.setMinimumHeight(right_natural_height)
         target_height = margins.top() + margins.bottom() + content_height
         bounded_height = min(maximum_height, target_height)
-        self.footer.setMinimumHeight(bounded_height)
-        self.footer.setMaximumHeight(maximum_height)
+        self.footer.setFixedHeight(bounded_height)
         self.footer_messages_scroll.updateGeometry()
         self.footer.updateGeometry()
 
@@ -8675,6 +8815,10 @@ class MainWindow(QMainWindow):
         self._schedule_feasibility_validation()
         self._refresh_stl_availability()
         self._update_section_summaries()
+        if sender is self.maximum_expansion_angle_spin:
+            self._refresh_geometry_section_layout(
+                self.geometry_settings_group.isChecked()
+            )
 
     def _on_numeric_input_state_changed(
         self,
@@ -8866,6 +9010,7 @@ class MainWindow(QMainWindow):
         self._refresh_tower_assessment()
         self._update_section_summaries()
         self.validate_form()
+        self._refresh_geometry_section_layout(self.geometry_settings_group.isChecked())
         self._schedule_feasibility_validation()
 
     def _on_full_infill_changed(self, _checked: bool) -> None:
@@ -9246,6 +9391,37 @@ class MainWindow(QMainWindow):
             is box._rejected_stl_accept_button  # type: ignore[attr-defined]
         )
 
+    def _ask_no_tower_confirmation(self, reason: str) -> bool:
+        """Require an explicit decision before generating an unnecessary tower."""
+
+        box = QMessageBox(self)
+        box.setObjectName("unnecessaryTowerConfirmationDialog")
+        box.setWindowTitle("Kühlturm trotzdem generieren?")
+        box.setWindowModality(Qt.WindowModality.WindowModal)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(
+            f"{reason}\n\n"
+            "Ein zusätzlicher Kühlturm verbraucht Material und Druckzeit, "
+            "obwohl die gewünschte Layerzeit bereits erreicht wird. "
+            "Möchtest du ihn trotzdem generieren?"
+        )
+        accept_button = box.addButton(
+            "Trotzdem generieren", QMessageBox.ButtonRole.AcceptRole
+        )
+        cancel_button = box.addButton(
+            "Abbrechen", QMessageBox.ButtonRole.RejectRole
+        )
+        box.setDefaultButton(cancel_button)
+        box.setEscapeButton(cancel_button)
+        box.ensurePolished()
+        box.adjustSize()
+        self._show_internal_dialog_without_flash(
+            box, lambda: self._place_dialog_centered(box)
+        )
+        cancel_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        box.exec()
+        return box.clickedButton() is accept_button
+
     def _complete_accepted_stl(
         self,
         request_id: int,
@@ -9464,6 +9640,9 @@ class MainWindow(QMainWindow):
         if snapshot is None:
             self.tower_assessment = None
             self.profile_feasibility = None
+            self._set_tower_need_message(
+                "Bitte zuerst eine STL-Datei auswählen.", "pending"
+            )
             self._refresh_prediction()
             return
         try:
@@ -9485,11 +9664,7 @@ class MainWindow(QMainWindow):
         if not assessment.tower_required:
             self._clear_feasibility_issues()
             self._set_tower_need_message(
-                "Kein Kühlturm erforderlich. Alle analysierten Schichten "
-                f"erreichen die Zielzeit von {assessment.target_layer_time_s:.2f} s. "
-                "Die kürzeste erkannte Zeit beträgt "
-                f"{snapshot.minimum_layer_time_s:.3f} s. "
-                "Es wird keine STL erzeugt.",
+                self._no_tower_required_reason(assessment, snapshot),
                 "notRequired",
             )
             self._refresh_prediction()
@@ -9497,6 +9672,18 @@ class MainWindow(QMainWindow):
 
         self._show_required_tower_message(assessment)
         self._refresh_prediction()
+
+    @staticmethod
+    def _no_tower_required_reason(
+        assessment: TowerNeedAssessment,
+        snapshot: GCodeAnalysisSnapshot,
+    ) -> str:
+        return (
+            "Kein Kühlturm erforderlich: Alle analysierten Schichten "
+            f"erreichen die Zielzeit von {assessment.target_layer_time_s:.2f} s. "
+            "Die kürzeste erkannte Zeit beträgt "
+            f"{snapshot.minimum_layer_time_s:.3f} s."
+        )
 
     def _show_required_tower_message(
         self,
@@ -9596,11 +9783,10 @@ class MainWindow(QMainWindow):
                 for solution in group.get("solutions", ())
             )
         )
-        self._feasibility_field_errors = self._field_errors_for_issues(
-            result.issues,
-            source_setting_name=request_source,
-            reset_setting_name=reset_setting_name,
-        )
+        # Geometric feasibility depends on several settings and the source.
+        # Keep these diagnostics in the general result area, never under an
+        # individual input where they look like a field validation error.
+        self._feasibility_field_errors = {}
         self._feasibility_issue_summaries = [
             str(group["notice"]) for group in grouped_issues
         ]
@@ -9663,7 +9849,7 @@ class MainWindow(QMainWindow):
 
         if setting_name is None or not self._feasibility_issues:
             return
-        if setting_name in {"target_layer_time_s", "safety_factor"}:
+        if setting_name == "target_layer_time_s":
             remaining: tuple[FeasibilityIssue, ...] = ()
         else:
             remaining = tuple(
@@ -9683,9 +9869,7 @@ class MainWindow(QMainWindow):
                 for solution in group.get("solutions", ())
             )
         )
-        self._feasibility_field_errors = self._field_errors_for_issues(
-            remaining
-        )
+        self._feasibility_field_errors = {}
         self._feasibility_issue_summaries = [
             str(group["notice"]) for group in grouped_issues
         ]
@@ -9720,7 +9904,7 @@ class MainWindow(QMainWindow):
             if target == reset_setting_name:
                 target = None
             if target not in self._setting_widgets:
-                if trigger in {"target_layer_time_s", "safety_factor"}:
+                if trigger == "target_layer_time_s":
                     target = trigger
                 elif dominant_target in self._setting_widgets:
                     target = dominant_target
@@ -9764,7 +9948,7 @@ class MainWindow(QMainWindow):
                 if self.full_infill_checkbox.isChecked()
                 else "deaktiviert"
             )
-            return f"100 % Turmfüllung simulieren: {state}"
+            return f"100% Turmfüllung simulieren: {state}"
         setting = self._setting_widgets.get(setting_name)
         if setting is None:
             return setting_name.replace("_", " ")
@@ -9795,7 +9979,6 @@ class MainWindow(QMainWindow):
         prefixes.extend(
             {
                 "target_layer_time_s": ("Ziel-Layerzeit",),
-                "safety_factor": ("Sicherheitsfaktor",),
                 "minimum_outer_diameter_mm": ("Minimaler Turmdurchmesser",),
                 "maximum_outer_diameter_mm": ("Maximaler Turmdurchmesser",),
                 "manual_base_width_mm": ("Manuelle Standfußbreite",),
@@ -9845,7 +10028,7 @@ class MainWindow(QMainWindow):
             "MAXIMUM_OUTER_DIAMETER_REACHED": (
                 "Den größten Außendurchmesser erhöhen.",
                 "Die Ziel-Layerzeit verringern.",
-                "Optional 100 % Turmfüllung simulieren.",
+                "Optional 100% Turmfüllung simulieren.",
             ),
         }
         result: list[dict[str, object]] = []
@@ -9949,8 +10132,6 @@ class MainWindow(QMainWindow):
     ) -> str | None:
         if trigger == "target_layer_time_s":
             return "Die zuletzt geänderte Ziel-Layerzeit verringern."
-        if trigger == "safety_factor":
-            return "Den Sicherheitsfaktor verringern, jedoch nicht unter 1,0."
         if trigger == "minimum_outer_diameter_mm":
             return "Den kleinsten Außendurchmesser auf den Standardwert zurücksetzen."
         if trigger == "maximum_outer_diameter_mm":
@@ -9994,7 +10175,7 @@ class MainWindow(QMainWindow):
     def _set_tower_need_message(self, text: str, state: str) -> None:
         self.tower_need_label.setText(text)
         self.tower_need_label.setProperty("state", state)
-        self.tower_need_label.hide()
+        self.tower_need_label.setVisible(state == "notRequired")
         self.tower_need_label.style().unpolish(self.tower_need_label)
         self.tower_need_label.style().polish(self.tower_need_label)
 
@@ -10059,6 +10240,7 @@ class MainWindow(QMainWindow):
             self,
             output_root=self.output_root_edit.text(),
             default_output_root=str(self.default_output_root),
+            default_maximum_joint_slices=self.default_maximum_joint_slices,
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
         dialog.show_limits_checkbox.setChecked(self.show_setting_limits)
@@ -10082,6 +10264,9 @@ class MainWindow(QMainWindow):
         self.show_setting_limits = bool(visible)
         for setting in self._setting_widgets.values():
             setting.set_limits_visible(self.show_setting_limits)
+            setting.layout().invalidate()
+            setting.layout().activate()
+            setting.updateGeometry()
         self._refresh_geometry_section_layout(self.geometry_settings_group.isChecked())
         self._save_user_settings()
 
@@ -10645,12 +10830,9 @@ class MainWindow(QMainWindow):
         return GenerationSettings(
             target_layer_time_s=self.target_time_spin.value(),
             layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
-            safety_factor=self.safety_factor_spin.value(),
             minimum_outer_diameter_mm=self.minimum_outer_spin.value(),
             maximum_outer_diameter_mm=self.maximum_outer_spin.value(),
-            minimum_object_tower_distance_mm=(
-                self.minimum_object_tower_distance_spin.value()
-            ),
+            minimum_object_tower_distance_mm=5.0,
             simulate_full_tower_infill=(
                 self.full_infill_checkbox.isChecked()
             ),
@@ -10672,20 +10854,14 @@ class MainWindow(QMainWindow):
                 self.maximum_contraction_angle_spin.value()
             ),
             local_reference_window=self.local_window_spin.value(),
-            mesh_segments=self.mesh_segments_spin.value(),
         )
 
     def apply_settings(self, settings: GenerationSettings) -> None:
         values = (
             (self.target_time_spin, settings.target_layer_time_s),
             (self.layer_time_tolerance_spin, settings.layer_time_tolerance_s),
-            (self.safety_factor_spin, settings.safety_factor),
             (self.minimum_outer_spin, settings.minimum_outer_diameter_mm),
             (self.maximum_outer_spin, settings.maximum_outer_diameter_mm),
-            (
-                self.minimum_object_tower_distance_spin,
-                settings.minimum_object_tower_distance_mm,
-            ),
             (self.minimum_base_spin, settings.minimum_base_radius_mm),
             (self.manual_base_width_spin, settings.manual_base_width_mm),
             (self.base_margin_spin, settings.base_margin_mm),
@@ -10707,7 +10883,6 @@ class MainWindow(QMainWindow):
                 settings.maximum_contraction_angle_deg,
             ),
             (self.local_window_spin, settings.local_reference_window),
-            (self.mesh_segments_spin, settings.mesh_segments),
         )
         for widget, value in values:
             widget.blockSignals(True)
@@ -10815,21 +10990,47 @@ class MainWindow(QMainWindow):
                 f"Manuelle Standfußbreite: "
                 f"{self.manual_base_width_spin.value():.2f} mm"
             )
-        self.automatic_base_info_button.set_hint(
-            self.automatic_base_width_label.text()
-            + "\n\nAutomatische Breite = max(20 mm, 0,2 × Modellhöhe)."
-            "\n\nStandfußhöhe = Höhe des ersten + Höhe des zweiten Layers. "
-            "Bei gleich hohen Layern: 2 × Layerhöhe; bei nur einem Layer dessen Höhe."
-            "\n\nAnschließend folgt bei Bedarf eine konkave Verjüngung. "
-            "Nach Ausschalten der Automatik kann die Breite manuell eingestellt werden."
-        )
-
     def _source_height_description(self) -> str:
         if self.current_source_kind is SourceKind.STL:
             return "Höhe des automatisch geslicten Modells"
         return "ermittelte Modellhöhe"
 
+    def _update_target_time_minimum(self) -> None:
+        minimum = 5.0
+        snapshot = self.analysis_snapshot
+        if snapshot is not None:
+            observed = getattr(snapshot, "minimum_layer_time_s", None)
+            if isinstance(observed, (int, float)) and not isinstance(observed, bool):
+                observed = float(observed)
+                if math.isfinite(observed) and observed > 0:
+                    # Match the one-decimal display precision and round upward
+                    # so the visible bound always includes the full margin.
+                    required = observed + 0.5
+                    if required <= MAXIMUM_TARGET_LAYER_TIME_S:
+                        minimum = max(
+                            5.0, math.ceil(required * 10 - 1e-9) / 10
+                        )
+        if self.target_time_spin.property("validationMinimum") != minimum:
+            self.target_time_spin.setProperty("validationMinimum", minimum)
+            self._setting_widgets["target_layer_time_s"].refresh_range_state()
+
+    def _update_diameter_limits(self) -> None:
+        boundaries = (
+            (self.minimum_outer_spin, "validationMaximum",
+             min(self.maximum_outer_spin.value(), 99.0),
+             "minimum_outer_diameter_mm"),
+            (self.maximum_outer_spin, "validationMinimum",
+             max(self.minimum_outer_spin.value() + 1.0, 5.0),
+             "maximum_outer_diameter_mm"),
+        )
+        for editor, property_name, value, setting_name in boundaries:
+            if editor.property(property_name) != value:
+                editor.setProperty(property_name, value)
+                self._setting_widgets[setting_name].refresh_range_state()
+
     def validate_form(self) -> bool:
+        self._update_target_time_minimum()
+        self._update_diameter_limits()
         field_records: dict[str, list[str]] = {}
         static_causes: list[str] = []
         general_errors: list[str] = []
@@ -10873,11 +11074,20 @@ class MainWindow(QMainWindow):
             general_errors.append(cause)
 
         settings = self.collect_settings()
+        diameter_order_invalid = (
+            settings.minimum_outer_diameter_mm
+            >= settings.maximum_outer_diameter_mm
+        )
         range_invalid_names: set[str] = set()
         for name, setting in self._setting_widgets.items():
             if not hasattr(settings, name):
                 continue
             if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+                continue
+            if diameter_order_invalid and name in {
+                "minimum_outer_diameter_mm",
+                "maximum_outer_diameter_mm",
+            }:
                 continue
             value = float(getattr(settings, name))
             minimum = setting.editor.property("validationMinimum")
@@ -10885,11 +11095,7 @@ class MainWindow(QMainWindow):
             unit = SETTING_UNITS.get(name, "")
             unit_suffix = f" {unit}" if unit else ""
             sentence_end = "" if unit.endswith(".") else "."
-            formatter = getattr(
-                setting.editor,
-                "stored_text_from_value",
-                setting.editor.textFromValue,
-            )
+            formatter = setting.editor.textFromValue
             if minimum is not None and value < float(minimum):
                 range_invalid_names.add(name)
                 rendered_minimum = formatter(
@@ -10916,6 +11122,15 @@ class MainWindow(QMainWindow):
                     f"den Maximalwert {rendered_maximum}"
                     f"{unit_suffix}{sentence_end}",
                 )
+        if diameter_order_invalid:
+            add_error(
+                ("minimum_outer_diameter_mm",),
+                "Min. Turmdurchmesser muss kleiner als Max. Turmdurchmesser sein.",
+            )
+            add_error(
+                ("maximum_outer_diameter_mm",),
+                "Max. Turmdurchmesser muss größer als Min. Turmdurchmesser sein.",
+            )
         for name in self._incomplete_setting_names:
             if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
                 continue
@@ -10952,18 +11167,6 @@ class MainWindow(QMainWindow):
                 ),
             )
         if (
-            "safety_factor" not in range_invalid_names
-            and settings.safety_factor < 1.0
-        ):
-            add_error(
-                ("safety_factor",),
-                "Sicherheitsfaktor muss mindestens 1,0 betragen.",
-                (
-                    "Den Sicherheitsfaktor auf mindestens 1,0 erhöhen.",
-                    "Den Standardwert wiederherstellen.",
-                ),
-            )
-        if (
             "minimum_outer_diameter_mm" not in range_invalid_names
             and settings.minimum_outer_diameter_mm <= 0.0
         ):
@@ -10973,24 +11176,6 @@ class MainWindow(QMainWindow):
                 (
                     "Einen kleinsten Außendurchmesser größer als 0 mm eingeben.",
                     "Den Standardwert wiederherstellen.",
-                ),
-            )
-        if (
-            settings.minimum_outer_diameter_mm
-            > settings.maximum_outer_diameter_mm
-        ):
-            add_error(
-                (
-                    "minimum_outer_diameter_mm",
-                    "maximum_outer_diameter_mm",
-                ),
-                f"{self._setting_value_description('maximum_outer_diameter_mm')} "
-                "muss mindestens so groß sein wie "
-                f"{self._setting_value_description('minimum_outer_diameter_mm')}.",
-                (
-                    "Den kleinsten Außendurchmesser verkleinern.",
-                    "Den größten Außendurchmesser vergrößern.",
-                    "Den zuletzt geänderten Wert zurücksetzen.",
                 ),
             )
         if (
@@ -11094,21 +11279,16 @@ class MainWindow(QMainWindow):
         # remains attached to the same field until it is actually resolved.
         self._static_field_errors = raw_field_errors
         self._static_error_causes = _deduplicate_validation_messages(static_causes)
-        validation_bypassed = self._input_validation_is_bypassed()
         feedback_available = self._setting_feedback_is_available()
         visible_field_errors = field_errors if feedback_available else {}
-        if validation_bypassed:
-            visible_field_errors = {}
         self._apply_inline_errors(visible_field_errors)
         self._refresh_collapsible_error_badges(visible_field_errors)
 
-        grouped_messages: dict[str, list[str]] = {}
-        if not validation_bypassed:
-            grouped_messages = {
-                name: list(messages) for name, messages in field_errors.items()
-            }
-            for name, messages in self._feasibility_field_errors.items():
-                grouped_messages.setdefault(name, []).extend(messages)
+        grouped_messages: dict[str, list[str]] = {
+            name: list(messages) for name, messages in field_errors.items()
+        }
+        for name, messages in self._feasibility_field_errors.items():
+            grouped_messages.setdefault(name, []).extend(messages)
 
         assigned_static = {
             message
@@ -11125,7 +11305,7 @@ class MainWindow(QMainWindow):
             if self._workflow_error_message
             else ()
         )
-        input_messages = () if validation_bypassed else (
+        input_messages = (
             *general_errors,
             *(
                 message
@@ -11150,7 +11330,7 @@ class MainWindow(QMainWindow):
             if messages
         ]
         if (
-            (feedback_available and not validation_bypassed)
+            feedback_available
             or self._workflow_error_message
         ):
             self.validation_label.set_grouped_notice(
@@ -11220,13 +11400,8 @@ class MainWindow(QMainWindow):
         self,
         static_errors: dict[str, list[str]],
     ) -> None:
-        feedback_available = (
-            self._setting_feedback_is_available()
-            and not self._input_validation_is_bypassed()
-        )
-        feasibility_errors = (
-            self._feasibility_field_errors if feedback_available else {}
-        )
+        feedback_available = self._setting_feedback_is_available()
+        feasibility_errors: dict[str, list[str]] = {}
         combined: dict[str, tuple[str, ...]] = {}
         for name in set(static_errors) | set(feasibility_errors):
             combined[name] = tuple(
@@ -11240,22 +11415,19 @@ class MainWindow(QMainWindow):
         sections = (
             (
                 self.timing_group,
-                {"target_layer_time_s", "safety_factor", "layer_time_tolerance_s"},
+                {"target_layer_time_s", "layer_time_tolerance_s"},
             ),
             (
                 self.geometry_settings_group,
                 {
                     "target_layer_time_s",
-                    "safety_factor",
                     "layer_time_tolerance_s",
                     "minimum_outer_diameter_mm",
                     "maximum_outer_diameter_mm",
-                    "minimum_object_tower_distance_mm",
                     "automatic_base_width",
                     "manual_base_width_mm",
                     "maximum_expansion_angle_deg",
                     "maximum_contraction_angle_deg",
-                    "mesh_segments",
                     "local_reference_window",
                 },
             ),
@@ -11284,13 +11456,8 @@ class MainWindow(QMainWindow):
         self,
         static_errors: dict[str, list[str]],
     ) -> None:
-        feedback_available = (
-            self._setting_feedback_is_available()
-            and not self._input_validation_is_bypassed()
-        )
-        feasibility_errors = (
-            self._feasibility_field_errors if feedback_available else {}
-        )
+        feedback_available = self._setting_feedback_is_available()
+        feasibility_errors: dict[str, list[str]] = {}
         layout_changed = False
         for name, widget in self._setting_widgets.items():
             messages = _deduplicate_validation_messages((
@@ -11393,6 +11560,7 @@ class MainWindow(QMainWindow):
                 self,
             )
             dialog.accept_requested.connect(self._accept_joint_candidate)
+            dialog.export_requested.connect(self._on_main_export_clicked)
             dialog.layout_changed.connect(self._refresh_ready_grid_layout)
             dialog.continue_requested.connect(self._continue_joint_generation)
             self._joint_generation_dialog = dialog
@@ -11403,6 +11571,7 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_preview_progress)
         worker.joint_phase_started.connect(self._on_joint_phase_started)
         worker.joint_progress.connect(self._on_joint_progress)
+        worker.joint_scene.connect(self._on_joint_scene)
         worker.succeeded.connect(self._on_preview_succeeded)
         worker.failed.connect(self._on_preview_failed)
         worker.finished.connect(self._on_preview_finished)
@@ -11420,10 +11589,28 @@ class MainWindow(QMainWindow):
         self._cancel_generation_phase_transition()
         self.validate_form()
         self._refresh_stl_availability()
+        if (
+            self.analysis_snapshot is not None
+            and self.tower_assessment is not None
+            and not self.tower_assessment.tower_required
+            and self._generation_block_reason() is None
+        ):
+            reason = self._no_tower_required_reason(
+                self.tower_assessment, self.analysis_snapshot
+            )
+            if not self._ask_no_tower_confirmation(reason):
+                self._set_main_status(
+                    f"Generierung nicht gestartet. {reason}",
+                    icon="○",
+                    state="idle",
+                )
+                return
+            self._force_no_tower_generation = True
+            self._refresh_phase17_actions()
         self._show_preview_dialog()
         if not self.preview_button.isEnabled():
             self.generation_intro_label.hide()
-            reason = self._export_block_reason(allow_validation_bypass=False)
+            reason = self._export_block_reason()
             message = reason or self.validation_label.text() or "Quellen- und Geometrieprüfung noch nicht abgeschlossen."
             self.joint_generation_dialog.show_error(message)
             self.preview_dialog.set_failed(message)
@@ -11454,7 +11641,13 @@ class MainWindow(QMainWindow):
             simulations.append("Stützen: aktiviert")
         self.joint_generation_dialog.set_context(simulations)
         self.generation_intro_label.hide()
-        self.joint_generation_dialog.begin(request.settings.target_layer_time_s, request.settings.layer_time_tolerance_s, 0, self.maximum_joint_slices)
+        self.joint_generation_dialog.begin(
+            request.settings.target_layer_time_s,
+            request.settings.layer_time_tolerance_s,
+            0,
+            self.maximum_joint_slices,
+            GENERATION_MINIMUM_JOINT_SLICES,
+        )
         self._joint_phase_active = False
         self._joint_accept_requested = False
         self._joint_resume_active = False
@@ -11520,6 +11713,18 @@ class MainWindow(QMainWindow):
         if request_id != self._preview_request_id or self._closing:
             return
         status = german_user_message(status)
+        if self._joint_resume_active and self._joint_slice_offset:
+            status = re.sub(
+                r"(Gemeinsamer Slice\s+)(\d+)\s*/\s*\d+",
+                lambda match: (
+                    f"{match.group(1)}"
+                    f"{self._joint_slice_offset + int(match.group(2))}"
+                    f"/{self.maximum_joint_slices}"
+                ),
+                status,
+                count=1,
+                flags=re.IGNORECASE,
+            )
         self.preview_dialog.set_progress(percent, status)
         normalized = status.casefold()
         if self._joint_phase_active or "gemeinsamer slice" in normalized:
@@ -11544,6 +11749,8 @@ class MainWindow(QMainWindow):
         )
         if match is not None:
             current, maximum = map(int, match.groups())
+            if "ausgewertet" in status.casefold():
+                return round(max(0, current) / max(1, maximum) * 100)
             return round(max(0, current - 1) / max(1, maximum) * 100)
         match = re.search(r"Slicer-Ergebnis\s+(\d+)\s*/", status, re.IGNORECASE)
         if match is not None:
@@ -11668,6 +11875,7 @@ class MainWindow(QMainWindow):
     def _on_joint_progress(self, request_id: int, progress: object) -> None:
         if request_id != self._preview_request_id or self._closing:
             return
+        previous_completed = self._joint_slices_completed
         completed = self._joint_slice_offset + int(
             getattr(progress, "completed_count", 0)
         )
@@ -11675,6 +11883,11 @@ class MainWindow(QMainWindow):
             self._joint_slices_completed,
             completed,
         )
+        if (
+            previous_completed < GENERATION_MINIMUM_JOINT_SLICES
+            <= self._joint_slices_completed
+        ):
+            self._update_responsive_action_labels()
         if self._generation_phase_transition_stage == "out":
             self._generation_phase_transition_target = (
                 completed, self.maximum_joint_slices
@@ -11687,12 +11900,24 @@ class MainWindow(QMainWindow):
         )
 
     @Slot(int, object)
+    def _on_joint_scene(self, request_id: int, scene: object) -> None:
+        if (
+            request_id == self._preview_request_id
+            and not self._closing
+            and self.preview_state is PreviewState.BUILDING
+        ):
+            self.preview_dialog.set_intermediate_scene(scene)
+
+    @Slot(int, object)
     def _on_preview_succeeded(
         self,
         request_id: int,
         result: PreviewResult,
     ) -> None:
         if request_id != self._preview_request_id or self._closing:
+            result.dispose()
+            return
+        if self._joint_resume_active and self._preview_cancel_requested:
             result.dispose()
             return
         self._cancel_generation_phase_transition()
@@ -11832,19 +12057,23 @@ class MainWindow(QMainWindow):
     def cancel_generation(self) -> None:
         if self._preview_cancel_requested:
             return
-        if self._joint_phase_active and self._joint_slices_completed > 0:
-            self._accept_joint_candidate()
-            return
         cancelled = self.background_job_manager.cancel_jobs(
             JobKind.PREVIEW,
             reason="user_request",
         )
         if not cancelled:
             return
+        if self._joint_resume_active:
+            # An explicit abort takes precedence even if accepting the
+            # retained seed was already requested in this resumed run.
+            self._joint_resume_accept_seed_only = False
+            self._joint_accept_requested = False
         self._cancel_generation_phase_transition()
         self._preview_cancel_requested = True
         self.preview_button.setText("Abbruch wird ausgeführt …")
         self.preview_button.setEnabled(False)
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.accept_button.setEnabled(False)
         self._set_main_status(
             "Generierung wird sicher abgebrochen …",
             icon="⏳",
@@ -11853,12 +12082,14 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _accept_joint_candidate(self) -> None:
+        if self._preview_cancel_requested:
+            return
         if not self.background_job_manager.has_active(JobKind.PREVIEW):
             if self._joint_generation_dialog is not None:
                 self._joint_generation_dialog.allow_programmatic_close()
                 self._joint_generation_dialog.close()
             return
-        if self._joint_slices_completed < 1:
+        if self._joint_slices_completed < GENERATION_MINIMUM_JOINT_SLICES:
             return
         worker = self._active_preview_worker
         if worker is None:
@@ -11895,6 +12126,17 @@ class MainWindow(QMainWindow):
             or self.preview_state is not PreviewState.CURRENT
         ):
             return
+        self.validate_form()
+        if self.analysis_snapshot is not None and self.tower_assessment is not None:
+            if not self.tower_assessment.tower_required and not self._force_no_tower_generation:
+                self._set_main_status(
+                    self._no_tower_required_reason(
+                        self.tower_assessment, self.analysis_snapshot
+                    ),
+                    icon="○",
+                    state="idle",
+                )
+                return
         self._cancel_generation_phase_transition()
         remaining = self.maximum_joint_slices - self._joint_slices_completed
         if remaining <= 0:
@@ -11903,7 +12145,7 @@ class MainWindow(QMainWindow):
             self._calibration_config(),
             maximum_iterations=remaining,
             maximum_joint_slices=remaining,
-            minimum_joint_slices=1,
+            completed_joint_slices_before_run=self._joint_slices_completed,
             perform_joint_final_slice=True,
         )
         try:
@@ -11926,6 +12168,7 @@ class MainWindow(QMainWindow):
         self._preview_cancel_requested = False
         self.preview_state = PreviewState.BUILDING
         self.joint_generation_dialog.resume_waiting()
+        self.preview_dialog.set_building("Gemeinsame Angleichung wird fortgesetzt …")
         worker = PreviewWorker(
             request_id,
             request,
@@ -11972,31 +12215,36 @@ class MainWindow(QMainWindow):
         if self.preview_state is not PreviewState.BUILDING:
             return
         self._preview_cancel_requested = False
-        self.preview_state = (
-            PreviewState.STALE
-            if self.current_preview is not None
-            else PreviewState.EMPTY
-        )
+        previous = self.current_preview
+        self.current_preview = None
+        self.preview_state = PreviewState.EMPTY
         self.preview_dialog.set_cancelled()
-        self.joint_generation_dialog.mark_finished(paused=True, can_continue=False, status_text="Vor dem ersten verwertbaren gemeinsamen Slice gestoppt.", has_result=False)
+        if previous is not None:
+            previous.dispose()
+        self._joint_resume_active = False
+        self._joint_resume_accept_seed_only = False
+        self._joint_accept_requested = False
+        self._joint_generation_paused = False
+        self._joint_phase_active = False
+        self._joint_slices_completed = 0
+        self._joint_slice_offset = 0
+        self.joint_generation_dialog.mark_interrupted("Generierung abgebrochen.")
+        self.generation_intro_label.setText(
+            "Die Generierung wurde manuell abgebrochen.\n"
+            "Der bisherige Kühlturm wurde verworfen."
+        )
+        self.generation_intro_label.show()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self._set_isolated_slice_progress_visible(False)
-        if self.current_preview is not None:
-            self.preview_hint_label.setProperty("state", "stale")
-            self.preview_hint_label.setText(
-                "⚠ Die Aktualisierung wurde abgebrochen. Der angezeigte "
-                "Kühlturm ist nicht exportfähig."
-            )
-            self.preview_hint_label.show()
-        else:
-            self.preview_hint_label.hide()
+        self.preview_hint_label.hide()
         self._set_main_status(
             "Generierung abgebrochen",
             icon="⚠",
             state="warning",
         )
+        self._refresh_prediction()
         for delay_ms in (0, 50):
             QTimer.singleShot(delay_ms, self._refresh_phase17_actions)
 
@@ -12288,31 +12536,89 @@ class MainWindow(QMainWindow):
     def _update_responsive_action_labels(self) -> None:
         if not hasattr(self, "open_stl_button"):
             return
-        compact = self.width() < 900
-        self.open_output_button.setText(
-            "Alle Exporte" if compact else "Alle Exporte öffnen"
-        )
-        self.open_stl_button.setText(
-            "Letzter Export" if compact else "Letzten Export öffnen"
-        )
         self.reset_button.setText("Standardwerte wiederherstellen")
+        accepting = False
         cancelling = self.preview_state is PreviewState.BUILDING
         for widget in (self.preview_action_control, self.preview_button):
             if widget.property("cancelAction") != cancelling:
                 widget.setProperty("cancelAction", cancelling)
                 self._refresh_widget_style(widget)
+            if widget.property("acceptAction") != accepting:
+                widget.setProperty("acceptAction", accepting)
+                self._refresh_widget_style(widget)
         if self.preview_state is PreviewState.BUILDING:
-            self.preview_button.setText(
-                "Abbruch wird ausgeführt …"
-                if self._preview_cancel_requested
-                else "Generierung abbrechen"
-            )
+            if self._preview_cancel_requested:
+                self.preview_button.setText("Abbruch wird ausgeführt …")
+            else:
+                self.preview_button.setText("Generierung abbrechen")
         elif self.current_preview is not None:
             self.preview_button.setText("Kühlturm aktualisieren")
         else:
             self.preview_button.setText("Kühlturm generieren")
         self.export_button.setText("Kühlturm exportieren")
+        self.preview_action_control.setFixedWidth(max(
+            PREVIEW_ACTION_COMPACT_WIDTH_PX,
+            QFontMetrics(self.preview_button.font()).horizontalAdvance(
+                self.preview_button.text()
+            ) + 2 * EXPORT_ACTION_HORIZONTAL_PADDING_PX + 2,
+        ))
         self._fit_export_button_width()
+        footer_inner_width = max(0, self.width() - 44)
+        if self.width() < METRICS.responsive_breakpoint_px:
+            action_area_width = footer_inner_width
+        else:
+            action_area_width = max(0, (footer_inner_width - 13) // 2 - 12)
+        self.open_output_button.setText("Alle Exporte öffnen")
+        self.open_stl_button.setText("Letzten Export öffnen")
+        folder_buttons = (
+            self.open_output_button,
+            self.open_stl_button,
+            self.open_run_button,
+        )
+        folder_count = sum(not button.isHidden() for button in folder_buttons)
+        primary_width = max(
+            self.preview_action_control.width(), self.export_button.width()
+        )
+        def required_action_width() -> int:
+            return (
+                sum(
+                    button.sizeHint().width()
+                    for button in folder_buttons
+                    if not button.isHidden()
+                )
+                + primary_width
+                + self.main_actions_layout.horizontalSpacing() * folder_count
+            )
+
+        # Shorten the folder labels before their full text would move the
+        # primary action to a second row in the two-column footer.
+        compact = self.width() < 1050 or required_action_width() > action_area_width
+        if compact:
+            self.open_output_button.setText("Alle Exporte")
+            self.open_stl_button.setText("Letzter Export")
+        required_width = required_action_width()
+        wrapped = required_width > action_area_width
+        if wrapped != getattr(self, "_footer_actions_wrapped", False):
+            self._footer_actions_wrapped = wrapped
+            actions = self.main_actions_layout
+            actions.removeWidget(self.preview_action_control)
+            actions.removeWidget(self.export_button)
+            actions.setVerticalSpacing(8 if wrapped else 0)
+            if wrapped:
+                for widget in (self.preview_action_control, self.export_button):
+                    actions.addWidget(
+                        widget, 1, 0, 1, 6, Qt.AlignmentFlag.AlignRight
+                    )
+            else:
+                actions.addWidget(
+                    self.preview_action_control,
+                    0, 4, Qt.AlignmentFlag.AlignBottom,
+                )
+                actions.addWidget(
+                    self.export_button,
+                    0, 5, Qt.AlignmentFlag.AlignBottom,
+                )
+            actions.invalidate()
 
     def _fit_export_button_width(self) -> None:
         """Keep exactly 25 px of horizontal text padding on each side."""
@@ -12397,7 +12703,17 @@ class MainWindow(QMainWindow):
         return box
 
     def reset_defaults(self) -> None:
+        self._feasibility_timer.stop()
+        self._feasibility_request_id += 1
+        self._cancel_feasibility_jobs()
+        self.profile_feasibility = None
+        self._clear_feasibility_issues()
+        self._last_changed_setting_name = None
         self.apply_settings(self.settings_store.load_defaults())
+        self._incomplete_setting_names.clear()
+        if self.analysis_snapshot is not None:
+            self._update_local_window_layer_limit(self.analysis_snapshot.layer_count)
+            self._setting_widgets["local_reference_window"].refresh_reset_state()
         self.maximum_joint_slices = self.default_maximum_joint_slices
         self._apply_show_setting_limits(False)
         self.output_root_edit.setText(
@@ -12413,6 +12729,7 @@ class MainWindow(QMainWindow):
         self.update_wall_path_preview()
         self._refresh_tower_assessment()
         self.validate_form()
+        self._schedule_feasibility_validation()
 
     def _save_user_settings(self) -> None:
         try:

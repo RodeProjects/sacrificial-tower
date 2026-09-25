@@ -57,8 +57,8 @@ class CalibrationConfig:
     minimum_path_growth_mm: float = 0.5
     material_reduction_factor: float = 1.0
     repeated_result_limit: int = 2
-    object_clearance_mm: float = 25.0
-    bed_edge_clearance_mm: float = 3.0
+    object_clearance_mm: float = 5.0
+    bed_edge_clearance_mm: float = 5.0
     travel_speed_mm_s: float = 150.0
     retraction_length_mm: float = 0.8
     retraction_speed_mm_s: float = 35.0
@@ -66,6 +66,7 @@ class CalibrationConfig:
     perform_joint_final_slice: bool = True
     maximum_joint_slices: int = 1
     minimum_joint_slices: int = 1
+    completed_joint_slices_before_run: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.perform_joint_final_slice, bool):
@@ -80,10 +81,21 @@ class CalibrationConfig:
                 "Die Kalibrierung erlaubt zwischen einem und 25 gemeinsamen "
                 "Slicer-Durchläufen."
             )
-        if not 1 <= self.minimum_joint_slices <= self.maximum_joint_slices:
+        if (
+            isinstance(self.completed_joint_slices_before_run, bool)
+            or not isinstance(self.completed_joint_slices_before_run, int)
+            or self.completed_joint_slices_before_run < 0
+        ):
+            raise ValueError(
+                "Die Anzahl zuvor abgeschlossener gemeinsamer Slices muss "
+                "eine nichtnegative ganze Zahl sein."
+            )
+        if not 1 <= self.minimum_joint_slices <= (
+            self.completed_joint_slices_before_run + self.maximum_joint_slices
+        ):
             raise ValueError(
                 "Die Mindestanzahl gemeinsamer Slicer-Durchläufe muss zwischen "
-                "eins und dem gemeinsamen Durchlauflimit liegen."
+                "eins und der Gesamtzahl verfügbarer gemeinsamer Durchläufe liegen."
             )
         if self.maximum_joint_slices > self.maximum_iterations:
             raise ValueError(
@@ -262,6 +274,8 @@ class JointSliceProgress:
     current_iteration: CalibrationIteration
     best_iteration: CalibrationIteration
     current_is_best: bool
+    current_profile: Any | None = None
+    placement: TowerPlacement | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,10 +11,6 @@ SETTING_INFO_TEXTS = {
         "Kürzeste gewünschte Druckzeit je Layer. Der Kühlturm ergänzt "
         "Druckzeit, wenn das eigentliche Objekt diesen Wert unterschreitet."
     ),
-    "safety_factor": (
-        "Vergrößert den berechneten zusätzlichen Druckweg als Reserve. "
-        "1,10 entspricht zehn Prozent Sicherheitszuschlag."
-    ),
     "minimum_outer_diameter_mm": (
         "Kleinster zulässiger Außendurchmesser oberhalb des Standfußes. "
         "Entfällt der Kühlbedarf dauerhaft, endet der Turm vorzeitig."
@@ -22,10 +18,6 @@ SETTING_INFO_TEXTS = {
     "maximum_outer_diameter_mm": (
         "Größter regulärer Außendurchmesser des Kühlturms. Er begrenzt den "
         "Platz- und Materialbedarf sowie die maximal erreichbare Zusatzzeit."
-    ),
-    "minimum_object_tower_distance_mm": (
-        "Legt den kleinsten freien Abstand zwischen Objekt und Kühlturm fest. "
-        "Brim und Support werden automatisch mitgerechnet."
     ),
     "manual_base_width_mm": (
         "Außendurchmesser des Standfußes bei deaktivierter Automatik. "
@@ -40,10 +32,6 @@ SETTING_INFO_TEXTS = {
         "entlang einer konkaven Kurve verjüngen darf, gemessen zur Vertikalen. "
         "Bei 100 % Turmfüllung wird diese Winkelgrenze vollständig ignoriert. "
         "Bei abrupt sinkendem Bedarf sind dann direkte Absätze nach innen möglich."
-    ),
-    "mesh_segments": (
-        "Anzahl gerader Segmente pro Kreisring im STL-Netz. Mehr Segmente "
-        "erzeugen rundere Flächen, aber größere Dateien."
     ),
     "local_reference_window": (
         "Ungerade Anzahl benachbarter Layer für die lokale Zeitreferenz. "

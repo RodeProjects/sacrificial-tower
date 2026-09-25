@@ -1,6 +1,6 @@
 {
-  "settings_schema_version": 15,
-  "maximum_joint_slices": 10,
+  "settings_schema_version": 18,
+  "maximum_joint_slices": 12,
   "layer_time_tolerance_s": 0.25,
   "default_output_root": "output",
   "automatic_base_width": true,
@@ -12,12 +12,10 @@
   "maximum_expansion_angle_deg": 50.0,
   "maximum_outer_diameter_mm": 40.0,
   "maximum_radius_change_per_mm_z": 0.35,
-  "mesh_segments": 32,
   "minimum_base_radius_mm": 10.0,
   "minimum_outer_diameter_mm": 5.0,
-  "minimum_object_tower_distance_mm": 15.0,
+  "minimum_object_tower_distance_mm": 5.0,
   "minimum_radius_height_factor": 0.04,
   "simulate_full_tower_infill": false,
-  "safety_factor": 1.0,
   "target_layer_time_s": 9.0
 }

@@ -10,7 +10,6 @@ class TowerNeedAssessment:
 
     tower_required: bool
     target_layer_time_s: float
-    safety_factor: float
 
     deficit_layer_count: int
     first_deficit_layer_index: int | None

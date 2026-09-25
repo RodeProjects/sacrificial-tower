@@ -10,9 +10,6 @@ _EXACT_TRANSLATIONS = {
     "The target layer time must be greater than zero.": (
         "Die Ziel-Layerzeit muss größer als 0 sein."
     ),
-    "The safety factor must be at least 1.0.": (
-        "Der Sicherheitsfaktor muss mindestens 1,0 betragen."
-    ),
     "Minimum outer diameter must be greater than zero.": (
         "Der kleinste Außendurchmesser muss größer als 0 sein."
     ),

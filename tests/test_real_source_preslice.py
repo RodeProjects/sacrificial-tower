@@ -570,7 +570,6 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
                     preslice.analysis_snapshot,
                     GenerationSettings(
                         target_layer_time_s=10.0,
-                        safety_factor=1.0,
                         minimum_outer_diameter_mm=3.0,
                         maximum_outer_diameter_mm=40.0,
                         minimum_object_tower_distance_mm=0.5,
@@ -579,7 +578,6 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
                         automatic_base_width=True,
                         maximum_expansion_angle_deg=50.0,
                         maximum_contraction_angle_deg=50.0,
-                        mesh_segments=32,
                     ),
                     adapter=adapter,
                     profile=confirmed.selected.effective_profile,

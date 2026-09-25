@@ -208,7 +208,7 @@ bleiben erhalten. Die stabile Kennung `generation.layer_time_tolerance_s` verwen
 den Einheitentoken `layer-time-tolerance-seconds-v1`; Downgrade-Übernahmen mit
 anderen Einheiten, ungültigen Typen oder außerhalb des Zielbereichs werden verworfen.
 
-Unter „Kühlzeit und Qualität“ gilt die Toleranz symmetrisch um die Ziel-Layerzeit.
+Unter „Layerzeit und Toleranz“ gilt die Toleranz symmetrisch um die Ziel-Layerzeit.
 Sie wird an die Kalibrierung übergeben und gehört zur Vorschau-Signatur. Der Export
 behält die beim Generieren verwendete Toleranz für seine farbige Abweichungsanzeige.
 
@@ -233,7 +233,9 @@ Bereich von 0,01 bis 30 Sekunden und verwerfen inkompatible Werte.
 Neue Einstellungen und Zurücksetzen verwenden zentral aus
 `config/default_settings.json`: Ziel-Layerzeit 9 s, Toleranz ±0,25 s,
 minimaler Turmdurchmesser 5 mm, Verjüngungswinkel 55°, Objektabstand 15 mm und
-Zeit-Sicherheitsfaktor 1,0.
+Zeit-Sicherheitsfaktor 1,0. Diese historischen Vorgaben wurden in Schema 16
+durch die feste 5-mm-Platzierungsregel und den Verzicht auf den Sicherheitsfaktor
+ersetzt.
 Historische Migrationen behalten ihre damaligen Standardwerte.
 
 ## Schema 14: maximale gemeinsame Slices
@@ -242,6 +244,10 @@ Historische Migrationen behalten ihre damaligen Standardwerte.
 nach den sechs getrennten Turm-Slices das Budget der vollständigen gemeinsamen
 Objekt-/Turm-Slices. Der Standardwert ist 10; gespeichert und übernommen werden
 nur Ganzzahlen von 5 bis 25. Ungültige Werte fallen auf 10 zurück.
+Dies beschreibt die historische Migration; der aktuelle Produktstandard für
+neue Konfigurationen und „Standardwerte wiederherstellen“ ist 12. Gespeicherte
+gültige Benutzerwerte behalten ihren Wert. Der Standardwechsel ändert weder
+Schema noch Bedeutung des Feldes.
 
 Die Kompatibilitätskennung `maximum_joint_slices` verwendet den Token
 `joint-slice-budget-v1`. Die Einstellung gehört zur Vorschau-Signatur, sodass
@@ -264,3 +270,35 @@ anwendbar. Die bestehenden Schutzregeln für Sicherung, atomare Speicherung,
 beschädigte, extern geänderte und neuere Dateien bleiben erhalten. Die Verlagerung
 des Exportordners in die allgemeinen Einstellungen ändert dessen gespeichertes
 Format nicht.
+
+## Schema 16: automatische Geometrieparameter
+
+15→16 entfernt `generation.safety_factor` und `generation.mesh_segments` sowie
+deren Downgrade-Kompatibilitätskennungen. Frühere Werte werden nicht übernommen.
+`generation.minimum_object_tower_distance_mm` wird auf 5 mm gesetzt und ist
+nicht mehr als Eingabe oder Downgrade-Wert verfügbar. Die Sicherung des Originals
+und das atomare Schreiben laufen vor beziehungsweise nach der direkten Migration
+über `VersionedJsonStore`; alle früheren Migrationsschritte bleiben erhalten.
+
+## Schema 17: Untergrenzen der Layerzeiten
+
+16→17 hebt gespeicherte Ziel-Layerzeiten unter 5 s auf 5 s und gespeicherte
+Layerzeit-Toleranzen unter 0,1 s auf 0,1 s an, sofern sie im bisherigen
+gültigen Bereich lagen. Andere gültige Werte bleiben erhalten. Ungültige
+Werte fallen bei der Normalisierung auf die aktuellen Standardwerte zurück.
+Die Downgrade-Übernahme akzeptiert für diese Kennungen nur noch 5–30 s
+beziehungsweise 0,1–3 s; Kennungen und Einheitentoken bleiben gleich.
+`VersionedJsonStore` sichert das Original vor der direkten oder mehrstufigen
+Migration und schreibt die neue Fassung atomar. Die zusätzliche, vom
+Pre-Slice-Ergebnis abhängige Ziel-Untergrenze gehört zur GUI-Validierung und
+wird nicht in den Einstellungen gespeichert.
+
+## Schema 18: Durchmessergrenzen
+
+17→18 begrenzt gespeicherte minimale Turmdurchmesser auf 3–99 mm und maximale
+Turmdurchmesser auf 5–100 mm. Liegt das Maximum weniger als 1 mm über dem
+Minimum, wird das Minimum bei der Migration auf `Maximum − 1 mm` abgesenkt;
+das bisherige Maximum bleibt dadurch soweit möglich erhalten. Bereits gültige
+Werte bleiben unverändert. Direkte und mehrstufige Migrationen nutzen weiterhin
+Sicherung und atomisches Schreiben. Die Downgrade-Übernahme prüft die neuen
+Einzelgrenzen und den Abstand von mindestens 1 mm als gemeinsame Gruppe.

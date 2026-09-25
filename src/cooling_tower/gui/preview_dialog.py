@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from cooling_tower.gui.widgets import PreviewCanvas
 from cooling_tower.gui.user_messages import german_user_message
-from cooling_tower.preview import PreviewResult, PreviewState
+from cooling_tower.preview import PreviewResult, PreviewScene, PreviewState
 
 
 class PreviewDialog(QDialog):
@@ -43,6 +43,8 @@ class PreviewDialog(QDialog):
             self.setWindowModality(Qt.WindowModality.NonModal)
             self.resize(920, 720)
         self.state = PreviewState.EMPTY
+        self._scene_before_build: PreviewScene | None = None
+        self._intermediate_scene_active = False
 
         layout = QVBoxLayout(self)
         if embedded:
@@ -95,6 +97,9 @@ class PreviewDialog(QDialog):
         self.height_info_label = self._preview_info_label(
             "previewHeightInfo"
         )
+        self.tower_circle_segments_info_label = self._preview_info_label(
+            "previewTowerCircleSegmentsInfo"
+        )
         self.layers_info_label = self._preview_info_label(
             "previewLayersInfo"
         )
@@ -103,10 +108,25 @@ class PreviewDialog(QDialog):
         preview_info_layout.addWidget(self.height_info_label, 0, 1)
         preview_info_layout.addWidget(self.layers_info_label, 1, 0)
         preview_info_layout.addWidget(self.bed_info_label, 1, 1)
+        previous_header_height = self.preview_info_header.sizeHint().height()
+        preview_info_layout.removeWidget(self.height_info_label)
+        preview_info_layout.removeWidget(self.bed_info_label)
+        # Three compact right-side lines fit into the old two-line header.
+        # The canvas keeps its position; navigation overlays its top edge.
+        preview_info_layout.setContentsMargins(12, 1, 12, 1)
+        preview_info_layout.setVerticalSpacing(0)
+        preview_info_layout.addWidget(self.tower_circle_segments_info_label, 0, 1)
+        preview_info_layout.addWidget(self.height_info_label, 1, 1)
+        preview_info_layout.addWidget(self.bed_info_label, 2, 1)
+        self.preview_info_header.setFixedHeight(previous_header_height)
         preview_info_layout.setColumnStretch(0, 1)
         preview_info_layout.setColumnStretch(1, 0)
         preview_frame_layout.addWidget(self.preview_info_header)
         preview_frame_layout.addWidget(self.canvas, 1)
+        self.canvas.set_navigation_overlay_parent(
+            self.preview_frame,
+            upward_offset=self.layers_info_label.fontMetrics().lineSpacing(),
+        )
 
         self.legend_widget = QWidget()
         self.legend_widget.setObjectName("previewLegendBar")
@@ -288,10 +308,18 @@ class PreviewDialog(QDialog):
         return label
 
     def set_building(self, status: str) -> None:
+        if self.state is PreviewState.BUILDING:
+            self._restore_scene_before_build()
+        self._scene_before_build = self.canvas.scene
+        self._intermediate_scene_active = False
         self.state = PreviewState.BUILDING
         self.canvas.set_navigation_enabled(False)
-        self.state_label.setText("⏳ Vorschau wird erstellt …")
-        self.state_label.setProperty("state", "building")
+        retained_scene = self.canvas.scene is not None
+        self.state_label.setText(
+            "⚠ Bisherige Vorschau veraltet – neue Vorschau wird erstellt …"
+            if retained_scene else "⏳ Vorschau wird erstellt …"
+        )
+        self.state_label.setProperty("state", "stale" if retained_scene else "building")
         self.state_label.setVisible(not self.embedded or self.canvas.scene is not None)
         self._refresh_state_style()
         self.progress.setRange(0, 100)
@@ -307,6 +335,35 @@ class PreviewDialog(QDialog):
         self._set_quality_details("")
         self._set_preview_controls_visible(self.canvas.scene is not None)
 
+    def set_intermediate_scene(self, scene: PreviewScene) -> None:
+        """Show the latest measured tower shape without granting result controls."""
+
+        if self.state is not PreviewState.BUILDING:
+            return
+        self._intermediate_scene_active = True
+        self.canvas.set_scene(scene)
+        self.canvas.side_view()
+        bed = scene.bed_bounds
+        self._set_scene_information(
+            scene,
+            bed_width_mm=bed.maximum_x_mm - bed.minimum_x_mm,
+            bed_depth_mm=bed.maximum_y_mm - bed.minimum_y_mm,
+        )
+        self._set_preview_controls_visible(True)
+
+    def _restore_scene_before_build(self) -> None:
+        if self._intermediate_scene_active:
+            self.canvas.set_scene(self._scene_before_build)
+            if self._scene_before_build is not None:
+                bed = self._scene_before_build.bed_bounds
+                self._set_scene_information(
+                    self._scene_before_build,
+                    bed_width_mm=bed.maximum_x_mm - bed.minimum_x_mm,
+                    bed_depth_mm=bed.maximum_y_mm - bed.minimum_y_mm,
+                )
+        self._intermediate_scene_active = False
+        self._scene_before_build = None
+
     def set_progress(self, percent: int, status: str) -> None:
         self.progress_status_label.setText(german_user_message(status))
         self.progress_status_widget.setVisible(not self.embedded)
@@ -314,6 +371,8 @@ class PreviewDialog(QDialog):
         self.progress.setValue(max(0, min(100, percent)))
 
     def set_preview(self, result: PreviewResult) -> None:
+        self._intermediate_scene_active = False
+        self._scene_before_build = None
         self.state = PreviewState.CURRENT
         self.canvas.set_scene(result.scene)
         self.canvas.side_view()
@@ -417,6 +476,15 @@ class PreviewDialog(QDialog):
                 self._format_count(len(tower_segments)), tower_color
             )
         )
+        circle_segments = getattr(scene, "tower_circle_segments", None)
+        self.tower_circle_segments_info_label.setText(
+            "Turm-Kreissegmente: "
+            + self._colored_value(
+                self._format_count(int(circle_segments))
+                if circle_segments is not None else "–",
+                tower_color,
+            )
+        )
         self.height_info_label.setText(
             "Höhe: "
             + self._colored_value(
@@ -449,6 +517,8 @@ class PreviewDialog(QDialog):
         )
 
     def mark_stale(self) -> None:
+        if self.state is PreviewState.BUILDING:
+            self._restore_scene_before_build()
         if self.canvas.scene is None:
             self.state = PreviewState.EMPTY
             self.state_label.setText("Vorschau wurde noch nicht erstellt.")
@@ -488,6 +558,7 @@ class PreviewDialog(QDialog):
         self._set_preview_controls_visible(True)
 
     def set_failed(self, message: str) -> None:
+        self._restore_scene_before_build()
         self.state = PreviewState.FAILED
         self.state_label.setText(
             f"✕ Vorschau fehlgeschlagen: {german_user_message(message)}"
@@ -510,22 +581,20 @@ class PreviewDialog(QDialog):
         self._set_preview_controls_visible(self.canvas.scene is not None)
 
     def set_cancelled(self) -> None:
-        self.state = (
-            PreviewState.STALE
-            if self.canvas.scene is not None
-            else PreviewState.EMPTY
-        )
-        self.state_label.setText(
-            "⚠ Generierung abgebrochen"
-            if self.canvas.scene is not None
-            else "Generierung abgebrochen."
-        )
-        self.state_label.setProperty("state", "stale")
+        self._restore_scene_before_build()
+        self.canvas.set_scene(None)
+        self._last_quality_text = ""
+        self._last_quality_state = "neutral"
+        self._set_quality_details("")
+        self._set_quality_text("Prüfstatus der Prognose\nKeine aktuelle Vorschau.", "neutral")
+        self.state = PreviewState.EMPTY
+        self.state_label.setText("Generierung abgebrochen. Kein Kühlturm vorhanden.")
+        self.state_label.setProperty("state", "empty")
         self.state_label.show()
         self._refresh_state_style()
         self.progress.hide()
         self.progress_status_widget.hide()
-        self._set_preview_controls_visible(self.canvas.scene is not None)
+        self._set_preview_controls_visible(False)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.closed.emit()
@@ -535,7 +604,7 @@ class PreviewDialog(QDialog):
         if self.embedded:
             full_text = self.state_label.text()
             self.state_label.setToolTip(full_text)
-            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
+            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "⚠ Veraltet" if self._scene_before_build is not None else "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
             self.state_label.setText(captions.get(self.state, full_text))
             self.state_label.setVisible(
                 self.state not in {PreviewState.EMPTY, PreviewState.FAILED}
@@ -545,13 +614,31 @@ class PreviewDialog(QDialog):
         style.polish(self.state_label)
 
     def _set_preview_controls_visible(self, visible: bool) -> None:
-        """Show interaction and result controls only for an existing scene."""
+        """Keep camera buttons visible but locked while a scene is building."""
 
         visible = bool(visible)
-        changed = visible != self._preview_controls_visible
+        building = self.state is PreviewState.BUILDING
+        changed = (
+            visible != self._preview_controls_visible
+            or building != getattr(self, "_preview_controls_building", False)
+        )
         self._preview_controls_visible = visible
+        self._preview_controls_building = building
         for widget in self._preview_only_controls:
             widget.setVisible(visible)
+        camera_buttons = (
+            self.three_quarter_button,
+            self.front_button,
+            self.side_button,
+            self.top_button,
+        )
+        for button in camera_buttons:
+            button.setVisible(visible or building)
+            button.setEnabled(visible and not building)
+        interactive = visible and not building
+        self.canvas.navigation_toggle.setVisible(interactive)
+        self.canvas.navigation_status_label.setVisible(interactive)
+        self.navigation_hint.setVisible(interactive)
         if self.embedded:
             frame_height = self.canvas.minimumHeight()
             if visible:

@@ -19,7 +19,6 @@ class TowerProfileConfig:
     """Configuration values required for the Phase-2 radius profile."""
 
     target_layer_time_s: float
-    safety_factor: float = 1.10
     minimum_radius_mm: float = 6.0
     maximum_radius_mm: float = 40.0
     local_time_factor_window: int = 5
@@ -155,7 +154,6 @@ def validate_profile_config(
     """Validate all user-controlled Phase-2 settings."""
     numeric_values = {
         "target layer time": config.target_layer_time_s,
-        "safety factor": config.safety_factor,
         "minimum radius": config.minimum_radius_mm,
         "maximum radius": config.maximum_radius_mm,
     }
@@ -171,10 +169,6 @@ def validate_profile_config(
             "The target layer time must be greater than zero."
         )
 
-    if config.safety_factor < 1.0:
-        raise ProfileCalculationError(
-            "The safety factor must be at least 1.0."
-        )
 
     if config.minimum_radius_mm <= 0.0:
         raise ProfileCalculationError(
@@ -425,9 +419,7 @@ def _calculate_layer_radius(
             )
 
         additional_path_mm = time_deficit_s / seconds_per_mm
-        safety_adjusted_path_mm = (
-            additional_path_mm * config.safety_factor
-        )
+        safety_adjusted_path_mm = additional_path_mm
         calculated_radius_mm = (
             safety_adjusted_path_mm / math.tau
         )

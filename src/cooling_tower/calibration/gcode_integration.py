@@ -294,13 +294,15 @@ def propose_tower_placement(
 ) -> TowerPlacement:
     if tower_radius_mm <= 0.0:
         raise ValueError("Der Turmradius muss größer als null sein.")
+    if object_clearance_mm < 0.0 or edge_clearance_mm < 0.0:
+        raise ValueError("Abstände dürfen nicht negativ sein.")
+    object_clearance_mm = max(5.0, object_clearance_mm)
+    edge_clearance_mm = max(5.0, edge_clearance_mm)
     inset = tower_radius_mm + edge_clearance_mm
     min_x, max_x = bed.minimum_x_mm + inset, bed.maximum_x_mm - inset
     min_y, max_y = bed.minimum_y_mm + inset, bed.maximum_y_mm - inset
     if min_x > max_x or min_y > max_y:
         raise GCodeIntegrationError("Der Kühlturm passt nicht auf das Druckbett.")
-    if object_clearance_mm < 0.0 or edge_clearance_mm < 0.0:
-        raise ValueError("Abstände dürfen nicht negativ sein.")
     geometry = bed_geometry or BedGeometry(
         bed,
         (
@@ -311,57 +313,44 @@ def propose_tower_placement(
         ),
     )
     expanded = occupied.expanded(object_clearance_mm)
-    center_x = (bed.minimum_x_mm + bed.maximum_x_mm) / 2.0
-    center_y = (bed.minimum_y_mm + bed.maximum_y_mm) / 2.0
     object_center = (
         (occupied.minimum_x_mm + occupied.maximum_x_mm) / 2.0,
         (occupied.minimum_y_mm + occupied.maximum_y_mm) / 2.0,
     )
-    offset = tower_radius_mm + object_clearance_mm
-    xs = {
-        min_x, max_x, center_x, object_center[0],
-        occupied.minimum_x_mm - offset,
-        occupied.maximum_x_mm + offset,
-    }
-    ys = {
-        min_y, max_y, center_y, object_center[1],
-        occupied.minimum_y_mm - offset,
-        occupied.maximum_y_mm + offset,
-    }
-    # The semantic candidates normally find the nearest solution exactly.
-    # A bounded grid additionally covers irregular beds and exclusion areas.
-    step = max(2.0, min(10.0, tower_radius_mm))
-    cursor = min_x
-    while cursor <= max_x + 1e-9:
-        xs.add(min(cursor, max_x))
-        cursor += step
-    cursor = min_y
-    while cursor <= max_y + 1e-9:
-        ys.add(min(cursor, max_y))
-        cursor += step
-    candidates = tuple((x, y) for x in xs for y in ys)
-    valid = [
-        point for point in candidates
-        if min_x - 1e-9 <= point[0] <= max_x + 1e-9
-        and min_y - 1e-9 <= point[1] <= max_y + 1e-9
-        and _circle_fits_bed(point, tower_radius_mm, edge_clearance_mm, geometry)
-        and not _circle_intersects_bounds(point[0], point[1], tower_radius_mm, expanded)
-    ]
-    if not valid:
-        raise GCodeIntegrationError(
-            "Auf dem Druckbett wurde keine Position gefunden, die den "
-            f"Kantenabstand von {object_clearance_mm:g} mm zum Objekt sowie "
-            "Druckbettrand und Ausschlussflächen einhält."
-        )
-    # Prefer the shortest average travel to the object while retaining all
-    # clearances.  This reduces non-productive time and stringing.
-    x, y = min(
-        valid,
-        key=lambda point: (
-            math.dist(point, object_center), point[1], point[0]
-        ),
+    safe_x = min(max(object_center[0], min_x), max_x)
+    safe_y = min(max(object_center[1], min_y), max_y)
+    # OccupiedBounds cover every source layer, so this position remains safe
+    # for the full object height. Reserve the maximum permitted tower radius
+    # before calibration starts; later diameter growth cannot eat clearance.
+    sides = (
+        (occupied.minimum_x_mm - bed.minimum_x_mm,
+         ((bed.minimum_x_mm + occupied.minimum_x_mm) / 2.0, safe_y)),
+        (bed.maximum_x_mm - occupied.maximum_x_mm,
+         ((occupied.maximum_x_mm + bed.maximum_x_mm) / 2.0, safe_y)),
+        (occupied.minimum_y_mm - bed.minimum_y_mm,
+         (safe_x, (bed.minimum_y_mm + occupied.minimum_y_mm) / 2.0)),
+        (bed.maximum_y_mm - occupied.maximum_y_mm,
+         (safe_x, (occupied.maximum_y_mm + bed.maximum_y_mm) / 2.0)),
     )
-    return TowerPlacement(x, y, tower_radius_mm, bed, object_clearance_mm)
+    point = next((
+        candidate
+        for _gap, candidate in sorted(sides, key=lambda side: side[0], reverse=True)
+        if min_x - 1e-9 <= candidate[0] <= max_x + 1e-9
+        and min_y - 1e-9 <= candidate[1] <= max_y + 1e-9
+        and _circle_fits_bed(
+            candidate, tower_radius_mm, edge_clearance_mm, geometry
+        )
+        and not _circle_intersects_bounds(
+            candidate[0], candidate[1], tower_radius_mm, expanded
+        )
+    ), None)
+    if point is None:
+        raise GCodeIntegrationError(
+            "In der Mitte des größten freien Abstands zwischen Objekt und "
+            "Druckbettrand passt der maximale Kühlturmdurchmesser nicht mit "
+            "mindestens 5 mm Abstand zu Objekt und Druckbettrand."
+        )
+    return TowerPlacement(point[0], point[1], tower_radius_mm, bed, object_clearance_mm)
 
 
 def _tower_center(path: Path) -> tuple[float, float]:

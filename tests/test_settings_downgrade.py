@@ -101,8 +101,8 @@ class CompatibilityRuleTests(unittest.TestCase):
         result = merge_compatible_setting_changes(
             current_payload(),
             {
-                "generation.mesh_segments": {
-                    "token": "circle-segment-count-v1",
+                "generation.local_reference_window": {
+                    "token": "layer-window-count-v1",
                     "value": 32.5,
                 },
                 "generation.target_layer_time_s": {
@@ -113,8 +113,8 @@ class CompatibilityRuleTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            result.payload["generation"]["mesh_segments"],
-            GenerationSettings().mesh_segments,
+            result.payload["generation"]["local_reference_window"],
+            GenerationSettings().local_reference_window,
         )
         self.assertEqual(
             result.payload["generation"]["target_layer_time_s"],
@@ -123,7 +123,7 @@ class CompatibilityRuleTests(unittest.TestCase):
         self.assertEqual(
             set(result.rejected_ids),
             {
-                "generation.mesh_segments",
+                "generation.local_reference_window",
                 "generation.target_layer_time_s",
             },
         )
@@ -178,6 +178,19 @@ class CompatibilityRuleTests(unittest.TestCase):
                 "generation.maximum_outer_diameter_mm",
             },
         )
+
+        equal = merge_compatible_setting_changes(
+            current_payload(),
+            {
+                "generation.minimum_outer_diameter_mm": {
+                    "token": "outer-diameter-mm-v1", "value": 50.0,
+                },
+                "generation.maximum_outer_diameter_mm": {
+                    "token": "outer-diameter-mm-v1", "value": 50.0,
+                },
+            },
+        )
+        self.assertEqual(len(equal.rejected_ids), 2)
 
 
 class DowngradeJournalIntegrationTests(unittest.TestCase):

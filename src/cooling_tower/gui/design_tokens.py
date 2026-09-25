@@ -30,6 +30,8 @@ class UiMetrics:
     form_spin_button_width_px: int = 24
     reset_button_size_px: int = 36
     info_button_diameter_px: int = 32
+    setting_info_diameter_px: int = 19
+    setting_info_text_gap_px: int = 10
     prediction_value_padding_px: int = 5
     inline_hint_maximum_height_px: int = 118
     responsive_breakpoint_px: int = 1040

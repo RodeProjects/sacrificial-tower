@@ -22,6 +22,7 @@ from cooling_tower.models import (
     TowerPlacement,
 )
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.tower.mesh_generator import automatic_mesh_segments
 from cooling_tower.preview.models import (
     LineSegment3D,
     OutputMode,
@@ -88,7 +89,7 @@ def _tower_wireframe(profile: object, placement: TowerPlacement) -> tuple[LineSe
     points = tuple(getattr(profile, "points"))
     if not points:
         return ()
-    segment_count = 32
+    segment_count = automatic_mesh_segments(profile)
     rings: list[tuple[Point3D, ...]] = []
     for profile_point in points:
         radius = float(getattr(profile_point, "outer_radius_mm"))
@@ -289,6 +290,7 @@ class PreviewService:
         accept_best_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
         joint_progress_callback: Callable[[object], None] | None = None,
+        joint_scene_callback: Callable[[PreviewScene], None] | None = None,
         seed_preview: PreviewResult | None = None,
     ) -> PreviewResult:
         notify = progress_callback or (lambda _percent, _status: None)
@@ -342,6 +344,40 @@ class PreviewService:
             object_segments = source_data.object_segments
             source_segment_count = source_data.source_segment_count
 
+            def report_joint_progress(progress: object) -> None:
+                if joint_scene_callback is not None:
+                    candidate_profile = getattr(progress, "current_profile", None)
+                    candidate_placement = getattr(progress, "placement", None)
+                    if candidate_profile is not None and candidate_placement is not None:
+                        points = tuple(getattr(candidate_profile, "points", ()))
+                        if points:
+                            joint_scene_callback(PreviewScene(
+                                object_segments=object_segments,
+                                tower_segments=_tower_wireframe(
+                                    candidate_profile, candidate_placement
+                                ),
+                                bed_bounds=candidate_placement.bed_bounds,
+                                tower_center_xy_mm=(
+                                    candidate_placement.center_x_mm,
+                                    candidate_placement.center_y_mm,
+                                ),
+                                source_segment_count=source_segment_count,
+                                displayed_segment_count=len(object_segments),
+                                tower_height_mm=max(float(point.z_mm) for point in points),
+                                object_height_mm=float(request.snapshot.maximum_print_z_mm),
+                                object_layer_count=int(request.snapshot.layer_count),
+                                tower_layer_count=int(getattr(
+                                    candidate_profile,
+                                    "printable_layer_count",
+                                    len(tuple(getattr(candidate_profile, "layers", ()))),
+                                )),
+                                tower_circle_segments=automatic_mesh_segments(
+                                    candidate_profile
+                                ),
+                            ))
+                if joint_progress_callback is not None:
+                    joint_progress_callback(progress)
+
             if (
                 request.calibration_config.maximum_iterations < 1
                 or request.adapter is None
@@ -367,6 +403,7 @@ class PreviewService:
                 calibration = self.calibration_service.calibrate(
                     request.snapshot,
                     request.settings,
+                    force_tower=request.force_tower,
                     adapter=request.adapter,
                     profile=request.effective_profile,
                     output_directory=root / "calibrated",
@@ -377,7 +414,12 @@ class PreviewService:
                         25 + round(max(0, min(100, percent)) * 0.6),
                         status,
                     ),
-                    joint_progress_callback=joint_progress_callback,
+                    joint_progress_callback=(
+                        report_joint_progress
+                        if joint_progress_callback is not None
+                        or joint_scene_callback is not None
+                        else None
+                    ),
                     source_artifact=request.source_artifact,
                     precomputed_occupied_bounds=source_data.occupied_bounds,
                     seed_profile=seed_profile,
@@ -482,10 +524,16 @@ class PreviewService:
                     request.effective_profile.effective_values
                 )
                 bed = bed_geometry.bounds if bed_geometry is not None else None
-            tower_radius = max(
+            actual_tower_radius = max(
                 float(getattr(point, "outer_radius_mm"))
                 for point in getattr(profile, "points")
             )
+            maximum_tower_radius = request.settings.maximum_outer_radius_mm
+            if actual_tower_radius > maximum_tower_radius + 1e-9:
+                raise PreviewBuildError(
+                    "Der Kühlturm überschreitet den maximalen Turmdurchmesser."
+                )
+            tower_radius = maximum_tower_radius
             bed = bed or _fallback_bed(
                 occupied,
                 tower_radius,
@@ -557,6 +605,7 @@ class PreviewService:
                         profile, "printable_layer_count",
                         len(tuple(getattr(profile, "layers", ()))),
                     )),
+                    tower_circle_segments=automatic_mesh_segments(profile),
                 ),
                 artifact_path=artifact.resolve(),
                 source_sha256=final_sha256,

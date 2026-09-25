@@ -82,17 +82,16 @@ class PlacementAndProjectTests(unittest.TestCase):
         store = UserSettingsStore(user, defaults)
         settings, payload = store.load()
 
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 15)
-        self.assertEqual(settings.minimum_object_tower_distance_mm, 25.0)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 18)
+        self.assertEqual(settings.minimum_object_tower_distance_mm, 5.0)
         self.assertEqual(
             payload["generation"]["minimum_object_tower_distance_mm"],
-            25.0,
+            5.0,
         )
         self.assertEqual(payload["preview_iterations"], 4)
-        self.assertEqual(
-            payload["setting_compatibility"]
-            ["generation.minimum_object_tower_distance_mm"],
-            "object-tower-edge-distance-mm-v1",
+        self.assertNotIn(
+            "generation.minimum_object_tower_distance_mm",
+            payload["setting_compatibility"],
         )
         self.assertIsNotNone(store.last_migration_backup)
         self.assertEqual(store.last_migration_backup.read_bytes(), original)
@@ -118,7 +117,7 @@ class PlacementAndProjectTests(unittest.TestCase):
         ))
         self.assertEqual(
             result.payload["generation"]["minimum_object_tower_distance_mm"],
-            15.0,
+            5.0,
         )
 
     def test_exclusion_area_is_parsed_and_avoided(self) -> None:

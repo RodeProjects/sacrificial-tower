@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -78,6 +79,34 @@ class RequestedRefinementsUiTests(unittest.TestCase):
         self.assertEqual(dialog.layers_info_label.text().count(">3</span>"), 2)
         self.assertIn("0,65 mm", dialog.height_info_label.text())
         self.assertEqual(dialog.height_info_label.text().count("0,65 mm"), 2)
+
+    def test_intermediate_preview_is_side_view_with_controls_locked(self):
+        dialog = PreviewDialog(embedded=True)
+        scene = preview_scene()
+        buttons = (
+            dialog.three_quarter_button, dialog.front_button,
+            dialog.side_button, dialog.top_button,
+        )
+        dialog.set_building("Gemeinsamer Slice läuft")
+        self.assertTrue(all(not button.isHidden() and not button.isEnabled() for button in buttons))
+        dialog.set_intermediate_scene(scene)
+        self.assertIs(dialog.canvas.scene, scene)
+        self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
+        self.assertTrue(dialog.canvas.navigation_toggle.isHidden())
+        self.assertTrue(dialog.canvas.navigation_status_label.isHidden())
+        self.assertFalse(dialog.canvas.navigation_enabled)
+        dialog.set_failed("Fehlgeschlagen")
+        self.assertIsNone(dialog.canvas.scene)
+        with patch.object(dialog, "_quality_summary", return_value=("", "current")), \
+             patch.object(dialog, "_last_iteration_summary", return_value=""):
+            dialog.set_preview(SimpleNamespace(scene=scene, output_mode=OutputMode.STL))
+        self.assertTrue(all(button.isEnabled() for button in buttons))
+        self.assertFalse(dialog.canvas.navigation_toggle.isHidden())
+        dialog.set_building("Noch ein Slice")
+        dialog.set_intermediate_scene(replace(scene, tower_height_mm=20))
+        dialog.mark_stale()
+        self.assertIs(dialog.canvas.scene, scene)
+        self.assertIn("5 mm", dialog.height_info_label.text())
         dialog.close()
 
     def test_generation_abort_uses_red_gradient_and_returns_to_blue(self):
@@ -97,8 +126,20 @@ class RequestedRefinementsUiTests(unittest.TestCase):
                 'QFrame#previewActionControl[cancelAction="true"] {',
                 style,
             )
-            self.assertIn("stop: 0 #c95d5d", style)
-            self.assertIn("stop: 1 #a83f3f", style)
+            cancel_style = style.split(
+                'QFrame#previewActionControl[cancelAction="true"] {', 1
+            )[1].split("}", 1)[0]
+            remove_rule = re.search(
+                r"QPushButton#removeSourceButton\s*,\s*"
+                r"QPushButton#supportSimulationCancelButton\s*,\s*"
+                r"QPushButton#presliceCancelButton\s*\{([^}]*)\}",
+                style,
+            )
+            self.assertIsNotNone(remove_rule)
+            remove_style = remove_rule.group(1)
+            for gradient_stop in ("stop: 0 #faeeee", "stop: 1 #f2dada"):
+                self.assertIn(gradient_stop, cancel_style)
+                self.assertIn(gradient_stop, remove_style)
             window.preview_state = PreviewState.EMPTY
             window._update_responsive_action_labels()
             self.assertFalse(window.preview_button.property("cancelAction"))

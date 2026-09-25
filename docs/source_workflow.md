@@ -51,6 +51,18 @@ Der [Anycubic-Quellcode](https://github.com/ANYCUBIC-3D/AnycubicSlicerNext/blob/
 erklärt die Ablehnung einer ersten Schicht ohne Extrusion in
 `GCode::collect_layers_to_print`.
 
+Bambu Studio meldet mit Exitcode `-61` eine Unverträglichkeit zwischen dem
+wirksamen Filamentprofil und Druckbett-Typ; die [offizielle CLI-Codedefinition](https://github.com/bambulab/BambuStudio/blob/master/src/libslic3r/Utils.hpp)
+bezeichnet ihn als `CLI_FILAMENT_NOT_MATCH_BED_TYPE`. Die
+[Bambu-Prüfung](https://github.com/bambulab/BambuStudio/blob/master/src/libslic3r/Print.cpp)
+löst ihn aus, wenn die im Profil hinterlegte Betttemperatur für den gewählten
+Druckbett-Typ `0 °C` beträgt. Die Anwendung zeigt dafür eine konkrete
+Handlungsanweisung an. Eine gültige, geschlossene STL oder ein
+Neustart nach einer Programmaktualisierung erklärt diesen Code nicht. Der
+Diagnosebericht ST-20260923-213527-B19F9B enthält diesen Code beim Bambu-
+Vorslice, aber keine STL oder konkreten Profil- und Druckbettwerte; die genaue
+unverträgliche Kombination lässt sich daraus nicht bestimmen.
+
 ### Zustimmung und Weitergabe simulierter Stützen
 
 `SourcePreSliceError.support_simulation_available` beschreibt ein mögliches

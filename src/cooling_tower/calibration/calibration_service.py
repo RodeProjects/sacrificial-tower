@@ -59,6 +59,7 @@ from cooling_tower.slicers import (
 from cooling_tower.tower.solid_profile import build_solid_tower_profile
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
+    automatic_mesh_segments,
     generate_solid_tower_mesh,
     write_binary_stl,
 )
@@ -76,17 +77,32 @@ from cooling_tower.write_policy import ensure_writable_output
 
 ProgressCallback = Callable[[int, str], None]
 JointProgressCallback = Callable[[JointSliceProgress], None]
-JOINT_TARGET_TOLERANCE_S = 0.1
+JOINT_TARGET_TOLERANCE_S = 0.09
 
 
 class _CombinedCancellationEvent:
     """Event-shaped view used to stop a slicer for cancel or early accept."""
 
-    def __init__(self, *events: Event | None) -> None:
-        self._events = tuple(event for event in events if event is not None)
+    def __init__(self, cancellation: Event | None, acceptance: Event | None) -> None:
+        self._cancellation = cancellation
+        self._acceptance = acceptance
+        self._accept_allowed = False
+
+    def allow_accept(self) -> None:
+        self._accept_allowed = True
+
+    def accept_requested(self) -> bool:
+        return bool(
+            self._accept_allowed
+            and self._acceptance is not None
+            and self._acceptance.is_set()
+        )
 
     def is_set(self) -> bool:
-        return any(event.is_set() for event in self._events)
+        return bool(
+            (self._cancellation is not None and self._cancellation.is_set())
+            or self.accept_requested()
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +144,7 @@ class CalibrationService:
         precomputed_occupied_bounds: OccupiedBounds | None = None,
         seed_profile: object | None = None,
         seed_stl_path: str | Path | None = None,
+        force_tower: bool = False,
     ) -> CalibrationResult:
         config = config or CalibrationConfig(time_tolerance_s=settings.layer_time_tolerance_s)
         notify = progress_callback or (lambda percent, status: None)
@@ -171,7 +188,7 @@ class CalibrationService:
             and seed_stl.is_file()
         )
         assessment = assess_tower_need(snapshot, settings)
-        if not assessment.tower_required:
+        if not assessment.tower_required and not force_tower:
             return CalibrationResult(
                 state=CalibrationState.CONVERGED,
                 mode=config.mode,
@@ -186,7 +203,16 @@ class CalibrationService:
                 source_sha256=source_hash,
                 configured_iteration_count=config.maximum_iterations,
             )
-        source_layers = layers_for_tower(snapshot, assessment)
+        source_layers = (
+            tuple(getattr(snapshot, "layers"))
+            if force_tower and not assessment.tower_required
+            else layers_for_tower(snapshot, assessment)
+        )
+        tower_end_z_mm = (
+            source_layers[-1].z_mm
+            if force_tower and not assessment.tower_required and source_layers
+            else assessment.tower_end_z_mm
+        )
         if not source_layers:
             return self._failure(
                 config, CalibrationState.INVALID_GEOMETRY, source_hash,
@@ -210,7 +236,6 @@ class CalibrationService:
 
         profile_config = TowerProfileConfig(
             target_layer_time_s=settings.target_layer_time_s,
-            safety_factor=settings.safety_factor,
             minimum_radius_mm=settings.minimum_outer_radius_mm,
             maximum_radius_mm=settings.maximum_outer_radius_mm,
             local_time_factor_window=settings.local_reference_window,
@@ -314,6 +339,11 @@ class CalibrationService:
         minimum_iteration_count = 1 if iteration_count == 1 else 2
         terminal_state = CalibrationState.LIMIT_REACHED
         warnings: list[str] = []
+        if force_tower and not assessment.tower_required:
+            warnings.append(
+                "Dieser Kühlturm wurde auf ausdrücklichen Wunsch erzeugt, obwohl "
+                "das Originalobjekt die eingestellte Ziel-Layerzeit bereits erreicht."
+            )
         accepted_early = False
         stagnated = False
         joint_stagnation_count = 0
@@ -328,9 +358,11 @@ class CalibrationService:
                 )
                 + "Danach werden Objekt und Kühlturm mit festen Positionen "
                 f"mindestens {config.minimum_joint_slices} und bis zu "
-                f"{config.maximum_joint_slices} Mal gemeinsam geslicet. "
-                "Sobald die Ziel-Layerzeit innerhalb der Toleranz bestätigt ist, "
-                "endet die Generierung vorzeitig. Das exportierte 3MF reproduziert "
+                f"{config.completed_joint_slices_before_run + config.maximum_joint_slices} "
+                "Mal insgesamt gemeinsam geslicet. "
+                "Nach den Pflicht-Slices beendet eine Zielabweichung "
+                "von höchstens 0,09 Sekunden die Generierung vorzeitig. "
+                "Das exportierte 3MF reproduziert "
                 "die ausgewählte geprüfte Anordnung."
             )
             if reuse_seed:
@@ -427,11 +459,7 @@ class CalibrationService:
                         configured_iteration_count=config.maximum_iterations,
                         best_iteration_number=best_iteration_number,
                     )
-                if (
-                    accept_best_event is not None
-                    and accept_best_event.is_set()
-                    and best_is_joint
-                ):
+                if slicer_stop_event.accept_requested() and best_is_joint:
                     accepted_early = True
                     break
                 elapsed = time.monotonic() - started
@@ -455,16 +483,22 @@ class CalibrationService:
                 use_seed_this_round = reuse_seed and number == 1
                 if joint_round:
                     joint_number = number - (first_joint_round or number) + 1
-                    round_status = (
+                    slice_label = (
                         f"Gemeinsamer Slice {joint_number}/"
-                        f"{config.maximum_joint_slices} wird vorbereitet …"
+                        f"{config.maximum_joint_slices}"
                     )
+                    round_status = f"{slice_label} wird vorbereitet …"
                 elif first_joint_round is not None:
+                    slice_label = (
+                        f"Getrennter Kühlturm-Slice {number}/"
+                        f"{first_joint_round - 1}"
+                    )
                     round_status = (
                         "Kühlturmgeometrie wird optimiert – getrennter Slice "
                         f"{number}/{first_joint_round - 1}"
                     )
                 else:
+                    slice_label = f"Kühlturm-Slice {number}/{iteration_count}"
                     round_status = (
                         f"Kühlturm wird kalibriert – Durchlauf "
                         f"{number}/{iteration_count}"
@@ -484,7 +518,7 @@ class CalibrationService:
                     else build_solid_tower_profile(
                         radius_profile,
                         settings,
-                        tower_end_z_mm=assessment.tower_end_z_mm,
+                        tower_end_z_mm=tower_end_z_mm,
                         object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
                     )
                 )
@@ -508,7 +542,7 @@ class CalibrationService:
                     geometry_is_valid = candidate_stl.stat().st_size > 84
                 else:
                     mesh = generate_solid_tower_mesh(
-                        solid, TowerMeshConfig(settings.mesh_segments)
+                        solid, TowerMeshConfig(automatic_mesh_segments(solid))
                     )
                     export = write_binary_stl(mesh, candidate_stl)
                     geometry_is_valid = export.validation.is_valid
@@ -636,8 +670,7 @@ class CalibrationService:
                             )
                     except JointProjectError as error:
                         if (
-                            accept_best_event is not None
-                            and accept_best_event.is_set()
+                            slicer_stop_event.accept_requested()
                             and best_is_joint
                         ):
                             # A user stop can interrupt native 3MF creation.
@@ -657,19 +690,7 @@ class CalibrationService:
                 repeated_signatures[signature] = repeated_signatures.get(signature, 0) + 1
                 notify(
                     round((number - 0.5) / iteration_count * 90),
-                    (
-                        (
-                            "Gemeinsamer Slice von Objekt und "
-                            "Kühlturm wird ausgeführt …"
-                            if number == first_joint_round
-                            else "Weiterer gemeinsamer Slice zur gezielten "
-                            "Korrekturprüfung wird ausgeführt …"
-                        )
-                        if joint_round
-                        else f"Getrennter Kühlturm-Slice "
-                        f"{number}/{first_joint_round - 1 if first_joint_round else iteration_count} "
-                        "wird ausgeführt …"
-                    ),
+                    f"{slice_label} wird ausgeführt …",
                 )
                 slice_request = SliceRequest(
                     model_path=slice_model_path,
@@ -700,11 +721,7 @@ class CalibrationService:
                         configured_iteration_count=config.maximum_iterations,
                         best_iteration_number=best_iteration_number,
                     )
-                if (
-                    accept_best_event is not None
-                    and accept_best_event.is_set()
-                    and best_is_joint
-                ):
+                if slicer_stop_event.accept_requested() and best_is_joint:
                     accepted_early = True
                     break
                 if (
@@ -730,7 +747,7 @@ class CalibrationService:
                     slice_result = adapter.slice_model(slice_request)
                 notify(
                     round(number / iteration_count * 90),
-                    f"Slicer-Ergebnis {number}/{iteration_count} wird ausgewertet …",
+                    f"{slice_label} wird ausgewertet …",
                 )
                 if not slice_result.success:
                     record_diagnostic(
@@ -951,8 +968,15 @@ class CalibrationService:
                     and evaluation.maximum_metadata_difference_s
                     > config.slicer_metadata_tolerance_s
                 )
+                completed_joint_slices = (
+                    config.completed_joint_slices_before_run
+                    + number - (first_joint_round or number) + 1
+                    if joint_round
+                    else 0
+                )
                 joint_candidate_accepted = bool(
                     joint_round
+                    and completed_joint_slices > config.minimum_joint_slices
                     and math.isfinite(minimum_target_difference_s)
                     and abs(minimum_target_difference_s)
                     <= JOINT_TARGET_TOLERANCE_S
@@ -1000,6 +1024,8 @@ class CalibrationService:
                     best_iteration_number = number
                     best_target_difference_s = minimum_target_difference_s
                 if joint_round and not metadata_conflict and best_is_joint:
+                    if completed_joint_slices >= config.minimum_joint_slices:
+                        slicer_stop_event.allow_accept()
                     best_iteration = next(
                         item
                         for item in reversed(iterations)
@@ -1014,6 +1040,8 @@ class CalibrationService:
                             current_iteration=iteration,
                             best_iteration=best_iteration,
                             current_is_best=candidate_is_best,
+                            current_profile=solid,
+                            placement=placement,
                         )
                     )
                     # Keep the smooth fill transition plus the 500 ms pulse
@@ -1093,12 +1121,11 @@ class CalibrationService:
                     # slices produced no meaningful geometric or timing
                     # movement. Further complete-object slices would only
                     # repeat the same candidate.
-                    joint_completed_count = (
-                        number - (first_joint_round or number) + 1
-                    )
+                    joint_completed_count = completed_joint_slices
                     if (
                         joint_stagnation_count >= 2
-                        and joint_completed_count >= 3
+                        and joint_completed_count
+                        >= max(3, config.minimum_joint_slices)
                     ):
                         stagnated = True
                         record_diagnostic(
@@ -1202,7 +1229,7 @@ class CalibrationService:
                     continuation_profile = build_solid_tower_profile(
                         radius_profile,
                         settings,
-                        tower_end_z_mm=assessment.tower_end_z_mm,
+                        tower_end_z_mm=tower_end_z_mm,
                         object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
                     )
                     continue
@@ -1227,7 +1254,7 @@ class CalibrationService:
                 continuation_profile = build_solid_tower_profile(
                     radius_profile,
                     settings,
-                    tower_end_z_mm=assessment.tower_end_z_mm,
+                    tower_end_z_mm=tower_end_z_mm,
                     object_height_mm=getattr(snapshot, "maximum_print_z_mm"),
                 )
             completed_within_configured_tolerance = bool(
@@ -1393,9 +1420,7 @@ class CalibrationService:
                     layer,
                     calculated_radius_mm=radius,
                     radius_mm=radius,
-                    additional_path_mm=(
-                        path / radius_profile.config.safety_factor
-                    ),
+                    additional_path_mm=path,
                     safety_adjusted_path_mm=path,
                     estimated_added_time_s=estimated_added,
                 )
