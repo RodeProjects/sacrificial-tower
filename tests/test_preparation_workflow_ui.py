@@ -1985,6 +1985,19 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         # Keep this offscreen regression fast while retaining the production
         # duration published by every transition.
         window.preparation_tabs._effective_transition_duration_ms = 30
+
+        def wait_for_transition(target_index: int) -> None:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                self.app.processEvents()
+                if (
+                    window.preparation_tabs.currentIndex() == target_index
+                    and window.preparation_tabs._transition_animation is None
+                ):
+                    return
+                QTest.qWait(10)
+            self.fail(f"Preparation transition to step {target_index} timed out")
+
         try:
             self.mark_valid_source(window)
             window.preparation_tabs.setCurrentIndex(1)
@@ -2004,15 +2017,13 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.preparation_tabs._transition_animation.duration(),
                 30,
             )
-            QTest.qWait(50)
-            self.app.processEvents()
+            wait_for_transition(1)
             self.assertEqual(window.preparation_tabs.currentIndex(), 1)
 
             window.preparation_tabs.setCurrentIndex(0)
-            QTest.qWait(50)
-            self.app.processEvents()
+            wait_for_transition(0)
             window.preparation_tabs.setCurrentIndex(1)
-            self.app.processEvents()
+            wait_for_transition(1)
 
             self.assertEqual(
                 transitions,
