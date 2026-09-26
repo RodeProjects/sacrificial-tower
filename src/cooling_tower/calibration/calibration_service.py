@@ -360,8 +360,9 @@ class CalibrationService:
                 f"mindestens {config.minimum_joint_slices} und bis zu "
                 f"{config.completed_joint_slices_before_run + config.maximum_joint_slices} "
                 "Mal insgesamt gemeinsam geslicet. "
-                "Nach den Pflicht-Slices beendet eine Zielabweichung "
-                "von höchstens 0,09 Sekunden die Generierung vorzeitig. "
+                "Sobald alle Pflicht-Slices vollständig geprüft sind, "
+                "beendet eine Zielabweichung des besten Kandidaten von "
+                "höchstens 0,09 Sekunden die Generierung vorzeitig. "
                 "Das exportierte 3MF reproduziert "
                 "die ausgewählte geprüfte Anordnung."
             )
@@ -974,13 +975,6 @@ class CalibrationService:
                     if joint_round
                     else 0
                 )
-                joint_candidate_accepted = bool(
-                    joint_round
-                    and completed_joint_slices > config.minimum_joint_slices
-                    and math.isfinite(minimum_target_difference_s)
-                    and abs(minimum_target_difference_s)
-                    <= JOINT_TARGET_TOLERANCE_S
-                )
                 quality_score = self._candidate_score(
                     convergence,
                     solid,
@@ -1023,6 +1017,20 @@ class CalibrationService:
                     best_deferred_project = deferred_project
                     best_iteration_number = number
                     best_target_difference_s = minimum_target_difference_s
+                # The configured joint slices are mandatory, but their best
+                # verified candidate remains eligible afterwards.
+                # Later, worse slices must not postpone an already achieved
+                # target result merely because the live display keeps that
+                # earlier candidate as its best result.
+                joint_candidate_accepted = bool(
+                    joint_round
+                    and completed_joint_slices >= config.minimum_joint_slices
+                    and best_is_joint
+                    and best_target_difference_s is not None
+                    and math.isfinite(best_target_difference_s)
+                    and abs(best_target_difference_s)
+                    <= JOINT_TARGET_TOLERANCE_S
+                )
                 if joint_round and not metadata_conflict and best_is_joint:
                     if completed_joint_slices >= config.minimum_joint_slices:
                         slicer_stop_event.allow_accept()

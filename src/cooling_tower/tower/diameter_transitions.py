@@ -130,11 +130,10 @@ def plan_diameter_transitions(
         else:
             if taper is base_taper:
                 taper = None
-            abrupt_drop = (
-                allow_steps and i > base_index
-                and (i in abrupt_drop_indices or
-                     required[i - 1] - required[i] > dz + EPSILON)
-            )
+            # Only the caller can certify that the next source layer has
+            # enough time of its own. A steep fall in the estimated radius
+            # is not evidence of that and must not create a shoulder.
+            abrupt_drop = allow_steps and i in abrupt_drop_indices
             if abrupt_drop:
                 # A later peak can require more than this layer's own demand.
                 # Start the new trunk as thin as possible while retaining the
@@ -153,7 +152,10 @@ def plan_diameter_transitions(
             else:
                 if taper is None:
                     amplitude = previous - minimum_radius
-                    duration = 0.0 if allow_steps else 2.0 * amplitude / contraction_slope
+                    # Even with full infill, a layer that still needs the
+                    # tower must taper continuously instead of collapsing
+                    # almost vertically after a steep demand change.
+                    duration = 2.0 * amplitude / contraction_slope
                     # Find the duration needed to stay above this descending
                     # run. A subsequent rise is handled by the linear floor.
                     j = i

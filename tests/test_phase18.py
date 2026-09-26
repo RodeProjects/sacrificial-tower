@@ -271,7 +271,7 @@ class Phase18UiTests(unittest.TestCase):
             window.geometry_settings_group.title_label.text(),
             "Turm-Einstellungen",
         )
-        self.assertFalse(bool(window.geometry_group.property("collapsible")))
+        self.assertTrue(bool(window.geometry_group.property("collapsible")))
         self.assertFalse(bool(window.stability_group.property("collapsible")))
         for card in (
             window.geometry_settings_group,
@@ -562,7 +562,7 @@ class Phase18UiTests(unittest.TestCase):
                     header_image.width() // 2,
                     5,
                 ).name(),
-                "#f5f7f9",
+                "#f4f6f8",
             )
             self.assertEqual(
                 body_image.pixelColor(
@@ -726,10 +726,7 @@ class Phase18UiTests(unittest.TestCase):
             "#ebf5fb",
         )
         self.assertFalse(window.timing_group.property("outerDropdown"))
-        self.assertEqual(
-            window.timing_group.header.grab().toImage().pixelColor(5, 5),
-            window.geometry_group.header.grab().toImage().pixelColor(5, 5),
-        )
+        self.assertTrue(window.timing_group.header.isHidden())
         geometry_header = window.geometry_settings_group.header.grab().toImage()
         self.assertEqual(
             geometry_header.pixelColor(
@@ -1022,7 +1019,7 @@ class Phase18UiTests(unittest.TestCase):
             window.source_guide.text(),
             "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
         )
-        self.assertEqual(window.geometry_group.title(), "Turmgeometrie")
+        self.assertEqual(window.geometry_group.title(), "Erweiterte Einstellungen")
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
         self.assertEqual(

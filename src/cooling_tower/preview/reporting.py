@@ -303,6 +303,7 @@ def _profile_details(request: PreviewRequest) -> dict[str, Any]:
         ),
         "resolution_notes": list(getattr(profile, "resolution_notes", ())),
         "supports_simulated": bool(getattr(profile, "supports_simulated", False)),
+        "draft_shield_simulated": bool(getattr(profile, "draft_shield_simulated", False)),
     }
 
 
@@ -804,6 +805,15 @@ def build_user_report(
             if project_path is not None else
             "- Stützen wurden simuliert. Ohne exportierte 3MF müssen sie im "
             "Zielprojekt selbst aktiviert werden."
+        )
+    if getattr(request.effective_profile, "draft_shield_simulated", False):
+        lines.append(
+            "- Draft Shield und Skirt-Loops wurden in temporären Profilkopien "
+            "deaktiviert. Die exportierte 3MF enthält diese Einstellung; "
+            "Originalprofile bleiben unverändert."
+            if project_path is not None else
+            "- Draft Shield und Skirt-Loops wurden nur für die Generierung "
+            "simuliert deaktiviert. Beim STL-Import selbst deaktivieren."
         )
     lines.extend(
         (

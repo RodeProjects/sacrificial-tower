@@ -743,11 +743,11 @@ class LiveValidationTests(GuiCase):
         self.window.target_time_spin.setValue(1.0)
         self.feed_snapshot((1.0, 2.0, 3.0))
         self.assertIn("Kein Kühlturm erforderlich", self.window.tower_need_label.text())
-        self.assertNotIn("Layer", self.window.tower_need_label.text())
+        self.assertIn("kürzeste layerzeit", self.window.tower_need_label.text().lower())
         self.assertFalse(self.window.tower_need_label.isHidden())
         self.assertFalse(self.window.preview_button.isEnabled())
 
-    def test_no_tower_requires_confirmation_and_explains_observed_time(self) -> None:
+    def test_no_tower_disables_generation_and_explains_observed_time(self) -> None:
         self.window.current_source_path = self.source
         self.feed_snapshot((31.0, 32.0, 33.0))
         self.complete_source_step()
@@ -757,19 +757,98 @@ class LiveValidationTests(GuiCase):
 
         reason = self.window.export_availability_label.text()
         self.assertIn("Kein Kühlturm erforderlich", reason)
-        self.assertIn("9.00 s", reason)
-        self.assertIn("31.000 s", reason)
-        self.assertTrue(self.window.preview_button.isEnabled())
-        with patch.object(self.window, "_ask_no_tower_confirmation", return_value=False) as ask, \
-             patch.object(self.window, "_show_preview_dialog") as show_dialog:
+        self.assertIn("die Generierung ist deshalb deaktiviert", reason)
+        self.assertNotIn("Bestätigung", reason)
+        self.assertEqual(self.window.action_availability_icon.text(), "✓")
+        self.assertEqual(
+            self.window.action_availability_icon.property("state"), "success"
+        )
+        self.assertFalse(self.window.preview_button.isEnabled())
+        with patch.object(self.window, "_show_preview_dialog") as show_dialog:
             self.window.start_preview()
-        ask.assert_called_once()
-        self.assertIn("31.000 s", ask.call_args.args[0])
         show_dialog.assert_not_called()
-        self.assertFalse(self.window._force_no_tower_generation)
         self.assertFalse(self.window.background_job_manager.has_active(JobKind.PREVIEW))
 
-    def test_confirmed_unnecessary_tower_requests_force_generation(self) -> None:
+    def test_small_gain_hint_uses_compact_setting_row_spacing(self) -> None:
+        self.window.current_source_path = self.source
+        self.feed_snapshot((10.703, 12.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.window.target_time_spin.setValue(11.0)
+        self.app.processEvents()
+
+        hint = self.window.tower_need_label
+        target_editor = self.window.target_time_spin
+        tolerance_row = self.window._setting_widgets["layer_time_tolerance_s"]
+        self.assertTrue(hint.isVisible())
+        self.assertEqual(hint.property("state"), "smallGain")
+        hint_top = hint.mapTo(self.window, hint.rect().topLeft()).y()
+        editor_bottom = target_editor.mapTo(
+            self.window, target_editor.rect().bottomLeft()
+        ).y()
+        tolerance_top = tolerance_row.mapTo(
+            self.window, tolerance_row.rect().topLeft()
+        ).y()
+        hint_bottom = hint.mapTo(self.window, hint.rect().bottomLeft()).y()
+        self.assertLessEqual(hint_top - editor_bottom, 12)
+        self.assertLessEqual(tolerance_top - hint_bottom, 16)
+
+    def test_tower_need_hint_resizes_both_ways_without_section_toggle(self) -> None:
+        self.window.current_source_path = self.source
+        self.window.target_time_spin.setValue(12.0)
+        self.feed_snapshot((10.703, 12.0))
+        self.complete_source_step()
+        self.window.workflow.slicer_succeeded("Testslicer")
+        self.window.workflow.complete_preparation()
+        self.app.processEvents()
+
+        target_row = self.window._setting_widgets["target_layer_time_s"]
+        tolerance_row = self.window._setting_widgets["layer_time_tolerance_s"]
+        hint = self.window.tower_need_label
+
+        def row_geometry() -> tuple[int, int]:
+            self.app.processEvents()
+            row_bottom = target_row.mapTo(
+                self.window, target_row.rect().bottomLeft()
+            ).y()
+            next_top = tolerance_row.mapTo(
+                self.window, tolerance_row.rect().topLeft()
+            ).y()
+            self.assertGreater(next_top, row_bottom)
+            return target_row.height(), next_top
+
+        self.assertTrue(hint.isHidden())
+        original_height, original_next_top = row_geometry()
+        for target, expected_state in ((9.0, "notRequired"), (11.0, "smallGain")):
+            self.window.target_time_spin.setValue(target)
+            self.app.processEvents()
+            self.assertEqual(hint.property("state"), expected_state)
+            self.assertTrue(hint.isVisible())
+            self.assertGreater(target_row.height(), original_height)
+            hint_bottom = hint.mapTo(self.window, hint.rect().bottomLeft()).y()
+            next_top = tolerance_row.mapTo(
+                self.window, tolerance_row.rect().topLeft()
+            ).y()
+            self.assertGreater(next_top, hint_bottom)
+            self.assertGreaterEqual(hint.height(), hint.heightForWidth(hint.width()))
+            row_geometry()
+
+        self.window.target_time_spin.setValue(12.0)
+        self.assertTrue(hint.isHidden())
+        restored_height, restored_next_top = row_geometry()
+        self.assertEqual(restored_height, original_height)
+        self.assertEqual(restored_next_top, original_next_top)
+
+        self.window.geometry_settings_group.setChecked(False)
+        self.window.geometry_settings_group.setChecked(True)
+        self.window.target_time_spin.setValue(9.0)
+        self.app.processEvents()
+        self.assertGreater(target_row.height(), original_height)
+        self.window.target_time_spin.setValue(12.0)
+        self.assertEqual(row_geometry(), (original_height, original_next_top))
+
+    def test_unnecessary_tower_cannot_be_forced(self) -> None:
         self.window.current_source_path = self.source
         self.feed_snapshot((31.0, 32.0, 33.0))
         self.complete_source_step()
@@ -777,15 +856,9 @@ class LiveValidationTests(GuiCase):
         self.window.workflow.complete_preparation()
         self.app.processEvents()
 
-        def inspect_request():
-            self.assertTrue(self.window._force_no_tower_generation)
-            raise ValueError("Testabbruch nach Bestätigung")
-
-        with patch.object(self.window, "_ask_no_tower_confirmation", return_value=True), \
-             patch.object(self.window, "_show_preview_dialog"), \
-             patch.object(self.window, "_current_preview_request", side_effect=inspect_request) as request:
+        with patch.object(self.window, "_current_preview_request") as request:
             self.window.start_preview()
-        request.assert_called_once()
+        request.assert_not_called()
 
     def test_no_tower_reason_precedes_other_invalid_settings(self) -> None:
         self.window.current_source_path = self.source
@@ -797,7 +870,7 @@ class LiveValidationTests(GuiCase):
         self.app.processEvents()
 
         self.assertFalse(self.window.tower_assessment.tower_required)
-        self.assertTrue(self.window.preview_button.isEnabled())
+        self.assertFalse(self.window.preview_button.isEnabled())
         self.assertIn(
             "Kein Kühlturm erforderlich",
             self.window.export_availability_label.text(),

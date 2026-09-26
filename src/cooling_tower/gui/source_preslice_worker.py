@@ -37,6 +37,7 @@ class SourcePreSliceWorker(CancelableWorker):
         adapter: SlicerAdapter,
         *,
         simulate_supports: bool = False,
+        simulate_draft_shield: bool = False,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -46,6 +47,7 @@ class SourcePreSliceWorker(CancelableWorker):
         self.confirmation = confirmation
         self.adapter = adapter
         self.simulate_supports = simulate_supports
+        self.simulate_draft_shield = simulate_draft_shield
 
     @Slot()
     def run(self) -> None:
@@ -62,6 +64,7 @@ class SourcePreSliceWorker(CancelableWorker):
                     confirmation=self.confirmation,
                     adapter=self.adapter,
                     **({"simulate_supports": True} if self.simulate_supports else {}),
+                    **({"simulate_draft_shield": True} if self.simulate_draft_shield else {}),
                     cancellation_event=self.cancellation_event,
                     progress_callback=lambda percent, status, busy: (
                         self.progress.emit(

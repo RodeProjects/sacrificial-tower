@@ -51,6 +51,10 @@ def build_calibration_profile(
     if profile.supports_simulated:
         key = SUPPORT_KEYS[profile.installation.adapter_id]
         values[key] = applied[key] = "1"
+    if profile.draft_shield_simulated:
+        values["skirt_loops"] = applied["skirt_loops"] = "0"
+        if "draft_shield" in values or profile.installation.adapter_id == "anycubic_slicer_next":
+            values["draft_shield"] = applied["draft_shield"] = "disabled"
     if simulate_full_tower_infill:
         overrides = FULL_INFILL_OVERRIDES_BY_ADAPTER.get(
             profile.installation.adapter_id

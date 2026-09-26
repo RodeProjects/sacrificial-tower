@@ -254,11 +254,19 @@ class GenerationUiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(window.manual_base_width_spin.value(), 20)
 
-    def test_full_infill_is_first_geometry_setting_without_checkbox_tooltip(self) -> None:
+    def test_full_infill_follows_layer_time_tolerance_without_checkbox_tooltip(self) -> None:
         self._ready()
-        first_row = self.window.geometry_fields_layout.itemAt(0).widget()
+        infill_row = next(
+            self.window.timing_group.content_layout.itemAt(index).widget()
+            for index in range(self.window.timing_group.content_layout.count())
+            if self.window.timing_group.content_layout.itemAt(index).widget()
+            and self.window.timing_group.content_layout.itemAt(index).widget().layout()
+            and self.window.timing_group.content_layout.itemAt(index).widget().layout().indexOf(
+                self.window.full_infill_checkbox
+            ) >= 0
+        )
         self.assertIs(
-            first_row.layout().itemAt(0).widget(),
+            infill_row.layout().itemAt(1).widget(),
             self.window.full_infill_checkbox,
         )
         self.assertEqual(self.window.automatic_base_checkbox.toolTip(), "")

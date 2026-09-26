@@ -193,9 +193,11 @@ gemeinsamen Slice mit dem Zähler dieser Phase. Bei einer Fortsetzung zeigt der
 Footer für gemeinsame Slices den bisherigen Gesamtzähler an.
 
 Das gemeinsame Budget ist als `maximum_joint_slices` (5–25, Standard 12)
-persistiert. Die ersten fünf gemeinsamen Slices sind verpflichtend. Erst ab
-dem sechsten Slice beendet eine absolute Zielabweichung von höchstens 0,09
-Sekunden den Lauf vorzeitig; ein größerer ungerundeter Wert läuft weiter.
+persistiert. Die ersten fünf gemeinsamen Slices sind verpflichtend. Direkt nach
+dem fünften vollständig geprüften Slice wird die bisher beste absolute
+Zielabweichung geprüft: Liegt sie ungerundet bei höchstens 0,09 Sekunden,
+endet der Lauf vorzeitig. Ein schlechterer aktueller Slice verdrängt einen
+früheren, bereits geprüften Zieltreffer nicht.
 Auch Stagnation und die manuelle Übernahme dürfen erst nach fünf vollständig
 geprüften gemeinsamen Slices zum vorzeitigen Abschluss führen. Stagnation liegt
 vor, wenn sich weder die Turmform noch die gemessenen Layerzeiten nennenswert
@@ -225,10 +227,10 @@ Der finale Projektbau des übernommenen Kandidaten bleibt vom Übernahme-Event
 unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor Abschluss des fünften
 gemeinsamen Slices wird der Lauf ohne exportfähiges Ergebnis abgebrochen.
 
-Ein Kandidat, der ab dem sechsten gemeinsamen Slice die feste Zielschwelle von
-höchstens 0,09 Sekunden erreicht, wird vor
-der Abschlussmeldung atomar zugleich als bester Anzeige- und Exportkandidat
-markiert. Nach Abschluss beziehen sich Generierungsanzeige und Exportbericht
+Ein Kandidat, der innerhalb der fünf Pflichtslices oder später die feste
+Zielschwelle von höchstens 0,09 Sekunden erreicht, bleibt bereits während
+der Pflichtslices das beste Anzeigeergebnis. Nach dem fünften Slice kann
+der Lauf mit diesem Kandidaten enden; Generierungsanzeige und Exportbericht
 auf dieselbe Slicer-Auswertung. Während des Laufs bleibt der bislang beste
 Kandidat intern und in der Ergebnisanzeige erhalten; schlechtere Folgeslices
 ändern nur den Fortschrittszähler. Die Seitenansicht zeigt nach jedem erfolgreich
@@ -259,18 +261,18 @@ Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
-„Turm-Einstellungen“ gliedert sich in „Layerzeit und Toleranz“ sowie
-„Turmgeometrie“; „100% Turmfüllung simulieren“ steht dort an erster Stelle.
-Die Untergrenze der gewünschten Mindest-Layerzeit beträgt nach einem gültigen
-Pre-Slice höchstens dann die kürzeste ermittelte Layerzeit des Originalobjekts
-plus 0,5 s, auf die nächste sichtbare Zehntelsekunde aufgerundet, wenn
-dieser Wert über 5 s liegt. Sonst sowie ohne gültige oder innerhalb des
-Zielbereichs bis 30 s nutzbare Messung beträgt sie 5 s. Bei eingeblendeten
+Unter „Turm-Einstellungen“ stehen Mindest-Layerzeit und Layerzeit-Toleranz ohne
+eigene Zwischenüberschrift. Darauf folgt „100% Turmfüllung simulieren“. Die
+darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
+geöffneten Unterbereich „Erweiterte Einstellungen“ ein- und ausklappbar.
+Die Untergrenze der gewünschten Mindest-Layerzeit bleibt unabhängig vom
+Pre-Slice bei 5 s. Die beim Pre-Slice ermittelte kürzeste Layerzeit des
+Originalobjekts erscheint im Info-Hinweis. Bei eingeblendeten
 Eingabegrenzen stehen Mindest- und Höchstwert gekürzt als
 „Minimum - Maximum Einheit“ unter dem Feld; einzelne Höchstwerte behalten
 die Beschriftung „Max.“. Die Nachkommastellen entsprechen denen des
 jeweiligen Eingabefelds. Ein
-bereits eingegebener kleinerer Wert bleibt sichtbar und wird als ungültig
+bereits eingegebener Wert unter 5 s bleibt sichtbar und wird als ungültig
 markiert. Die Layerzeit-Toleranz beginnt bei ±0,1 s.
 Der minimale Turmdurchmesser hat weiterhin 5 mm als Voreinstellung und liegt
 zwischen 3 mm und dem kleineren Wert aus aktuellem Maximaldurchmesser und
@@ -280,8 +282,13 @@ dem größeren Wert aus 5 mm und `Minimaldurchmesser + 1 mm` sowie 100 mm.
 verschwinden nach einer gültigen Korrektur.
 Wenn alle analysierten Schichten die eingestellte Zielzeit bereits erreichen,
 nennen der Einstellungsbereich und die Aktionsmeldung Zielzeit und kürzeste
-gemessene Schichtzeit als Grund. Ein Klick auf „Kühlturm generieren“ zeigt dann
-eine Bestätigung mit dem Hinweis auf zusätzlichen Material- und Zeitbedarf.
+gemessene Schichtzeit als Grund; die Turmgenerierung bleibt gesperrt.
+Bei einem Mehrbedarf von höchstens 0,5 s erscheint stattdessen ein gelber
+Hinweis, die Generierung bleibt möglich.
+Ein aktiviertes Draft Shield in den bestätigten Profilen wird vor dem Pre-Slice
+gesondert angezeigt. Nach ausdrücklicher Wahl werden Draft Shield und
+Skirt-Loops nur in temporären Profilkopien deaktiviert; die Kopien fließen
+in Pre-Slice, gemeinsame Slices und den exportierten 3MF-Projektstand ein.
 Nach Bestätigung wird ein Turm über die gesamte Modellhöhe erzwungen; dabei
 darf allein die durch die aktuelle Messung erhöhte Zielzeit-Untergrenze für
 diesen Lauf unterschritten werden. Andere Eingabefehler bleiben gesperrt.

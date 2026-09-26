@@ -197,14 +197,24 @@ class ExportSessionUiTests(unittest.TestCase):
                     for widget in widgets
                 ]
                 self.assertTrue(all(rect.right() < window.width() for rect in bounds))
-                self.assertTrue(
-                    all(
-                        left.right() < right.left()
-                        if left.top() == right.top()
-                        else left.bottom() < right.top()
-                        for left, right in zip(bounds, bounds[1:])
+                positions = {
+                    widget: window.main_actions_layout.getItemPosition(
+                        window.main_actions_layout.indexOf(widget)
+                    )[:2]
+                    for widget in widgets
+                }
+                report_row = positions[window.last_export_report_button][0]
+                folder_row = positions[window.open_output_button][0]
+                if window._footer_actions_layout_mode in {
+                    "report_above", "report_and_action_same_row",
+                    "report_and_action_above",
+                }:
+                    self.assertLess(report_row, folder_row)
+                    self.assertLessEqual(
+                        bounds[2].bottom(), min(bounds[0].top(), bounds[1].top())
                     )
-                )
+                else:
+                    self.assertEqual(report_row, folder_row)
         finally:
             window.close()
 

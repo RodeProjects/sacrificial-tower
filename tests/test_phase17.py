@@ -353,7 +353,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertEqual(window.selected_slicer_installation, second)
         window.close()
 
-    def test_04_slicer_change_discards_profiles_and_stales_preview(self) -> None:
+    def test_04_slicer_change_discards_profiles_and_preview(self) -> None:
         window = self.window()
         first = self.installation(self.root, "First")
         second = self.installation(self.root, "Second")
@@ -368,8 +368,8 @@ class Phase17Tests(unittest.TestCase):
         window.profile_match_result = SimpleNamespace(selected=object())
         window.slicer_combo.setCurrentIndex(1)
         self.assertIsNone(window.profile_match_result)
-        self.assertEqual(window.preview_state, PreviewState.STALE)
-        window.current_preview = None
+        self.assertEqual(window.preview_state, PreviewState.EMPTY)
+        self.assertIsNone(window.current_preview)
         window.close()
 
     def test_05_main_status_remains_evidence_neutral(self) -> None:

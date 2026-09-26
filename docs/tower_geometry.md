@@ -75,8 +75,10 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
    Mindestdurchmesser. Die Kurve wird über den gesamten absteigenden Abschnitt
    geplant und nicht an jedem Layer neu gestartet. Ihre Dauer wird so gewählt,
    dass ein späterer Radiusbedarf erhalten bleibt. Ohne 100-%-Turmfüllung gilt
-   zusätzlich die maximale Verjüngungsneigung. Bei 100-%-Turmfüllung wird diese
-   Winkelgrenze vollständig ignoriert, auch für gekrümmte Übergänge und den Fuß.
+   zusätzlich die eingestellte maximale Verjüngungsneigung. Bei 100-%-Turmfüllung
+   wird dieser Eingabewert ignoriert: Gekrümmte Übergänge ohne Absatz erhalten
+   stattdessen eine feste maximale Radiusabnahme von 1 mm pro mm Höhe; der
+   Standfußübergang behält seine eigene Höhenregel.
 
 ### Automatischer Standfuß
 
@@ -93,10 +95,11 @@ kann die Winkelgrenze die Verjüngung über dieses Höhenziel hinaus verlängern
 ### Direkte Absätze bei 100 % Turmfüllung
 
 Nur `simulate_full_tower_infill=True` erlaubt einen horizontalen Absatz nach
-innen. Als abrupter Bedarfseinbruch gilt eine Radiusabnahme größer als die
-Layerhöhe (feste Erkennungsschwelle, unabhängig vom ignorierten Verjüngungswinkel)
-oder ein starker Zeitsprung in einen selbst ausreichenden Objektlayer.
-Der erste Übergang aus dem Standfuß bleibt konkav.
+innen. Er ist ausschließlich beim Übergang in einen Objektlayer zulässig,
+dessen eigene gemessene Layerzeit das Ziel innerhalb der eingestellten Toleranz
+bereits erreicht. Ein starker Rückgang des berechneten Radius allein reicht
+dafür nicht aus: Gerade bei einem kurzen Objektlayer muss der Turm weiterhin
+Zusatzzeit bereitstellen. Der erste Übergang aus dem Standfuß bleibt konkav.
 
 Das lokale Zeitfenster wird an starken Übergängen über die Zielzeit getrennt
 (Zeitverhältnis über 1,5), damit spätere breite Objektflächen die Zeitreferenz

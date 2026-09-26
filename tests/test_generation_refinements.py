@@ -23,17 +23,25 @@ from test_phase9 import make_snapshot
 from test_solid_tower_changes import radius_layer
 
 
-def profile_for(z, radii, *, full=True, end=None, base_height=0.0):
+def profile_for(z, radii, *, full=True, end=None, base_height=0.0,
+                source_times=None):
     settings = GenerationSettings(
         minimum_outer_diameter_mm=4.0, maximum_outer_diameter_mm=40.0,
         automatic_base_width=False, manual_base_width_mm=20.0,
         base_height_mm=base_height, maximum_expansion_angle_deg=45.0,
         maximum_contraction_angle_deg=45.0, simulate_full_tower_infill=full,
     )
+    source_times = source_times or {}
     source = TowerRadiusProfile(
         config=TowerProfileConfig(target_layer_time_s=11.0), global_seconds_per_deposition_mm=0.1,
-        layers=tuple(radius_layer(index=i + 1, z=height, calculated_radius=r, radius=r)
-                     for i, (height, r) in enumerate(zip(z, radii))),
+        layers=tuple(
+            replace(
+                radius_layer(index=i + 1, z=height, calculated_radius=r, radius=r),
+                layer_time_s=source_times.get(i + 1, 1.0),
+                time_deficit_s=max(0.0, 11.0 - source_times.get(i + 1, 1.0)),
+            )
+            for i, (height, r) in enumerate(zip(z, radii))
+        ),
     )
     return build_solid_tower_profile(source, settings, tower_end_z_mm=end)
 
@@ -85,7 +93,8 @@ class GenerationRefinementTests(unittest.TestCase):
         self.assertFalse(any(p.source == "synthetic_final_layer" for p in profile.points))
 
     def test_shoulder_reserves_smallest_radius_for_later_peak(self):
-        profile = profile_for(tuple(range(1, 23)) + (23, 24, 28, 29), (10,) * 22 + (2, 2, 8, 8))
+        profile = profile_for(tuple(range(1, 23)) + (23, 24, 28, 29),
+                              (10,) * 22 + (2, 2, 8, 8), source_times={23: 11.0})
         step = next(p for p in profile.points if p.source == "inward_step")
         self.assertEqual(step.z_mm, 22)
         self.assertAlmostEqual(step.outer_radius_mm, 2)
@@ -99,7 +108,8 @@ class GenerationRefinementTests(unittest.TestCase):
             self.assertAlmostEqual(point.outer_radius_mm, point.z_mm - 20)
 
     def test_close_future_peak_prevents_overly_thin_restart(self):
-        profile = profile_for(tuple(range(1, 23)) + (23, 24), (10,) * 22 + (2, 9))
+        profile = profile_for(tuple(range(1, 23)) + (23, 24),
+                              (10,) * 22 + (2, 9), source_times={23: 11.0})
         step = next(p for p in profile.points if p.source == "inward_step")
         self.assertAlmostEqual(step.outer_radius_mm, 7)
         self.assertAlmostEqual(profile.layers[-1].outer_radius_mm, 9)
@@ -120,8 +130,23 @@ class GenerationRefinementTests(unittest.TestCase):
         profile = profile_for(tuple(range(1, 18)), (2,) * 17)
         self.assertFalse(any(p.source == "inward_step" for p in profile.points))
 
+    def test_deficient_source_layer_never_receives_a_diameter_step(self):
+        # The reproduced export stepped from 7.858 to 5.442 mm at Z=177.5,
+        # although the next original layer needed only 1.047 of 11 seconds.
+        z = tuple(range(1, 23)) + (22.18, 22.36, 22.54)
+        profile = profile_for(
+            z, (7.858,) * 22 + (5.442, 5.656, 4.756),
+            source_times={22: 1.210, 23: 1.047, 24: 0.581},
+        )
+        self.assertFalse(any(p.source == "inward_step" for p in profile.points))
+        self.assertGreaterEqual(
+            profile.layers[22].outer_radius_mm,
+            profile.layers[21].outer_radius_mm - 0.18 - 1e-8,
+        )
+
     def test_shoulder_mesh_is_single_closed_outward_volume(self):
-        profile = profile_for((1, 2, 3, 4, 8, 9), (10, 10, 2, 2, 8, 8), end=9.2)
+        profile = profile_for((1, 2, 3, 4, 8, 9), (10, 10, 2, 2, 8, 8),
+                              end=9.2, source_times={5: 11.0})
         mesh = generate_solid_tower_mesh(profile, TowerMeshConfig(segment_count=32))
         validation = validate_triangle_mesh(mesh)
         self.assertTrue(validation.is_watertight)

@@ -41,6 +41,7 @@ from cooling_tower.slicers.profile_models import stable_json_fingerprint
 from cooling_tower.slicers.support_simulation import (
     can_offer_support_simulation, with_simulated_supports,
 )
+from cooling_tower.slicers.draft_shield import with_simulated_draft_shield_disabled
 from cooling_tower.slicers.profile_matching import metadata_values
 from cooling_tower.slicers.orca_profile_compatibility import (
     temporary_orca_machine_identity,
@@ -91,6 +92,7 @@ class SourcePreSliceResult:
     cache_hit: bool = False
     preview_source_data: PreviewSourceData | None = None
     supports_simulated: bool = False
+    draft_shield_simulated: bool = False
 
     def cleanup(self) -> None:
         _safe_cleanup_workspace(self.workspace_root)
@@ -134,6 +136,7 @@ class SourcePreSliceService:
         cancellation_event: Event | None = None,
         progress_callback: PreSliceProgressCallback | None = None,
         simulate_supports: bool = False,
+        simulate_draft_shield: bool = False,
     ) -> SourcePreSliceResult:
         notify = progress_callback or (lambda _percent, _status, _busy: None)
         cancelled = cancellation_event or Event()
@@ -159,6 +162,7 @@ class SourcePreSliceService:
                 confirmation=confirmation,
                 adapter_version=PRESLICE_ADAPTER_VERSION,
                 simulate_supports=simulate_supports,
+                simulate_draft_shield=simulate_draft_shield,
             )
             if self.cache is not None:
                 self.cache.assert_safe_location(
@@ -181,6 +185,7 @@ class SourcePreSliceService:
                     cancellation_event=cancelled,
                     notify=notify,
                     simulate_supports=simulate_supports,
+                    simulate_draft_shield=simulate_draft_shield,
                 )
 
         notify(5, "Slicer wird vorbereitet", False)
@@ -202,9 +207,13 @@ class SourcePreSliceService:
                         confirmation.profile_sources_fingerprint
                     ),
                 ):
+                    effective_profile = selected.effective_profile
+                    if simulate_supports:
+                        effective_profile = with_simulated_supports(effective_profile)
+                    if simulate_draft_shield:
+                        effective_profile = with_simulated_draft_shield_disabled(effective_profile)
                     timing_profile, timing_overrides = build_calibration_profile(
-                        (with_simulated_supports(selected.effective_profile)
-                         if simulate_supports else selected.effective_profile),
+                        effective_profile,
                         workspace / "timing_profile",
                         simulate_full_tower_infill=False,
                         resolved_profiles=selected.resolved_profiles,
@@ -324,6 +333,7 @@ class SourcePreSliceService:
                 metadata_verified=True,
                 cache_hit=False,
                 supports_simulated=simulate_supports,
+                draft_shield_simulated=simulate_draft_shield,
                 preview_source_data=preview_source_data,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError) as error:
@@ -527,6 +537,7 @@ class SourcePreSliceService:
         cancellation_event: Event,
         notify: PreSliceProgressCallback,
         simulate_supports: bool = False,
+        simulate_draft_shield: bool = False,
     ) -> SourcePreSliceResult:
         source = stl_validation.source_artifact
         workspace = self._create_workspace(profile_match, source.original_path)
@@ -609,6 +620,7 @@ class SourcePreSliceService:
                 cache_hit=True,
                 preview_source_data=preview_source_data,
                 supports_simulated=simulate_supports,
+                draft_shield_simulated=simulate_draft_shield,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError):
             _safe_cleanup_workspace(workspace)
@@ -831,6 +843,7 @@ def build_preslice_cache_key(
     adapter_version: int = PRESLICE_ADAPTER_VERSION,
     gcode_parser_version: int = ANALYSIS_PARSER_VERSION,
     simulate_supports: bool = False,
+    simulate_draft_shield: bool = False,
 ) -> str:
     if (
         isinstance(adapter_version, bool)
@@ -871,6 +884,7 @@ def build_preslice_cache_key(
             "adapter_version": adapter_version,
             "gcode_parser_version": gcode_parser_version,
             "simulate_supports": simulate_supports,
+            "simulate_draft_shield": simulate_draft_shield,
         }
     )
 

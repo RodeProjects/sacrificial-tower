@@ -35,9 +35,10 @@ from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 DEFAULT_MAXIMUM_JOINT_SLICES = 12
 GENERATION_DIALOG_WIDTH_PX = 610
 JOINT_SLICE_HINT = (
-    "Die Angleichung endet spätestens nach dieser Anzahl gemeinsamer Slices – "
-    "oder früher bei höchstens ±0,09 s Zielabweichung, manueller Übernahme "
-    "oder ausbleibender Verbesserung."
+    "Maximale Anzahl gemeinsamer Slicer-Durchläufe für die Angleichung. "
+    "Bereich: 5 bis 25; Standard: 12. Nach der Mindestanzahl kann die "
+    "Angleichung bei höchstens ±0,09 s Zielabweichung, manueller Übernahme "
+    "oder ausbleibender Verbesserung früher enden."
 )
 
 

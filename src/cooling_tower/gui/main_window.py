@@ -96,7 +96,11 @@ from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
 from cooling_tower.gui.stl_validation_worker import StlValidationWorker
 from cooling_tower.gui.source_preslice_worker import SourcePreSliceWorker
 from cooling_tower.gui.support_simulation_dialog import SupportSimulationDialog
+from cooling_tower.gui.draft_shield_dialog import DraftShieldDialog
 from cooling_tower.slicers.support_simulation import with_simulated_supports
+from cooling_tower.slicers.draft_shield import (
+    draft_shield_source, with_simulated_draft_shield_disabled,
+)
 from cooling_tower.gui.support_report_dialog import SupportReportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
@@ -260,8 +264,8 @@ FULL_INFILL_HINT_HTML = """
   </tr>
   <tr>
     <td valign="top" style="padding:4px 12px 4px 0;"><b>Bettschubser</b></td>
-    <td valign="top" style="padding:4px 12px;"><b>Aktivierung empfohlen.</b><br>Der Turm bleibt gleich breit oder wird schmaler und stabiler; etwas mehr Material.</td>
-    <td valign="top" style="padding:4px 12px;">Weniger Material; ein breiterer Turm kann stärker schwingen.</td>
+    <td valign="top" style="padding:4px 12px;"><b>Aktivierung empfohlen.</b><br>+ Schmalerer Turm<br>+ Weniger Schwingungen<br>- Mehr Material</td>
+    <td valign="top" style="padding:4px 12px;">+ Weniger Material<br>- Breiterer Turm<br>- Kann stärker schwingen.</td>
   </tr>
   <tr>
     <td valign="top" style="padding:4px 12px 4px 0;"><b>CoreXY</b></td>
@@ -752,6 +756,8 @@ class MainWindow(QMainWindow):
         self._preslice_request_id = 0
         self._support_simulation_offer_id = None
         self._support_simulation_dialog = None
+        self._draft_shield_dialog = None
+        self._draft_shield_simulation_requested = False
         self._pending_support_retry = None
         self._pending_support_profile_reload = None
         self._preslice_runtime_request_id: int | None = None
@@ -775,7 +781,6 @@ class MainWindow(QMainWindow):
         self._feasibility_request_id = 0
         self._preview_request_id = 0
         self._preview_cancel_requested = False
-        self._force_no_tower_generation = False
         self._active_preview_worker: PreviewWorker | None = None
         self._joint_generation_dialog: GenerationPanel | None = None
         self._joint_slice_settings_dialog: JointSliceSettingsDialog | None = None
@@ -2389,7 +2394,7 @@ class MainWindow(QMainWindow):
         self.target_time_spin.set_display_decimals(1)
         self.target_time_spin.setProperty("rangeLabelShowMinimum", True)
         self.layer_time_tolerance_spin = self._double_spin(0.1, 3.0, 2, 0.01, "layerTimeTolerance")
-        self._add_numeric_setting(
+        target_setting = self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
             "Gewünschte Mindest-Layerzeit",
@@ -2399,18 +2404,50 @@ class MainWindow(QMainWindow):
             timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
             self.layer_time_tolerance_spin,
         )
+        self.full_infill_checkbox = QCheckBox(
+            "100% Turmfüllung simulieren"
+        )
+        self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
+        full_infill_row = QWidget()
+        full_infill_layout = QHBoxLayout(full_infill_row)
+        full_infill_layout.setContentsMargins(0, 2, 0, 2)
+        full_infill_layout.setSpacing(METRICS.setting_info_text_gap_px)
+        self.full_infill_info_button = InfoToolButton(
+            FULL_INFILL_HINT_HTML,
+            full_infill_row,
+            accessible_name="Informationen zur 100-%-Turmfüllung",
+            accessible_hint=FULL_INFILL_HINT_ACCESSIBLE,
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        full_infill_layout.addWidget(
+            self.full_infill_info_button,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        full_infill_layout.addWidget(
+            self.full_infill_checkbox,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        full_infill_layout.addStretch(1)
+        timing_layout.addWidget(full_infill_row)
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
         )
         self.tower_need_label.setObjectName("towerNeedLabel")
         self.tower_need_label.setWordWrap(True)
+        self.tower_need_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
         self.tower_need_label.setProperty("state", "pending")
-        timing_layout.addWidget(self.tower_need_label)
+        target_setting.layout().addWidget(self.tower_need_label, 3, 0, 1, 4)
         self.tower_need_label.hide()
         self.content_layout.addWidget(timing_group)
 
         geometry_group = SectionCard(
-            "Turmgeometrie",
+            "Erweiterte Einstellungen",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2440,34 +2477,6 @@ class MainWindow(QMainWindow):
             "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
-        self.full_infill_checkbox = QCheckBox(
-            "100% Turmfüllung simulieren"
-        )
-        self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
-        full_infill_row = QWidget()
-        full_infill_layout = QHBoxLayout(full_infill_row)
-        full_infill_layout.setContentsMargins(0, 2, 0, 2)
-        full_infill_layout.setSpacing(METRICS.setting_info_text_gap_px)
-        self.full_infill_info_button = InfoToolButton(
-            FULL_INFILL_HINT_HTML,
-            full_infill_row,
-            accessible_name="Informationen zur 100-%-Turmfüllung",
-            accessible_hint=FULL_INFILL_HINT_ACCESSIBLE,
-            object_name="settingInfoButton",
-            diameter_px=METRICS.setting_info_diameter_px,
-        )
-        full_infill_layout.addWidget(
-            self.full_infill_info_button,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-        full_infill_layout.addWidget(
-            self.full_infill_checkbox,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-        full_infill_layout.addStretch(1)
-        geometry_layout.insertWidget(0, full_infill_row)
         geometry_group.refresh_collapsed_state()
         self.content_layout.addWidget(geometry_group)
 
@@ -2864,7 +2873,7 @@ class MainWindow(QMainWindow):
         options_actions.addWidget(self.additional_options_close_button)
         options_layout.addLayout(options_actions)
         # Timing and geometry share one collapsible card after preparation.
-        # Its grey subsections stay open and follow one another in one column.
+        # The advanced subsection collapses inside the outer settings card.
         self.geometry_settings_group = SectionCard(
             "Turm-Einstellungen",
             collapsible=True,
@@ -2877,8 +2886,9 @@ class MainWindow(QMainWindow):
         self.geometry_settings_group.content_layout.setContentsMargins(
             0, 0, 0, 0
         )
-        geometry_group.setCheckable(False)
         timing_group.setCheckable(False)
+        timing_group.setProperty("headerless", True)
+        timing_group.refresh_collapsed_state()
         timing_group.setProperty("outerDropdown", False)
         timing_group.setProperty("subsection", "single")
         stability_group.setCheckable(False)
@@ -2955,6 +2965,11 @@ class MainWindow(QMainWindow):
         )
         self.geometry_settings_group.toggled.connect(
             self._refresh_geometry_section_layout
+        )
+        geometry_group.toggled.connect(
+            lambda _expanded: self._refresh_geometry_section_layout(
+                self.geometry_settings_group.isChecked()
+            )
         )
 
         workflow_widgets = (self.ready_grid,)
@@ -4269,6 +4284,10 @@ class MainWindow(QMainWindow):
         effective_profile = result.selected.effective_profile
         if self.source_preslice_result is not None and getattr(self.source_preslice_result, "supports_simulated", False):
             effective_profile = with_simulated_supports(effective_profile)
+        if self.source_preslice_result is not None and getattr(
+            self.source_preslice_result, "draft_shield_simulated", False
+        ):
+            effective_profile = with_simulated_draft_shield_disabled(effective_profile)
         adapter = self.slicer_service.adapter_for(result.execution_slicer)
         slicer_key = result.execution_slicer.identity_key
         profile_fingerprint = (
@@ -4290,7 +4309,7 @@ class MainWindow(QMainWindow):
                 if self.source_preslice_result is not None
                 else None
             ),
-            force_tower=self._force_no_tower_generation,
+            force_tower=False,
         )
 
     def _invalidate_preview(
@@ -4301,7 +4320,6 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._loading_phase17_state:
             return
-        self._force_no_tower_generation = False
         self._cancel_generation_phase_transition()
         if not preserve_slicer_prediction:
             self._clear_slicer_prediction()
@@ -4452,20 +4470,15 @@ class MainWindow(QMainWindow):
             self.tower_assessment is not None
             and not self.tower_assessment.tower_required
         )
-        if no_tower and not self._force_no_tower_generation:
+        if no_tower:
             return self._no_tower_required_reason(
                 self.tower_assessment, self.analysis_snapshot
             )
-        if not self._phase17_static_valid and not (
-            no_tower and self._force_no_tower_generation
-            and self._only_target_minimum_blocks_generation()
-        ):
+        if not self._phase17_static_valid:
             causes = list(dict.fromkeys(message for messages in self._static_field_errors.values() for message in messages))
             return "Bitte Eingaben korrigieren: " + " ".join(causes[:3]) if causes else "Bitte ungültige oder unvollständige Eingaben korrigieren."
         if self.tower_assessment is None:
             return "Der Kühlturmbedarf wird noch geprüft."
-        if no_tower:
-            return None
         if self.profile_feasibility is None:
             return "Die Turmgeometrie wird noch geprüft."
         elif not self.profile_feasibility.feasible:
@@ -4473,37 +4486,8 @@ class MainWindow(QMainWindow):
             return "Die Turmgeometrie ist mit den aktuellen Werten nicht möglich. " + reasons
         return None
 
-    def _only_target_minimum_blocks_generation(self) -> bool:
-        """Allow a confirmed unnecessary tower without bypassing other errors."""
-        value = self.target_time_spin.value()
-        minimum = float(self.target_time_spin.property("validationMinimum"))
-        errors = self._static_field_errors
-        target_errors = errors.get("target_layer_time_s", ())
-        return bool(
-            5.0 <= value < minimum <= MAXIMUM_TARGET_LAYER_TIME_S
-            and not self._incomplete_setting_names
-            and not self._workflow_error_message
-            and target_errors
-            and set(errors) == {"target_layer_time_s"}
-            and len(self._static_error_causes) == len(target_errors)
-        )
-
     def _generation_block_reason(self) -> str | None:
-        reason = self._export_block_reason()
-        assessment = self.tower_assessment
-        if (
-            assessment is not None
-            and not assessment.tower_required
-            and self.analysis_snapshot is not None
-            and reason == self._no_tower_required_reason(
-                assessment, self.analysis_snapshot
-            )
-        ):
-            if self._phase17_static_valid or self._only_target_minimum_blocks_generation():
-                return None
-            causes = list(dict.fromkeys(self._static_error_causes))
-            return "Bitte Eingaben korrigieren: " + " ".join(causes[:3])
-        return reason
+        return self._export_block_reason()
 
     def _set_export_button_state(
         self,
@@ -4534,12 +4518,20 @@ class MainWindow(QMainWindow):
             )
         elif message.startswith("Kein Kühlturm erforderlich:"):
             self.export_availability_label.setText(
-                f"Generierung nur nach Bestätigung: {message}"
+                "Kein Kühlturm erforderlich. Alle Layer des Originalobjekts "
+                "erreichen bereits die gewünschte Mindest-Layerzeit; "
+                "die Generierung ist deshalb deaktiviert."
             )
         else:
             self.export_availability_label.setText(
                 f"Export/Vorschau nicht möglich: {message}"
             )
+        no_tower = message.startswith("Kein Kühlturm erforderlich:")
+        self.action_availability_icon.setText("✓" if no_tower else "⚠")
+        state = "success" if no_tower else "warning"
+        for widget in (self.action_availability_icon, self.export_availability_label):
+            widget.setProperty("state", state)
+            self._refresh_widget_style(widget)
         self.export_availability_label.show()
         self.action_availability_widget.show()
         self._refresh_footer_auxiliary_visibility()
@@ -5844,10 +5836,22 @@ class MainWindow(QMainWindow):
             or result.execution_slicer.identity_key != installation.identity_key
         ):
             return
-        if (
+        catalog_confirmed = bool(
             result.requires_confirmation
             and self._profile_result_matches_catalog_confirmation(result)
             and self.source_artifact is not None
+        )
+        draft_detected = (
+            draft_shield_source(
+                result.selected.effective_profile,
+                result.selected.resolved_profiles,
+            )
+            if catalog_confirmed and result.selected is not None
+            and not self._draft_shield_simulation_requested
+            else None
+        )
+        if (
+            catalog_confirmed and draft_detected is None
         ):
             try:
                 source_confirmation = ProfileConfirmation.from_result(
@@ -5987,6 +5991,8 @@ class MainWindow(QMainWindow):
         self._refresh_stl_availability()
         self._update_preparation_requirements()
         self.update_wall_path_preview()
+        if draft_detected is not None and self.profile_match_result is result:
+            self._show_draft_shield_dialog(result, draft_detected)
 
     def _profile_result_matches_catalog_confirmation(
         self,
@@ -6434,6 +6440,14 @@ class MainWindow(QMainWindow):
                 state="error",
             )
             return
+        selected = result.selected
+        if selected is not None and not self._draft_shield_simulation_requested:
+            detected = draft_shield_source(
+                selected.effective_profile, selected.resolved_profiles
+            )
+            if detected is not None:
+                self._show_draft_shield_dialog(result, detected)
+                return
         try:
             confirmation = (
                 ProfileConfirmation.from_result(result, self.source_artifact)
@@ -6496,6 +6510,61 @@ class MainWindow(QMainWindow):
         self._refresh_stl_availability()
         self._update_preparation_requirements()
 
+    def _show_draft_shield_dialog(self, result, detected) -> None:
+        if self._draft_shield_dialog is not None:
+            self._draft_shield_dialog.reject()
+            self._draft_shield_dialog.deleteLater()
+        dialog = DraftShieldDialog(detected.role, detected.profile_name, self)
+        self._draft_shield_dialog = dialog
+        source = self.source_artifact
+
+        def still_current() -> bool:
+            return (
+                not self._closing
+                and self.profile_match_result is result
+                and self.source_artifact == source
+            )
+
+        def accepted() -> None:
+            if still_current():
+                self._draft_shield_simulation_requested = True
+                self.confirm_profile_selection()
+
+        def reload_profiles() -> None:
+            if not still_current() or result.selected is None:
+                return
+            selected = {
+                role: ProfileSelectionReference(record.profile_id, record.path)
+                for role in ("machine", "filament", "process")
+                if (record := getattr(result.selected, role)) is not None
+            }
+            self._discard_source_preslice("Profile werden erneut eingelesen")
+            self.profile_catalog_confirmation = None
+            self.confirmed_profile_context = None
+            self.profile_match_result = None
+            self.start_profile_catalog_loading(
+                force_inventory=True,
+                selected_profile_ids=selected,
+                restore_remembered_profiles=False,
+                match_source_after_loading=True,
+            )
+
+        dialog.accepted.connect(accepted)
+        dialog.reload_profiles_requested.connect(reload_profiles)
+        self._show_internal_dialog_without_flash(
+            dialog, self._resize_draft_shield_dialog
+        )
+
+    def _resize_draft_shield_dialog(self) -> None:
+        dialog = self._draft_shield_dialog
+        if dialog is None or not dialog.isVisible():
+            return
+        screen = dialog.screen() or self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            dialog.resize(min(640, available.width() - 40), min(571, available.height() - 40))
+        self._place_dialog_centered(dialog)
+
     def start_source_preslice(self, *, simulate_supports: bool = False) -> None:
         validation = self.stl_validation_result
         profile_match = self.profile_match_result
@@ -6553,6 +6622,7 @@ class MainWindow(QMainWindow):
             confirmation,
             adapter,
             simulate_supports=simulate_supports,
+            simulate_draft_shield=self._draft_shield_simulation_requested,
         )
         worker.support_simulation_available.connect(self._on_support_simulation_available)
         worker.progress.connect(self._on_source_preslice_progress)
@@ -6695,6 +6765,7 @@ class MainWindow(QMainWindow):
         confirmation = self.confirmed_profile_context
         self.current_gcode_path = None
         self.analysis_snapshot = None
+        self._refresh_target_time_hint()
         self.prepared_analysis_source = None
         self._analysis_failed = True
         rendered = german_user_message(message)
@@ -6826,6 +6897,7 @@ class MainWindow(QMainWindow):
         self._preslice_timeout_request_id = None
         self.current_gcode_path = None
         self.analysis_snapshot = None
+        self._refresh_target_time_hint()
         self.prepared_analysis_source = None
         self.preslice_cancel_button.hide()
         self._set_preslice_activity(False)
@@ -6889,6 +6961,11 @@ class MainWindow(QMainWindow):
             result.cleanup()
 
     def _discard_source_preslice(self, reason: str) -> None:
+        if reason != "preslice_replaced":
+            self._draft_shield_simulation_requested = False
+        if self._draft_shield_dialog is not None and self._draft_shield_dialog.isVisible():
+            self._draft_shield_dialog.reject()
+        self._discard_generated_tower()
         self._pending_support_retry = None
         self._pending_support_profile_reload = None
         self._support_simulation_offer_id = None
@@ -6915,10 +6992,44 @@ class MainWindow(QMainWindow):
             self.tower_assessment = None
             self.profile_feasibility = None
             self._clear_feasibility_issues()
+            self._refresh_target_time_hint()
         if hasattr(self, "preslice_cancel_button"):
             self.preslice_cancel_button.hide()
         if hasattr(self, "profile_confirmation_stack"):
             self._set_preslice_activity(False)
+
+    def _discard_generated_tower(self) -> None:
+        if not hasattr(self, "current_preview"):
+            return
+        self._preview_request_id += 1
+        if hasattr(self, "background_job_manager"):
+            self.background_job_manager.cancel_jobs(
+                JobKind.PREVIEW, reason="preparation_changed"
+            )
+        self._cancel_generation_phase_transition()
+        if self.current_preview is not None:
+            dispose = getattr(self.current_preview, "dispose", None)
+            if callable(dispose):
+                dispose()
+            self.current_preview = None
+        self.preview_state = PreviewState.EMPTY
+        self._preview_cancel_requested = False
+        self._last_exported_preview_signature = None
+        if self._preview_dialog is not None:
+            self._preview_dialog.canvas.set_scene(None)
+            self._preview_dialog.mark_stale()
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.hide()
+        if hasattr(self, "generation_intro_label"):
+            self.generation_intro_label.setText(
+                "Noch kein Kühlturm generiert. Starten Sie die Generierung, "
+                "um den Fortschritt und das Ergebnis hier zu sehen."
+            )
+            self.generation_intro_label.show()
+        if hasattr(self, "preview_hint_label"):
+            self.preview_hint_label.hide()
+        if hasattr(self, "result_label"):
+            self._clear_result_notices()
 
     def _check_profile_inventory_changes(self) -> None:
         if (
@@ -7891,6 +8002,16 @@ class MainWindow(QMainWindow):
         target_height = margins.top() + margins.bottom() + content_height
         bounded_height = min(maximum_height, target_height)
         self.footer.setFixedHeight(bounded_height)
+        self.footer_layout.invalidate()
+        self.footer_layout.activate()
+        self.footer_content_grid.activate()
+        if self._footer_narrow_layout and not self.footer_action_area.isHidden():
+            action_bottom = self.footer_action_area.mapTo(
+                self.footer, QPoint(0, self.footer_action_area.height())
+            ).y()
+            required_height = action_bottom + margins.bottom()
+            if required_height > self.footer.height():
+                self.footer.setFixedHeight(min(maximum_height, required_height))
         self.footer_messages_scroll.updateGeometry()
         self.footer.updateGeometry()
 
@@ -8895,6 +9016,7 @@ class MainWindow(QMainWindow):
         self.stl_validation_result = None
         self.prepared_analysis_source = None
         self.analysis_snapshot = None
+        self._refresh_target_time_hint()
         self.tower_assessment = None
         self.profile_feasibility = None
         self.profile_match_result = None
@@ -9391,37 +9513,6 @@ class MainWindow(QMainWindow):
             is box._rejected_stl_accept_button  # type: ignore[attr-defined]
         )
 
-    def _ask_no_tower_confirmation(self, reason: str) -> bool:
-        """Require an explicit decision before generating an unnecessary tower."""
-
-        box = QMessageBox(self)
-        box.setObjectName("unnecessaryTowerConfirmationDialog")
-        box.setWindowTitle("Kühlturm trotzdem generieren?")
-        box.setWindowModality(Qt.WindowModality.WindowModal)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText(
-            f"{reason}\n\n"
-            "Ein zusätzlicher Kühlturm verbraucht Material und Druckzeit, "
-            "obwohl die gewünschte Layerzeit bereits erreicht wird. "
-            "Möchtest du ihn trotzdem generieren?"
-        )
-        accept_button = box.addButton(
-            "Trotzdem generieren", QMessageBox.ButtonRole.AcceptRole
-        )
-        cancel_button = box.addButton(
-            "Abbrechen", QMessageBox.ButtonRole.RejectRole
-        )
-        box.setDefaultButton(cancel_button)
-        box.setEscapeButton(cancel_button)
-        box.ensurePolished()
-        box.adjustSize()
-        self._show_internal_dialog_without_flash(
-            box, lambda: self._place_dialog_centered(box)
-        )
-        cancel_button.setFocus(Qt.FocusReason.OtherFocusReason)
-        box.exec()
-        return box.clickedButton() is accept_button
-
     def _complete_accepted_stl(
         self,
         request_id: int,
@@ -9613,6 +9704,7 @@ class MainWindow(QMainWindow):
         """Enter the cooling-tower pipeline for the prepared STL analysis."""
 
         self.analysis_snapshot = snapshot
+        self._refresh_target_time_hint()
         self._update_local_window_layer_limit(snapshot.layer_count)
         self._refresh_tower_assessment()
         self.validate_form()
@@ -9643,6 +9735,7 @@ class MainWindow(QMainWindow):
             self._set_tower_need_message(
                 "Bitte zuerst eine STL-Datei auswählen.", "pending"
             )
+            self._refresh_target_time_hint()
             self._refresh_prediction()
             return
         try:
@@ -9679,16 +9772,28 @@ class MainWindow(QMainWindow):
         snapshot: GCodeAnalysisSnapshot,
     ) -> str:
         return (
-            "Kein Kühlturm erforderlich: Alle analysierten Schichten "
-            f"erreichen die Zielzeit von {assessment.target_layer_time_s:.2f} s. "
-            "Die kürzeste erkannte Zeit beträgt "
-            f"{snapshot.minimum_layer_time_s:.3f} s."
+            "Kein Kühlturm erforderlich:\n"
+            f"• Gewünschte Mindest-Layerzeit: {_de_number(assessment.target_layer_time_s, 1)} s.\n"
+            f"• Kürzeste Layerzeit des Originalobjekts: "
+            f"{_de_number(snapshot.minimum_layer_time_s, 3)} s.\n"
+            "• Alle analysierten Layer erreichen damit bereits die gewünschte Zeit."
         )
 
     def _show_required_tower_message(
         self,
         assessment: TowerNeedAssessment,
     ) -> None:
+        snapshot = self.analysis_snapshot
+        if snapshot is not None:
+            difference = assessment.target_layer_time_s - snapshot.minimum_layer_time_s
+            if 0 < difference <= 0.5 + 1e-9:
+                self._set_tower_need_message(
+                    f"Nur {_de_number(difference, 3)} s zusätzliche Layerzeit: "
+                    "Dieser geringe Zeitgewinn macht oft keinen zusätzlichen "
+                    "Kühlturm erforderlich.",
+                    "smallGain",
+                )
+                return
         verb = (
             "unterschreitet"
             if assessment.deficit_layer_count == 1
@@ -10173,11 +10278,25 @@ class MainWindow(QMainWindow):
             self.geometry_settings_group.set_summary_badge(None)
 
     def _set_tower_need_message(self, text: str, state: str) -> None:
+        visible = state in {"notRequired", "smallGain"}
+        changed = (
+            self.tower_need_label.text() != text
+            or self.tower_need_label.property("state") != state
+            or self.tower_need_label.isHidden() == visible
+        )
+        if not changed:
+            return
         self.tower_need_label.setText(text)
         self.tower_need_label.setProperty("state", state)
-        self.tower_need_label.setVisible(state == "notRequired")
+        self.tower_need_label.setVisible(visible)
         self.tower_need_label.style().unpolish(self.tower_need_label)
         self.tower_need_label.style().polish(self.tower_need_label)
+        self.tower_need_label.updateGeometry()
+        self._setting_widgets["target_layer_time_s"].refresh_content_height()
+        if hasattr(self, "geometry_settings_group"):
+            self._refresh_geometry_section_layout(
+                self.geometry_settings_group.isChecked()
+            )
 
     def _show_input_error(self, message: str) -> None:
         self._workflow_error_message = german_user_message(message)
@@ -10673,6 +10792,7 @@ class MainWindow(QMainWindow):
 
     def _resize_visible_optional_dialogs(self) -> None:
         self._resize_support_simulation_dialog()
+        self._resize_draft_shield_dialog()
         if self._about_dialog is not None and self._about_dialog.isVisible():
             self._resize_about_to_content()
         if (
@@ -10997,22 +11117,24 @@ class MainWindow(QMainWindow):
 
     def _update_target_time_minimum(self) -> None:
         minimum = 5.0
-        snapshot = self.analysis_snapshot
-        if snapshot is not None:
-            observed = getattr(snapshot, "minimum_layer_time_s", None)
-            if isinstance(observed, (int, float)) and not isinstance(observed, bool):
-                observed = float(observed)
-                if math.isfinite(observed) and observed > 0:
-                    # Match the one-decimal display precision and round upward
-                    # so the visible bound always includes the full margin.
-                    required = observed + 0.5
-                    if required <= MAXIMUM_TARGET_LAYER_TIME_S:
-                        minimum = max(
-                            5.0, math.ceil(required * 10 - 1e-9) / 10
-                        )
         if self.target_time_spin.property("validationMinimum") != minimum:
             self.target_time_spin.setProperty("validationMinimum", minimum)
             self._setting_widgets["target_layer_time_s"].refresh_range_state()
+
+    def _refresh_target_time_hint(self) -> None:
+        if "target_layer_time_s" not in self._setting_widgets:
+            return
+        hint = SETTING_INFO_TEXTS["target_layer_time_s"]
+        snapshot = self.analysis_snapshot
+        observed = getattr(snapshot, "minimum_layer_time_s", None)
+        if isinstance(observed, (int, float)) and not isinstance(observed, bool):
+            observed = float(observed)
+            if math.isfinite(observed) and observed > 0:
+                hint += (
+                    "\n\nPre-Slice des Originalobjekts:\n"
+                    f"Kürzeste Layerzeit: {_de_number(observed, 3)} s."
+                )
+        self._setting_widgets["target_layer_time_s"].info_button.set_hint(hint)
 
     def _update_diameter_limits(self) -> None:
         boundaries = (
@@ -11590,23 +11712,10 @@ class MainWindow(QMainWindow):
         self.validate_form()
         self._refresh_stl_availability()
         if (
-            self.analysis_snapshot is not None
-            and self.tower_assessment is not None
+            self.tower_assessment is not None
             and not self.tower_assessment.tower_required
-            and self._generation_block_reason() is None
         ):
-            reason = self._no_tower_required_reason(
-                self.tower_assessment, self.analysis_snapshot
-            )
-            if not self._ask_no_tower_confirmation(reason):
-                self._set_main_status(
-                    f"Generierung nicht gestartet. {reason}",
-                    icon="○",
-                    state="idle",
-                )
-                return
-            self._force_no_tower_generation = True
-            self._refresh_phase17_actions()
+            return
         self._show_preview_dialog()
         if not self.preview_button.isEnabled():
             self.generation_intro_label.hide()
@@ -11639,6 +11748,8 @@ class MainWindow(QMainWindow):
             simulations.append("Turmfüllung: 100 %")
         if getattr(request.effective_profile, "supports_simulated", False):
             simulations.append("Stützen: aktiviert")
+        if getattr(request.effective_profile, "draft_shield_simulated", False):
+            simulations.append("Draft Shield: deaktiviert")
         self.joint_generation_dialog.set_context(simulations)
         self.generation_intro_label.hide()
         self.joint_generation_dialog.begin(
@@ -12128,7 +12239,7 @@ class MainWindow(QMainWindow):
             return
         self.validate_form()
         if self.analysis_snapshot is not None and self.tower_assessment is not None:
-            if not self.tower_assessment.tower_required and not self._force_no_tower_generation:
+            if not self.tower_assessment.tower_required:
                 self._set_main_status(
                     self._no_tower_required_reason(
                         self.tower_assessment, self.analysis_snapshot
@@ -12597,26 +12708,82 @@ class MainWindow(QMainWindow):
             self.open_output_button.setText("Alle Exporte")
             self.open_stl_button.setText("Letzter Export")
         required_width = required_action_width()
-        wrapped = required_width > action_area_width
-        if wrapped != getattr(self, "_footer_actions_wrapped", False):
-            self._footer_actions_wrapped = wrapped
+        report_visible = not self.open_run_button.isHidden()
+        folder_pair_width = sum(
+            button.sizeHint().width()
+            for button in (self.open_output_button, self.open_stl_button)
+            if not button.isHidden()
+        )
+        paired_width = (
+            folder_pair_width + primary_width
+            + self.main_actions_layout.horizontalSpacing() * 3
+        )
+        mode = (
+            "single"
+            if required_width <= action_area_width
+            else "report_above"
+            if report_visible and paired_width <= action_area_width
+            else "report_and_action_same_row"
+            if report_visible and (
+                self.open_run_button.sizeHint().width()
+                + primary_width
+                + self.main_actions_layout.horizontalSpacing()
+                <= action_area_width
+            )
+            else "report_and_action_above"
+            if report_visible
+            else "action_below"
+        )
+        if mode != getattr(self, "_footer_actions_layout_mode", None):
+            self._footer_actions_layout_mode = mode
+            self._footer_actions_wrapped = mode != "single"
             actions = self.main_actions_layout
-            actions.removeWidget(self.preview_action_control)
-            actions.removeWidget(self.export_button)
-            actions.setVerticalSpacing(8 if wrapped else 0)
-            if wrapped:
-                for widget in (self.preview_action_control, self.export_button):
-                    actions.addWidget(
-                        widget, 1, 0, 1, 6, Qt.AlignmentFlag.AlignRight
-                    )
+            for widget in (
+                self.open_output_button, self.open_stl_button,
+                self.open_run_button, self.preview_action_control,
+                self.export_button,
+            ):
+                actions.removeWidget(widget)
+            report_above = mode in {
+                "report_above", "report_and_action_same_row",
+                "report_and_action_above",
+            }
+            folder_row = 1 if report_above else 0
+            actions.setVerticalSpacing(8 if mode != "single" else 0)
+            actions.addWidget(
+                self.open_output_button, folder_row, 0,
+                Qt.AlignmentFlag.AlignBottom,
+            )
+            actions.addWidget(
+                self.open_stl_button, folder_row, 1,
+                Qt.AlignmentFlag.AlignBottom,
+            )
+            if report_above:
+                actions.addWidget(
+                    self.open_run_button, 0, 0, 1, 2,
+                    Qt.AlignmentFlag.AlignLeft,
+                )
             else:
                 actions.addWidget(
+                    self.open_run_button, 0, 2,
+                    Qt.AlignmentFlag.AlignBottom,
+                )
+            if mode in {"action_below", "report_and_action_above"}:
+                action_row = folder_row + 1
+                for widget in (self.preview_action_control, self.export_button):
+                    actions.addWidget(
+                        widget, action_row, 0, 1, 6,
+                        Qt.AlignmentFlag.AlignRight,
+                    )
+            else:
+                action_row = 0 if mode == "report_and_action_same_row" else folder_row
+                actions.addWidget(
                     self.preview_action_control,
-                    0, 4, Qt.AlignmentFlag.AlignBottom,
+                    action_row, 4, Qt.AlignmentFlag.AlignBottom,
                 )
                 actions.addWidget(
                     self.export_button,
-                    0, 5, Qt.AlignmentFlag.AlignBottom,
+                    action_row, 5, Qt.AlignmentFlag.AlignBottom,
                 )
             actions.invalidate()
 
@@ -12765,6 +12932,8 @@ class MainWindow(QMainWindow):
         self._pending_support_profile_reload = None
         if self._support_simulation_dialog is not None:
             self._support_simulation_dialog.reject()
+        if self._draft_shield_dialog is not None:
+            self._draft_shield_dialog.reject()
         self._pending_slicer_discovery = None
         self._pending_profile_match = None
         self._feasibility_timer.stop()

@@ -1384,30 +1384,31 @@ class Phase16Tests(unittest.TestCase):
     def test_joint_calibration_stops_after_three_stagnant_slices(self) -> None:
         source_stl = self.root / "stagnant_joint_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
-        updates = []
+        for minimum_joint_slices, expected_slices in ((1, 3), (5, 5)):
+            with self.subTest(minimum_joint_slices=minimum_joint_slices):
+                updates = []
+                result = CalibrationService().calibrate(
+                    self.snapshot,
+                    GenerationSettings(target_layer_time_s=30.0),
+                    adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
+                    profile=self.profile,
+                    output_directory=self.root / f"stagnant_joint_result_{minimum_joint_slices}",
+                    config=CalibrationConfig(
+                        maximum_iterations=8,
+                        maximum_joint_slices=8,
+                        minimum_joint_slices=minimum_joint_slices,
+                        time_tolerance_s=0.01,
+                        profile_change_tolerance_mm=1_000.0,
+                        slicer_result_change_tolerance_s=1_000.0,
+                    ),
+                    source_artifact=SourceArtifact.capture(source_stl),
+                    joint_progress_callback=updates.append,
+                )
 
-        result = CalibrationService().calibrate(
-            self.snapshot,
-            GenerationSettings(target_layer_time_s=30.0),
-            adapter=FakeAdapter(tower_gcode(path_size=3.0, feed=30.0)),
-            profile=self.profile,
-            output_directory=self.root / "stagnant_joint_result",
-            config=CalibrationConfig(
-                maximum_iterations=8,
-                maximum_joint_slices=8,
-                minimum_joint_slices=1,
-                time_tolerance_s=0.01,
-                profile_change_tolerance_mm=1_000.0,
-                slicer_result_change_tolerance_s=1_000.0,
-            ),
-            source_artifact=SourceArtifact.capture(source_stl),
-            joint_progress_callback=updates.append,
-        )
-
-        self.assertEqual(len(updates), 3)
-        self.assertEqual(updates[-1].completed_count, 3)
-        self.assertTrue(result.has_usable_improvement)
-        self.assertIn("Stagnation", " ".join(result.warnings))
+                self.assertEqual(len(updates), expected_slices)
+                self.assertEqual(updates[-1].completed_count, expected_slices)
+                self.assertTrue(result.has_usable_improvement)
+                self.assertEqual(result.termination_reason, "stagnation")
 
     def test_target_hit_becomes_the_displayed_and_exported_best_candidate(self) -> None:
         source_stl = self.root / "target_hit_joint_source.stl"
@@ -1455,7 +1456,42 @@ class Phase16Tests(unittest.TestCase):
         self.assertEqual(result.best_iteration_number, 2)
         self.assertEqual(result.termination_reason, "target_tolerance")
 
-    def test_joint_target_stop_waits_until_sixth_slice_and_includes_009_boundary(self) -> None:
+    def test_joint_target_stop_at_fifth_slice_uses_earlier_best(self) -> None:
+        source_stl = self.root / "joint_fifth_target_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        updates = []
+        service = CalibrationService()
+        with (
+            patch.object(
+                service,
+                "_minimum_target_difference",
+                side_effect=(0.022, -0.48, -0.13, -0.20, -0.24),
+            ),
+            patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
+        ):
+            result = service.calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=30.0),
+                adapter=adapter,
+                profile=self.profile,
+                output_directory=self.root / "joint_fifth_target_result",
+                config=CalibrationConfig(
+                    maximum_iterations=8,
+                    maximum_joint_slices=8,
+                    minimum_joint_slices=5,
+                    time_tolerance_s=0.01,
+                ),
+                source_artifact=SourceArtifact.capture(source_stl),
+                joint_progress_callback=updates.append,
+            )
+        self.assertEqual(len(adapter.requests), 5)
+        self.assertEqual(len(updates), 5)
+        self.assertEqual(updates[-1].best_iteration.number, 1)
+        self.assertEqual(result.best_iteration_number, 1)
+        self.assertEqual(result.termination_reason, "target_tolerance")
+
+    def test_joint_target_stop_includes_009_boundary_after_fifth_slice(self) -> None:
         source_stl = self.root / "joint_minimum_target_source.stl"
         trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
         adapter = FakeAdapter(tower_gcode(path_size=3.0, feed=30.0))
@@ -1464,7 +1500,7 @@ class Phase16Tests(unittest.TestCase):
             patch.object(
                 service,
                 "_minimum_target_difference",
-                side_effect=(0.05, 0.05, 0.05, 0.05, 0.05, 0.0901, 0.09),
+                side_effect=(0.0901, 0.0901, 0.0901, 0.0901, 0.0901, 0.0901, 0.09),
             ),
             patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
         ):

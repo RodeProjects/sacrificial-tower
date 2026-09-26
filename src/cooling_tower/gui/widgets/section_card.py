@@ -826,8 +826,11 @@ class SectionCard(QFrame):
         self._sync_visual_state()
 
     def _sync_visual_state(self) -> None:
+        headerless = bool(self.property("headerless"))
+        if headerless:
+            self.header.hide()
         self.content_widget.setVisible(self._expanded)
-        self.body_divider.setVisible(self._expanded)
+        self.body_divider.setVisible(self._expanded and not headerless)
         self.toggle_button.setVisible(self._collapsible)
         self.toggle_button.setText("⌃" if self._expanded else "⌄")
         self.toggle_button.setAccessibleName(

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.settings_store import UserSettingsStore
-from cooling_tower.models import GenerationSettings
+from cooling_tower.models import GenerationSettings, ProfileFeasibilityAssessment
 from cooling_tower.preview import PreviewExportResult, OutputMode
 from cooling_tower.settings_compatibility import merge_compatible_setting_changes
 from test_phase9 import make_snapshot
@@ -137,23 +137,40 @@ class LayerTimeToleranceTests(unittest.TestCase):
                 self.assertEqual(settings.layer_time_tolerance_s, 0.1)
                 self.assertEqual(store.last_migration_backup.read_bytes(), original)
 
-    def test_preslice_target_floor_and_fallback(self):
+    def test_preslice_time_is_in_hint_without_raising_target_floor(self):
         window = MainWindow(user_settings_path=self.path, enable_update_check=False,
                             enable_startup_slicer_discovery=False)
         try:
-            self.assertEqual(window.timing_group.title_label.text(), 'Layerzeit und Toleranz')
+            self.assertTrue(window.timing_group.header.isHidden())
             self.assertEqual(window.target_time_spin.property('validationMinimum'), 5.0)
             snapshot = make_snapshot(self.path.parent / 'source.gcode', (8.123, 11.0))
             window._adopt_common_analysis_snapshot(snapshot)
-            self.assertEqual(window.target_time_spin.property('validationMinimum'), 8.7)
+            self.assertEqual(window.target_time_spin.property('validationMinimum'), 5.0)
             range_text = window._setting_widgets['target_layer_time_s'].range_label.text()
-            self.assertEqual(range_text, '8,7-30,0 Sek.')
+            self.assertEqual(range_text, '5,0 - 30,0 Sek.')
+            self.assertIn('8,123 s', window._setting_widgets['target_layer_time_s'].info_button.toolTip())
             window.target_time_spin.setValue(8.6)
             window.validate_form()
-            self.assertTrue(window._static_field_errors['target_layer_time_s'])
+            self.assertNotIn('target_layer_time_s', window._static_field_errors)
+            self.assertEqual(window.tower_need_label.property('state'), 'smallGain')
+            self.assertIn('0,477 s', window.tower_need_label.text())
+            self.assertFalse(window.tower_need_label.isHidden())
+            self.assertIs(
+                window.tower_need_label.parent(),
+                window._setting_widgets['target_layer_time_s'],
+            )
+            window._on_feasibility_succeeded(
+                window._feasibility_request_id,
+                ProfileFeasibilityAssessment(True, True),
+            )
+            self.assertEqual(window.tower_need_label.property('state'), 'smallGain')
+            self.assertFalse(window.tower_need_label.isHidden())
             window.target_time_spin.setValue(8.7)
             window.validate_form()
             self.assertNotIn('target_layer_time_s', window._static_field_errors)
+            self.assertEqual(window.tower_need_label.property('state'), 'required')
+            window.target_time_spin.setValue(8.1)
+            self.assertEqual(window.tower_need_label.property('state'), 'notRequired')
 
             for observed in (1.0, float('nan'), -1.0, 29.6):
                 window.analysis_snapshot = replace(snapshot, minimum_layer_time_s=observed)

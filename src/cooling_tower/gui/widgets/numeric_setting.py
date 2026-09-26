@@ -361,6 +361,11 @@ class NumericSettingWidget(QWidget):
         """Refresh a range line after a data-dependent bound changed."""
 
         self._refresh_range_label()
+        self.refresh_content_height()
+
+    def refresh_content_height(self) -> None:
+        """Re-measure the row after externally managed feedback changes."""
+
         self._sync_content_height()
         self.updateGeometry()
 

@@ -20,6 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
 from cooling_tower.application import append_runtime_diagnostic
@@ -1095,11 +1096,54 @@ class RequestedGuiChangesTests(unittest.TestCase):
     def test_geometry_fields_share_one_named_section(self) -> None:
         window = self.window()
         self.addCleanup(window.close)
-        self.assertEqual(window.geometry_group.title(), "Turmgeometrie")
+        self.assertEqual(window.geometry_group.title(), "Erweiterte Einstellungen")
         for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "local_reference_window"):
             self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
         self.assertTrue(window.stability_group.isHidden())
         self.assertTrue(window.overhang_group.isHidden())
+
+    def test_advanced_settings_toggle_resizes_outer_card_without_bottom_gap(self) -> None:
+        window = self.window()
+        self.addCleanup(window.close)
+        window.resize(1300, 900)
+        window.show()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        self.app.processEvents()
+
+        advanced = window.geometry_group
+        outer = window.geometry_settings_group
+        self.assertTrue(advanced.isChecked())
+        self.assertTrue(advanced.toggle_button.isVisible())
+        self.assertEqual(advanced.toggle_button.text(), "⌃")
+        self.assertTrue(window.timing_group.header.isHidden())
+        self.assertTrue(window.timing_group.body_divider.isHidden())
+        self.assertTrue(window.timing_group.isAncestorOf(window.full_infill_checkbox))
+        expanded_height = outer.height()
+
+        QTest.mouseClick(advanced.header, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertFalse(advanced.isChecked())
+        self.assertTrue(advanced.content_widget.isHidden())
+        self.assertEqual(advanced.toggle_button.text(), "⌄")
+        self.assertLess(outer.height(), expanded_height)
+        self.assertLessEqual(
+            outer.height() - outer.header.height() - outer.body_divider.height()
+            - window.timing_group.height() - advanced.header.height(),
+            2,
+        )
+
+        outer.setChecked(False)
+        self.app.processEvents()
+        outer.setChecked(True)
+        self.app.processEvents()
+        self.assertFalse(advanced.isChecked())
+        QTest.mouseClick(advanced.toggle_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertTrue(advanced.isChecked())
+        self.assertEqual(advanced.toggle_button.text(), "⌃")
+        self.assertGreater(outer.height(), expanded_height - 2)
 
     def test_single_column_prediction_order_survives_state_and_width_changes(
         self,
