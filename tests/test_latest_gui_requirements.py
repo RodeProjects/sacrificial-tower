@@ -743,9 +743,14 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 setting.info_button.rect().center(),
             )
             self.assertLessEqual(abs(editor_center.y() - info_center.y()), 1)
-            label_right = setting.label.mapTo(
+            text_control = (
+                window.automatic_base_checkbox
+                if setting.setting_name == "manual_base_width_mm"
+                else setting.label
+            )
+            label_right = text_control.mapTo(
                 setting,
-                setting.label.rect().topRight(),
+                text_control.rect().topRight(),
             ).x()
             info_left = setting.info_button.mapTo(
                 setting,
@@ -754,7 +759,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             self.assertLess(info_left + setting.info_button.width(), label_right)
             self.assertLess(
                 info_left + setting.info_button.width(),
-                setting.label.x(),
+                text_control.mapTo(setting, text_control.rect().topLeft()).x(),
                 setting.setting_name,
             )
         self.assertGreater(
@@ -1454,6 +1459,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "target_layer_time_s",
             "minimum_outer_diameter_mm",
             "maximum_outer_diameter_mm",
+            "manual_base_width_mm",
         }
         for name, setting in window._setting_widgets.items():
             if name in dual_bounds:
@@ -1476,6 +1482,10 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             window._setting_widgets["minimum_outer_diameter_mm"].range_label.text(),
             "3,0 - 40,0 mm",
+        )
+        self.assertEqual(
+            window._setting_widgets["manual_base_width_mm"].range_label.text(),
+            "20 - 100 mm",
         )
         self.assertEqual(
             window._setting_widgets["layer_time_tolerance_s"].range_label.text(),

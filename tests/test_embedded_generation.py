@@ -67,7 +67,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         p.complete_slice(2, 10, candidate, 10)
         self.assertIn("2 von 10", p.counter_label.text())
         self.assertTrue(p.accept_button.isHidden())
-        p.complete_slice(5, 10, candidate, 10)
+        p.complete_slice(3, 10, candidate, 10)
         self.assertFalse(p.accept_button.isHidden())
         self.assertFalse(p.continue_button.isHidden())
         self.assertFalse(p.continue_button.isEnabled())
@@ -91,7 +91,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertFalse(p.continue_button.isHidden())
         self.assertFalse(p.continue_button.isEnabled())
         self.assertTrue(p.export_button.isHidden())
-        self.assertIn("5 von 10", p.counter_label.text())
+        self.assertIn("3 von 10", p.counter_label.text())
         self.assertIn("wird generiert", p.title_label.text())
         p.set_achieved(10.15)
         p.mark_finished(paused=False, can_continue=False)
@@ -435,10 +435,10 @@ class EmbeddedGenerationTests(unittest.TestCase):
             accept.assert_not_called()
             cancel.assert_called_once()
 
-    def test_stop_before_five_joint_slices_cancels_without_acceptance(self):
+    def test_stop_before_three_joint_slices_cancels_without_acceptance(self):
         w = self.window()
         w._joint_phase_active = True
-        w._joint_slices_completed = 4
+        w._joint_slices_completed = 2
         with patch.object(w, "_accept_joint_candidate") as accept, patch.object(
             w.background_job_manager, "cancel_jobs", return_value=("job",)
         ) as cancel:
@@ -502,16 +502,16 @@ class EmbeddedGenerationTests(unittest.TestCase):
             "Gemeinsamer Slice 6/12 wird ausgewertet …",
         )
 
-    def test_main_action_stays_abort_after_fifth_joint_slice(self):
+    def test_main_action_stays_abort_after_third_joint_slice(self):
         w = self.window()
         w.preview_state = PreviewState.BUILDING
         w._joint_phase_active = True
-        w._joint_slices_completed = 4
+        w._joint_slices_completed = 2
         w._update_responsive_action_labels()
         self.assertEqual(w.preview_button.text(), "Generierung abbrechen")
         self.assertTrue(w.preview_action_control.property("cancelAction"))
         progress = SimpleNamespace(
-            completed_count=5,
+            completed_count=3,
             best_iteration=SimpleNamespace(evaluation=SimpleNamespace(layer_timings=())),
         )
         w._on_joint_progress(w._preview_request_id, progress)
@@ -563,7 +563,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
             self.assertFalse(p.continue_button.isEnabled())
             self.assertEqual(w._joint_slice_offset, 5)
             config = build_request.call_args.kwargs["calibration_config"]
-            self.assertEqual(config.minimum_joint_slices, 5)
+            self.assertEqual(config.minimum_joint_slices, 3)
             self.assertEqual(config.completed_joint_slices_before_run, 5)
             self.assertEqual(w.preview_state, PreviewState.BUILDING)
             active[0] = True

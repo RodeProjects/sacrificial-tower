@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cooling_tower.models import (
     FeasibilityIssue,
@@ -9,6 +9,7 @@ from cooling_tower.models import (
     TowerLayerProfile,
 )
 from cooling_tower.tower.base_calculator import (
+    MAXIMUM_BASE_WIDTH_MM,
     MINIMUM_BASE_WIDTH_MM,
     calculate_phase10_base_outer_radius,
 )
@@ -112,10 +113,15 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError(
             "Minimum object/tower distance must not be negative."
         )
-    if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:
-        raise ValueError(
-            f"Manual base width must be at least {MINIMUM_BASE_WIDTH_MM:g} mm."
-        )
+    if not settings.automatic_base_width:
+        if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:
+            raise ValueError(
+                f"Manual base width must be at least {MINIMUM_BASE_WIDTH_MM:g} mm."
+            )
+        if settings.manual_base_width_mm > MAXIMUM_BASE_WIDTH_MM:
+            raise ValueError(
+                f"Manual base width must be at most {MAXIMUM_BASE_WIDTH_MM:g} mm."
+            )
     if not (
         0.0
         < settings.maximum_expansion_angle_deg
@@ -186,14 +192,33 @@ def build_solid_tower_profile(
             )
         )
     base_outer = max(calculated_base_outer, minimum_outer)
-    effective_base_height = phase2_profile.layers[min(1, len(phase2_profile.layers) - 1)].z_mm
-    # Twenty actual layer intervals take precedence over the 5 mm preference.
-    taper_last = phase2_profile.layers[min(21, len(phase2_profile.layers) - 1)].z_mm
-    minimum_taper_height = max(0.0, taper_last - effective_base_height)
-    base_taper_height = min(
-        last_layer_z - effective_base_height,
-        max(minimum_taper_height, min(5.0, 0.025 * base_reference_height)),
+    tiered_foot = (
+        not settings.simulate_full_tower_infill
+        and base_outer > 15.0 + EPSILON
+        and minimum_outer <= 15.0 + EPSILON
+        and len(phase2_profile.layers) >= 2
     )
+    effective_base_height = phase2_profile.layers[0].z_mm
+    taper_start_index = 2 if tiered_foot else 1
+    taper_start_z = phase2_profile.layers[taper_start_index - 1].z_mm
+    # Use the longer of six millimetres and 22 real layer intervals.
+    taper_last_index = min(taper_start_index + 21, len(phase2_profile.layers) - 1)
+    minimum_layer_height = max(
+        0.0, phase2_profile.layers[taper_last_index].z_mm - taper_start_z,
+    )
+    base_taper_height = min(
+        last_layer_z - taper_start_z,
+        max(6.0, minimum_layer_height, 0.025 * base_reference_height),
+    )
+    if (settings.simulate_full_tower_infill
+            and base_taper_height < last_layer_z - taper_start_z - EPSILON):
+        target_z = taper_start_z + base_taper_height
+        target_index = next(
+            index for index in range(taper_start_index - 1, len(phase2_profile.layers))
+            if phase2_profile.layers[index].z_mm >= target_z - EPSILON
+        )
+        raised_index = min(target_index + 5, len(phase2_profile.layers) - 1)
+        base_taper_height = phase2_profile.layers[raised_index].z_mm - taper_start_z
     if calculated_base_outer > settings.maximum_outer_radius_mm + EPSILON:
         raise ProfileFeasibilityError(
             FeasibilityIssue(
@@ -237,11 +262,14 @@ def build_solid_tower_profile(
                     start -= 1
                 held_radius = max(required[start:index])
                 required[start:index] = [held_radius] * (index - start)
-    outer_radii, unreachable, segments = plan_diameter_transitions(
-        tuple(support.z_mm for support in supports),
-        tuple(required),
-        base_index=base_anchor_index,
-        base_radius=base_outer,
+    foot_middle_radius = 0.5 * (base_outer + 15.0)
+    plan_start = 2 if tiered_foot else 0
+    planned_radii, planned_unreachable, planned_segments = plan_diameter_transitions(
+        tuple(support.z_mm for support in supports[plan_start:]),
+        tuple(([15.0] + required[plan_start + 1:]) if tiered_foot
+              else required),
+        base_index=0 if tiered_foot else base_anchor_index,
+        base_radius=15.0 if tiered_foot else base_outer,
         minimum_radius=minimum_outer,
         expansion_slope=angle_to_radial_slope(settings.maximum_expansion_angle_deg),
         contraction_slope=(1.0 if settings.simulate_full_tower_infill else
@@ -250,6 +278,29 @@ def build_solid_tower_profile(
         base_taper_height=base_taper_height,
         abrupt_drop_indices=frozenset(abrupt_drops),
     )
+    if tiered_foot:
+        outer_radii = (base_outer, base_outer, foot_middle_radius) + planned_radii[1:]
+        unreachable = tuple(index + 2 for index in planned_unreachable)
+        prefix = (
+            DiameterSegment(supports[0].z_mm, supports[1].z_mm,
+                            base_outer, base_outer),
+            DiameterSegment(supports[1].z_mm, supports[2].z_mm,
+                            base_outer, foot_middle_radius,
+                            step_radius=foot_middle_radius,
+                            step_source="base_tier_step"),
+        )
+        if planned_segments:
+            first_taper_segment = replace(
+                planned_segments[0], start_radius=foot_middle_radius,
+                step_radius=15.0, step_source="base_tier_step",
+            )
+            segments = prefix + (first_taper_segment,) + planned_segments[1:]
+        else:
+            segments = prefix
+    else:
+        outer_radii, unreachable, segments = (
+            planned_radii, planned_unreachable, planned_segments,
+        )
 
     initial_geometry_limitations: list[FeasibilityIssue] = []
     _append_angle_issues(
@@ -269,6 +320,12 @@ def build_solid_tower_profile(
         segments=segments,
     )
     points = _sample_support_splines(support_points, segments)
+    if tiered_foot and not planned_segments:
+        points += (SolidTowerPoint(
+            z_mm=taper_start_z, outer_radius_mm=15.0,
+            source="base_tier_step", layer_index=None,
+            raw_outer_radius_mm=15.0, profile_region="shoulder",
+        ),)
     unique_limitations = _unique_issues(initial_geometry_limitations)
     warnings = [
         "Der Kühlturm wird als geschlossener Vollkörper ohne Hohlraum erzeugt.",
@@ -461,7 +518,7 @@ def _sample_support_splines(
             sampled.append(SolidTowerPoint(
                 z_mm=start.z_mm,
                 outer_radius_mm=segment.step_radius,
-                source="inward_step",
+                source=segment.step_source,
                 layer_index=None,
                 raw_outer_radius_mm=segment.step_radius,
                 profile_region="shoulder",

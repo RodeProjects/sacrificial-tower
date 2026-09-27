@@ -35,11 +35,12 @@ from cooling_tower.preview import (
     PreviewState,
 )
 from cooling_tower.tower.mesh_generator import automatic_mesh_segments
+from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 
 
 class AutomaticGeometryTests(unittest.TestCase):
     def test_segments_follow_current_widest_diameter(self) -> None:
-        for diameter, expected in ((10, 16), (30, 27), (30.2, 28), (150, 128)):
+        for diameter, expected in ((10, 16), (30, 30), (30.2, 31), (150, 128)):
             with self.subTest(diameter=diameter):
                 profile = SimpleNamespace(points=(SimpleNamespace(radius_mm=diameter / 2),))
                 self.assertEqual(automatic_mesh_segments(profile), expected)
@@ -157,17 +158,17 @@ class GenerationUiTests(unittest.TestCase):
         window.automatic_base_checkbox.setChecked(False)
         self.app.processEvents()
         self.assertTrue(window._setting_widgets["manual_base_width_mm"].isVisible())
-        self.assertGreater(window.geometry_settings_group.height(), original_height)
+        self.assertTrue(window.manual_base_width_spin.isEnabled())
+        self.assertEqual(window.geometry_settings_group.height(), original_height)
 
         window.target_time_spin.setValue(100)
-        window.manual_base_width_spin.setValue(9)
+        window.manual_base_width_spin.setValue(20)
         window.maximum_expansion_angle_spin.setValue(60)
         window.validate_form()
         for _ in range(3):
             self.app.processEvents()
         expanded_height = window.geometry_settings_group.height()
         self.assertTrue(window._setting_widgets["target_layer_time_s"].message_label.isVisible())
-        self.assertTrue(window._setting_widgets["manual_base_width_mm"].message_label.isVisible())
         self.assertTrue(window.maximum_expansion_angle_setting.message_label.isVisible())
 
         for first, second in (
@@ -191,7 +192,8 @@ class GenerationUiTests(unittest.TestCase):
         window.automatic_base_checkbox.setChecked(True)
         for _ in range(3):
             self.app.processEvents()
-        self.assertTrue(window._setting_widgets["manual_base_width_mm"].isHidden())
+        self.assertTrue(window._setting_widgets["manual_base_width_mm"].isVisible())
+        self.assertFalse(window.manual_base_width_spin.isEnabled())
         self.assertLess(window.geometry_settings_group.height(), expanded_height)
         self.assertEqual(
             window.geometry_settings_group.height(),
@@ -450,7 +452,7 @@ class SettingsMigrationTests(unittest.TestCase):
             user_path.write_bytes(original)
             store = UserSettingsStore(user_path, ROOT / "config" / "default_settings.json")
             settings, payload = store.load()
-            self.assertEqual(payload["settings_schema_version"], 18)
+            self.assertEqual(payload["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
             self.assertNotIn("safety_factor", payload["generation"])
             self.assertNotIn("mesh_segments", payload["generation"])
             self.assertEqual(settings.minimum_object_tower_distance_mm, 5)

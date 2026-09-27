@@ -28,7 +28,7 @@ class AutomaticFootTests(unittest.TestCase):
         self.assertAlmostEqual(after.seconds_per_mm, 0.5)
         self.assertEqual(after.start_layer, 31)
 
-    def make_profile(self, heights, radii=None, *, full=True, angle=10, object_height=160, sufficient=()):
+    def make_profile(self, heights, radii=None, *, full=True, angle=10, object_height=160, sufficient=(), manual_width=20):
         radii = radii or [2.0] * len(heights)
         layers = []
         for i, (z, radius) in enumerate(zip(heights, radii)):
@@ -37,35 +37,44 @@ class AutomaticFootTests(unittest.TestCase):
                 layer = replace(layer, layer_time_s=30.0, time_deficit_s=0.0)
             layers.append(layer)
         source = TowerRadiusProfile(TowerProfileConfig(10), 0.1, tuple(layers))
-        settings = GenerationSettings(minimum_outer_diameter_mm=4, maximum_outer_diameter_mm=40,
-            automatic_base_width=False, manual_base_width_mm=20, simulate_full_tower_infill=full,
+        settings = GenerationSettings(minimum_outer_diameter_mm=4,
+            maximum_outer_diameter_mm=max(40, manual_width),
+            automatic_base_width=False, manual_base_width_mm=manual_width, simulate_full_tower_infill=full,
             maximum_expansion_angle_deg=45, maximum_contraction_angle_deg=angle)
         return build_solid_tower_profile(source, settings, object_height_mm=object_height)
 
-    def test_two_layers_then_twenty_layer_concave_taper(self):
-        profile = self.make_profile([0.2 * i for i in range(1, 101)])
-        self.assertAlmostEqual(profile.effective_base_height_mm, 0.4)
-        self.assertEqual([p.outer_radius_mm for p in profile.layers[:2]], [10, 10])
-        self.assertGreater(profile.layers[20].outer_radius_mm, 2)
-        self.assertAlmostEqual(profile.layers[21].outer_radius_mm, 2)
+    def test_full_infill_curve_ends_five_layers_above_six_mm_minimum(self):
+        heights = [0.2 * i for i in range(1, 101)]
+        profile = self.make_profile(heights)
+        normal = self.make_profile(heights, full=False, angle=80)
+        self.assertAlmostEqual(profile.effective_base_height_mm, 0.2)
+        self.assertEqual(profile.layers[0].outer_radius_mm, 10)
+        self.assertLess(profile.layers[1].outer_radius_mm, 10)
+        self.assertGreater(normal.layers[29].outer_radius_mm, 2)
+        self.assertAlmostEqual(normal.layers[30].outer_radius_mm, 2)
+        self.assertGreater(profile.layers[34].outer_radius_mm, 2)
+        self.assertAlmostEqual(profile.layers[35].outer_radius_mm, 2)
         slopes = [(b.outer_radius_mm-a.outer_radius_mm)/(b.z_mm-a.z_mm)
-                  for a,b in zip(profile.points, profile.points[1:]) if a.z_mm >= 0.4]
+                  for a,b in zip(profile.points, profile.points[1:]) if a.z_mm >= 0.2]
         self.assertTrue(all(b >= a - 1e-8 for a,b in zip(slopes, slopes[1:])))
 
-    def test_twenty_layers_take_precedence_over_five_mm(self):
+    def test_object_height_can_extend_curve_beyond_six_mm(self):
         profile = self.make_profile([0.3 * i for i in range(1, 101)], object_height=1000)
-        self.assertGreater(profile.layers[20].outer_radius_mm, 2)
-        self.assertAlmostEqual(profile.layers[21].outer_radius_mm, 2)
-        self.assertAlmostEqual(profile.layers[21].z-profile.effective_base_height_mm, 6)
+        self.assertGreater(profile.layers[88].outer_radius_mm, 2)
+        self.assertAlmostEqual(profile.layers[89].outer_radius_mm, 2)
+        self.assertAlmostEqual(profile.layers[89].z-profile.effective_base_height_mm, 26.7)
 
-    def test_five_mm_cap_and_variable_layer_heights(self):
-        profile = self.make_profile([0.1 * i for i in range(1, 101)], object_height=1000)
-        self.assertGreater(profile.layers[50].outer_radius_mm, 2)
-        self.assertAlmostEqual(profile.layers[51].outer_radius_mm, 2)
+    def test_six_mm_or_twenty_two_layers_with_variable_heights(self):
+        profile = self.make_profile([0.1 * i for i in range(1, 101)])
+        self.assertGreater(profile.layers[64].outer_radius_mm, 2)
+        self.assertAlmostEqual(profile.layers[65].outer_radius_mm, 2)
+        thick = self.make_profile([0.4 * i for i in range(1, 101)])
+        self.assertGreater(thick.layers[26].outer_radius_mm, 2)
+        self.assertAlmostEqual(thick.layers[27].outer_radius_mm, 2)
         variable = self.make_profile([0.3, 0.5] + [0.5 + i * 0.15 for i in range(1, 61)], object_height=40)
-        self.assertEqual(variable.effective_base_height_mm, 0.5)
-        self.assertGreater(variable.layers[20].outer_radius_mm, 2)
-        self.assertAlmostEqual(variable.layers[21].outer_radius_mm, 2)
+        self.assertEqual(variable.effective_base_height_mm, 0.3)
+        self.assertGreater(variable.layers[44].outer_radius_mm, 2)
+        self.assertAlmostEqual(variable.layers[45].outer_radius_mm, 2)
 
     def test_short_tower_and_angle_policy(self):
         short = self.make_profile([0.2, 0.4, 0.6, 0.8])
@@ -96,6 +105,36 @@ class AutomaticFootTests(unittest.TestCase):
         validation = validate_triangle_mesh(generate_solid_tower_mesh(profile,TowerMeshConfig(segment_count=24)))
         self.assertTrue(validation.is_watertight)
         self.assertTrue(validation.has_outward_orientation)
+
+    def test_wide_normal_foot_has_two_equal_tiers_then_closed_curved_mesh(self):
+        profile = self.make_profile(
+            [0.2 * i for i in range(1, 201)],
+            full=False, angle=55, manual_width=50,
+        )
+        self.assertAlmostEqual(profile.effective_base_height_mm, 0.2)
+        self.assertAlmostEqual(profile.layers[0].outer_radius_mm, 25)
+        self.assertAlmostEqual(profile.layers[1].outer_radius_mm, 20)
+        steps = [point for point in profile.points
+                 if point.source == "base_tier_step"]
+        self.assertEqual([(point.z_mm, point.outer_radius_mm)
+                          for point in steps], [(0.2, 20.0), (0.4, 15.0)])
+        self.assertLess(profile.layers[2].outer_radius_mm, 15.0)
+        self.assertTrue(all(point.source != "inward_step" for point in profile.points))
+        validation = validate_triangle_mesh(generate_solid_tower_mesh(
+            profile, TowerMeshConfig(segment_count=24),
+        ))
+        self.assertTrue(validation.is_watertight)
+        self.assertTrue(validation.has_outward_orientation)
+
+    def test_normal_foot_at_30_mm_keeps_one_layer_before_curve(self):
+        profile = self.make_profile(
+            [0.2 * i for i in range(1, 101)],
+            full=False, angle=55, manual_width=30,
+        )
+        self.assertFalse(any(point.source == "base_tier_step"
+                             for point in profile.points))
+        self.assertAlmostEqual(profile.layers[0].outer_radius_mm, 15.0)
+        self.assertLess(profile.layers[1].outer_radius_mm, 15.0)
 
 
 if __name__ == '__main__':

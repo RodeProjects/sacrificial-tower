@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cooling_tower.models import GenerationSettings
 from cooling_tower.services.tower_need_service import assess_tower_need, layers_for_tower
-from cooling_tower.tower.diameter_transitions import plan_diameter_transitions
+from cooling_tower.tower.diameter_transitions import Taper, plan_diameter_transitions
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig, generate_solid_tower_mesh, validate_triangle_mesh,
 )
@@ -129,6 +129,86 @@ class GenerationRefinementTests(unittest.TestCase):
     def test_full_infill_does_not_turn_gentle_taper_or_foot_into_steps(self):
         profile = profile_for(tuple(range(1, 18)), (2,) * 17)
         self.assertFalse(any(p.source == "inward_step" for p in profile.points))
+
+    def test_foot_curves_follow_annotated_half_width_heights(self):
+        # The blue outlines cross half of the foot's radial span at about
+        # 6% (full infill) and 13% (normal infill) of the taper height.
+        curves = []
+        for full, half_height, eighty_height in (
+            (True, 0.06, 0.28), (False, 0.13, 0.36),
+        ):
+            _, unreachable, segments = plan_diameter_transitions(
+                (0.0, 5.0, 10.0), (10.0, 2.0, 2.0),
+                base_index=0, base_radius=10.0, minimum_radius=2.0,
+                expansion_slope=10.0, contraction_slope=100.0,
+                allow_steps=full, base_taper_height=5.0,
+            )
+            self.assertFalse(unreachable)
+            segment = segments[0]
+            self.assertAlmostEqual(segment.radius(half_height), 6.0, delta=0.3)
+            self.assertAlmostEqual(segment.radius(eighty_height), 3.6, delta=0.3)
+            self.assertAlmostEqual(segment.radius(0.0), 10.0)
+            self.assertAlmostEqual(segment.radius(1.0), 2.0)
+            curves.append(segment)
+        self.assertLess(curves[0].radius(0.13), curves[1].radius(0.13))
+
+    def test_normal_foot_curve_respects_contraction_limit(self):
+        _, unreachable, segments = plan_diameter_transitions(
+            tuple(i * 0.2 for i in range(101)),
+            (10.0,) + (2.0,) * 100,
+            base_index=0, base_radius=10.0, minimum_radius=2.0,
+            expansion_slope=10.0, contraction_slope=0.7,
+            allow_steps=False, base_taper_height=5.0,
+        )
+        self.assertFalse(unreachable)
+        for segment in segments:
+            samples = [(segment.start_z, segment.radius(0.0)), *segment.samples(
+                radial_error=0.005, maximum_z_step=0.05,
+            )]
+            for (z0, r0), (z1, r1) in zip(samples, samples[1:]):
+                self.assertGreaterEqual((r1 - r0) / (z1 - z0), -0.7 - 1e-8)
+
+    def test_foot_curve_prefers_exact_then_partial_then_angle_limited_shape(self):
+        options = dict(
+            start_z=0.0, start_radius=10.0, minimum_radius=2.0,
+            duration=5.0, foot_curve_power=2.15,
+            foot_start_fraction=0.02,
+        )
+        ideal = Taper(**options)
+        feasible = Taper(**options, maximum_contraction_slope=20.0)
+        partial = Taper(**options, maximum_contraction_slope=4.0)
+        angle_only = Taper(**options, maximum_contraction_slope=1.6)
+
+        for z in (0.0, 0.025, 0.1, 0.5, 2.5, 4.0, 5.0):
+            self.assertAlmostEqual(feasible.radius(z), ideal.radius(z))
+            self.assertAlmostEqual(angle_only.radius(z), 10.0 - 1.6 * z)
+        self.assertAlmostEqual(partial.radius(0.5), 8.0)
+        self.assertGreater(partial.radius(0.5), ideal.radius(0.5))
+        self.assertAlmostEqual(partial.radius(4.0), ideal.radius(4.0))
+
+    def test_normal_foot_curve_uses_angle_only_where_necessary(self):
+        z = tuple(i * 0.25 for i in range(121))
+        required = (15.0,) + (2.0,) * (len(z) - 1)
+        _, unreachable, segments = plan_diameter_transitions(
+            z, required, base_index=0, base_radius=15.0,
+            minimum_radius=2.0, expansion_slope=10.0,
+            contraction_slope=1.4, allow_steps=False,
+            base_taper_height=5.0,
+        )
+        self.assertFalse(unreachable)
+        taper = segments[0].taper
+        self.assertIsNotNone(taper)
+        ideal = replace(taper, maximum_contraction_slope=None)
+        self.assertGreater(taper.radius(0.5), ideal.radius(0.5))
+        self.assertAlmostEqual(taper.radius(0.5), 15.0 - 1.4 * 0.5)
+        self.assertAlmostEqual(taper.radius(taper.duration * 0.8),
+                               ideal.radius(taper.duration * 0.8))
+        for segment in segments:
+            samples = [(segment.start_z, segment.radius(0.0)), *segment.samples(
+                radial_error=0.005, maximum_z_step=0.05,
+            )]
+            for (z0, r0), (z1, r1) in zip(samples, samples[1:]):
+                self.assertGreaterEqual((r1 - r0) / (z1 - z0), -1.4 - 1e-8)
 
     def test_deficient_source_layer_never_receives_a_diameter_step(self):
         # The reproduced export stepped from 7.858 to 5.442 mm at Z=177.5,

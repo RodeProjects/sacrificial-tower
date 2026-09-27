@@ -230,8 +230,10 @@ ersetzt. Die bestehende Sicherung und atomare Speicherung bleiben aktiv.
 Gültige Benutzerwerte bleiben erhalten. Downgrade-Übernahmen prüfen den neuen
 Bereich von 0,01 bis 30 Sekunden und verwerfen inkompatible Werte.
 
-Neue Einstellungen und Zurücksetzen verwenden zentral aus
-`config/default_settings.json`: Ziel-Layerzeit 9 s, Toleranz ±0,25 s,
+Bei Einführung des Schemas verwendeten neue Einstellungen und Zurücksetzen
+eine Ziel-Layerzeit von 9 s. Der aktuelle, zentral in
+`config/default_settings.json` gepflegte Produktstandard beträgt 10 s. Die
+weiteren damaligen Vorgaben waren Toleranz ±0,25 s,
 minimaler Turmdurchmesser 5 mm, Verjüngungswinkel 55°, Objektabstand 15 mm und
 Zeit-Sicherheitsfaktor 1,0. Diese historischen Vorgaben wurden in Schema 16
 durch die feste 5-mm-Platzierungsregel und den Verzicht auf den Sicherheitsfaktor
@@ -302,3 +304,18 @@ das bisherige Maximum bleibt dadurch soweit möglich erhalten. Bereits gültige
 Werte bleiben unverändert. Direkte und mehrstufige Migrationen nutzen weiterhin
 Sicherung und atomisches Schreiben. Die Downgrade-Übernahme prüft die neuen
 Einzelgrenzen und den Abstand von mindestens 1 mm als gemeinsame Gruppe.
+
+## Schema 19: maximale getrennte Slices
+
+18→19 ergänzt die stabile UI-Einstellung `maximum_separate_slices`. Sie legt
+das Budget der getrennten Turm-Slices vor der gemeinsamen Objekt-/Turm-Phase
+fest. Der Standardwert ist 6; gespeichert und übernommen werden ausschließlich
+Ganzzahlen von 1 bis 25. Ungültige Werte fallen auf 6 zurück. Der
+Kompatibilitätstoken `separate-slice-budget-v1` erlaubt eine Downgrade-Übernahme
+nur bei identischer Bedeutung und gültigem Wertebereich.
+
+`maximum_separate_slices`, `maximum_joint_slices`, die Anzeige numerischer
+Grenzen und der Exportordner gehören zu „Allgemeine Einstellungen“. Der globale
+Button „Standardwerte wiederherstellen“ verändert diese Werte nicht; jeder
+dieser Werte wird ausschließlich über seinen zugehörigen Einzel-Reset im
+Dialog zurückgesetzt.

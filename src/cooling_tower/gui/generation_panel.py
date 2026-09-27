@@ -6,7 +6,10 @@ from html import escape
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout
 
-from cooling_tower.gui.generation_progress_dialog import TowerImageProgress
+from cooling_tower.gui.generation_progress_dialog import (
+    MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
+    TowerImageProgress,
+)
 
 
 def result_description(deviation: float, tolerance: float) -> str:
@@ -31,7 +34,7 @@ class GenerationPanel(QWidget):
         self._tolerance = 0.0
         self._completed = 0
         self._maximum = 0
-        self._minimum_joint_slices = 5
+        self._minimum_joint_slices = MINIMUM_JOINT_SLICES_BEFORE_ACCEPT
         self._running = False
         self._has_result = False
         layout = QVBoxLayout(self)
@@ -113,7 +116,14 @@ class GenerationPanel(QWidget):
             "<u>Simulierte Werte:</u><br>" + (items or "• Keine zusätzlichen Simulationen")
         )
 
-    def begin(self, target_s, tolerance_s, completed, maximum, minimum_joint_slices=5):
+    def begin(
+        self,
+        target_s,
+        tolerance_s,
+        completed,
+        maximum,
+        minimum_joint_slices=MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
+    ):
         self._target, self._tolerance = target_s, tolerance_s
         self._minimum_joint_slices = minimum_joint_slices
         self._has_result = False

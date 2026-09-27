@@ -65,7 +65,7 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
    `g = tan(Aufweitungswinkel)` gilt an benachbarten Höhen
    `Bedarf[i] = max(lokaler Radius[i], Bedarf[i+1] - g * Δz)`.
    Dadurch beginnt eine nötige Verbreiterung rechtzeitig und verläuft linear.
-2. Die feste Standfußbreite und die Höhe der ersten zwei Layer bleiben Randbedingungen. Kann von dort ein
+2. Die feste Standfußbreite und die Höhe des ersten Layers bleiben Randbedingungen. Kann von dort ein
    Radius nicht mit dem erlaubten Winkel erreicht werden, bleibt diese Grenze
    als Diagnose erhalten. Die anschließenden Testslices beurteilen die
    tatsächlich erzielte Zusatzzeit durch Wände und Füllung.
@@ -82,20 +82,48 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
 
 ### Automatischer Standfuß
 
-Der zylindrische Fuß besteht aus genau zwei tatsächlichen Layern (bei kürzeren
-Türmen entsprechend weniger). Es gibt keine manuelle Höhenangabe mehr.
-Eine anschließende konkave Verjüngung strebt 2,5 % der Originalobjekthöhe an,
-bevorzugt höchstens 5 mm, mindestens aber die Höhe von 20 weiteren Layern.
-Die 20 Layer haben Vorrang vor den 5 mm; ein früheres Turmende begrenzt die
-Verjüngung. Unterschiedliche Layerhöhen werden über ihre tatsächlichen Z-Werte
+Die automatische Außenbreite folgt `0,2 × Objekthöhe` und ist auf 20 bis
+100 mm begrenzt. Eine manuelle Breite muss ebenfalls in diesem Bereich liegen.
+Die GUI zeigt und prüft dieselben Grenzen; bei sehr hohen Objekten wird auch
+der automatisch berechnete Wert auf 100 mm begrenzt.
+
+Der äußere gerade Fußrand besteht aus genau einem tatsächlichen Layer.
+Es gibt keine manuelle Höhenangabe mehr.
+Eine anschließende konkave Verjüngung strebt 2,5 % der Originalobjekthöhe an.
+Sie reicht mindestens 6 mm oder über 22 weitere Layer, je nachdem, welche
+Strecke länger ist. Bei einem zweistufigen Fuß beginnt diese Strecke nach dem
+zweiten Layer. Mit 100-%-Turmfüllung liegt das Kurvenende weitere fünf
+tatsächliche Layer höher. Ein früheres Turmende begrenzt die Verjüngung.
+Unterschiedliche Layerhöhen werden über ihre tatsächlichen Z-Werte
 berücksichtigt. Der Zielradius bleibt mindestens so groß wie der eingestellte
 Mindestdurchmesser und der vorausschauend benötigte Radius. Ohne Vollfüllung
 kann die Winkelgrenze die Verjüngung über dieses Höhenziel hinaus verlängern.
+Der Standfußübergang verwendet eine eigene Kontur mit nahezu waagerechtem
+Ansatz außen und senkrechtem Anschluss am Turmschaft. Seine normierte Höhe
+über dem Fuß beträgt `1 - √(1 - q^p)` für den radialen Fortschritt `q` vom
+Fußrand zum Schaft. Bei 100-%-Turmfüllung gilt `p = 3,2`: Der äußere Bereich
+bleibt länger flach. Ohne diese Option gilt `p = 2,15`, sodass der Anstieg
+früher beginnt. Die ersten 2 % der Übergangshöhe werden dabei linear an die
+Soll-Kurve angeschlossen, damit ihr Anfang eine endliche Neigung hat. Liegt
+die gesamte Kontur innerhalb des eingestellten Verjüngungswinkels, bleibt sie
+erhalten. Andernfalls werden nur zu steile Abschnitte durch eine Linie mit dem
+maximal erlaubten Winkel begrenzt. Ohne 100-%-Füllung und bei mehr als 30 mm
+Standfußbreite wird die überschüssige Durchmesserbreite halbiert. Die äußere
+Hälfte ist einen Layer hoch, die innere zwei Layer. Ein 50-mm-Fuß hat damit
+oben auf dem ersten Layer einen Absatz auf 40 mm und oben auf dem zweiten
+Layer einen Absatz auf 30 mm. Ab 30 mm beginnt die gezeichnete konkave Kurve.
+Sie bleibt erhalten, soweit die Winkelgrenze es zulässt; andernfalls gilt
+abschnittsweise der eingestellte Winkel. Die Verjüngung nach dem zweiten
+Absatz umfasst mindestens 6 mm oder 22 Layer, sofern der Turm hoch genug ist. Bei
+höchstens 30 mm Fußbreite beginnt sie nach dem ersten Layer. Andere
+Turmverjüngungen behalten die quadratische Grundkurve.
 
 ### Direkte Absätze bei 100 % Turmfüllung
 
-Nur `simulate_full_tower_infill=True` erlaubt einen horizontalen Absatz nach
-innen. Er ist ausschließlich beim Übergang in einen Objektlayer zulässig,
+Die zwei beschriebenen Standfußabsätze sind auch ohne Vollfüllung zulässig.
+Andere horizontale Absätze nach innen erfordern
+`simulate_full_tower_infill=True`. Ein solcher Absatz ist ausschließlich beim
+Übergang in einen Objektlayer zulässig,
 dessen eigene gemessene Layerzeit das Ziel innerhalb der eingestellten Toleranz
 bereits erreicht. Ein starker Rückgang des berechneten Radius allein reicht
 dafür nicht aus: Gerade bei einem kurzen Objektlayer muss der Turm weiterhin
@@ -135,7 +163,7 @@ Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
 maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
 
 Die Kreissegmentzahl wird pro Kandidat aus dessen größtem aktuellen Durchmesser
-berechnet: `ceil(0,9 × Durchmesser in mm)`, auf 16 bis 128 begrenzt.
+berechnet: `ceil(1,0 × Durchmesser in mm)`, auf 16 bis 128 begrenzt.
 Alle Ringe eines STL verwenden dieselbe Segmentzahl,
 damit das Netz geschlossen bleibt. Getrennte und gemeinsame Slices verwenden
 dieselbe Regel; eine veränderte Kandidatenbreite kann die Auflösung im nächsten
@@ -177,10 +205,10 @@ und die Geometrie; er belegte keine vollständige Konvergenz zur Zielzeit.
 Der anschließende Kontrolllauf der automatischen Fußregel mit
 `Test-STL apprupte Flächenänderung (manifold).stl` erzeugte ein gemeinsames 3MF
 mit 889 Objektlayern (160,04 mm) und 683 Turmlayern (122,96 mm, vorzeitiges Ende).
-Die Fußhöhe betrug exakt 0,38 mm entsprechend den ersten zwei Layern.
+Die Fußhöhe betrug nach der damaligen Zwei-Layer-Regel exakt 0,38 mm.
 Auch dieser auf drei Durchläufe begrenzte Test prüfte Geometrie und Datenfluss,
 nicht vollständige Konvergenz. Originaldateien blieben bytegleich.
 
-`test_automatic_foot.py` prüft die 20-Layer-Priorität, variable Layerhöhen,
+`test_automatic_foot.py` prüft die 25-Layer-Priorität, variable Layerhöhen,
 kurze Türme, die füllungsabhängige Winkelgrenze, den geschlossenen Absatz sowie
 die getrennte Zeitreferenz und den Schutz vor Verjüngung vor einem Bedarfseinbruch.

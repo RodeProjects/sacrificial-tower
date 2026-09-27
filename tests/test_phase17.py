@@ -799,7 +799,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(window.result_label.text())
         self.assertFalse(window.result_label.toolTip())
         self.assertEqual(window._calibration_config().maximum_iterations, 18)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 3)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
 
         window.output_root_edit.setText(str(self.root / "exact_output"))
@@ -931,7 +931,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_quality_panel"))
         self.assertEqual(window.preview_iterations, 18)
         self.assertEqual(window._calibration_config().maximum_iterations, 18)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 3)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
         self.assertFalse(
             window._calibration_config().perform_joint_final_slice

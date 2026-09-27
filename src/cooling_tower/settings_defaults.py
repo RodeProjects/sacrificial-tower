@@ -17,6 +17,7 @@ GENERATION_DEFAULTS = MappingProxyType({
         "settings_schema_version",
         "default_output_root",
         "maximum_joint_slices",
+        "maximum_separate_slices",
         "setting_compatibility",
     }
 })

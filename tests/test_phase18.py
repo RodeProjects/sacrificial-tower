@@ -956,6 +956,18 @@ class Phase18UiTests(unittest.TestCase):
             dialog.canvas.geometry().bottom() + 1,
             dialog.legend_widget.geometry().top(),
         )
+        self.assertEqual(
+            dialog.legend_widget.geometry().bottom() + 1,
+            dialog.preview_frame.contentsRect().bottom() + 1,
+        )
+        self.assertEqual(
+            dialog.preview_frame.minimumHeight(),
+            dialog.preview_frame.maximumHeight(),
+        )
+        self.assertEqual(
+            dialog.preview_title_widget.height(),
+            dialog.preview_title_widget.sizeHint().height(),
+        )
         self.assertFalse(
             dialog.canvas.geometry().intersects(
                 dialog.preview_info_header.geometry()
@@ -971,6 +983,20 @@ class Phase18UiTests(unittest.TestCase):
         self.assertLessEqual(
             dialog.navigation_hint.geometry().bottom(),
             dialog.contentsRect().bottom(),
+        )
+
+        frame_height = dialog.preview_frame.height()
+        dialog.set_building("Gemeinsamer Slice wird ausgewertet …")
+        dialog.set_intermediate_scene(scene)
+        self.app.processEvents()
+        self.assertEqual(dialog.preview_frame.height(), frame_height)
+        self.assertEqual(
+            dialog.preview_title_widget.height(),
+            dialog.preview_title_widget.sizeHint().height(),
+        )
+        self.assertEqual(
+            dialog.legend_widget.geometry().bottom() + 1,
+            dialog.preview_frame.contentsRect().bottom() + 1,
         )
         window.close()
 

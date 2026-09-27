@@ -315,9 +315,9 @@ class Phase16Tests(unittest.TestCase):
             CalibrationConfig(maximum_iterations=0)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=-1)
-        self.assertEqual(CalibrationConfig(maximum_iterations=31).maximum_iterations, 31)
+        self.assertEqual(CalibrationConfig(maximum_iterations=50).maximum_iterations, 50)
         with self.assertRaises(ValueError):
-            CalibrationConfig(maximum_iterations=32)
+            CalibrationConfig(maximum_iterations=51)
         with self.assertRaises(ValueError):
             CalibrationConfig(maximum_iterations=31, maximum_joint_slices=26)
         with self.assertRaises(ValueError):

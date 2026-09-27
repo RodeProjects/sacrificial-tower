@@ -52,12 +52,20 @@ class PreviewDialog(QDialog):
             # A zero-margin panel therefore reaches that inset on both sides
             # without introducing a second, visually uneven padding layer.
             layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         if embedded:
             section_title = QLabel("3D-Vorschau")
             section_title.setObjectName("embeddedPreviewTitle")
-            title_row = QHBoxLayout()
+            self.preview_title_widget = QWidget(self)
+            self.preview_title_widget.setObjectName("embeddedPreviewTitleRow")
+            self.preview_title_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            title_row = QHBoxLayout(self.preview_title_widget)
+            title_row.setContentsMargins(0, 0, 0, 0)
             title_row.addWidget(section_title)
-            layout.addLayout(title_row)
+            layout.addWidget(self.preview_title_widget)
         self.state_label = QLabel("Vorschau wurde noch nicht erstellt.")
         self.state_label.setObjectName("previewStateLabel")
         self.state_label.setWordWrap(True)
@@ -81,6 +89,15 @@ class PreviewDialog(QDialog):
 
         self.preview_frame = QWidget()
         self.preview_frame.setObjectName("previewFrame")
+        if embedded:
+            # Header, canvas and legend have deterministic heights. Keeping
+            # their host fixed prevents a transient parent relayout from
+            # assigning surplus height below the legend while an intermediate
+            # joint-slice scene replaces the previous one.
+            self.preview_frame.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
         preview_frame_layout = QVBoxLayout(self.preview_frame)
         preview_frame_layout.setContentsMargins(0, 0, 0, 0)
         preview_frame_layout.setSpacing(0)
@@ -185,7 +202,10 @@ class PreviewDialog(QDialog):
             button.setToolTip(button.text())
             camera_layout.addWidget(button, 1)
         layout.addLayout(camera_layout)
-        layout.addWidget(self.preview_frame, 1)
+        # The embedded frame has a deterministic height. Giving its layout
+        # cell vertical stretch would let transient surplus space shift the
+        # frame (or previously enlarge it) during scene replacement.
+        layout.addWidget(self.preview_frame, 0 if embedded else 1)
         self.navigation_hint = QLabel(
             "Interaktive Maussteuerung über die Schaltfläche oben links in der "
             "Vorschau aktivieren."
@@ -612,6 +632,12 @@ class PreviewDialog(QDialog):
         style = self.state_label.style()
         style.unpolish(self.state_label)
         style.polish(self.state_label)
+        self.state_label.updateGeometry()
+        if self.embedded:
+            own_layout = self.layout()
+            if own_layout is not None:
+                own_layout.invalidate()
+                own_layout.activate()
 
     def _set_preview_controls_visible(self, visible: bool) -> None:
         """Keep camera buttons visible but locked while a scene is building."""
@@ -643,10 +669,13 @@ class PreviewDialog(QDialog):
             frame_height = self.canvas.minimumHeight()
             if visible:
                 frame_height += (
-                    self.preview_info_header.sizeHint().height()
+                    # The header is intentionally fixed to its original
+                    # three-row height. Rich-text width changes may alter its
+                    # size hint, but must not move the canvas during refresh.
+                    self.preview_info_header.minimumHeight()
                     + self.legend_widget.sizeHint().height()
                 )
-            self.preview_frame.setMinimumHeight(frame_height + 2)
+            self.preview_frame.setFixedHeight(frame_height + 2)
         if visible:
             self.details_label.setVisible(not self.embedded)
             self.quality_label.setVisible(bool(self.quality_label.text().strip()))

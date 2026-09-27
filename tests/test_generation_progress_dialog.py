@@ -66,7 +66,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             dialog.explanation_label.text(),
         )
         self.assertIn(
-            "Die ersten fünf gemeinsamen Slices sind Pflicht. "
+            "Die ersten drei gemeinsamen Slices sind Pflicht. "
             "Danach können Sie das bisher beste Ergebnis übernehmen und anschließend "
             "exportieren",
             dialog.explanation_label.text(),
@@ -98,9 +98,9 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 )
             )
         )
-        dialog.complete_slice(4, 10, iteration, 9.0)
+        dialog.complete_slice(2, 10, iteration, 9.0)
         self.assertTrue(dialog.accept_button.isHidden())
-        dialog.complete_slice(5, 10, iteration, 9.0)
+        dialog.complete_slice(3, 10, iteration, 9.0)
         self.assertTrue(dialog.accept_button.isEnabled())
         self.assertFalse(dialog.accept_button.isHidden())
         self.assertEqual(dialog.best_minimum_value.text(), "8.95 s")
@@ -109,7 +109,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             dialog.best_deviation_value.property("resultState"),
             "within",
         )
-        self.assertIn("5 von 10", dialog.counter_label.text())
+        self.assertIn("3 von 10", dialog.counter_label.text())
 
         dialog.set_slice_progress(0.58)
         self.assertGreaterEqual(
@@ -169,10 +169,17 @@ class GenerationProgressDialogTests(unittest.TestCase):
         dialog.close()
 
     def test_joint_slice_setting_is_bounded_between_five_and_twenty_five(self) -> None:
-        dialog = JointSliceSettingsDialog(17)
+        dialog = JointSliceSettingsDialog(17, maximum_separate_slices=9)
         self.assertEqual(dialog.spin_box.minimum(), 5)
         self.assertEqual(dialog.spin_box.maximum(), 25)
         self.assertGreaterEqual(dialog.minimumWidth(), 650)
+        self.assertEqual(dialog.separate_spin_box.minimum(), 1)
+        self.assertEqual(dialog.separate_spin_box.maximum(), 25)
+        self.assertEqual(dialog.separate_spin_box.value(), 9)
+        self.assertEqual(
+            dialog.maximum_separate_slices_label.text(),
+            "Max. getrennte Slices:",
+        )
         self.assertIn("±0,09 s", dialog.info_button.toolTip())
         self.assertEqual(
             dialog.maximum_joint_slices_label.text(),
@@ -190,6 +197,22 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         dialog.show()
         self.app.processEvents()
+        self.assertLess(
+            dialog.show_limits_checkbox.mapTo(
+                dialog, dialog.show_limits_checkbox.rect().topLeft()
+            ).y(),
+            dialog.maximum_separate_slices_label.mapTo(
+                dialog, dialog.maximum_separate_slices_label.rect().topLeft()
+            ).y(),
+        )
+        self.assertLess(
+            dialog.maximum_separate_slices_label.mapTo(
+                dialog, dialog.maximum_separate_slices_label.rect().topLeft()
+            ).y(),
+            dialog.maximum_joint_slices_label.mapTo(
+                dialog, dialog.maximum_joint_slices_label.rect().topLeft()
+            ).y(),
+        )
         self.assertEqual(dialog.info_button.width(), 19)
         self.assertEqual(dialog.info_button.height(), 19)
         self.assertEqual(
@@ -230,6 +253,19 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(dialog.spin_box.value(), 12)
         self.assertIn("Standardwert 12", dialog.reset_button.toolTip())
         self.assertFalse(dialog.reset_button.isEnabled())
+        self.assertTrue(dialog.separate_reset_button.isEnabled())
+        dialog.separate_reset_button.click()
+        self.assertEqual(dialog.separate_spin_box.value(), 6)
+        self.assertFalse(dialog.separate_reset_button.isEnabled())
+        self.assertEqual(dialog.output_reset_button.objectName(), "settingResetButton")
+        self.assertEqual(dialog.output_reset_button.size().width(), 36)
+        self.assertFalse(dialog.output_reset_button.isEnabled())
+        self.assertFalse(dialog.limits_reset_button.isEnabled())
+        dialog.show_limits_checkbox.setChecked(True)
+        self.assertTrue(dialog.limits_reset_button.isEnabled())
+        dialog.limits_reset_button.click()
+        self.assertFalse(dialog.show_limits_checkbox.isChecked())
+        self.assertFalse(dialog.limits_reset_button.isEnabled())
 
         applied: list[int] = []
         dialog.value_applied.connect(applied.append)
@@ -271,10 +307,11 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         _settings, state = store.load()
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 18)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 19)
         self.assertEqual(state["maximum_joint_slices"], 10)
+        self.assertEqual(state["maximum_separate_slices"], 6)
         migrated = json.loads(user_path.read_text(encoding="utf-8"))
-        self.assertEqual(migrated["settings_schema_version"], 18)
+        self.assertEqual(migrated["settings_schema_version"], 19)
         self.assertIsNotNone(store.last_migration_backup)
 
     def test_current_joint_slice_default_and_fallback_are_twelve(self) -> None:
@@ -283,6 +320,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         self.assertEqual(store.load_default_maximum_joint_slices(), 12)
+        self.assertEqual(store.load_default_maximum_separate_slices(), 6)
         self.assertEqual(
             store._default_payload(store.load_defaults())["maximum_joint_slices"],
             12,
@@ -292,6 +330,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             self.root / "missing-defaults.json",
         )
         self.assertEqual(missing_defaults.load_default_maximum_joint_slices(), 12)
+        self.assertEqual(missing_defaults.load_default_maximum_separate_slices(), 6)
 
     def test_main_menu_uses_persisted_joint_slice_budget(self) -> None:
         user_path = self.root / "settings.json"
@@ -301,6 +340,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
                     "settings_schema_version": SETTINGS_SCHEMA_VERSION,
                     "generation": {},
                     "maximum_joint_slices": 17,
+                    "maximum_separate_slices": 8,
                 }
             ),
             encoding="utf-8",
@@ -311,8 +351,9 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_startup_slicer_discovery=False,
         )
         self.assertEqual(window.maximum_joint_slices, 17)
+        self.assertEqual(window.maximum_separate_slices, 8)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 17)
-        self.assertEqual(window._calibration_config().maximum_iterations, 23)
+        self.assertEqual(window._calibration_config().maximum_iterations, 25)
         self.assertEqual(
             window.joint_slice_settings_action.text(),
             "Allgemeine Einstellungen …",

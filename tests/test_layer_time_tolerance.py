@@ -122,7 +122,7 @@ class LayerTimeToleranceTests(unittest.TestCase):
                 {'generation': GenerationSettings().to_dict()},
                 {stable_id: {'token': token, 'value': value}})
             self.assertNotIn(stable_id, result.accepted_ids)
-            self.assertEqual(result.payload['generation']['target_layer_time_s'], 9)
+            self.assertEqual(result.payload['generation']['target_layer_time_s'], 10)
 
     def test_new_time_floors_migrate_directly_and_through_older_schemas(self):
         for version in (10, 16):

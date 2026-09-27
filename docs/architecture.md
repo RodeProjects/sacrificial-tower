@@ -166,7 +166,8 @@ Backend-Schalter, Adaptermatrix und Doppelvalidierung sind in
 ### Getrennte und gemeinsame Generierungsphase
 
 Jede neue Generierung beginnt unabhängig von einer vorhandenen Vorschau mit
-sechs getrennten Turm-Slices. Der eingebettete Bereich „Generierung und
+der unter „Max. getrennte Slices“ konfigurierten Anzahl getrennter Turm-Slices
+(1–25, Standard 6). Der eingebettete Bereich „Generierung und
 Vorschau“ verwendet `gui/generation_panel.py`; es öffnet sich kein separates
 Generierungsfenster. Der Worker
 meldet jeden vollständig ausgewerteten gemeinsamen Kandidaten als unveränderlichen
@@ -174,7 +175,7 @@ meldet jeden vollständig ausgewerteten gemeinsamen Kandidaten als unveränderli
 intern die Werte des bisher besten vollständig ausgewerteten Kandidaten.
 Die getrennten Slices bilden die Vorbereitungsphase. Währenddessen zeigt der
 eingebettete Bereich ausschließlich „Turmgenerierung wird vorbereitet...“, einen
-über alle sechs getrennten Slices fortlaufenden Gesamtfortschrittsbalken und den
+über alle konfigurierten getrennten Slices fortlaufenden Gesamtfortschrittsbalken und den
 aktuellen Arbeitsschritt. Das Turmbild und gemeinsame Ergebniswerte bleiben
 verborgen. Beim Wechsel in die gemeinsame Phase verschwindet der gesamte
 Vorbereitungsblock; an seiner Stelle erscheinen das fortschreitende Turmbild,
@@ -186,19 +187,23 @@ Deckkraft wiederhergestellt.
 Ein Abbruch vor dem ersten verwertbaren gemeinsamen Slice meldet seinen Grund
 im Statusbereich unten links; ohne Kandidaten bleibt die Ergebnisansicht
 verborgen. Beim Fortsetzen bleibt die gemeinsame Ergebnisansicht sichtbar.
-Ergebnisanzeigen zählen ausschließlich gemeinsame Slices; die sechs getrennten
+Ergebnisanzeigen zählen ausschließlich gemeinsame Slices; die getrennten
 Vorläufe erscheinen nur in ihrem eigenen Fortschrittsblock. Vorbereitung,
 Ausführung und Auswertung benennen jeweils den aktuellen getrennten oder
 gemeinsamen Slice mit dem Zähler dieser Phase. Bei einer Fortsetzung zeigt der
 Footer für gemeinsame Slices den bisherigen Gesamtzähler an.
 
 Das gemeinsame Budget ist als `maximum_joint_slices` (5–25, Standard 12)
-persistiert. Die ersten fünf gemeinsamen Slices sind verpflichtend. Direkt nach
-dem fünften vollständig geprüften Slice wird die bisher beste absolute
+persistiert. Die ersten drei gemeinsamen Slices sind verpflichtend. Direkt nach
+dem dritten vollständig geprüften Slice wird die bisher beste absolute
 Zielabweichung geprüft: Liegt sie ungerundet bei höchstens 0,09 Sekunden,
 endet der Lauf vorzeitig. Ein schlechterer aktueller Slice verdrängt einen
 früheren, bereits geprüften Zieltreffer nicht.
-Auch Stagnation und die manuelle Übernahme dürfen erst nach fünf vollständig
+Das getrennte Budget ist unabhängig davon als `maximum_separate_slices`
+(1–25, Standard 6) persistiert. Beide Budgets werden in den allgemeinen
+Einstellungen einzeln zurückgesetzt und bleiben beim globalen Zurücksetzen der
+übrigen Generierungseinstellungen erhalten.
+Auch Stagnation und die manuelle Übernahme dürfen erst nach drei vollständig
 geprüften gemeinsamen Slices zum vorzeitigen Abschluss führen. Stagnation liegt
 vor, wenn sich weder die Turmform noch die gemessenen Layerzeiten nennenswert
 verändern. Ein Lauf endet außerdem bei ausgeschöpftem Budget oder einem Fehler.
@@ -265,6 +270,20 @@ Unter „Turm-Einstellungen“ stehen Mindest-Layerzeit und Layerzeit-Toleranz o
 eigene Zwischenüberschrift. Darauf folgt „100% Turmfüllung simulieren“. Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Einstellungen“ ein- und ausklappbar.
+Die Checkboxen für die 100-%-Turmfüllung und die automatische Standfußbreite
+zeigen den Haken rechts neben ihrem Text. Der Text mit Checkbox der
+automatischen Standfußbreite beginnt mit dem gleichen Abstand zum Info-Hinweis
+wie die übrigen Einstellungsnamen; Breitenfeld und Reset behalten die
+rechtsbündigen Spalten der übrigen Zahleneinstellungen.
+Die automatische Standfußbreite ist
+standardmäßig aktiv; Checkbox, Breitenfeld und Reset stehen in einer Zeile.
+Bei aktiver Automatik zeigt das deaktivierte, leicht ausgegraute Feld den
+berechneten Wert. Bei deaktivierter Automatik ist es normal editierbar; die
+Breite liegt zwischen 20 und 100 mm. Der stets sichtbare Reset setzt auf den
+derzeit berechneten Automatikwert zurück. Ein vor dem Umschalten eingegebener
+manueller Wert bleibt für die laufende Sitzung erhalten.
+Entspricht der angezeigte Wert dem auf zwei Nachkommastellen gerundeten
+Automatikwert, ist der Reset deaktiviert.
 Die Untergrenze der gewünschten Mindest-Layerzeit bleibt unabhängig vom
 Pre-Slice bei 5 s. Die beim Pre-Slice ermittelte kürzeste Layerzeit des
 Originalobjekts erscheint im Info-Hinweis. Bei eingeblendeten

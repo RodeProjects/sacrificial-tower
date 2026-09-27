@@ -156,6 +156,13 @@ def german_user_message(message: object) -> str:
         value = manual_width.group(1).replace(".", ",")
         return f"Die manuelle Standfußbreite muss mindestens {value} mm betragen."
 
+    manual_width_maximum = re.fullmatch(
+        r"Manual base width must be at most ([0-9.]+) mm\.", text
+    )
+    if manual_width_maximum:
+        value = manual_width_maximum.group(1).replace(".", ",")
+        return f"Die manuelle Standfußbreite darf höchstens {value} mm betragen."
+
     generation_setting = re.fullmatch(
         r"Generation setting ([A-Za-z0-9_]+) must be finite\.", text
     )

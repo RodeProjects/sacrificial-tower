@@ -71,10 +71,10 @@ class CalibrationConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.perform_joint_final_slice, bool):
             raise ValueError("perform_joint_final_slice must be a boolean")
-        if not 1 <= self.maximum_iterations <= 31:
+        if not 1 <= self.maximum_iterations <= 50:
             raise ValueError(
                 "Die Kalibrierung benötigt mindestens einen Slicer-Durchlauf "
-                "und erlaubt höchstens 31 Durchläufe."
+                "und erlaubt höchstens 50 Durchläufe."
             )
         if not 1 <= self.maximum_joint_slices <= 25:
             raise ValueError(

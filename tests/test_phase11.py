@@ -514,10 +514,13 @@ class NumericSettingWidgetTests(GuiCase):
         finally:
             alternate.close()
 
-    def test_global_reset_restores_values_mode_and_output(self) -> None:
+    def test_global_reset_restores_generation_values_but_preserves_output(self) -> None:
         self.window.target_time_spin.setValue(91)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.output_root_edit.setText(str(self.root / "other"))
+        self.window.maximum_separate_slices = 9
+        self.window.maximum_joint_slices = 15
+        self.window._apply_show_setting_limits(True)
         self.window.reset_defaults()
         self.assertEqual(
             self.window.target_time_spin.value(),
@@ -529,8 +532,11 @@ class NumericSettingWidgetTests(GuiCase):
         )
         self.assertEqual(
             Path(self.window.output_root_edit.text()),
-            (PROJECT_ROOT / "output").resolve(),
+            self.root / "other",
         )
+        self.assertEqual(self.window.maximum_separate_slices, 9)
+        self.assertEqual(self.window.maximum_joint_slices, 15)
+        self.assertTrue(self.window.show_setting_limits)
 
     def test_output_and_base_mode_have_dedicated_resets(self) -> None:
         self.window.geometry_settings_group.setChecked(True)
@@ -543,7 +549,8 @@ class NumericSettingWidgetTests(GuiCase):
             Path(self.window.output_root_edit.text()),
             self.window.default_output_root,
         )
-        self.assertTrue(self.window.automatic_base_reset_button.isHidden())
+        self.assertFalse(self.window.automatic_base_reset_button.isHidden())
+        self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
         self.window.automatic_base_checkbox.setChecked(False)
         self.assertFalse(self.window.automatic_base_reset_button.isHidden())
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
@@ -559,6 +566,7 @@ class NumericSettingWidgetTests(GuiCase):
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
 
     def test_spin_arrows_are_clickable_for_every_numeric_editor(self) -> None:
+        self.window.automatic_base_checkbox.setChecked(False)
         for group in (
             self.window.geometry_group,
             self.window.stability_group,
@@ -595,6 +603,25 @@ class NumericSettingWidgetTests(GuiCase):
                 pos=down_left,
             )
             self.assertLess(editor.value(), increased, setting.setting_name)
+
+    def test_manual_base_width_survives_automatic_preview_toggle(self) -> None:
+        self.window.geometry_settings_group.setChecked(True)
+        self.window.stability_group.setChecked(True)
+        self.window.automatic_base_checkbox.setChecked(False)
+        self.window.manual_base_width_spin.setValue(35.0)
+        self.assertEqual(self.window.collect_settings().manual_base_width_mm, 35.0)
+
+        self.window.automatic_base_checkbox.setChecked(True)
+        self.assertFalse(self.window.manual_base_width_spin.isEnabled())
+        self.assertEqual(self.window.manual_base_width_spin.value(), 20.0)
+        self.assertEqual(self.window.collect_settings().manual_base_width_mm, 35.0)
+
+        self.window.automatic_base_checkbox.setChecked(False)
+        self.assertTrue(self.window.manual_base_width_spin.isEnabled())
+        self.assertEqual(self.window.manual_base_width_spin.value(), 35.0)
+        self.window.automatic_base_reset_button.click()
+        self.assertEqual(self.window.manual_base_width_spin.value(), 20.0)
+        self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
 
     def test_spin_text_area_does_not_cover_arrow_buttons(self) -> None:
         for setting in self.window._setting_widgets.values():

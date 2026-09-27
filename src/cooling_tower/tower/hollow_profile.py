@@ -9,6 +9,7 @@ from cooling_tower.models import (
     TowerLayerProfile,
 )
 from cooling_tower.tower.base_calculator import (
+    MAXIMUM_BASE_WIDTH_MM,
     MINIMUM_BASE_WIDTH_MM,
     calculate_phase10_base_outer_radius,
 )
@@ -105,10 +106,15 @@ def validate_hollow_settings(settings: GenerationSettings) -> WallPathBounds:
         raise ValueError("Minimum inner radius must be greater than zero.")
     if settings.base_height_mm < 0.0:
         raise ValueError("Base height must not be negative.")
-    if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:
-        raise ValueError(
-            f"Manual base width must be at least {MINIMUM_BASE_WIDTH_MM:g} mm."
-        )
+    if not settings.automatic_base_width:
+        if settings.manual_base_width_mm < MINIMUM_BASE_WIDTH_MM:
+            raise ValueError(
+                f"Manual base width must be at least {MINIMUM_BASE_WIDTH_MM:g} mm."
+            )
+        if settings.manual_base_width_mm > MAXIMUM_BASE_WIDTH_MM:
+            raise ValueError(
+                f"Manual base width must be at most {MAXIMUM_BASE_WIDTH_MM:g} mm."
+            )
     if not (
         0.0
         < settings.maximum_expansion_angle_deg

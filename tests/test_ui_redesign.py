@@ -64,7 +64,7 @@ class UiRedesignTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "preview_fast_button"))
         self.assertFalse(hasattr(window, "preview_precise_button"))
         self.assertEqual(window._calibration_config().maximum_iterations, 18)
-        self.assertEqual(window._calibration_config().minimum_joint_slices, 5)
+        self.assertEqual(window._calibration_config().minimum_joint_slices, 3)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 12)
         self.assertFalse(hasattr(window, "layer_time_check_hint"))
         _ = window.export_success_dialog

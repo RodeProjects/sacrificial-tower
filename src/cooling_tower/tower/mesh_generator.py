@@ -29,7 +29,7 @@ class TowerMeshConfig:
 
 
 def automatic_mesh_segments(profile: object) -> int:
-    """Use 0.9 segments/mm per candidate to keep every STL ring watertight."""
+    """Use one segment/mm of diameter while keeping every STL ring watertight."""
     radii = [
         float(
             getattr(point, "outer_radius_mm", getattr(point, "radius_mm", math.nan))
@@ -38,7 +38,7 @@ def automatic_mesh_segments(profile: object) -> int:
     ]
     if not radii or any(not math.isfinite(radius) or radius <= 0 for radius in radii):
         raise MeshGenerationError("The tower profile needs finite positive radii.")
-    return max(16, min(128, math.ceil(1.8 * max(radii))))
+    return max(16, min(128, math.ceil(2.0 * max(radii))))
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,12 +151,29 @@ def _validate_stable_profile(profile: StableTowerProfile) -> None:
         ):
             inward_solid_step = (
                 isinstance(profile, SolidTowerProfile)
-                and profile.settings.simulate_full_tower_infill
                 and point.z_mm == previous_z
                 and previous_z > 0.0
                 and previous_radius is not None
                 and point.radius_mm < previous_radius - Z_EPSILON_MM
-                and point.source == "inward_step"
+                and (
+                    (profile.settings.simulate_full_tower_infill
+                     and point.source == "inward_step")
+                    or (
+                        not profile.settings.simulate_full_tower_infill
+                        and point.source == "base_tier_step"
+                        and len(profile.layers) >= 2
+                        and profile.base_outer_radius_mm > 15.0 + Z_EPSILON_MM
+                        and (
+                            (abs(point.z_mm - profile.layers[0].z) <= Z_EPSILON_MM
+                             and abs(point.radius_mm -
+                                     (profile.base_outer_radius_mm + 15.0) / 2.0)
+                             <= Z_EPSILON_MM)
+                            or (abs(point.z_mm - profile.layers[1].z)
+                                <= Z_EPSILON_MM
+                                and abs(point.radius_mm - 15.0) <= Z_EPSILON_MM)
+                        )
+                    )
+                )
             )
             if not inward_solid_step:
                 raise MeshGenerationError(

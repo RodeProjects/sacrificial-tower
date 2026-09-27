@@ -11,7 +11,7 @@ SETTING_INFO_TEXTS = {
         "Kürzeste gewünschte Druckzeit je Layer. Der Kühlturm ergänzt "
         "Druckzeit, wenn das eigentliche Objekt diesen Wert unterschreitet. "
         "Die kürzeste Layerzeit des Originalobjekts wird beim Pre-Slice "
-        "ermittelt. Bereich: 5 bis 30 Sekunden; Standard: 9 Sekunden."
+        "ermittelt. Bereich: 5 bis 30 Sekunden; Standard: 10 Sekunden."
     ),
     "minimum_outer_diameter_mm": (
         "Kleinster zulässiger Außendurchmesser oberhalb des Standfußes. "
@@ -24,7 +24,7 @@ SETTING_INFO_TEXTS = {
     ),
     "manual_base_width_mm": (
         "Außendurchmesser des Standfußes bei deaktivierter Automatik. "
-        "Mindestens 20 mm sind erforderlich."
+        "Mindestens 20 mm und höchstens 100 mm sind zulässig."
     ),
     "maximum_expansion_angle_deg": (
         "Größter zulässiger Winkel, mit dem sich der Turm nach außen "

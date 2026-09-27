@@ -353,6 +353,8 @@ class NumericSettingWidget(QWidget):
         self.range_label.setVisible(self._feedback_enabled and self._limits_visible and bool(text))
 
     def _format_bound(self, value: object) -> str:
+        if bool(self.editor.property("rangeLabelIntegerBounds")):
+            return str(int(float(value)))
         if isinstance(self.editor, QDoubleSpinBox):
             return self.editor.textFromValue(float(value))
         return str(int(float(value)))
@@ -564,8 +566,17 @@ class NumericSettingWidget(QWidget):
     def _update_modified_state(self, _value=None) -> None:
         default = self.default_provider()
         current = self.editor.value()
-        tolerance = 1e-9 if isinstance(self.editor, QDoubleSpinBox) else 0
-        modified = abs(float(current) - float(default)) > tolerance
+        if (
+            isinstance(self.editor, QDoubleSpinBox)
+            and self.editor.property("resetCompareDisplayedValue")
+        ):
+            modified = (
+                self.editor.textFromValue(float(current))
+                != self.editor.textFromValue(float(default))
+            )
+        else:
+            tolerance = 1e-9 if isinstance(self.editor, QDoubleSpinBox) else 0
+            modified = abs(float(current) - float(default)) > tolerance
         self.reset_button.setProperty("modified", modified)
         self.reset_button.setEnabled(modified)
         self.reset_button.style().unpolish(self.reset_button)

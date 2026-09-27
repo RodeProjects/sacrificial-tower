@@ -11,6 +11,15 @@ from dataclasses import dataclass
 
 
 EPSILON = 1e-9
+NORMAL_FOOT_START_FRACTION = 0.02
+
+
+def _foot_radial_fraction(t: float, power: float, start_fraction: float) -> float:
+    """Radial progress on the drawn curve, with an optional finite start slope."""
+    if start_fraction > 0.0 and t < start_fraction:
+        at_join = (2.0 * start_fraction - start_fraction * start_fraction) ** (1.0 / power)
+        return at_join * t / start_fraction
+    return (2.0 * t - t * t) ** (1.0 / power)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,12 +28,32 @@ class Taper:
     start_radius: float
     minimum_radius: float
     duration: float
+    exponent: float = 2.0
+    foot_curve_power: float | None = None
+    foot_start_fraction: float = 0.0
+    maximum_contraction_slope: float | None = None
 
     def radius(self, z: float) -> float:
         t = min(1.0, max(0.0, (z - self.start_z) / self.duration))
-        return self.minimum_radius + (
-            self.start_radius - self.minimum_radius
-        ) * (1.0 - t) ** 2
+        amplitude = self.start_radius - self.minimum_radius
+        if self.foot_curve_power is None:
+            return self.minimum_radius + amplitude * (1.0 - t) ** self.exponent
+        # In the reference outline the foot starts almost horizontally and
+        # meets the trunk vertically.  The inverse curve makes both endpoint
+        # tangents explicit: height = 1 - sqrt(1 - radial_fraction ** power).
+        radial_fraction = _foot_radial_fraction(
+            t, self.foot_curve_power, self.foot_start_fraction,
+        )
+        radius = self.start_radius - amplitude * radial_fraction
+        if self.maximum_contraction_slope is not None:
+            # Preserve the reference curve wherever its local descent fits.
+            # The angle line replaces only too-steep sections.
+            radius = max(
+                radius,
+                self.start_radius - self.maximum_contraction_slope
+                * max(0.0, z - self.start_z),
+            )
+        return radius
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +65,7 @@ class DiameterSegment:
     step_radius: float | None = None
     taper: Taper | None = None
     rising_floor_start: float | None = None
+    step_source: str = "inward_step"
 
     def radius(self, t: float) -> float:
         start = self.start_radius if self.step_radius is None else self.step_radius
@@ -53,8 +83,8 @@ class DiameterSegment:
         """Chord-error bound, also across a taper/linear intersection."""
         def split(left: float, right: float):
             r0, r1 = self.radius(left), self.radius(right)
-            # Each interval is convex (quadratic taper, possibly the maximum
-            # with a rising line). Twice its midpoint chord error bounds the
+            # Each interval is convex (taper, possibly the maximum with a
+            # limiting line). Twice its midpoint chord error bounds the
             # error everywhere, including an off-centre intersection.
             error = 2.0 * max(abs(self.radius(left + (right - left) * f)
                             - (r0 + (r1 - r0) * f))
@@ -84,9 +114,10 @@ def plan_diameter_transitions(
 ) -> tuple[tuple[float, ...], tuple[int, ...], tuple[DiameterSegment, ...]]:
     """Reserve future expansion, then form tapers above the demand envelope.
 
-    A taper is one quadratic curve across a descending run, including flat
-    requirements. Its duration is enlarged until all those requirements and
-    the maximum contraction angle fit. It is not restarted at each layer.
+    A regular taper is one quadratic curve across a descending run, including
+    flat requirements; the foot has its own reference curve. Its duration is
+    enlarged until requirements and the contraction angle fit. It is not
+    restarted at each layer.
     """
     demand = list(required)
     for i in range(len(z) - 2, base_index - 1, -1):
@@ -102,18 +133,41 @@ def plan_diameter_transitions(
     base_taper = None
     if base_taper_height is not None and base_taper_height > EPSILON:
         if not allow_steps:
-            base_taper_height = max(base_taper_height, 2.0 * (base_radius - minimum_radius) / contraction_slope)
+            base_taper_height = max(
+                base_taper_height,
+                2.0 * (base_radius - minimum_radius) / contraction_slope,
+            )
+        # Fitted to the two annotated outlines at half their radial span:
+        # 100% infill rises by about 6%, normal infill by about 13% of the
+        # transition height.  A larger power keeps the outer foot flatter.
+        foot_curve_power = 3.2 if allow_steps else 2.15
+        foot_start_fraction = 0.0 if allow_steps else NORMAL_FOOT_START_FRACTION
         end_z = z[base_index] + base_taper_height
         target_radius = minimum_radius
         for j in range(base_index + 1, len(z)):
             t = min(1.0, (z[j] - z[base_index]) / base_taper_height)
             if t > 0:
-                weight = (1.0 - t) ** 2
-                target_radius = max(target_radius, (demand[j] - base_radius * weight) / (1.0 - weight))
+                if (not allow_steps and demand[j] <= base_radius -
+                        contraction_slope * (z[j] - z[base_index])):
+                    continue
+                weight = 1.0 - _foot_radial_fraction(
+                    t, foot_curve_power, foot_start_fraction,
+                )
+                target_radius = max(
+                    target_radius,
+                    (demand[j] - base_radius * weight) / (1.0 - weight),
+                )
             if z[j] >= end_z:
                 break
         if target_radius < base_radius - EPSILON:
-            base_taper = Taper(z[base_index], base_radius, target_radius, base_taper_height)
+            base_taper = Taper(
+                z[base_index], base_radius, target_radius,
+                base_taper_height, foot_curve_power=foot_curve_power,
+                foot_start_fraction=foot_start_fraction,
+                maximum_contraction_slope=None if allow_steps else contraction_slope,
+            )
+        else:
+            base_taper = None
     for i in range(1, len(z)):
         previous = radii[-1]
         dz = z[i] - z[i - 1]

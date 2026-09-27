@@ -134,8 +134,9 @@ class UxImprovementTests(unittest.TestCase):
         self.assertIn("CoreXY", hint)
         self.assertIn("Druckkopf übernimmt", hint)
         self.assertIn("<b>Aktivierung empfohlen.</b>", hint)
-        self.assertIn("etwas mehr Material", hint)
-        self.assertIn("wird schmaler", hint)
+        self.assertIn("- Mehr Material", hint)
+        self.assertIn("+ Schmalerer Turm", hint)
+        self.assertIn("Vor- und Nachteile dieser Funktion:", hint)
         self.assertNotIn("oft schmalerer", hint.casefold())
         self.assertIn('align="center"', hint)
         self.assertEqual(hint.count("<tr>"), 3)
@@ -144,7 +145,7 @@ class UxImprovementTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "full_infill_hint"))
         window.close()
 
-    def test_01b_full_infill_hint_has_balanced_spacing_and_column_padding(self) -> None:
+    def test_01b_full_infill_hint_preserves_selected_spacing_and_column_padding(self) -> None:
         window = self.window()
         document = QTextDocument()
         document.setHtml(window.full_infill_info_button.toolTip())
@@ -161,9 +162,9 @@ class UxImprovementTests(unittest.TestCase):
             if "Bettschubser: Das Druckbett bewegt" in text
         )
         self.assertEqual(type_question.alignment(), Qt.AlignmentFlag.AlignHCenter)
-        self.assertEqual(first_question.bottomMargin(), 10)
+        self.assertEqual(first_question.bottomMargin(), 0)
         self.assertEqual(type_question.bottomMargin(), first_question.bottomMargin())
-        self.assertEqual(answer.bottomMargin(), first_question.bottomMargin())
+        self.assertEqual(answer.bottomMargin(), 8)
         hint = window.full_infill_info_button.toolTip()
         self.assertIn("Die 100%-Füllung gilt nur", hint)
         self.assertEqual(hint.count("<u>"), 3)
@@ -179,9 +180,10 @@ class UxImprovementTests(unittest.TestCase):
             frames += 1
         self.assertIsNotNone(table)
         layout = document.documentLayout()
-        answer_block = document.firstBlock()
-        while answer_block.isValid() and "Bettschubser:" not in answer_block.text():
-            answer_block = answer_block.next()
+        table_title_block = document.firstBlock()
+        while (table_title_block.isValid()
+               and "Vor- und Nachteile dieser Funktion:" not in table_title_block.text()):
+            table_title_block = table_title_block.next()
         table_header = table.cellAt(0, 0).firstCursorPosition().block()
         last_row_bottom = max(
             layout.blockBoundingRect(
@@ -190,11 +192,15 @@ class UxImprovementTests(unittest.TestCase):
             for column in range(table.columns())
         )
         final_paragraph = document.lastBlock()
-        self.assertEqual(
+        heading_to_table_gap = (
             layout.blockBoundingRect(table_header).top()
-            - layout.blockBoundingRect(answer_block).bottom(),
-            layout.blockBoundingRect(final_paragraph).top() - last_row_bottom,
+            - layout.blockBoundingRect(table_title_block).bottom()
         )
+        table_to_final_gap = (
+            layout.blockBoundingRect(final_paragraph).top() - last_row_bottom
+        )
+        self.assertEqual(heading_to_table_gap, 10)
+        self.assertEqual(table_to_final_gap, 16)
         for row in range(table.rows()):
             first_cell = table.cellAt(row, 0).format()
             self.assertEqual(
@@ -232,18 +238,23 @@ class UxImprovementTests(unittest.TestCase):
             info_right = setting.info_button.mapTo(
                 window, setting.info_button.rect().topRight()
             ).x()
-            label_left = setting.label.mapTo(
-                window, setting.label.rect().topLeft()
+            text_control = (
+                window.automatic_base_checkbox
+                if setting.setting_name == "manual_base_width_mm"
+                else setting.label
+            )
+            label_left = text_control.mapTo(
+                window, text_control.rect().topLeft()
             ).x()
             self.assertEqual(label_left - info_right - 1, 10)
             self.assertLess(
                 setting.info_button.mapTo(window, setting.info_button.rect().center()).x(),
-                setting.label.mapTo(window, setting.label.rect().center()).x(),
+                text_control.mapTo(window, text_control.rect().center()).x(),
             )
             self.assertLessEqual(
                 abs(
                     setting.info_button.mapTo(window, setting.info_button.rect().center()).y()
-                    - setting.label.mapTo(window, setting.label.rect().center()).y()
+                    - text_control.mapTo(window, text_control.rect().center()).y()
                 ),
                 1,
             )
@@ -274,20 +285,21 @@ class UxImprovementTests(unittest.TestCase):
         self.assertEqual(window.output_root_info_button.width(), 19)
         window.close()
 
-    def test_01c_automatic_base_hint_explains_width_and_shape_without_manual_mode(self) -> None:
+    def test_01c_base_hint_explains_automatic_and_manual_width(self) -> None:
         window = self.window()
         hint = window.automatic_base_info_button.toolTip()
         document = QTextDocument()
         document.setHtml(hint)
         text = document.toPlainText()
-        self.assertIn("Wie breit wird der Standfuß?", text)
-        self.assertIn("Wie ist der Standfuß geformt?", text)
-        self.assertIn("mindestens 20 mm", text)
-        self.assertIn("ein Fünftel der Objekthöhe", text)
-        self.assertIn("150 mm Höhe sind das 30 mm", text)
-        self.assertIn("ersten zwei Drucklayer", text)
-        self.assertIn("nach innen gebogenen", text)
-        self.assertNotIn("manuell", text.casefold())
+        self.assertIn("Höhe", text)
+        self.assertIn("Fußrand ist 1–2 Layer hoch", text)
+        self.assertIn("6 mm oder 22 Layern; der längere Wert gilt", text)
+        self.assertIn("Breite entspricht 20 % der Objekthöhe", text)
+        self.assertIn("auf 20 bis 100 mm begrenzt", text)
+        self.assertIn("Standfuß ist unten breit", text)
+        self.assertIn("nach oben schmaler", text)
+        self.assertIn("Manuelle Breite", text)
+        self.assertIn("20 bis 100 mm selbst einstellen", text)
         window.close()
 
     def test_01a_full_infill_checkbox_does_not_move_on_hover(self) -> None:

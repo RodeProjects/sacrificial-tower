@@ -1920,6 +1920,18 @@ QDoubleSpinBox, QSpinBox {
     padding: 0 48px 0 8px;
 }
 
+QDoubleSpinBox#manualBaseWidth[automaticPreview="true"] {
+    color: #667684;
+    background: #f1f4f6;
+    border-color: #d6dee4;
+}
+
+QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::up-button,
+QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::down-button {
+    background: #edf1f4;
+    border-color: #d6dee4;
+}
+
 QLabel#numericEditorUnit {
     color: #7a8794;
     background: transparent;
@@ -2226,7 +2238,7 @@ QCheckBox#simulateFullTowerInfill:pressed,
 QCheckBox#simulateFullTowerInfill:focus {
     border: 1px solid transparent;
     border-radius: 5px;
-    padding: 4px 7px;
+    padding: 4px 7px 4px 0;
 }
 QCheckBox#simulateFullTowerInfill:hover {
     color: #0f5d91;
@@ -2292,7 +2304,7 @@ QCheckBox#automaticBaseWidth:focus,
 QCheckBox#automaticBaseWidth:hover {
     border: 1px solid transparent;
     border-radius: 5px;
-    padding: 4px 7px;
+    padding: 4px 7px 4px 0;
 }
 
 QCheckBox#automaticBaseWidth:focus {

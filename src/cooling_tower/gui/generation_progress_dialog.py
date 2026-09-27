@@ -12,7 +12,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QCloseEvent, QPainter, QPixmap
+from PySide6.QtGui import QColor, QCloseEvent, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QCheckBox,
@@ -33,12 +33,19 @@ from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 
 
 DEFAULT_MAXIMUM_JOINT_SLICES = 12
+DEFAULT_MAXIMUM_SEPARATE_SLICES = 6
+MINIMUM_JOINT_SLICES_BEFORE_ACCEPT = 3
 GENERATION_DIALOG_WIDTH_PX = 610
 JOINT_SLICE_HINT = (
     "Maximale Anzahl gemeinsamer Slicer-Durchläufe für die Angleichung. "
     "Bereich: 5 bis 25; Standard: 12. Nach der Mindestanzahl kann die "
     "Angleichung bei höchstens ±0,09 s Zielabweichung, manueller Übernahme "
     "oder ausbleibender Verbesserung früher enden."
+)
+SEPARATE_SLICE_HINT = (
+    "Maximale Anzahl getrennter Slicer-Durchläufe zur Vorbereitung der "
+    "Turmgeometrie. Bereich: 1 bis 25; Standard: 6. Anschließend folgen "
+    "die gemeinsamen Slices mit Objekt und Kühlturm."
 )
 
 
@@ -179,7 +186,7 @@ class TowerGenerationDialog(QDialog):
         self._primary_mode = "accept"
         self._tolerance_s = 0.0
         self._best_deviation_s: float | None = None
-        self._minimum_joint_slices = 5
+        self._minimum_joint_slices = MINIMUM_JOINT_SLICES_BEFORE_ACCEPT
         self._completed_joint_slices = 0
 
         layout = QVBoxLayout(self)
@@ -194,7 +201,7 @@ class TowerGenerationDialog(QDialog):
             "Objekt und Kühlturm werden jetzt gemeinsam geslicet; weil sich dabei "
             "Geschwindigkeiten, Beschleunigungen und Kühlzeiten gegenseitig "
             "beeinflussen, wird die Turmform schrittweise an Ihre Zielzeit "
-            "angeglichen. Die ersten fünf gemeinsamen Slices sind Pflicht. "
+            "angeglichen. Die ersten drei gemeinsamen Slices sind Pflicht. "
             "Danach können Sie das bisher beste Ergebnis übernehmen und anschließend "
             "exportieren."
         )
@@ -316,7 +323,7 @@ class TowerGenerationDialog(QDialog):
         tolerance_s: float,
         completed: int,
         maximum: int,
-        minimum_joint_slices: int = 5,
+        minimum_joint_slices: int = MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
     ) -> None:
         # A newly created owned dialog can briefly inherit the maximized
         # native state of its main window on Windows.  Clear that state before
@@ -569,6 +576,7 @@ class TowerGenerationDialog(QDialog):
 
 class JointSliceSettingsDialog(QDialog):
     value_applied = Signal(int)
+    separate_value_applied = Signal(int)
     limits_applied = Signal(bool)
     output_root_applied = Signal(str)
 
@@ -579,6 +587,8 @@ class JointSliceSettingsDialog(QDialog):
         *,
         output_root: str = "",
         default_output_root: str = "",
+        maximum_separate_slices: int = DEFAULT_MAXIMUM_SEPARATE_SLICES,
+        default_maximum_separate_slices: int = DEFAULT_MAXIMUM_SEPARATE_SLICES,
         default_maximum_joint_slices: int = DEFAULT_MAXIMUM_JOINT_SLICES,
     ) -> None:
         super().__init__(parent)
@@ -589,6 +599,9 @@ class JointSliceSettingsDialog(QDialog):
         self.default_maximum_joint_slices = max(
             5, min(25, int(default_maximum_joint_slices))
         )
+        self.default_maximum_separate_slices = max(
+            1, min(25, int(default_maximum_separate_slices))
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
@@ -596,6 +609,66 @@ class JointSliceSettingsDialog(QDialog):
         title.setObjectName("dialogTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        separate_row = QHBoxLayout()
+        separate_row.setSpacing(METRICS.setting_info_text_gap_px)
+        self.separate_info_button = InfoToolButton(
+            SEPARATE_SLICE_HINT,
+            self,
+            accessible_name="Informationen zur maximalen Anzahl getrennter Slices",
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        separate_row.addWidget(
+            self.separate_info_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        self.maximum_separate_slices_label = QLabel("Max. getrennte Slices:")
+        self.maximum_separate_slices_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        separate_row.addWidget(
+            self.maximum_separate_slices_label,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.separate_spin_box = QSpinBox()
+        self.separate_spin_box.setObjectName("maximumSeparateSlicesSpin")
+        self.separate_spin_box.setRange(1, 25)
+        self.separate_spin_box.setValue(
+            max(1, min(25, int(maximum_separate_slices)))
+        )
+        self.separate_spin_box.setSuffix(" Slices")
+        self.separate_spin_box.lineEdit().returnPressed.connect(self.accept)
+        separate_row.addStretch(1)
+        separate_row.addWidget(self.separate_spin_box)
+        self.separate_reset_button = QPushButton("")
+        self.separate_reset_button.setObjectName("settingResetButton")
+        self.separate_reset_button.setIcon(
+            QIcon(str(Path(__file__).with_name("assets") / "reset.svg"))
+        )
+        self.separate_reset_button.setIconSize(QSize(18, 18))
+        self.separate_reset_button.setFixedSize(
+            METRICS.reset_button_size_px,
+            METRICS.reset_button_size_px,
+        )
+        self.separate_reset_button.setAccessibleName(
+            "Getrennte Slices auf den Standardwert "
+            f"{self.default_maximum_separate_slices} zurücksetzen"
+        )
+        self.separate_reset_button.setToolTip(
+            "Auf Standardwert "
+            f"{self.default_maximum_separate_slices} zurücksetzen"
+        )
+        self.separate_reset_button.clicked.connect(
+            lambda: self.separate_spin_box.setValue(
+                self.default_maximum_separate_slices
+            )
+        )
+        self.separate_spin_box.valueChanged.connect(
+            self._refresh_separate_reset_button
+        )
+        separate_row.addWidget(self.separate_reset_button)
+        self.separate_settings_row_layout = separate_row
+        layout.addLayout(separate_row)
         row = QHBoxLayout()
         row.setSpacing(METRICS.setting_info_text_gap_px)
         self.info_button = InfoToolButton(
@@ -623,8 +696,16 @@ class JointSliceSettingsDialog(QDialog):
         self.spin_box.lineEdit().returnPressed.connect(self.accept)
         row.addStretch(1)
         row.addWidget(self.spin_box)
-        self.reset_button = QPushButton("↺")
+        self.reset_button = QPushButton("")
         self.reset_button.setObjectName("settingResetButton")
+        self.reset_button.setIcon(
+            QIcon(str(Path(__file__).with_name("assets") / "reset.svg"))
+        )
+        self.reset_button.setIconSize(QSize(18, 18))
+        self.reset_button.setFixedSize(
+            METRICS.reset_button_size_px,
+            METRICS.reset_button_size_px,
+        )
         self.reset_button.setAccessibleName(
             "Gemeinsame Slices auf den Standardwert "
             f"{self.default_maximum_joint_slices} zurücksetzen"
@@ -637,10 +718,36 @@ class JointSliceSettingsDialog(QDialog):
         )
         self.spin_box.valueChanged.connect(self._refresh_reset_button)
         row.addWidget(self.reset_button)
-        self.show_limits_checkbox = QCheckBox("Eingabegrenzen unter den Zahlenfeldern anzeigen")
-        layout.addWidget(self.show_limits_checkbox)
         self.settings_row_layout = row
         layout.addLayout(row)
+        self.show_limits_checkbox = QCheckBox("Eingabegrenzen unter den Zahlenfeldern anzeigen")
+        limits_row = QHBoxLayout()
+        limits_row.addWidget(self.show_limits_checkbox)
+        limits_row.addStretch(1)
+        self.limits_reset_button = QPushButton("")
+        self.limits_reset_button.setObjectName("settingResetButton")
+        self.limits_reset_button.setIcon(
+            QIcon(str(Path(__file__).with_name("assets") / "reset.svg"))
+        )
+        self.limits_reset_button.setIconSize(QSize(18, 18))
+        self.limits_reset_button.setFixedSize(
+            METRICS.reset_button_size_px,
+            METRICS.reset_button_size_px,
+        )
+        self.limits_reset_button.setToolTip(
+            "Anzeige der Eingabegrenzen auf Standardwert zurücksetzen"
+        )
+        self.limits_reset_button.setAccessibleName(
+            "Anzeige der Eingabegrenzen auf Standardwert zurücksetzen"
+        )
+        self.limits_reset_button.clicked.connect(
+            lambda: self.show_limits_checkbox.setChecked(False)
+        )
+        self.show_limits_checkbox.toggled.connect(
+            self._refresh_limits_reset_button
+        )
+        limits_row.addWidget(self.limits_reset_button)
+        layout.insertLayout(1, limits_row)
         layout.addWidget(QLabel("Exportordner"))
         export_row = QHBoxLayout()
         self.output_root_edit = QLineEdit(output_root)
@@ -653,10 +760,29 @@ class JointSliceSettingsDialog(QDialog):
                 self.output_root_edit.setText(selected)
         browse.clicked.connect(select_output)
         export_row.addWidget(browse)
-        reset_output = QPushButton("↺")
-        reset_output.setToolTip("Exportordner auf Standardwert zurücksetzen")
-        reset_output.clicked.connect(lambda: self.output_root_edit.setText(default_output_root))
-        export_row.addWidget(reset_output)
+        self.output_reset_button = QPushButton("")
+        self.output_reset_button.setObjectName("settingResetButton")
+        self.output_reset_button.setIcon(
+            QIcon(str(Path(__file__).with_name("assets") / "reset.svg"))
+        )
+        self.output_reset_button.setIconSize(QSize(18, 18))
+        self.output_reset_button.setFixedSize(
+            METRICS.reset_button_size_px,
+            METRICS.reset_button_size_px,
+        )
+        self.output_reset_button.setToolTip(
+            "Exportordner auf Standardwert zurücksetzen"
+        )
+        self.output_reset_button.setAccessibleName(
+            "Exportordner auf Standardwert zurücksetzen"
+        )
+        self.output_reset_button.clicked.connect(
+            lambda: self.output_root_edit.setText(default_output_root)
+        )
+        self.output_root_edit.textChanged.connect(
+            self._refresh_output_reset_button
+        )
+        export_row.addWidget(self.output_reset_button)
         layout.addLayout(export_row)
         actions = QHBoxLayout()
         actions.addStretch(1)
@@ -671,7 +797,11 @@ class JointSliceSettingsDialog(QDialog):
         actions.addWidget(apply_button)
         layout.addLayout(actions)
         self.apply_button = apply_button
+        self._default_output_root = default_output_root
+        self._refresh_separate_reset_button()
         self._refresh_reset_button()
+        self._refresh_limits_reset_button()
+        self._refresh_output_reset_button()
 
     def accept(self) -> None:
         if not self.output_root_edit.text().strip() and self.output_root_edit.text() != "":
@@ -679,6 +809,7 @@ class JointSliceSettingsDialog(QDialog):
             return
         self.output_root_applied.emit(self.output_root_edit.text().strip())
         self.limits_applied.emit(self.show_limits_checkbox.isChecked())
+        self.separate_value_applied.emit(self.separate_spin_box.value())
         self.value_applied.emit(self.spin_box.value())
         super().accept()
 
@@ -689,3 +820,30 @@ class JointSliceSettingsDialog(QDialog):
         style = self.reset_button.style()
         style.unpolish(self.reset_button)
         style.polish(self.reset_button)
+
+    def _refresh_separate_reset_button(self) -> None:
+        modified = (
+            self.separate_spin_box.value()
+            != self.default_maximum_separate_slices
+        )
+        self.separate_reset_button.setEnabled(modified)
+        self.separate_reset_button.setProperty("modified", modified)
+        style = self.separate_reset_button.style()
+        style.unpolish(self.separate_reset_button)
+        style.polish(self.separate_reset_button)
+
+    def _refresh_output_reset_button(self) -> None:
+        modified = self.output_root_edit.text() != self._default_output_root
+        self.output_reset_button.setEnabled(modified)
+        self.output_reset_button.setProperty("modified", modified)
+        style = self.output_reset_button.style()
+        style.unpolish(self.output_reset_button)
+        style.polish(self.output_reset_button)
+
+    def _refresh_limits_reset_button(self) -> None:
+        modified = self.show_limits_checkbox.isChecked()
+        self.limits_reset_button.setEnabled(modified)
+        self.limits_reset_button.setProperty("modified", modified)
+        style = self.limits_reset_button.style()
+        style.unpolish(self.limits_reset_button)
+        style.polish(self.limits_reset_button)

@@ -82,6 +82,7 @@ from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
+    MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
 )
 from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.export_worker import ExportWorker
@@ -200,6 +201,7 @@ from cooling_tower.tower.solid_profile import (
 )
 from cooling_tower.tower.base_calculator import (
     BASE_WIDTH_PER_OBJECT_HEIGHT,
+    MAXIMUM_BASE_WIDTH_MM,
     MINIMUM_BASE_WIDTH_MM,
 )
 
@@ -209,10 +211,10 @@ _LOCKED_SLICER_STEP_TOOLTIP = (
 )
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-GENERATION_NORMAL_SLICES = 6
+DEFAULT_MAXIMUM_SEPARATE_SLICES = 6
 GENERATION_PHASE_FADE_OUT_MS = 180
 GENERATION_PHASE_FADE_IN_MS = 220
-GENERATION_MINIMUM_JOINT_SLICES = 5
+GENERATION_MINIMUM_JOINT_SLICES = MINIMUM_JOINT_SLICES_BEFORE_ACCEPT
 MAIN_FOOTER_MAX_HEIGHT_PX = 350
 MAIN_FOOTER_NARROW_MAX_HEIGHT_PX = 400
 MAXIMUM_TARGET_LAYER_TIME_S = 30.0
@@ -250,13 +252,18 @@ SETTING_UNITS = {
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 
 FULL_INFILL_HINT_HTML = """
-<p align="center" style="margin-top:0; margin-bottom:10px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
-<p style="margin-top:0; margin-bottom:10px;">Das hängt davon ab, ob Ihr Drucker ein Bettschubser oder ein CoreXY-Drucker ist.</p>
-<p align="center" style="margin-top:0; margin-bottom:10px;"><b>Welchen Druckertyp habe ich?</b></p>
+<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Was macht diese Funktion?</b></p>
 <p style="margin-top:0; margin-bottom:10px;">
+&#8226; <b>Aktiviert:</b> In der temporären Slicerprofilkopie wird für den Turm 100% Füllung eingestellt.<br>
+&#8226; <b>Deaktiviert:</b> Für Berechnung und Slice gelten die Füllungswerte des gewählten Slicerprofils.</p>
+<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
+<p style="margin-top:0; margin-bottom:10px;">Das hängt teilweise davon ab, ob Ihr Drucker ein Bettschubser oder ein CoreXY-Drucker ist.</p>
+<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Welchen Druckertyp habe ich?</b></p>
+<p style="margin-top:0; margin-bottom:8px;">
 &#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell horizontal vor und zurück.<br>
 &#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die horizontalen X/Y-Bewegungen; das Bett fährt dabei nicht hin und her.</p>
-<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:12px;">
+<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Vor- und Nachteile dieser Funktion:</b></p>
+<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:6px; margin-bottom:0px;">
   <tr>
     <th align="left" style="padding:4px 12px 4px 0;"><u>Druckertyp</u></th>
     <th align="left" style="padding:4px 12px;"><u>Aktiviert: Vorteil / Nachteil</u></th>
@@ -269,8 +276,8 @@ FULL_INFILL_HINT_HTML = """
   </tr>
   <tr>
     <td valign="top" style="padding:4px 12px 4px 0;"><b>CoreXY</b></td>
-    <td valign="top" style="padding:4px 12px;">Der Turm bleibt gleich breit oder wird schmaler; etwas mehr Material.</td>
-    <td valign="top" style="padding:4px 12px;">Meist weniger Material; der Turm kann breiter sein. Häufig ausreichend.</td>
+    <td valign="top" style="padding:4px 12px;">+ Schmalerer Turm<br/>- Mehr Material</td>
+    <td valign="top" style="padding:4px 12px;">+ Weniger Material<br/>- Breiterer Turm</td>
   </tr>
 </table>
 <p>Die 100%-Füllung gilt nur für den Kühlturm, nicht für das Druckobjekt.</p>
@@ -288,24 +295,21 @@ FULL_INFILL_HINT_ACCESSIBLE = (
 )
 
 AUTOMATIC_BASE_HINT_HTML = """
-<p><b>Wie breit wird der Standfuß?</b></p>
-<p>Die Breite richtet sich nach der gesamten Höhe des Originalobjekts:
-mindestens 20 mm. Ist das Objekt höher als 100 mm, beträgt die
-Standfußbreite ein Fünftel der Objekthöhe. Bei 150 mm Höhe sind das 30 mm.</p>
-<p><b>Wie ist der Standfuß geformt?</b></p>
-<p>Der gerade untere Teil ist so hoch wie die ersten zwei Drucklayer.
-Hat der Turm nur einen Layer, entspricht er dessen Höhe.
-Darüber wird der Turm bei Bedarf mit einem sanften, nach innen gebogenen
-Übergang schmaler.</p>
+<p><b>Höhe</b></p>
+<p>Der Fußrand ist 1–2 Layer hoch. Die Verjüngung richtet sich nach 6 mm oder
+22 Layern; der längere Wert gilt.</p>
+<p><b>Breite</b></p>
+<p>Die Breite entspricht 20 % der Objekthöhe und wird auf 20 bis 100 mm begrenzt.</p>
+<p><b>Form</b></p>
+<p>Der Standfuß ist unten breit und wird nach oben schmaler, bis er in den Turm übergeht.</p>
 """.strip()
 
 AUTOMATIC_BASE_HINT_ACCESSIBLE = (
-    "Die automatische Standfußbreite richtet sich nach der gesamten Höhe "
-    "des Originalobjekts. Sie beträgt mindestens 20 Millimeter. Bei einem "
-    "Objekt über 100 Millimeter Höhe beträgt sie ein Fünftel der Höhe. "
-    "Der gerade untere Teil ist zwei Drucklayer hoch, bei nur einem Layer "
-    "entsprechend dessen Höhe. Danach verjüngt sich der Turm bei Bedarf "
-    "sanft nach innen."
+    "Der Fußrand ist ein bis zwei Layer hoch. Die Verjüngung richtet sich nach "
+    "6 Millimetern oder 22 Layern; der längere Wert gilt. Die Breite entspricht "
+    "20 Prozent der Objekthöhe und wird auf 20 bis 100 Millimeter begrenzt. "
+    "Der Standfuß ist unten breit und wird nach oben schmaler, bis er in den "
+    "Turm übergeht."
 )
 
 
@@ -852,9 +856,19 @@ class MainWindow(QMainWindow):
             ),
         )
         self.default_settings = self.settings_store.load_defaults()
+        self._manual_base_width_session_value = (
+            self.default_settings.manual_base_width_mm
+        )
+        self._manual_base_width_user_override = False
+        self._automatic_base_width_active = (
+            self.default_settings.automatic_base_width
+        )
         self.default_output_root = self.settings_store.load_default_output_root()
         self.default_maximum_joint_slices = (
             self.settings_store.load_default_maximum_joint_slices()
+        )
+        self.default_maximum_separate_slices = (
+            self.settings_store.load_default_maximum_separate_slices()
         )
         initial_settings, ui_state = self.settings_store.load()
         self.show_setting_limits = ui_state.get("show_setting_limits", False) is True
@@ -868,6 +882,17 @@ class MainWindow(QMainWindow):
             and not isinstance(raw_joint_slices, bool)
             and 5 <= raw_joint_slices <= 25
             else self.default_maximum_joint_slices
+        )
+        raw_separate_slices = ui_state.get(
+            "maximum_separate_slices",
+            self.default_maximum_separate_slices,
+        )
+        self.maximum_separate_slices = (
+            int(raw_separate_slices)
+            if isinstance(raw_separate_slices, int)
+            and not isinstance(raw_separate_slices, bool)
+            and 1 <= raw_separate_slices <= 25
+            else self.default_maximum_separate_slices
         )
 
         self._feasibility_timer = QTimer(self)
@@ -2408,6 +2433,13 @@ class MainWindow(QMainWindow):
             "100% Turmfüllung simulieren"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
+        self.full_infill_checkbox.setLayoutDirection(
+            Qt.LayoutDirection.RightToLeft
+        )
+        self.full_infill_checkbox.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
         full_infill_row = QWidget()
         full_infill_layout = QHBoxLayout(full_infill_row)
         full_infill_layout.setContentsMargins(0, 2, 0, 2)
@@ -2504,54 +2536,38 @@ class MainWindow(QMainWindow):
             "Standfußbreite automatisch berechnen"
         )
         self.automatic_base_checkbox.setObjectName("automaticBaseWidth")
+        self.automatic_base_checkbox.setLayoutDirection(
+            Qt.LayoutDirection.RightToLeft
+        )
         self.automatic_base_checkbox.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
         )
-        self.automatic_base_checkbox.setMinimumWidth(220)
         self.automatic_base_checkbox.setFixedHeight(
             METRICS.form_control_height_px
-        )
-        automatic_row = QWidget()
-        automatic_layout = QGridLayout(automatic_row)
-        automatic_layout.setContentsMargins(0, 2, 0, 2)
-        automatic_layout.setHorizontalSpacing(METRICS.setting_info_text_gap_px)
-        self.automatic_base_info_button = InfoToolButton(
-            AUTOMATIC_BASE_HINT_HTML,
-            automatic_row,
-            accessible_name=(
-                "Informationen zur automatischen Standfußbreite"
-            ),
-            accessible_hint=AUTOMATIC_BASE_HINT_ACCESSIBLE,
-            object_name="settingInfoButton",
-            diameter_px=METRICS.setting_info_diameter_px,
         )
         self.automatic_base_error_label = QLabel()
         self.automatic_base_error_label.setObjectName("settingMessage")
         self.automatic_base_error_label.setWordWrap(True)
         self.automatic_base_error_label.hide()
-        automatic_layout.addWidget(
-            self.automatic_base_info_button,
-            0,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
-        automatic_layout.addWidget(
-            self.automatic_base_checkbox,
-            0,
-            1,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-        automatic_layout.addWidget(
-            self.automatic_base_error_label, 1, 0, 1, 2
-        )
-        automatic_layout.setColumnStretch(0, 0)
-        automatic_layout.setColumnStretch(1, 1)
         self.manual_base_width_spin = self._double_spin(
-            20.0, 1000.0, 2, 1.0, "manualBaseWidth"
+            MINIMUM_BASE_WIDTH_MM,
+            MAXIMUM_BASE_WIDTH_MM,
+            2,
+            1.0,
+            "manualBaseWidth",
+        )
+        self.manual_base_width_spin.setProperty(
+            "rangeLabelShowMinimum", True
+        )
+        self.manual_base_width_spin.setProperty(
+            "rangeLabelIntegerBounds", True
+        )
+        self.manual_base_width_spin.setProperty(
+            "resetCompareDisplayedValue", True
         )
         self.automatic_base_width_label = QLabel(
-            "Automatische Breite: mindestens 20,00 mm", self
+            "Automatische Breite: 20,00 bis höchstens 100,00 mm", self
         )
         self.automatic_base_width_label.setObjectName("calculatedHint")
         self.automatic_base_width_label.setWordWrap(True)
@@ -2575,18 +2591,57 @@ class MainWindow(QMainWindow):
         self.maximum_contraction_angle_spin = self._double_spin(
             1.0, 85.0, 1, 1.0, "maximumContractionAngle"
         )
-        stability_fields_layout.addWidget(automatic_row)
         manual_base_setting = self._add_numeric_setting(
             stability_fields_layout,
             "manual_base_width_mm",
-            "Manuelle Standfußbreite",
+            "Standfußbreite",
             self.manual_base_width_spin,
+            info_text=(
+                AUTOMATIC_BASE_HINT_HTML
+                + "<p><b>Manuelle Breite</b></p>"
+                "Bei deaktivierter Automatik können Sie 20 bis 100 mm selbst "
+                "einstellen."
+            ),
         )
-        # Compatibility alias for existing integrations. The reset now belongs
-        # to the manual value row and can no longer overlap or sit above it.
+        self.manual_base_width_setting = manual_base_setting
+        manual_base_setting.default_provider = self._automatic_base_width_mm
+        manual_base_setting.label.hide()
+        manual_base_setting.layout().removeWidget(manual_base_setting.label)
+        manual_base_setting.layout().addWidget(
+            self.automatic_base_checkbox,
+            0,
+            1,
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignAbsolute
+            | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.automatic_base_checkbox.setAccessibleName(
+            "Standfußbreite automatisch berechnen"
+        )
+        self.automatic_base_info_button = manual_base_setting.info_button
+        self.automatic_base_info_button.setAccessibleName(
+            "Informationen zur automatischen und manuellen Standfußbreite"
+        )
+        self.automatic_base_info_button.set_hint(
+            self.automatic_base_info_button.toolTip(),
+            accessible_hint=(
+                AUTOMATIC_BASE_HINT_ACCESSIBLE
+                + " Bei deaktivierter Automatik kann die Standfußbreite "
+                "zwischen 20 und 100 Millimetern selbst eingestellt werden."
+            ),
+        )
+        manual_base_setting.layout().addWidget(
+            self.automatic_base_error_label,
+            3,
+            0,
+            1,
+            4,
+        )
+        # Compatibility alias: the reset now shares the single checkbox and
+        # width row, as it does for all other numeric settings.
         self.automatic_base_reset_button = manual_base_setting.reset_button
         self.automatic_base_width_label.hide()
-        base_height_hint = QLabel("Standfußhöhe: automatisch 2 Layer; anschließend bei Bedarf konkave Verjüngung.", self)
+        base_height_hint = QLabel("Standfußhöhe: 1 Layer; anschließend mindestens 6 mm oder 22 Layer Verjüngung (der längere Wert gilt), soweit der Turm hoch genug ist.", self)
         base_height_hint.setObjectName("calculatedHint")
         base_height_hint.setWordWrap(True)
         base_height_hint.hide()
@@ -4197,7 +4252,7 @@ class MainWindow(QMainWindow):
             mode=CalibrationMode.STL,
             time_tolerance_s=self.layer_time_tolerance_spin.value(),
             maximum_iterations=(
-                GENERATION_NORMAL_SLICES + self.maximum_joint_slices
+                self.maximum_separate_slices + self.maximum_joint_slices
             ),
             object_clearance_mm=5.0,
             bed_edge_clearance_mm=5.0,
@@ -4208,7 +4263,7 @@ class MainWindow(QMainWindow):
 
     @property
     def preview_iterations(self) -> int:
-        return GENERATION_NORMAL_SLICES + self.maximum_joint_slices
+        return self.maximum_separate_slices + self.maximum_joint_slices
 
     @property
     def preview_joint_slices(self) -> int:
@@ -7223,10 +7278,9 @@ class MainWindow(QMainWindow):
             )
             self.profile_confirm_button.show()
         elif section == "stability":
-            automatic = self.automatic_base_checkbox.isChecked()
-            self._setting_widgets["manual_base_width_mm"].setVisible(not automatic)
+            self._setting_widgets["manual_base_width_mm"].show()
             self.automatic_base_width_label.hide()
-            self.automatic_base_reset_button.setVisible(not automatic)
+            self.automatic_base_reset_button.setVisible(True)
             self.automatic_base_error_label.setVisible(
                 bool(self.automatic_base_error_label.text().strip())
             )
@@ -8918,6 +8972,11 @@ class MainWindow(QMainWindow):
             if sender is setting.editor:
                 self._last_changed_setting_name = name
                 changed_setting_name = name
+                if name == "manual_base_width_mm":
+                    self._manual_base_width_session_value = float(
+                        setting.editor.value()
+                    )
+                    self._manual_base_width_user_override = True
                 # A later ordinary edit supersedes a previously queued reset.
                 self._pending_reset_setting_name = None
                 break
@@ -8961,6 +9020,11 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def _on_individual_reset(self, _setting_name: str) -> None:
+        if _setting_name == "manual_base_width_mm":
+            self._manual_base_width_session_value = (
+                self._automatic_base_width_mm()
+            )
+            self._manual_base_width_user_override = False
         self._last_changed_setting_name = _setting_name
         self._pending_reset_setting_name = _setting_name
         self._on_value_changed(None)
@@ -9118,14 +9182,24 @@ class MainWindow(QMainWindow):
         if self._closing:
             return
         automatic = self.automatic_base_checkbox.isChecked()
+        if self._automatic_base_width_active and not automatic:
+            # Entering manual mode starts at the current automatic default
+            # unless the user has already supplied a manual value this session.
+            if not self._manual_base_width_user_override:
+                self._manual_base_width_session_value = (
+                    self._automatic_base_width_mm()
+                )
+        elif not self._automatic_base_width_active and automatic:
+            self._manual_base_width_session_value = float(
+                self.manual_base_width_spin.value()
+            )
+        self._automatic_base_width_active = automatic
         self._last_changed_setting_name = "automatic_base_width"
         self._pending_reset_setting_name = None
         self._feasibility_request_id += 1
         self._cancel_feasibility_jobs()
-        self.manual_base_width_spin.setEnabled(not automatic)
-        self._setting_widgets["manual_base_width_mm"].setVisible(not automatic)
         self.automatic_base_width_label.hide()
-        self.automatic_base_reset_button.setVisible(not automatic)
+        self.automatic_base_reset_button.setVisible(True)
         self.profile_feasibility = None
         self._invalidate_preview("Die Standfußberechnung wurde geändert.")
         self._update_automatic_base_width_preview()
@@ -10359,11 +10433,18 @@ class MainWindow(QMainWindow):
             self,
             output_root=self.output_root_edit.text(),
             default_output_root=str(self.default_output_root),
+            maximum_separate_slices=self.maximum_separate_slices,
+            default_maximum_separate_slices=(
+                self.default_maximum_separate_slices
+            ),
             default_maximum_joint_slices=self.default_maximum_joint_slices,
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
         dialog.show_limits_checkbox.setChecked(self.show_setting_limits)
         dialog.limits_applied.connect(self._apply_show_setting_limits)
+        dialog.separate_value_applied.connect(
+            self._apply_maximum_separate_slices
+        )
         dialog.value_applied.connect(self._apply_maximum_joint_slices)
         self._joint_slice_settings_dialog = dialog
         dialog.finished.connect(
@@ -10397,6 +10478,17 @@ class MainWindow(QMainWindow):
         dialog.adjustSize()
         dialog.setFixedSize(dialog.sizeHint())
         self._place_dialog_centered(dialog)
+
+    @Slot(int)
+    def _apply_maximum_separate_slices(self, value: int) -> None:
+        normalized = max(1, min(25, int(value)))
+        if normalized == self.maximum_separate_slices:
+            return
+        self.maximum_separate_slices = normalized
+        self._save_user_settings()
+        self._invalidate_preview(
+            "Die maximale Anzahl getrennter Slices wurde geändert."
+        )
 
     @Slot(int)
     def _apply_maximum_joint_slices(self, value: int) -> None:
@@ -10947,6 +11039,11 @@ class MainWindow(QMainWindow):
         }
 
     def collect_settings(self) -> GenerationSettings:
+        manual_base_width = (
+            self.manual_base_width_spin.value()
+            if not self.automatic_base_checkbox.isChecked()
+            else self._manual_base_width_session_value
+        )
         return GenerationSettings(
             target_layer_time_s=self.target_time_spin.value(),
             layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
@@ -10960,7 +11057,7 @@ class MainWindow(QMainWindow):
             base_margin_mm=self.base_margin_spin.value(),
             base_height_factor=self.base_height_factor_spin.value(),
             automatic_base_width=self.automatic_base_checkbox.isChecked(),
-            manual_base_width_mm=self.manual_base_width_spin.value(),
+            manual_base_width_mm=manual_base_width,
             minimum_radius_height_factor=(
                 self.minimum_radius_height_factor_spin.value()
             ),
@@ -10977,6 +11074,17 @@ class MainWindow(QMainWindow):
         )
 
     def apply_settings(self, settings: GenerationSettings) -> None:
+        self._manual_base_width_session_value = float(
+            settings.manual_base_width_mm
+        )
+        self._manual_base_width_user_override = (
+            not settings.automatic_base_width
+            or abs(
+                settings.manual_base_width_mm
+                - self.default_settings.manual_base_width_mm
+            )
+            > 1e-9
+        )
         values = (
             (self.target_time_spin, settings.target_layer_time_s),
             (self.layer_time_tolerance_spin, settings.layer_time_tolerance_s),
@@ -11024,13 +11132,9 @@ class MainWindow(QMainWindow):
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
         )
-        self._setting_widgets["manual_base_width_mm"].setVisible(
-            not settings.automatic_base_width
-        )
+        self._automatic_base_width_active = settings.automatic_base_width
         self.automatic_base_width_label.hide()
-        self.automatic_base_reset_button.setVisible(
-            not settings.automatic_base_width
-        )
+        self.automatic_base_reset_button.setVisible(True)
         self._update_expansion_angle_warning()
         self._update_automatic_base_width_preview()
 
@@ -11060,20 +11164,7 @@ class MainWindow(QMainWindow):
         ):
             group.set_summary("")
         output_text = self.output_root_edit.text().strip()
-        manual_base_modified = (
-            abs(
-                self.manual_base_width_spin.value()
-                - self.default_settings.manual_base_width_mm
-            )
-            > 1e-9
-        )
-        self.automatic_base_reset_button.setProperty(
-            "modified", manual_base_modified
-        )
-        self.automatic_base_reset_button.setVisible(
-            not self.automatic_base_checkbox.isChecked()
-        )
-        self.automatic_base_reset_button.setEnabled(manual_base_modified)
+        self.automatic_base_reset_button.setVisible(True)
         output_modified = output_text != str(self.default_output_root)
         self.output_root_reset_button.setProperty("modified", output_modified)
         self.output_root_reset_button.setEnabled(output_modified)
@@ -11084,6 +11175,37 @@ class MainWindow(QMainWindow):
         self._update_automatic_base_width_preview()
 
     def _update_automatic_base_width_preview(self) -> None:
+        width = self._automatic_base_width_mm()
+        if (
+            not self.automatic_base_checkbox.isChecked()
+            and self._manual_base_width_user_override
+        ):
+            displayed_width = self._manual_base_width_session_value
+        else:
+            displayed_width = width
+            if not self.automatic_base_checkbox.isChecked():
+                self._manual_base_width_session_value = width
+
+        self.manual_base_width_spin.blockSignals(True)
+        self.manual_base_width_spin.setValue(displayed_width)
+        self.manual_base_width_spin.blockSignals(False)
+        if self.automatic_base_checkbox.isChecked():
+            self.manual_base_width_spin.lineEdit().deselect()
+        self.manual_base_width_spin.setEnabled(
+            not self.automatic_base_checkbox.isChecked()
+        )
+        automatic_preview = self.automatic_base_checkbox.isChecked()
+        if (
+            self.manual_base_width_spin.property("automaticPreview")
+            != automatic_preview
+        ):
+            self.manual_base_width_spin.setProperty(
+                "automaticPreview", automatic_preview
+            )
+            self._refresh_widget_style(self.manual_base_width_spin)
+        self.automatic_base_reset_button.setVisible(True)
+        self.manual_base_width_setting.refresh_reset_state()
+
         if self.automatic_base_checkbox.isChecked():
             object_height = (
                 self.analysis_snapshot.maximum_print_z_mm
@@ -11092,14 +11214,11 @@ class MainWindow(QMainWindow):
             )
             if object_height is None:
                 self.automatic_base_width_label.setText(
-                    "Automatische Breite: mindestens 20,00 mm; der genaue "
+                    "Automatische Breite: 20,00 bis höchstens 100,00 mm; "
+                    "der genaue "
                     "Wert folgt aus der ermittelten Modellhöhe."
                 )
             else:
-                width = max(
-                    MINIMUM_BASE_WIDTH_MM,
-                    object_height * BASE_WIDTH_PER_OBJECT_HEIGHT,
-                )
                 self.automatic_base_width_label.setText(
                     f"Automatische Breite bei {object_height:.2f} mm "
                     f"{self._source_height_description()}: {width:.2f} mm "
@@ -11108,8 +11227,24 @@ class MainWindow(QMainWindow):
         else:
             self.automatic_base_width_label.setText(
                 f"Manuelle Standfußbreite: "
-                f"{self.manual_base_width_spin.value():.2f} mm"
+                f"{displayed_width:.2f} mm"
             )
+
+    def _automatic_base_width_mm(self) -> float:
+        object_height = (
+            self.analysis_snapshot.maximum_print_z_mm
+            if self.analysis_snapshot is not None
+            else None
+        )
+        if object_height is None or object_height <= 0.0:
+            return MINIMUM_BASE_WIDTH_MM
+        return min(
+            MAXIMUM_BASE_WIDTH_MM,
+            max(
+                MINIMUM_BASE_WIDTH_MM,
+                object_height * BASE_WIDTH_PER_OBJECT_HEIGHT,
+            ),
+        )
     def _source_height_description(self) -> str:
         if self.current_source_kind is SourceKind.STL:
             return "Höhe des automatisch geslicten Modells"
@@ -11203,6 +11338,8 @@ class MainWindow(QMainWindow):
         range_invalid_names: set[str] = set()
         for name, setting in self._setting_widgets.items():
             if not hasattr(settings, name):
+                continue
+            if name == "manual_base_width_mm" and settings.automatic_base_width:
                 continue
             if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
                 continue
@@ -11851,8 +11988,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self._update_isolated_slice_progress(status)
 
-    @staticmethod
-    def _isolated_slice_progress(status: str, fallback: int) -> int:
+    def _isolated_slice_progress(self, status: str, fallback: int) -> int:
         match = re.search(
             r"getrennt(?:er|en)\w*\s+(?:Kühlturm-)?Slice\s+(\d+)\s*/\s*(\d+)",
             status,
@@ -11865,8 +12001,8 @@ class MainWindow(QMainWindow):
             return round(max(0, current - 1) / max(1, maximum) * 100)
         match = re.search(r"Slicer-Ergebnis\s+(\d+)\s*/", status, re.IGNORECASE)
         if match is not None:
-            current = min(GENERATION_NORMAL_SLICES, int(match.group(1)))
-            return round(current / GENERATION_NORMAL_SLICES * 100)
+            current = min(self.maximum_separate_slices, int(match.group(1)))
+            return round(current / self.maximum_separate_slices * 100)
         return max(0, min(99, int(fallback)))
 
     def _update_isolated_slice_progress(
@@ -12832,18 +12968,7 @@ class MainWindow(QMainWindow):
         self._refresh_last_export_report_action()
 
     def _has_non_default_settings(self) -> bool:
-        if self.collect_settings() != self.settings_store.load_defaults():
-            return True
-        if self.maximum_joint_slices != self.default_maximum_joint_slices:
-            return True
-        try:
-            selected_output = Path(
-                self.output_root_edit.text()
-            ).expanduser().resolve()
-            default_output = self.settings_store.load_default_output_root()
-            return selected_output != default_output
-        except OSError:
-            return True
+        return self.collect_settings() != self.settings_store.load_defaults()
 
     def request_reset_defaults(self) -> None:
         if not self._has_non_default_settings():
@@ -12858,8 +12983,9 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("Standardwerte wiederherstellen?")
         box.setIcon(QMessageBox.Icon.Warning)
         box.setText(
-            "Alle abweichenden Einstellungen werden auf ihre Standardwerte "
-            "zurückgesetzt. Die bisherigen Änderungen gehen dadurch verloren."
+            "Alle abweichenden Einstellungen außerhalb der allgemeinen "
+            "Einstellungen werden auf ihre Standardwerte zurückgesetzt. "
+            "Die bisherigen Änderungen gehen dadurch verloren."
         )
         yes_button = box.addButton("Ja", QMessageBox.ButtonRole.AcceptRole)
         no_button = box.addButton("Nein", QMessageBox.ButtonRole.RejectRole)
@@ -12881,11 +13007,6 @@ class MainWindow(QMainWindow):
         if self.analysis_snapshot is not None:
             self._update_local_window_layer_limit(self.analysis_snapshot.layer_count)
             self._setting_widgets["local_reference_window"].refresh_reset_state()
-        self.maximum_joint_slices = self.default_maximum_joint_slices
-        self._apply_show_setting_limits(False)
-        self.output_root_edit.setText(
-            str(self.settings_store.load_default_output_root())
-        )
         self._pending_preview_camera_state = None
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.reset_camera()
@@ -12910,6 +13031,7 @@ class MainWindow(QMainWindow):
                 window_x=window_position.x(),
                 window_y=window_position.y(),
                 preview_iterations=self.preview_iterations,
+                maximum_separate_slices=self.maximum_separate_slices,
                 maximum_joint_slices=self.maximum_joint_slices,
                 show_setting_limits=self.show_setting_limits,
                 preview_camera=(
