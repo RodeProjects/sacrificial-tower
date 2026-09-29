@@ -35,6 +35,7 @@ class GenerationSettings:
     maximum_outer_diameter_mm: float
     minimum_object_tower_distance_mm: float
     simulate_full_tower_infill: bool
+    simulate_tower_without_supports: bool
 
     minimum_base_radius_mm: float
     _legacy_base_height_mm: float = field(repr=False, compare=False)
@@ -73,6 +74,7 @@ class GenerationSettings:
         maximum_outer_diameter_mm: float | object = _UNSET,
         minimum_object_tower_distance_mm: float = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"],
         simulate_full_tower_infill: bool = GENERATION_DEFAULTS["simulate_full_tower_infill"],
+        simulate_tower_without_supports: bool = GENERATION_DEFAULTS["simulate_tower_without_supports"],
         minimum_base_radius_mm: float = GENERATION_DEFAULTS["minimum_base_radius_mm"],
         base_margin_mm: float = GENERATION_DEFAULTS["base_margin_mm"],
         base_height_factor: float = GENERATION_DEFAULTS["base_height_factor"],
@@ -114,6 +116,7 @@ class GenerationSettings:
             "maximum_outer_diameter_mm": maximum_outer_diameter_mm,
             "minimum_object_tower_distance_mm": minimum_object_tower_distance_mm,
             "simulate_full_tower_infill": simulate_full_tower_infill,
+            "simulate_tower_without_supports": simulate_tower_without_supports,
             "minimum_base_radius_mm": minimum_base_radius_mm,
             "base_margin_mm": base_margin_mm,
             "base_height_factor": base_height_factor,

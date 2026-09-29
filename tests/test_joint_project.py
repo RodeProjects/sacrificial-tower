@@ -82,7 +82,7 @@ class PlacementAndProjectTests(unittest.TestCase):
         store = UserSettingsStore(user, defaults)
         settings, payload = store.load()
 
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 19)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 21)
         self.assertEqual(settings.minimum_object_tower_distance_mm, 5.0)
         self.assertEqual(
             payload["generation"]["minimum_object_tower_distance_mm"],
@@ -215,6 +215,62 @@ class PlacementAndProjectTests(unittest.TestCase):
             values[4][TOWER_INFILL_PATTERN_KEY],
             TOWER_FULL_INFILL_PATTERN,
         )
+
+    def test_support_override_is_only_on_tower_in_joint_project(self) -> None:
+        source = self.root / "source_support.stl"
+        tower = self.root / "tower_support.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source)
+        trimesh.creation.cylinder(radius=4, height=5, sections=25).export(tower)
+        placement = TowerPlacement(
+            80.0, 80.0, 4.0, BedBounds(0, 200, 0, 200), 25.0
+        )
+        first = self.root / "support_template.3mf"
+        build_joint_project(
+            source, tower, first,
+            occupied=OccupiedBounds(40, 50, 40, 50),
+            placement=placement,
+            tower_full_infill=False,
+            tower_supports_disabled=True,
+        )
+        self.assertEqual(validate_joint_project(
+            first, tower_full_infill=False, tower_supports_disabled=True
+        ), (2, 4))
+        native_template = self.root / "support_native_template.3mf"
+        with zipfile.ZipFile(first) as original, zipfile.ZipFile(native_template, "w") as rewritten:
+            for entry in original.infolist():
+                data = original.read(entry.filename)
+                if entry.filename == MODEL_SETTINGS_PATH:
+                    config = ElementTree.fromstring(data)
+                    for item in config.findall("object"):
+                        if item.get("id") == "2":
+                            ElementTree.SubElement(
+                                item, "metadata", {"key": "enable_support", "value": "1"}
+                            )
+                        elif item.get("id") == "4":
+                            for metadata in item.findall("metadata"):
+                                if metadata.get("key") == "enable_support":
+                                    metadata.set("value", "1")
+                    data = ElementTree.tostring(config, encoding="utf-8", xml_declaration=True)
+                rewritten.writestr(entry, data)
+        final = self.root / "support_final.3mf"
+        finalize_slicer_project(
+            native_template, source, tower, final,
+            occupied=OccupiedBounds(40, 50, 40, 50),
+            placement=placement,
+            tower_full_infill=False,
+            tower_supports_disabled=True,
+        )
+        with zipfile.ZipFile(final) as archive:
+            config = ElementTree.fromstring(archive.read(MODEL_SETTINGS_PATH))
+        values = {
+            int(item.get("id")): {
+                meta.get("key"): meta.get("value")
+                for meta in item.findall("metadata")
+            }
+            for item in config.findall("object")
+        }
+        self.assertEqual(values[2]["enable_support"], "1")
+        self.assertEqual(values[4]["enable_support"], "0")
 
     def test_slicer_project_finalization_reassigns_positions_by_role(self) -> None:
         source = self.root / "source.stl"

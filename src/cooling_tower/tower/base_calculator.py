@@ -4,8 +4,9 @@ import math
 
 
 MINIMUM_BASE_WIDTH_MM = 20.0
-MAXIMUM_BASE_WIDTH_MM = 100.0
-BASE_WIDTH_PER_OBJECT_HEIGHT = 0.2
+MINIMUM_AUTOMATIC_BASE_WIDTH_MM = 25.0
+MAXIMUM_BASE_WIDTH_MM = 80.0
+BASE_WIDTH_PER_OBJECT_HEIGHT = 0.21
 
 
 def calculate_phase10_base_outer_radius(
@@ -16,9 +17,9 @@ def calculate_phase10_base_outer_radius(
 ) -> float:
     """Return the Phase-10 stand width as an outer radius.
 
-    In automatic mode the diameter follows 0.2 mm per millimetre of the
-    analyzed G-code object's full height, bounded to 20–100 mm. A manual
-    diameter must also remain in that range. The base is deliberately allowed
+    In automatic mode the diameter follows 0.21 mm per millimetre of the
+    analyzed G-code object's full height, bounded to 25–80 mm. A manual
+    diameter must remain within 20–80 mm. The base is deliberately allowed
     to be wider than the regular maximum outer radius.
     """
     if not math.isfinite(object_height_mm) or object_height_mm <= 0.0:
@@ -46,7 +47,7 @@ def calculate_phase10_base_outer_radius(
         diameter_mm = min(
             MAXIMUM_BASE_WIDTH_MM,
             max(
-                MINIMUM_BASE_WIDTH_MM,
+                MINIMUM_AUTOMATIC_BASE_WIDTH_MM,
                 object_height_mm * BASE_WIDTH_PER_OBJECT_HEIGHT,
             ),
         )

@@ -164,6 +164,10 @@ Store-spezifische Variante der Distributionsdatei.
   verwenden und eine gültige Signatur besitzen.
 - Der Installer wird vollständig heruntergeladen und gegen Dateigröße und
   SHA-256 aus dem signierten Manifest geprüft.
+- Während des Downloads kann der Vorgang abgebrochen werden; die unvollständige
+  Datei und ihr temporärer Ordner werden entfernt. Nach erfolgreicher Prüfung
+  läuft ein zehnsekündiger Neustart-Countdown, der ebenfalls abgebrochen werden
+  kann. In diesem Fall wird der bereits geladene Installer entfernt.
 - HTTPS-Zertifikate werden über den nativen Windows-Zertifikatsspeicher
   geprüft.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung

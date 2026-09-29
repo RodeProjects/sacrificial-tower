@@ -3,9 +3,17 @@ from __future__ import annotations
 
 SETTING_INFO_TEXTS = {
     "layer_time_tolerance_s": (
-        "Zulässige Abweichung von der gewünschten Layerzeit nach oben und unten.\n\n"
-        "Bereich: 0,1 bis 3 Sekunden;\n\nStandard: 0,25 Sekunden.\n\n"
-        "Eine kleinere Toleranz kann mehr Kalibrierungsdurchläufe benötigen."
+        '<p align="left" style="margin-top:0; margin-bottom:0px;">'
+        '<b>Layerzeit-Toleranz</b></p>'
+        '<p style="margin-top:0; margin-bottom:10px;">'
+        '&#8226; <b>Bedeutung:</b> Dieser Wert bestimmt, wie weit die erreichte '
+        'Layerzeit von der gewünschten Layerzeit abweichen darf, damit das '
+        'Ergebnis noch als zufriedenstellend gilt.<br>'
+        '&#8226; <b>Bereich:</b> 0,1 bis 3 Sekunden.<br>'
+        '&#8226; <b>Standard:</b> 0,25 Sekunden.</p>'
+        '<p style="margin-top:0; margin-bottom:0px;">'
+        '* Eine kleinere Toleranz kann mehr Kalibrierungsdurchläufe '
+        'erfordern.</p>'
     ),
     "target_layer_time_s": (
         "Kürzeste gewünschte Druckzeit je Layer. Der Kühlturm ergänzt "
@@ -24,7 +32,7 @@ SETTING_INFO_TEXTS = {
     ),
     "manual_base_width_mm": (
         "Außendurchmesser des Standfußes bei deaktivierter Automatik. "
-        "Mindestens 20 mm und höchstens 100 mm sind zulässig."
+        "Mindestens 20 mm und höchstens 80 mm sind zulässig."
     ),
     "maximum_expansion_angle_deg": (
         "Größter zulässiger Winkel, mit dem sich der Turm nach außen "

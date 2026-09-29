@@ -335,11 +335,12 @@ class PreviewDialog(QDialog):
         self.state = PreviewState.BUILDING
         self.canvas.set_navigation_enabled(False)
         retained_scene = self.canvas.scene is not None
+        retained_tower = bool(retained_scene and self.canvas.scene.tower_segments)
         self.state_label.setText(
             "⚠ Bisherige Vorschau veraltet – neue Vorschau wird erstellt …"
-            if retained_scene else "⏳ Vorschau wird erstellt …"
+            if retained_tower else "⏳ Vorschau wird erstellt …"
         )
-        self.state_label.setProperty("state", "stale" if retained_scene else "building")
+        self.state_label.setProperty("state", "stale" if retained_tower else "building")
         self.state_label.setVisible(not self.embedded or self.canvas.scene is not None)
         self._refresh_state_style()
         self.progress.setRange(0, 100)
@@ -362,6 +363,7 @@ class PreviewDialog(QDialog):
             return
         self._intermediate_scene_active = True
         self.canvas.set_scene(scene)
+        self.tower_legend.setVisible(bool(scene.tower_segments))
         self.canvas.side_view()
         bed = scene.bed_bounds
         self._set_scene_information(
@@ -371,9 +373,34 @@ class PreviewDialog(QDialog):
         )
         self._set_preview_controls_visible(True)
 
+    def set_original_object(self, scene: PreviewScene) -> None:
+        """Display the analyzed source without presenting it as a tower result."""
+        self._intermediate_scene_active = False
+        self._scene_before_build = None
+        self.state = PreviewState.EMPTY
+        self.canvas.set_scene(scene)
+        self.canvas.three_quarter_view()
+        self.state_label.setText("Originalobjekt aus dem Pre-Slice · noch kein Kühlturm")
+        self.state_label.setProperty("state", "empty")
+        self.state_label.show()
+        self._refresh_state_style()
+        self._set_scene_information(
+            scene,
+            bed_width_mm=scene.bed_bounds.maximum_x_mm - scene.bed_bounds.minimum_x_mm,
+            bed_depth_mm=scene.bed_bounds.maximum_y_mm - scene.bed_bounds.minimum_y_mm,
+        )
+        self.tower_legend.hide()
+        self.progress.hide()
+        self.progress_status_widget.hide()
+        self._set_preview_controls_visible(True)
+
     def _restore_scene_before_build(self) -> None:
         if self._intermediate_scene_active:
             self.canvas.set_scene(self._scene_before_build)
+            self.tower_legend.setVisible(bool(
+                self._scene_before_build is not None
+                and self._scene_before_build.tower_segments
+            ))
             if self._scene_before_build is not None:
                 bed = self._scene_before_build.bed_bounds
                 self._set_scene_information(
@@ -395,6 +422,7 @@ class PreviewDialog(QDialog):
         self._scene_before_build = None
         self.state = PreviewState.CURRENT
         self.canvas.set_scene(result.scene)
+        self.tower_legend.show()
         self.canvas.side_view()
         self.state_label.setText("✓ Vorschau ist aktuell")
         self.state_label.setProperty("state", "current")
@@ -544,6 +572,11 @@ class PreviewDialog(QDialog):
             self.state_label.setText("Vorschau wurde noch nicht erstellt.")
             self.state_label.setProperty("state", "empty")
             self.state_label.setVisible(not self.embedded)
+        elif not self.canvas.scene.tower_segments:
+            self.state = PreviewState.EMPTY
+            self.state_label.setText("Originalobjekt aus dem Pre-Slice · noch kein Kühlturm")
+            self.state_label.setProperty("state", "empty")
+            self.state_label.setVisible(not self.embedded)
         else:
             self.state = PreviewState.STALE
             self.state_label.setText(
@@ -624,7 +657,11 @@ class PreviewDialog(QDialog):
         if self.embedded:
             full_text = self.state_label.text()
             self.state_label.setToolTip(full_text)
-            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "⚠ Veraltet" if self._scene_before_build is not None else "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
+            retained_tower = bool(
+                self._scene_before_build is not None
+                and self._scene_before_build.tower_segments
+            )
+            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "⚠ Veraltet" if retained_tower else "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
             self.state_label.setText(captions.get(self.state, full_text))
             self.state_label.setVisible(
                 self.state not in {PreviewState.EMPTY, PreviewState.FAILED}
@@ -683,6 +720,24 @@ class PreviewDialog(QDialog):
             self.quality_details_toggle.setVisible(has_details)
             self.quality_details_label.setVisible(
                 has_details and self.quality_details_toggle.isChecked()
+            )
+        if self.embedded:
+            # During generation a scene update and its slice result arrive in
+            # the same event-loop turn. Do not let the parent card stretch this
+            # panel to a stale height before its own layout catches up.
+            old_minimum_height = self.minimumHeight()
+            old_maximum_height = self.maximumHeight()
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+            own_layout = self.layout()
+            if own_layout is not None:
+                own_layout.invalidate()
+                own_layout.activate()
+            if building:
+                self.setFixedHeight(self.sizeHint().height())
+            changed = changed or (
+                self.minimumHeight() != old_minimum_height
+                or self.maximumHeight() != old_maximum_height
             )
         if changed:
             own_layout = self.layout()

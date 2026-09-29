@@ -7,7 +7,7 @@ from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 19
+SETTINGS_SCHEMA_VERSION = 21
 _CONFIG_METADATA_KEYS = {
     "settings_schema_version",
     "default_output_root",

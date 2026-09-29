@@ -2,6 +2,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import unittest
 from unittest.mock import PropertyMock, patch
@@ -9,12 +10,17 @@ from unittest.mock import PropertyMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtWidgets import QApplication
+from cooling_tower.models import OccupiedBounds
+from cooling_tower.preview import LineSegment3D, Point3D
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.models import SourceKind
 from cooling_tower.persistence import PreSliceCache
 from cooling_tower.services import SourcePreSliceError, build_preslice_cache_key
 from cooling_tower.slicers import ProfileConfirmation, ProfileCatalog
-from cooling_tower.slicers.support_simulation import can_offer_support_simulation, with_simulated_supports
+from cooling_tower.slicers.support_simulation import (
+    can_offer_support_simulation, tower_support_warning_angle,
+    with_simulated_supports,
+)
 from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.preview import PreviewExportResult, OutputMode
 import test_source_preslice as preslice_tests
@@ -106,6 +112,32 @@ class SupportSimulationTests(unittest.TestCase):
             self.assertEqual(values['support_threshold_angle'], '23')
             self.assertEqual(overrides['enable_support'], '1')
 
+    def test_tower_support_threshold_converts_horizontal_to_vertical(self):
+        profile = self.fixture.match.selected.effective_profile
+        profile = replace(profile, effective_values={
+            **profile.effective_values,
+            'enable_support': '1',
+            'support_threshold_angle': '23',
+        })
+        self.assertEqual(tower_support_warning_angle(profile), 67.0)
+        self.assertIsNone(tower_support_warning_angle(replace(
+            profile, effective_values={**profile.effective_values, 'enable_support': '0'}
+        )))
+        self.assertIsNone(tower_support_warning_angle(replace(
+            profile, effective_values={**profile.effective_values, 'support_threshold_angle': '0'}
+        )))
+
+    def test_tower_support_override_only_changes_disposable_profile(self):
+        profile = with_simulated_supports(self.fixture.match.selected.effective_profile)
+        copied, overrides = build_calibration_profile(
+            profile, self.fixture.app_root / 'without_supports',
+            simulate_tower_without_supports=True, resolved_profiles=(),
+        )
+        values = json.loads(copied.process.path.read_text(encoding='utf-8'))
+        self.assertEqual(values['enable_support'], '0')
+        self.assertEqual(overrides['enable_support'], '0')
+        self.assertTrue(profile.supports_simulated)
+
     def make_window(self):
         f = self.fixture
         window = MainWindow(user_settings_path=f.app_root / 'settings.json',
@@ -117,6 +149,140 @@ class SupportSimulationTests(unittest.TestCase):
         window.confirmed_profile_context = f.confirmation
         window._preslice_request_id = 12
         return window
+
+    def test_angle_warning_appears_at_threshold_and_respects_override(self):
+        window = self.make_window()
+        self.addCleanup(window.close)
+        selected = window.profile_match_result.selected
+        profile = replace(selected.effective_profile, effective_values={
+            **selected.effective_profile.effective_values,
+            'enable_support': '1', 'support_threshold_angle': '23',
+        })
+        window.profile_match_result = replace(
+            window.profile_match_result,
+            selected=replace(selected, effective_profile=profile),
+        )
+        window.source_preslice_result = SimpleNamespace(supports_simulated=False)
+        self.addCleanup(lambda: setattr(window, 'source_preslice_result', None))
+        spin = window.maximum_expansion_angle_spin
+        spin.blockSignals(True)
+        spin.setValue(66)
+        window._update_expansion_angle_warning()
+        self.assertFalse(any('67°' in text for text in
+                             window.maximum_expansion_angle_setting._warning_messages))
+        spin.setValue(67)
+        spin.blockSignals(False)
+        window._update_expansion_angle_warning()
+        self.assertTrue(any('67°' in text for text in
+                            window.maximum_expansion_angle_setting._warning_messages))
+        checkbox = window.simulate_tower_without_supports_checkbox
+        checkbox.blockSignals(True)
+        checkbox.setChecked(True)
+        checkbox.blockSignals(False)
+        window._update_expansion_angle_warning()
+        self.assertFalse(any('67°' in text for text in
+                             window.maximum_expansion_angle_setting._warning_messages))
+
+    def test_support_warning_reflows_after_repeated_checkbox_changes(self):
+        window = self.make_window()
+        self.addCleanup(window.close)
+        window.resize(900, 900)
+        window.show()
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded('STL', analysis_complete=True)
+        window.workflow.slicer_succeeded('Testslicer')
+        window.workflow.complete_preparation()
+        selected = window.profile_match_result.selected
+        profile = replace(selected.effective_profile, effective_values={
+            **selected.effective_profile.effective_values,
+            'enable_support': '1', 'support_threshold_angle': '23',
+        })
+        window.profile_match_result = replace(
+            window.profile_match_result,
+            selected=replace(selected, effective_profile=profile),
+        )
+        window.source_preslice_result = SimpleNamespace(supports_simulated=False)
+        self.addCleanup(lambda: setattr(window, 'source_preslice_result', None))
+        support_row = window.simulate_tower_without_supports_checkbox.parentWidget()
+        timing_layout = window.timing_group.content_layout
+        infill_row = window.full_infill_checkbox.parentWidget()
+        self.assertEqual(timing_layout.indexOf(support_row), timing_layout.indexOf(infill_row) + 1)
+        self.assertEqual(
+            window.simulate_tower_without_supports_checkbox.text(),
+            'Deaktivierte Turmstützen simulieren',
+        )
+        self.assertEqual(support_row.height(), infill_row.height())
+        self.assertEqual(
+            window.simulate_tower_without_supports_checkbox.height(),
+            window.full_infill_checkbox.height(),
+        )
+
+        spin = window.maximum_expansion_angle_spin
+        row = window.maximum_expansion_angle_setting
+        following = window._setting_widgets['maximum_contraction_angle_deg']
+        checkbox = window.simulate_tower_without_supports_checkbox
+        spin.setValue(69)
+        self.app.processEvents()
+        self.assertIn(
+            'Aktiviere die Einstellung <b>„Deaktivierte Turmstützen simulieren“</b>, '
+            'um dies zu verhindern.',
+            row.message_label.text(),
+        )
+        self.assertIn('<br>', row.message_label.text())
+        expanded_height = row.height()
+        expanded_card_height = window.geometry_settings_group.height()
+        self.assertLess(row.geometry().bottom(), following.geometry().top())
+
+        for checked, angle in ((True, 67), (False, 67), (True, 69), (False, 69)):
+            checkbox.setChecked(checked)
+            spin.setValue(angle)
+            self.app.processEvents()
+            self.assertEqual('67°' in row.message_label.text(), not checked)
+            self.assertLess(row.geometry().bottom(), following.geometry().top())
+            self.assertLessEqual(row.message_container.geometry().bottom(), row.height())
+            if checked:
+                self.assertLess(row.height(), expanded_height)
+                self.assertLess(window.geometry_settings_group.height(), expanded_card_height)
+            else:
+                self.assertGreaterEqual(row.height(), expanded_height)
+                self.assertGreaterEqual(window.geometry_settings_group.height(), expanded_card_height)
+
+    def test_original_preview_explains_missing_tower_above_divider(self):
+        window = self.make_window()
+        self.addCleanup(window.close)
+        window.show()
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded('STL', analysis_complete=True)
+        window.workflow.slicer_succeeded('Testslicer')
+        window.workflow.complete_preparation()
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        window.source_preslice_result = SimpleNamespace(
+            supports_simulated=False,
+            preview_source_data=SimpleNamespace(
+                object_segments=(segment,), source_segment_count=1,
+                occupied_bounds=OccupiedBounds(1, 2, 1, 2),
+            ),
+        )
+        self.addCleanup(lambda: setattr(window, 'source_preslice_result', None))
+        window.analysis_snapshot = SimpleNamespace(maximum_print_z_mm=0.2, layer_count=1)
+        window._show_original_object_preview()
+        self.app.processEvents()
+        self.assertEqual(
+            (window.preview_dialog.canvas.yaw_deg,
+             window.preview_dialog.canvas.pitch_deg),
+            (-38.0, 28.0),
+        )
+        self.assertFalse(window.generation_intro_label.isHidden())
+        self.assertEqual(
+            window.generation_intro_label.text(),
+            'Die Vorschau zeigt derzeit nur das übergebene Originalobjekt, '
+            'da noch kein Kühlturm generiert wurde.',
+        )
+        self.assertLess(
+            window.generation_intro_label.geometry().bottom(),
+            window.prediction_preview_divider.geometry().top(),
+        )
+        self.assertFalse(window.preview_dialog.canvas.scene.tower_segments)
 
     def test_popup_accept_cancel_and_stale_response(self):
         for action in ('accept', 'cancel', 'stale'):
@@ -229,6 +395,7 @@ class SupportSimulationTests(unittest.TestCase):
                 user_report_path=f.root/'summary.txt', calibrated=True, slicer_optimized=True,
                 minimum_verified_layer_time_s=10, source_sha256='a', output_sha256='b',
                 supports_simulated=True, full_tower_infill_simulated=True,
+                tower_supports_disabled_simulated=True,
                 project_path=f.root/'project.3mf')
             with patch.object(window, '_show_internal_dialog_without_flash'):
                 window._show_export_success_dialog(result)
@@ -236,6 +403,7 @@ class SupportSimulationTests(unittest.TestCase):
                 self.assertIn('Stützen wurden simuliert', text)
                 self.assertIn('in der exportierten 3MF aktiviert', text)
                 self.assertIn('100%-Turmfüllung simuliert', text)
+                self.assertIn('Deaktivierte Turmstützen simuliert', text)
                 window._show_export_success_dialog(replace(result, project_path=None))
                 self.assertTrue(window.export_success_simulation_frame.isHidden())
                 window._show_export_success_dialog(replace(result, supports_simulated=False))

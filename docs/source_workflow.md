@@ -189,6 +189,10 @@ Bestätigung. Er arbeitet ausschließlich in einem markierten Verzeichnis
 5. Erst danach entsteht ein `PreparedAnalysisSource`; Fehler und Abbruch
    bereinigen unvollständige Arbeitsdaten.
 
+Die G-Code-Analyse sammelt zugleich die Druckbahnen für die 3D-Vorschau des
+Originalobjekts. Bis zu einer erfolgreichen Turmgenerierung und nach deren
+Abbruch bleibt diese Objektvorschau mit allen Ansichtsbuttons sichtbar.
+
 Ausgabe- und Cachepfade dürfen weder in einem Slicerverzeichnis noch direkt
 neben der Benutzer-STL liegen. Hashprüfungen vor und nach dem Vorgang sichern
 die Unverändertheit der Quelle und aller verwendeten Profile ab. Technische

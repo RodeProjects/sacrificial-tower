@@ -467,7 +467,7 @@ class NumericSettingWidgetTests(GuiCase):
             self.window.geometry_settings_group,
         ):
             group.setChecked(True)
-        self.assertEqual(len(self.window._setting_widgets), 8)
+        self.assertEqual(len(self.window._setting_widgets), 7)
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
             self.assertIn("Standardwert", setting.reset_button.toolTip())
@@ -554,13 +554,13 @@ class NumericSettingWidgetTests(GuiCase):
         self.window.automatic_base_checkbox.setChecked(False)
         self.assertFalse(self.window.automatic_base_reset_button.isHidden())
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
-        changed_width = self.window.default_settings.manual_base_width_mm + 5.0
+        changed_width = self.window._automatic_base_width_mm() + 5.0
         self.window.manual_base_width_spin.setValue(changed_width)
         self.assertTrue(self.window.automatic_base_reset_button.isEnabled())
         self.window.automatic_base_reset_button.click()
         self.assertEqual(
             self.window.manual_base_width_spin.value(),
-            self.window.default_settings.manual_base_width_mm,
+            self.window._automatic_base_width_mm(),
         )
         self.assertFalse(self.window.automatic_base_checkbox.isChecked())
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
@@ -613,18 +613,20 @@ class NumericSettingWidgetTests(GuiCase):
 
         self.window.automatic_base_checkbox.setChecked(True)
         self.assertFalse(self.window.manual_base_width_spin.isEnabled())
-        self.assertEqual(self.window.manual_base_width_spin.value(), 20.0)
+        self.assertEqual(self.window.manual_base_width_spin.value(), 25.0)
         self.assertEqual(self.window.collect_settings().manual_base_width_mm, 35.0)
 
         self.window.automatic_base_checkbox.setChecked(False)
         self.assertTrue(self.window.manual_base_width_spin.isEnabled())
         self.assertEqual(self.window.manual_base_width_spin.value(), 35.0)
         self.window.automatic_base_reset_button.click()
-        self.assertEqual(self.window.manual_base_width_spin.value(), 20.0)
+        self.assertEqual(self.window.manual_base_width_spin.value(), 25.0)
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
 
     def test_spin_text_area_does_not_cover_arrow_buttons(self) -> None:
         for setting in self.window._setting_widgets.values():
+            if setting is self.window._setting_widgets["local_reference_window"]:
+                continue  # This editor now lives in the general settings dialog.
             editor = setting.editor
             up = self.spin_subcontrol(
                 editor,
@@ -807,19 +809,19 @@ class LiveValidationTests(GuiCase):
 
         hint = self.window.tower_need_label
         target_editor = self.window.target_time_spin
-        tolerance_row = self.window._setting_widgets["layer_time_tolerance_s"]
+        next_row = self.window.full_infill_checkbox.parentWidget()
         self.assertTrue(hint.isVisible())
         self.assertEqual(hint.property("state"), "smallGain")
         hint_top = hint.mapTo(self.window, hint.rect().topLeft()).y()
         editor_bottom = target_editor.mapTo(
             self.window, target_editor.rect().bottomLeft()
         ).y()
-        tolerance_top = tolerance_row.mapTo(
-            self.window, tolerance_row.rect().topLeft()
+        next_top = next_row.mapTo(
+            self.window, next_row.rect().topLeft()
         ).y()
         hint_bottom = hint.mapTo(self.window, hint.rect().bottomLeft()).y()
         self.assertLessEqual(hint_top - editor_bottom, 12)
-        self.assertLessEqual(tolerance_top - hint_bottom, 16)
+        self.assertLessEqual(next_top - hint_bottom, 16)
 
     def test_tower_need_hint_resizes_both_ways_without_section_toggle(self) -> None:
         self.window.current_source_path = self.source
@@ -831,7 +833,7 @@ class LiveValidationTests(GuiCase):
         self.app.processEvents()
 
         target_row = self.window._setting_widgets["target_layer_time_s"]
-        tolerance_row = self.window._setting_widgets["layer_time_tolerance_s"]
+        next_row = self.window.full_infill_checkbox.parentWidget()
         hint = self.window.tower_need_label
 
         def row_geometry() -> tuple[int, int]:
@@ -839,8 +841,8 @@ class LiveValidationTests(GuiCase):
             row_bottom = target_row.mapTo(
                 self.window, target_row.rect().bottomLeft()
             ).y()
-            next_top = tolerance_row.mapTo(
-                self.window, tolerance_row.rect().topLeft()
+            next_top = next_row.mapTo(
+                self.window, next_row.rect().topLeft()
             ).y()
             self.assertGreater(next_top, row_bottom)
             return target_row.height(), next_top
@@ -854,8 +856,8 @@ class LiveValidationTests(GuiCase):
             self.assertTrue(hint.isVisible())
             self.assertGreater(target_row.height(), original_height)
             hint_bottom = hint.mapTo(self.window, hint.rect().bottomLeft()).y()
-            next_top = tolerance_row.mapTo(
-                self.window, tolerance_row.rect().topLeft()
+            next_top = next_row.mapTo(
+                self.window, next_row.rect().topLeft()
             ).y()
             self.assertGreater(next_top, hint_bottom)
             self.assertGreaterEqual(hint.height(), hint.heightForWidth(hint.width()))
@@ -923,7 +925,7 @@ class LiveValidationTests(GuiCase):
             "200.00 mm ermittelte Modellhöhe",
             self.window.automatic_base_width_label.text(),
         )
-        self.assertIn("40.00 mm", self.window.automatic_base_width_label.text())
+        self.assertIn("42.00 mm", self.window.automatic_base_width_label.text())
 
     def test_feasible_tower_still_waits_for_stl_and_slicer(self) -> None:
         self.window.target_time_spin.setValue(5.0)

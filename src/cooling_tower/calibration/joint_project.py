@@ -200,6 +200,7 @@ def _settings_xml(
     tower_id: int,
     *,
     tower_full_infill: bool,
+    tower_supports_disabled: bool = False,
 ) -> bytes:
     root = ElementTree.Element("config")
     source = ElementTree.SubElement(root, "object", {"id": str(source_id)})
@@ -236,6 +237,10 @@ def _settings_xml(
                 "metadata",
                 {"key": key, "value": value},
             )
+    if tower_supports_disabled:
+        ElementTree.SubElement(
+            tower, "metadata", {"key": "enable_support", "value": "0"}
+        )
     tower_part = ElementTree.SubElement(
         tower,
         "part",
@@ -571,6 +576,7 @@ def validate_joint_project(
     path: str | Path,
     *,
     tower_full_infill: bool,
+    tower_supports_disabled: bool = False,
 ) -> tuple[int, int]:
     candidate = Path(path).resolve()
     try:
@@ -628,6 +634,8 @@ def validate_joint_project(
             "Das mit vollständiger Turmfüllung kompatible Füllmuster wurde "
             "nicht korrekt übernommen."
         )
+    if tower_supports_disabled and tower_values.get("enable_support") != "0":
+        raise JointProjectError("Die Stützen des Kühlturms wurden nicht deaktiviert.")
     return source_id, tower_id
 
 
@@ -639,6 +647,7 @@ def build_joint_project(
     occupied: OccupiedBounds,
     placement: TowerPlacement,
     tower_full_infill: bool,
+    tower_supports_disabled: bool = False,
 ) -> JointProjectResult:
     """Create a fixed-position two-object 3MF without altering either STL."""
 
@@ -673,11 +682,13 @@ def build_joint_project(
             source_id,
             tower_id,
             tower_full_infill=tower_full_infill,
+            tower_supports_disabled=tower_supports_disabled,
         ),
     )
     validated_source, validated_tower = validate_joint_project(
         destination_path,
         tower_full_infill=tower_full_infill,
+        tower_supports_disabled=tower_supports_disabled,
     )
     if source_before != sha256_file(source_path) or tower_before != sha256_file(tower_path):
         raise JointProjectError("Eine STL-Quelldatei wurde unerwartet verändert.")
@@ -701,6 +712,7 @@ def finalize_slicer_project(
     occupied: OccupiedBounds,
     placement: TowerPlacement,
     tower_full_infill: bool,
+    tower_supports_disabled: bool = False,
 ) -> JointProjectResult:
     """Apply verified positions and tower settings to a slicer-native 3MF."""
 
@@ -796,6 +808,12 @@ def finalize_slicer_project(
                     and identifier == tower_id
                 ):
                     object_element.remove(metadata)
+                elif (
+                    tower_supports_disabled
+                    and metadata.get("key") == "enable_support"
+                    and identifier == tower_id
+                ):
+                    object_element.remove(metadata)
                 elif metadata.get("key") == "name" and identifier in {
                     source_id, tower_id
                 }:
@@ -814,6 +832,11 @@ def finalize_slicer_project(
                         "metadata",
                         {"key": key, "value": value},
                     )
+            if identifier == tower_id and tower_supports_disabled:
+                ElementTree.SubElement(
+                    object_element, "metadata",
+                    {"key": "enable_support", "value": "0"},
+                )
         ElementTree.register_namespace("", MODEL_NAMESPACE)
         ElementTree.register_namespace("p", PRODUCTION_NAMESPACE)
         ElementTree.register_namespace("BambuStudio", BAMBU_STUDIO_NAMESPACE)
@@ -859,6 +882,7 @@ def finalize_slicer_project(
     validated_source, validated_tower = validate_joint_project(
         destination_path,
         tower_full_infill=tower_full_infill,
+        tower_supports_disabled=tower_supports_disabled,
     )
     if source_before != sha256_file(source_path) or tower_before != sha256_file(tower_path):
         raise JointProjectError("Eine STL-Quelldatei wurde unerwartet verändert.")

@@ -47,6 +47,8 @@ def base_settings(**changes: object) -> GenerationSettings:
         wall_path_width_mm=0.42,
         minimum_inner_radius_mm=2.0,
         minimum_base_radius_mm=5.0,
+        automatic_base_width=False,
+        manual_base_width_mm=20.0,
         base_height_mm=0.0,
         base_margin_mm=0.0,
         base_height_factor=0.0,

@@ -90,9 +90,11 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError("Automatic base width must be a boolean value.")
     if not isinstance(settings.simulate_full_tower_infill, bool):
         raise ValueError("Full tower infill simulation must be a boolean value.")
+    if not isinstance(settings.simulate_tower_without_supports, bool):
+        raise ValueError("Tower support simulation must be a boolean value.")
 
     for name, value in settings.to_dict().items():
-        if name in {"automatic_base_width", "simulate_full_tower_infill"}:
+        if name in {"automatic_base_width", "simulate_full_tower_infill", "simulate_tower_without_supports"}:
             continue
         if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
             continue

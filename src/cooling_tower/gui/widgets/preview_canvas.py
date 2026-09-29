@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QColor,
     QIcon,
     QMouseEvent,
+    QMoveEvent,
     QPainter,
     QPen,
     QPixmap,
@@ -747,6 +748,10 @@ class PreviewCanvas(QWidget):
         self.navigation_status_label.raise_()
         if self.scene is not None and self._rendered_frame is not None:
             self._resize_render_timer.start()
+
+    def moveEvent(self, event: QMoveEvent) -> None:  # noqa: N802
+        super().moveEvent(event)
+        self._position_navigation_toggle()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if not self._navigation_enabled:

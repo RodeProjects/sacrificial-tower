@@ -2059,7 +2059,7 @@ QComboBox[warning="true"][invalid="true"] {
 }
 
 QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus,
-QComboBox:focus, QPushButton:focus, QCheckBox:focus {
+QComboBox:focus, QPushButton:focus {
     border: 2px solid #3b82f6;
 }
 
@@ -2235,27 +2235,32 @@ QCheckBox::indicator:checked:hover {
 QCheckBox#simulateFullTowerInfill,
 QCheckBox#simulateFullTowerInfill:hover,
 QCheckBox#simulateFullTowerInfill:pressed,
-QCheckBox#simulateFullTowerInfill:focus {
+QCheckBox#simulateTowerWithoutSupports,
+QCheckBox#simulateTowerWithoutSupports:hover,
+QCheckBox#simulateTowerWithoutSupports:pressed,
+QCheckBox#showSettingLimits,
+QCheckBox#showSettingLimits:hover,
+QCheckBox#showSettingLimits:pressed {
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 4px 7px 4px 0;
 }
-QCheckBox#simulateFullTowerInfill:hover {
+QCheckBox#simulateFullTowerInfill:hover,
+QCheckBox#simulateTowerWithoutSupports:hover,
+QCheckBox#showSettingLimits:hover {
     color: #0f5d91;
     background: #f1f7fb;
 }
-QCheckBox#simulateFullTowerInfill:focus {
-    border-color: #3b82f6;
-}
-QCheckBox#simulateFullTowerInfill::indicator {
+QCheckBox#simulateFullTowerInfill::indicator,
+QCheckBox#simulateTowerWithoutSupports::indicator,
+QCheckBox#showSettingLimits::indicator {
     width: 16px;
     height: 16px;
 }
 
 QCheckBox#showAllProfilesCheckBox,
 QCheckBox#showAllProfilesCheckBox:hover,
-QCheckBox#showAllProfilesCheckBox:pressed,
-QCheckBox#showAllProfilesCheckBox:focus {
+QCheckBox#showAllProfilesCheckBox:pressed {
     color: #21384f;
     background: transparent;
     border: 1px solid transparent;
@@ -2300,15 +2305,10 @@ QCheckBox#showAllProfilesCheckBox::indicator:checked:pressed {
 }
 
 QCheckBox#automaticBaseWidth,
-QCheckBox#automaticBaseWidth:focus,
 QCheckBox#automaticBaseWidth:hover {
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 4px 7px 4px 0;
-}
-
-QCheckBox#automaticBaseWidth:focus {
-    border-color: #3b82f6;
 }
 
 QCheckBox#automaticBaseWidth::indicator {
@@ -2758,8 +2758,8 @@ QLabel#previewLegendTitle {
 }
 
 QPushButton#previewCameraButton {
-    min-height: 34px;
-    padding: 6px;
+    min-height: 22px;
+    padding: 4px 6px;
     font-size: 10.5pt;
 }
 QLabel#towerNeedLabel[state="smallGain"] {
@@ -2883,7 +2883,9 @@ QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton:press
 
 QPushButton#removeSourceButton,
 QPushButton#supportSimulationCancelButton,
-QPushButton#presliceCancelButton {
+QPushButton#presliceCancelButton,
+QPushButton#updateCancelButton,
+QPushButton#updateRestartCancelButton {
     color: #7d4141;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #faeeee, stop: 1 #f2dada);
@@ -2893,7 +2895,9 @@ QPushButton#presliceCancelButton {
 
 QPushButton#removeSourceButton:hover,
 QPushButton#supportSimulationCancelButton:hover,
-QPushButton#presliceCancelButton:hover {
+QPushButton#presliceCancelButton:hover,
+QPushButton#updateCancelButton:hover,
+QPushButton#updateRestartCancelButton:hover {
     color: #713636;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #f8e4e4, stop: 1 #eac5c5);
@@ -2902,7 +2906,9 @@ QPushButton#presliceCancelButton:hover {
 
 QPushButton#removeSourceButton:pressed,
 QPushButton#supportSimulationCancelButton:pressed,
-QPushButton#presliceCancelButton:pressed {
+QPushButton#presliceCancelButton:pressed,
+QPushButton#updateCancelButton:pressed,
+QPushButton#updateRestartCancelButton:pressed {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #eacaca, stop: 1 #f6e7e7);
 }
@@ -2911,7 +2917,9 @@ QPushButton#removeSourceButton:disabled,
 QPushButton#supportSimulationCancelButton:disabled,
 QPushButton#supportSimulationReloadButton:disabled,
 QPushButton#supportSimulationProceedButton:disabled,
-QPushButton#presliceCancelButton:disabled {
+QPushButton#presliceCancelButton:disabled,
+QPushButton#updateCancelButton:disabled,
+QPushButton#updateRestartCancelButton:disabled {
     color: #8995a0;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #f5f7f8, stop: 1 #e7ecef);
@@ -2964,6 +2972,24 @@ QToolButton#previewNavigationStatus:hover {
 QDialog#towerGenerationDialog,
 QDialog#jointSliceSettingsDialog {
     background: #f5f8fb;
+}
+
+QFrame#generalSettingsFooterDivider {
+    border: none;
+    background: #c8d3df;
+}
+
+QWidget#generalSettingsFooter QPushButton {
+    font-size: 10pt;
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0 12px;
+}
+
+QPushButton#generalSettingsBrowseButton {
+    min-height: 34px;
+    max-height: 34px;
+    padding: 4px 13px;
 }
 
 QLabel#towerGenerationTitle {

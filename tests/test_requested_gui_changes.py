@@ -24,6 +24,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
 from cooling_tower.application import append_runtime_diagnostic
+from cooling_tower.preview import PreviewState
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.main_window import (
     MainWindow,
@@ -470,7 +471,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             )
             window._on_update_download_succeeded(9, installer)
 
-        dialog_type.assert_called_once_with(window, seconds=5)
+        dialog_type.assert_called_once_with(window, seconds=10)
         self.assertEqual(events, ["countdown", "installer", "beenden"])
         window.close()
 
@@ -983,7 +984,6 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         expected_units = {
             "target_layer_time_s": "Sek.",
-            "layer_time_tolerance_s": "Sek.",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
             "manual_base_width_mm": "mm",
@@ -1097,15 +1097,16 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window = self.window()
         self.addCleanup(window.close)
         self.assertEqual(window.geometry_group.title(), "Erweiterte Einstellungen")
-        for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "local_reference_window"):
+        for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg"):
             self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
+        self.assertFalse(window.geometry_group.isAncestorOf(window._setting_widgets["local_reference_window"]))
         self.assertTrue(window.stability_group.isHidden())
         self.assertTrue(window.overhang_group.isHidden())
 
     def test_advanced_settings_toggle_resizes_outer_card_without_bottom_gap(self) -> None:
         window = self.window()
         self.addCleanup(window.close)
-        window.resize(1300, 900)
+        window.resize(1400, 900)
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -1283,7 +1284,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def test_footer_notices_are_priority_sorted_in_one_scrollable_column(self) -> None:
         window = self.window()
-        window.resize(1300, 900)
+        window.resize(2000, 900)
         window.show()
         window._set_export_button_state(True)
         window.warning_text.setPlainText("Ein Warnhinweis")
@@ -1396,12 +1397,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
             open_directory_mock.assert_called_once_with(
                 second_folder.resolve()
             )
-        self.assertEqual(window.open_output_button.text(), "Alle Exporte")
-        self.assertEqual(window.open_stl_button.text(), "Letzter Export")
+        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
+        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
         self.assertTrue(window.open_stl_button.isEnabled())
         window.close()
 
-    def test_footer_shortens_folder_actions_before_export_wraps(self) -> None:
+    def test_footer_shortens_actions_in_order_and_restores_full_labels_after_split(self) -> None:
         window = self.window()
         window.workflow.set_slicer_step_visible(True)
         self.complete_source_step(window)
@@ -1411,39 +1412,138 @@ class RequestedGuiChangesTests(unittest.TestCase):
         for _ in range(5):
             self.app.processEvents()
 
-        # Use stable text metrics in offscreen Qt, where the system font can
-        # otherwise be much wider than the font in the desktop application.
-        for button in (
-            window.open_output_button,
-            window.open_stl_button,
-            window.preview_button,
-            window.export_button,
+        window.current_preview = SimpleNamespace(dispose=lambda: None)
+        window.preview_state = PreviewState.CURRENT
+        window._joint_generation_paused = True
+        with patch.object(window, "_export_block_reason", return_value=None), patch.object(
+            window, "_current_preview_was_exported", return_value=False
         ):
-            button.setStyleSheet("font-size: 5pt;")
-        window.preview_action_control.hide()
-        window.export_button.show()
-
-        window.resize(1200, 900)
-        window._update_responsive_action_labels()
-        for _ in range(3):
-            self.app.processEvents()
-        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
-
-        for width in (1058, 1049):
-            window.resize(width, 900)
-            for _ in range(3):
+            stages = []
+            saw_action_wrap = False
+            for width in range(2600, 719, -25):
+                window.resize(width, 900)
+                window._refresh_phase17_actions()
                 self.app.processEvents()
-            self.assertEqual(window.open_output_button.text(), "Alle Exporte")
-            self.assertEqual(window.open_stl_button.text(), "Letzter Export")
-            self.assertFalse(getattr(window, "_footer_actions_wrapped", False))
+                stage = (
+                    window._footer_narrow_layout,
+                    window.open_output_button.text(),
+                    window.open_stl_button.text(),
+                    window.preview_button.text(),
+                    window.export_button.text(),
+                )
+                if stage not in stages:
+                    stages.append(stage)
+                buttons = (
+                    window.open_output_button,
+                    window.open_stl_button,
+                    window.preview_action_control,
+                    window.export_button,
+                )
+                for index, button in enumerate(buttons):
+                    self.assertGreaterEqual(button.width(), button.sizeHint().width())
+                    self.assertTrue(
+                        window.footer_action_area.rect().contains(button.geometry())
+                    )
+                    for other in buttons[index + 1:]:
+                        self.assertFalse(button.geometry().intersects(other.geometry()))
+                self.assertLess(
+                    window.preview_action_control.geometry().right(),
+                    window.export_button.geometry().left(),
+                )
+                if window._footer_actions_layout_mode == "action_below":
+                    saw_action_wrap = True
+                    self.assertGreater(
+                        window.preview_action_control.geometry().top(),
+                        window.open_output_button.geometry().bottom(),
+                    )
+            self.assertTrue(saw_action_wrap)
+            self.assertEqual(stages, [
+                (False, "Alle Exporte öffnen", "Letzten Export öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte", "Letzter Export",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte", "Letzter Export",
+                 "Abbrechen", "Exportieren"),
+                (True, "Alle Exporte öffnen", "Letzten Export öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte", "Letzter Export",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte", "Letzter Export",
+                 "Abbrechen", "Exportieren"),
+            ])
+        window.close()
+
+    def test_footer_shortens_export_report_before_right_actions_in_both_layouts(self) -> None:
+        window = self.window()
+        window.workflow.set_slicer_step_visible(True)
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.show()
+        window.current_preview = SimpleNamespace(dispose=lambda: None)
+        window.preview_state = PreviewState.CURRENT
+        window._joint_generation_paused = True
+        window._last_export_report_result = SimpleNamespace()
+        window._refresh_last_export_report_action()
+
+        with patch.object(window, "_export_block_reason", return_value=None), patch.object(
+            window, "_current_preview_was_exported", return_value=False
+        ):
+            stages = []
+            for width in range(4500, 719, -25):
+                window.resize(width, 900)
+                window._refresh_phase17_actions()
+                self.app.processEvents()
+                self.assertTrue(window.open_run_button.isVisible())
+                stage = (
+                    window._footer_narrow_layout,
+                    window.open_output_button.text(),
+                    window.open_run_button.text(),
+                    window.preview_button.text(),
+                    window.export_button.text(),
+                )
+                if stage not in stages:
+                    stages.append(stage)
+                buttons = (
+                    window.open_output_button,
+                    window.open_stl_button,
+                    window.open_run_button,
+                    window.preview_action_control,
+                    window.export_button,
+                )
+                for index, button in enumerate(buttons):
+                    self.assertGreaterEqual(button.width(), button.sizeHint().width())
+                    self.assertTrue(
+                        window.footer_action_area.rect().contains(button.geometry())
+                    )
+                    for other in buttons[index + 1:]:
+                        self.assertFalse(button.geometry().intersects(other.geometry()))
+            self.assertEqual(stages, [
+                (False, "Alle Exporte öffnen", "Letzten Exportbericht öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte öffnen", "Exportbericht öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte öffnen", "Exportbericht",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte", "Exportbericht",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (False, "Alle Exporte", "Exportbericht",
+                 "Abbrechen", "Exportieren"),
+                (True, "Alle Exporte öffnen", "Letzten Exportbericht öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte öffnen", "Exportbericht öffnen",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte öffnen", "Exportbericht",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte", "Exportbericht",
+                 "Generierung abbrechen", "Kühlturm exportieren"),
+                (True, "Alle Exporte", "Exportbericht",
+                 "Abbrechen", "Exportieren"),
+            ])
             self.assertEqual(
-                window.open_output_button.mapTo(window.footer, QPoint()).y(),
-                window.export_button.mapTo(window.footer, QPoint()).y(),
+                window.open_run_button.accessibleName(),
+                "Letzten Exportbericht öffnen",
             )
-        window.resize(1200, 900)
-        for _ in range(3):
-            self.app.processEvents()
-        self.assertEqual(window.open_output_button.text(), "Alle Exporte öffnen")
         window.close()
 
     def test_latest_export_button_explains_disabled_state_and_rechecks(self) -> None:

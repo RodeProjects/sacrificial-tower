@@ -40,7 +40,7 @@ from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 
 class AutomaticGeometryTests(unittest.TestCase):
     def test_segments_follow_current_widest_diameter(self) -> None:
-        for diameter, expected in ((10, 16), (30, 30), (30.2, 31), (150, 128)):
+        for diameter, expected in ((10, 25), (25, 25), (30, 30), (30.2, 31), (150, 150)):
             with self.subTest(diameter=diameter):
                 profile = SimpleNamespace(points=(SimpleNamespace(radius_mm=diameter / 2),))
                 self.assertEqual(automatic_mesh_segments(profile), expected)
@@ -172,7 +172,6 @@ class GenerationUiTests(unittest.TestCase):
         self.assertTrue(window.maximum_expansion_angle_setting.message_label.isVisible())
 
         for first, second in (
-            ("target_layer_time_s", "layer_time_tolerance_s"),
             ("manual_base_width_mm", "maximum_expansion_angle_deg"),
             ("maximum_expansion_angle_deg", "maximum_contraction_angle_deg"),
         ):
@@ -214,7 +213,6 @@ class GenerationUiTests(unittest.TestCase):
             for _ in range(3):
                 self.app.processEvents()
             for first, second in (
-                ("target_layer_time_s", "layer_time_tolerance_s"),
                 ("manual_base_width_mm", "maximum_expansion_angle_deg"),
                 ("maximum_expansion_angle_deg", "maximum_contraction_angle_deg"),
             ):
@@ -254,7 +252,7 @@ class GenerationUiTests(unittest.TestCase):
             ),
         )
         self.app.processEvents()
-        self.assertEqual(window.manual_base_width_spin.value(), 20)
+        self.assertEqual(window.manual_base_width_spin.value(), 25)
 
     def test_full_infill_follows_layer_time_tolerance_without_checkbox_tooltip(self) -> None:
         self._ready()
@@ -362,6 +360,73 @@ class GenerationUiTests(unittest.TestCase):
             "Der bisherige Kühlturm wurde verworfen.",
         )
 
+    def test_original_object_stays_unstale_until_a_tower_is_shown(self) -> None:
+        self._ready()
+        window = self.window
+        dialog = window.preview_dialog
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        original = PreviewScene(
+            object_segments=(segment,), tower_segments=(),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(0, 0),
+            source_segment_count=1, displayed_segment_count=1,
+            tower_height_mm=0, object_height_mm=0.2,
+            object_layer_count=1, tower_layer_count=0,
+        )
+        dialog.set_original_object(original)
+        window._invalidate_preview("Eine Kühlturmeinstellung wurde geändert.")
+        self.assertIs(dialog.canvas.scene, original)
+        self.assertEqual(window.preview_state, PreviewState.EMPTY)
+        self.assertEqual(dialog.state, PreviewState.EMPTY)
+        self.assertNotIn("Veraltet", dialog.state_label.text())
+
+        dialog.set_building("Kühlturm wird generiert")
+        self.assertNotIn("Veraltet", dialog.state_label.text())
+        dialog.mark_stale()
+        self.assertIs(dialog.canvas.scene, original)
+        self.assertEqual(dialog.state, PreviewState.EMPTY)
+
+        dialog.canvas.set_scene(replace(
+            original, tower_segments=(segment,), tower_height_mm=0.2,
+            tower_layer_count=1,
+        ))
+        window.current_preview = SimpleNamespace(dispose=Mock())
+        window._invalidate_preview("Eine Kühlturmeinstellung wurde geändert.")
+        self.assertEqual(window.preview_state, PreviewState.STALE)
+        self.assertEqual(dialog.state, PreviewState.STALE)
+        self.assertIn("Veraltet", dialog.state_label.text())
+
+    def test_reset_defaults_uses_the_view_for_the_visible_scene(self) -> None:
+        self._ready()
+        window = self.window
+        dialog = window.preview_dialog
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        original = PreviewScene(
+            object_segments=(segment,), tower_segments=(),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(0, 0),
+            source_segment_count=1, displayed_segment_count=1,
+            tower_height_mm=0, object_height_mm=0.2,
+            object_layer_count=1, tower_layer_count=0,
+        )
+        dialog.set_original_object(original)
+        self.assertEqual((dialog.canvas.yaw_deg, dialog.canvas.pitch_deg), (-38.0, 28.0))
+        dialog.canvas.side_view()
+        window.reset_defaults()
+        self.assertEqual((dialog.canvas.yaw_deg, dialog.canvas.pitch_deg), (-38.0, 28.0))
+
+        tower_segment = LineSegment3D(Point3D(70, 50, 0.2), Point3D(72, 52, 0.2))
+        dialog.canvas.set_scene(replace(
+            original, tower_segments=(tower_segment,), tower_center_xy_mm=(71, 51),
+            tower_height_mm=0.2, tower_layer_count=1,
+        ))
+        window.current_preview = SimpleNamespace(dispose=Mock())
+        dialog.canvas.three_quarter_view()
+        window.reset_defaults()
+        self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
+        self.assertEqual(dialog.canvas.pitch_deg, 0.0)
+        self.assertEqual(dialog.canvas.zoom, dialog.canvas.SIDE_VIEW_ZOOM)
+
     def test_result_precedes_simulation_and_export_is_offered_after_finish(self) -> None:
         panel = self.window.joint_generation_dialog
         result_layout = panel.result_label.parentWidget().layout()
@@ -377,6 +442,29 @@ class PreviewCircleSegmentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_original_object_scene_keeps_all_view_buttons_working(self) -> None:
+        dialog = PreviewDialog(embedded=True)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        scene = PreviewScene(
+            object_segments=(segment,), tower_segments=(),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(0, 0),
+            source_segment_count=1, displayed_segment_count=1,
+            tower_height_mm=0, object_height_mm=0.2,
+            object_layer_count=1, tower_layer_count=0,
+        )
+        dialog.set_original_object(scene)
+        self.app.processEvents()
+        self.assertIs(dialog.canvas.scene, scene)
+        self.assertFalse(dialog.tower_legend.isVisible())
+        for button in (dialog.three_quarter_button, dialog.front_button,
+                       dialog.side_button, dialog.top_button):
+            self.assertTrue(button.isEnabled())
+            button.click()
+            self.assertIs(dialog.canvas.scene, scene)
 
     def test_segment_count_sits_above_height_without_moving_navigation(self) -> None:
         dialog = PreviewDialog(embedded=True)
@@ -434,6 +522,39 @@ class PreviewCircleSegmentTests(unittest.TestCase):
         self.assertIs(
             dialog.preview_frame.childAt(toggle_center),
             dialog.canvas.navigation_toggle,
+        )
+
+    def test_navigation_follows_canvas_after_layout_move(self) -> None:
+        dialog = PreviewDialog(embedded=True)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
+        scene = PreviewScene(
+            object_segments=(segment,), tower_segments=(),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(0, 0),
+            source_segment_count=1, displayed_segment_count=1,
+            tower_height_mm=0, object_height_mm=0.2,
+            object_layer_count=1, tower_layer_count=0,
+        )
+        dialog.set_original_object(scene)
+        self.app.processEvents()
+        canvas = dialog.canvas
+        toggle = canvas.navigation_toggle
+        before = toggle.mapTo(dialog, QPoint(0, 0)).y()
+        layer_info_edge = dialog.layers_info_label.mapTo(
+            dialog, QPoint(0, dialog.layers_info_label.height())
+        ).y()
+        layer_line_spacing = dialog.layers_info_label.fontMetrics().lineSpacing()
+        self.assertGreaterEqual(before - layer_info_edge, layer_line_spacing - 4)
+        self.assertLessEqual(before - layer_info_edge, layer_line_spacing + 4)
+        dialog.preview_frame.layout().setEnabled(False)
+        canvas.move(canvas.x(), canvas.y() + 18)
+        self.app.processEvents()
+        self.assertEqual(toggle.mapTo(dialog, QPoint(0, 0)).y(), before + 18)
+        self.assertEqual(
+            toggle.mapTo(dialog, QPoint(0, 0)).y() - layer_info_edge,
+            before - layer_info_edge + 18,
         )
 
 

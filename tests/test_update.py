@@ -241,6 +241,21 @@ class UpdateServiceTests(unittest.TestCase):
                 )
             self.assertEqual(list(Path(temporary).iterdir()), [])
 
+    def test_discard_installer_removes_only_own_download(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = UpdateService(temporary_root=root)
+            own = root / 'sacrificial-tower-update-test' / 'SacrificialTowerSetup-1.2.3.exe'
+            own.parent.mkdir()
+            own.write_bytes(b'installer')
+            external = root / 'unrelated' / own.name
+            external.parent.mkdir()
+            external.write_bytes(b'keep')
+            service.discard_installer(external)
+            self.assertTrue(external.exists())
+            service.discard_installer(own)
+            self.assertFalse(own.parent.exists())
+
     def test_failing_progress_callback_removes_completed_download(self) -> None:
         payload = b"installer"
         info = UpdateInfo(

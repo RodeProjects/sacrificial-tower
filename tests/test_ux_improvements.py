@@ -138,7 +138,7 @@ class UxImprovementTests(unittest.TestCase):
         self.assertIn("+ Schmalerer Turm", hint)
         self.assertIn("Vor- und Nachteile dieser Funktion:", hint)
         self.assertNotIn("oft schmalerer", hint.casefold())
-        self.assertIn('align="center"', hint)
+        self.assertIn('align="left"', hint)
         self.assertEqual(hint.count("<tr>"), 3)
         self.assertNotIn("Aktuell aktiviert", hint)
         self.assertNotIn("Aktuell deaktiviert", hint)
@@ -161,12 +161,16 @@ class UxImprovementTests(unittest.TestCase):
             for text, format_ in blocks.items()
             if "Bettschubser: Das Druckbett bewegt" in text
         )
-        self.assertEqual(type_question.alignment(), Qt.AlignmentFlag.AlignHCenter)
+        self.assertTrue(
+            type_question.alignment() & Qt.AlignmentFlag.AlignLeft
+        )
         self.assertEqual(first_question.bottomMargin(), 0)
         self.assertEqual(type_question.bottomMargin(), first_question.bottomMargin())
         self.assertEqual(answer.bottomMargin(), 8)
         hint = window.full_infill_info_button.toolTip()
-        self.assertIn("Die 100%-Füllung gilt nur", hint)
+        self.assertIn("Die 100%-Füllung gilt nur für den Kühlturm", hint)
+        self.assertIn("temporäre Profilkopien", hint)
+        self.assertIn("Die Originalprofile bleiben unverändert", hint)
         self.assertEqual(hint.count("<u>"), 3)
         self.assertEqual(hint.count("</u>"), 3)
 
@@ -291,16 +295,72 @@ class UxImprovementTests(unittest.TestCase):
         document = QTextDocument()
         document.setHtml(hint)
         text = document.toPlainText()
-        self.assertIn("Höhe", text)
-        self.assertIn("Fußrand ist 1–2 Layer hoch", text)
-        self.assertIn("6 mm oder 22 Layern; der längere Wert gilt", text)
-        self.assertIn("Breite entspricht 20 % der Objekthöhe", text)
-        self.assertIn("auf 20 bis 100 mm begrenzt", text)
-        self.assertIn("Standfuß ist unten breit", text)
-        self.assertIn("nach oben schmaler", text)
-        self.assertIn("Manuelle Breite", text)
-        self.assertIn("20 bis 100 mm selbst einstellen", text)
+        self.assertIn("0,21 mm Breite je 1 mm Original-Objekthöhe", text)
+        self.assertIn("Automatische Standfußbreite", text)
+        self.assertIn("Manuelle Standfußbreite", text)
+        self.assertIn("mindestens 25 mm und höchstens 80 mm", text)
+        self.assertIn("Grenzbereich: Manuell einstellbar zwischen 20 und 80mm.", text)
+        self.assertIn(
+            "Ein breiterer Standfuß verbessert Druckbett-Haftung und Turmstabilität",
+            text,
+        )
+        self.assertNotIn("Eingabe:", text)
+        self.assertNotIn("Empfehlung:", text)
+        self.assertNotIn("% der Objekthöhe", text)
+        self.assertNotIn("Fußrand", text)
+        self.assertNotIn("verjüngt", text)
+        self.assertEqual(hint.count("&#8226;"), 4)
+        self.assertNotIn("<li>", hint)
+        self.assertEqual(hint.count('margin-top:0; margin-bottom:0px;'), 2)
+
+        window.analysis_snapshot = SimpleNamespace(maximum_print_z_mm=150.0)
+        window._update_automatic_base_width_preview()
+        self.assertEqual(window.automatic_base_info_button.toolTip(), hint)
+        self.assertIn(
+            "Manuell einstellbar zwischen 20 und 80 Millimetern",
+            window.automatic_base_info_button.accessibleDescription(),
+        )
         window.close()
+
+    def test_rich_hint_popover_does_not_grow_when_switching_hints(self) -> None:
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        buttons = (
+            window.full_infill_info_button,
+            window.simulate_tower_without_supports_info_button,
+            window.automatic_base_info_button,
+            window._setting_widgets["target_layer_time_s"].info_button,
+        )
+        first_sizes = {}
+        try:
+            for _ in range(3):
+                for button in buttons:
+                    button.show_hint()
+                    self.app.processEvents()
+                    popover = window._bounded_hint_popover
+                    size = popover.size()
+                    if button.toolTip().lstrip().startswith("<"):
+                        document = QTextDocument()
+                        document.setDefaultFont(popover.label.font())
+                        document.setDocumentMargin(0)
+                        document.setHtml(button.toolTip())
+                        document.setTextWidth(popover.label.width())
+                        unused_height = popover.label.height() - document.size().height()
+                        self.assertGreaterEqual(unused_height, 0)
+                        self.assertLessEqual(
+                            unused_height,
+                            1,
+                        )
+                    if button in first_sizes:
+                        self.assertEqual(size, first_sizes[button])
+                    else:
+                        first_sizes[button] = size
+                    self.assertTrue(
+                        popover.label.alignment() & Qt.AlignmentFlag.AlignTop
+                    )
+        finally:
+            window.close()
 
     def test_01a_full_infill_checkbox_does_not_move_on_hover(self) -> None:
         window = self.window()

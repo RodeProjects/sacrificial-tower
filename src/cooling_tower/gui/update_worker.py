@@ -83,7 +83,9 @@ class UpdateDownloadWorker(CancelableWorker):
                         traceback.format_exc(),
                     )
             else:
-                if not self.cancellation_requested():
+                if self.cancellation_requested():
+                    self.update_service.discard_installer(installer)
+                else:
                     self.succeeded.emit(self.request_id, installer)
             finally:
                 self.finished.emit(self.request_id)

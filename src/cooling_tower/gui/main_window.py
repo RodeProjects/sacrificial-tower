@@ -98,7 +98,9 @@ from cooling_tower.gui.stl_validation_worker import StlValidationWorker
 from cooling_tower.gui.source_preslice_worker import SourcePreSliceWorker
 from cooling_tower.gui.support_simulation_dialog import SupportSimulationDialog
 from cooling_tower.gui.draft_shield_dialog import DraftShieldDialog
-from cooling_tower.slicers.support_simulation import with_simulated_supports
+from cooling_tower.slicers.support_simulation import (
+    tower_support_warning_angle, with_simulated_supports,
+)
 from cooling_tower.slicers.draft_shield import (
     draft_shield_source, with_simulated_draft_shield_disabled,
 )
@@ -126,6 +128,7 @@ from cooling_tower.gui.widgets import (
     WindowHintController,
 )
 from cooling_tower.models import (
+    BedBounds,
     CalibrationConfig,
     CalibrationMode,
     FeasibilityIssue,
@@ -149,9 +152,11 @@ from cooling_tower.preview import (
     PreviewExportService,
     PreviewRequest,
     PreviewResult,
+    PreviewScene,
     PreviewService,
     PreviewState,
 )
+from cooling_tower.calibration.gcode_integration import parse_bed_geometry
 from cooling_tower.services import (
     DEFAULT_PRESLICE_TIMEOUT_S,
     GCodeAnalysisService,
@@ -202,6 +207,7 @@ from cooling_tower.tower.solid_profile import (
 from cooling_tower.tower.base_calculator import (
     BASE_WIDTH_PER_OBJECT_HEIGHT,
     MAXIMUM_BASE_WIDTH_MM,
+    MINIMUM_AUTOMATIC_BASE_WIDTH_MM,
     MINIMUM_BASE_WIDTH_MM,
 )
 
@@ -252,13 +258,13 @@ SETTING_UNITS = {
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 
 FULL_INFILL_HINT_HTML = """
-<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Was macht diese Funktion?</b></p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was macht diese Funktion?</b></p>
 <p style="margin-top:0; margin-bottom:10px;">
 &#8226; <b>Aktiviert:</b> In der temporären Slicerprofilkopie wird für den Turm 100% Füllung eingestellt.<br>
 &#8226; <b>Deaktiviert:</b> Für Berechnung und Slice gelten die Füllungswerte des gewählten Slicerprofils.</p>
-<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
 <p style="margin-top:0; margin-bottom:10px;">Das hängt teilweise davon ab, ob Ihr Drucker ein Bettschubser oder ein CoreXY-Drucker ist.</p>
-<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Welchen Druckertyp habe ich?</b></p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Welchen Druckertyp habe ich?</b></p>
 <p style="margin-top:0; margin-bottom:8px;">
 &#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell horizontal vor und zurück.<br>
 &#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die horizontalen X/Y-Bewegungen; das Bett fährt dabei nicht hin und her.</p>
@@ -280,7 +286,7 @@ FULL_INFILL_HINT_HTML = """
     <td valign="top" style="padding:4px 12px;">+ Weniger Material<br/>- Breiterer Turm</td>
   </tr>
 </table>
-<p>Die 100%-Füllung gilt nur für den Kühlturm, nicht für das Druckobjekt.</p>
+<p>* Die 100%-Füllung gilt nur für den Kühlturm. Zur Generierung werden temporäre Profilkopien verwendet; im exportierten 3MF wird die Füllung objektspezifisch gesetzt. Die Originalprofile bleiben unverändert.</p>
 """.strip()
 
 FULL_INFILL_HINT_ACCESSIBLE = (
@@ -294,22 +300,47 @@ FULL_INFILL_HINT_ACCESSIBLE = (
     "betrifft nur den Kühlturm."
 )
 
-AUTOMATIC_BASE_HINT_HTML = """
-<p><b>Höhe</b></p>
-<p>Der Fußrand ist 1–2 Layer hoch. Die Verjüngung richtet sich nach 6 mm oder
-22 Layern; der längere Wert gilt.</p>
-<p><b>Breite</b></p>
-<p>Die Breite entspricht 20 % der Objekthöhe und wird auf 20 bis 100 mm begrenzt.</p>
-<p><b>Form</b></p>
-<p>Der Standfuß ist unten breit und wird nach oben schmaler, bis er in den Turm übergeht.</p>
+def _automatic_base_hint() -> tuple[str, str]:
+    rate = f"{BASE_WIDTH_PER_OBJECT_HEIGHT:g}".replace(".", ",")
+    html = (
+        '<p align="left" style="margin-top:0; margin-bottom:0px;">'
+        '<b>Automatische Standfußbreite</b></p>'
+        '<p style="margin-top:0; margin-bottom:10px;">'
+        f'&#8226; <b>Berechnungsgrundlage:</b> {rate} mm Breite je 1 mm '
+        'Original-Objekthöhe.<br>'
+        '&#8226; <b>Grenzbereich:</b> Das Ergebnis wird auf mindestens '
+        '25 mm und höchstens 80 mm begrenzt.</p>'
+        '<p align="left" style="margin-top:0; margin-bottom:0px;">'
+        '<b>Manuelle Standfußbreite</b></p>'
+        '<p style="margin-top:0; margin-bottom:10px;">'
+        '&#8226; <b>Grenzbereich:</b> Manuell einstellbar zwischen 20 und 80mm.<br>'
+        '&#8226; Ein breiterer Standfuß verbessert Druckbett-Haftung und '
+        'Turmstabilität.</p>'
+    )
+    accessible = (
+        f"Automatische Standfußbreite. Berechnungsgrundlage: {rate} "
+        "Millimeter Breite je 1 Millimeter Original-Objekthöhe. "
+        "Grenzbereich: Das Ergebnis wird auf mindestens 25 Millimeter "
+        "und höchstens 80 Millimeter begrenzt. "
+        "Manuelle Standfußbreite. Grenzbereich: Manuell einstellbar "
+        "zwischen 20 und 80 Millimetern. Ein breiterer Standfuß verbessert "
+        "Druckbett-Haftung und Turmstabilität."
+    )
+    return html, accessible
+
+TOWER_SUPPORT_HINT_HTML = """
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was bewirkt die Einstellung?</b></p>
+<p style="margin-top:0; margin-bottom:10px;">Bei aktivierter Einstellung werden die Stützen für den Kühlturm objektspezifisch deaktiviert. Der Turm wird so ohne eigene Stützen berechnet; die Stützen des Druckobjekts bleiben erhalten.</p>
+<p>* Die Stützen werden nur für den Kühlturm deaktiviert. Zur Generierung werden temporäre Profilkopien verwendet; im exportierten 3MF wird die Deaktivierung objektspezifisch gesetzt. Die Originalprofile bleiben unverändert.</p>
 """.strip()
 
-AUTOMATIC_BASE_HINT_ACCESSIBLE = (
-    "Der Fußrand ist ein bis zwei Layer hoch. Die Verjüngung richtet sich nach "
-    "6 Millimetern oder 22 Layern; der längere Wert gilt. Die Breite entspricht "
-    "20 Prozent der Objekthöhe und wird auf 20 bis 100 Millimeter begrenzt. "
-    "Der Standfuß ist unten breit und wird nach oben schmaler, bis er in den "
-    "Turm übergeht."
+TOWER_SUPPORT_HINT_ACCESSIBLE = (
+    "Bei aktivierter Einstellung werden die Stützen für den Kühlturm "
+    "objektspezifisch deaktiviert. Der Turm wird ohne eigene Stützen "
+    "berechnet; die Stützen des Druckobjekts bleiben erhalten. Hinweis: "
+    "Für die Generierung werden temporäre Profilkopien verwendet. Im "
+    "exportierten 3MF werden nur die Turmstützen deaktiviert. Die "
+    "Originalprofile bleiben unverändert."
 )
 
 
@@ -738,6 +769,7 @@ class MainWindow(QMainWindow):
         self.available_update: UpdateInfo | None = None
         self._update_check_request_id = 0
         self._update_download_request_id = 0
+        self._update_download_cancel_requested = False
         self._slicer_request_id = 0
         self._pending_slicer_discovery: tuple[bool, Path | None] | None = None
         self._slicer_step_auto_discovery_attempted = False
@@ -880,7 +912,7 @@ class MainWindow(QMainWindow):
             int(raw_joint_slices)
             if isinstance(raw_joint_slices, int)
             and not isinstance(raw_joint_slices, bool)
-            and 5 <= raw_joint_slices <= 25
+            and 5 <= raw_joint_slices <= 20
             else self.default_maximum_joint_slices
         )
         raw_separate_slices = ui_state.get(
@@ -891,7 +923,7 @@ class MainWindow(QMainWindow):
             int(raw_separate_slices)
             if isinstance(raw_separate_slices, int)
             and not isinstance(raw_separate_slices, bool)
-            and 1 <= raw_separate_slices <= 25
+            and 1 <= raw_separate_slices <= 15
             else self.default_maximum_separate_slices
         )
 
@@ -1045,7 +1077,7 @@ class MainWindow(QMainWindow):
         self.reset_button = QPushButton("Standardwerte wiederherstellen")
         self.reset_button.setObjectName("headerResetButton")
         self.reset_button.setToolTip(
-            "Alle Eingaben auf die Standardwerte zurücksetzen"
+            "Turm-Einstellungen außerhalb der allgemeinen Einstellungen zurücksetzen"
         )
         self.reset_button.setFixedHeight(METRICS.info_button_diameter_px)
         self.reset_button.setSizePolicy(
@@ -1116,6 +1148,12 @@ class MainWindow(QMainWindow):
         self.update_button.clicked.connect(self.start_update_download)
         self.update_button.hide()
         subtitle_row.addWidget(self.update_button)
+        self.update_cancel_button = QPushButton("Abbrechen")
+        self.update_cancel_button.setObjectName("updateCancelButton")
+        self.update_cancel_button.setFixedHeight(METRICS.info_button_diameter_px)
+        self.update_cancel_button.clicked.connect(self.cancel_update_download)
+        self.update_cancel_button.hide()
+        subtitle_row.addWidget(self.update_cancel_button)
         header_layout.addLayout(title_row)
         header_layout.addLayout(subtitle_row)
         root_layout.addWidget(header)
@@ -2399,7 +2437,7 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(workflow_group)
 
         timing_group = SectionCard(
-            "Layerzeit und Toleranz",
+            "Layerzeit",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2419,15 +2457,14 @@ class MainWindow(QMainWindow):
         self.target_time_spin.set_display_decimals(1)
         self.target_time_spin.setProperty("rangeLabelShowMinimum", True)
         self.layer_time_tolerance_spin = self._double_spin(0.1, 3.0, 2, 0.01, "layerTimeTolerance")
+        self.layer_time_tolerance_spin.setParent(self)
+        self.layer_time_tolerance_spin.hide()
+        self.layer_time_tolerance_spin.valueChanged.connect(self._on_value_changed)
         target_setting = self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
             "Gewünschte Mindest-Layerzeit",
             self.target_time_spin,
-        )
-        self._add_numeric_setting(
-            timing_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
-            self.layer_time_tolerance_spin,
         )
         self.full_infill_checkbox = QCheckBox(
             "100% Turmfüllung simulieren"
@@ -2464,6 +2501,34 @@ class MainWindow(QMainWindow):
         )
         full_infill_layout.addStretch(1)
         timing_layout.addWidget(full_infill_row)
+        self.simulate_tower_without_supports_checkbox = QCheckBox(
+            "Deaktivierte Turmstützen simulieren"
+        )
+        self.simulate_tower_without_supports_checkbox.setObjectName(
+            "simulateTowerWithoutSupports"
+        )
+        self.simulate_tower_without_supports_checkbox.setLayoutDirection(
+            Qt.LayoutDirection.RightToLeft
+        )
+        self.simulate_tower_without_supports_checkbox.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        support_row = QWidget()
+        support_layout = QHBoxLayout(support_row)
+        support_layout.setContentsMargins(0, 2, 0, 2)
+        support_layout.setSpacing(METRICS.setting_info_text_gap_px)
+        self.simulate_tower_without_supports_info_button = InfoToolButton(
+            TOWER_SUPPORT_HINT_HTML,
+            support_row,
+            accessible_name="Informationen zur Stützen-Simulation",
+            accessible_hint=TOWER_SUPPORT_HINT_ACCESSIBLE,
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        support_layout.addWidget(self.simulate_tower_without_supports_info_button)
+        support_layout.addWidget(self.simulate_tower_without_supports_checkbox)
+        support_layout.addStretch(1)
+        timing_layout.addWidget(support_row)
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
         )
@@ -2567,7 +2632,7 @@ class MainWindow(QMainWindow):
             "resetCompareDisplayedValue", True
         )
         self.automatic_base_width_label = QLabel(
-            "Automatische Breite: 20,00 bis höchstens 100,00 mm", self
+            "Automatische Breite: 25,00 bis höchstens 80,00 mm", self
         )
         self.automatic_base_width_label.setObjectName("calculatedHint")
         self.automatic_base_width_label.setWordWrap(True)
@@ -2596,12 +2661,7 @@ class MainWindow(QMainWindow):
             "manual_base_width_mm",
             "Standfußbreite",
             self.manual_base_width_spin,
-            info_text=(
-                AUTOMATIC_BASE_HINT_HTML
-                + "<p><b>Manuelle Breite</b></p>"
-                "Bei deaktivierter Automatik können Sie 20 bis 100 mm selbst "
-                "einstellen."
-            ),
+            info_text=_automatic_base_hint()[0],
         )
         self.manual_base_width_setting = manual_base_setting
         manual_base_setting.default_provider = self._automatic_base_width_mm
@@ -2622,13 +2682,9 @@ class MainWindow(QMainWindow):
         self.automatic_base_info_button.setAccessibleName(
             "Informationen zur automatischen und manuellen Standfußbreite"
         )
+        base_hint, accessible_base_hint = _automatic_base_hint()
         self.automatic_base_info_button.set_hint(
-            self.automatic_base_info_button.toolTip(),
-            accessible_hint=(
-                AUTOMATIC_BASE_HINT_ACCESSIBLE
-                + " Bei deaktivierter Automatik kann die Standfußbreite "
-                "zwischen 20 und 100 Millimetern selbst eingestellt werden."
-            ),
+            base_hint, accessible_hint=accessible_base_hint
         )
         manual_base_setting.layout().addWidget(
             self.automatic_base_error_label,
@@ -2973,6 +3029,8 @@ class MainWindow(QMainWindow):
             while old_layout.count():
                 item = old_layout.takeAt(0)
                 if item.widget() is not None:
+                    if item.widget() is self._setting_widgets["local_reference_window"]:
+                        continue
                     geometry_layout.addWidget(item.widget())
         stability_group.hide()
         overhang_group.hide()
@@ -3426,6 +3484,9 @@ class MainWindow(QMainWindow):
         self.full_infill_checkbox.toggled.connect(
             self._on_full_infill_changed
         )
+        self.simulate_tower_without_supports_checkbox.toggled.connect(
+            self._on_support_simulation_changed
+        )
         self.output_root_reset_button.clicked.connect(
             self._reset_output_root
         )
@@ -3831,9 +3892,12 @@ class MainWindow(QMainWindow):
         ):
             return
         self._update_download_request_id += 1
+        self._update_download_cancel_requested = False
         request_id = self._update_download_request_id
         self.update_button.setEnabled(False)
         self.update_button.setText("Lädt … 0 %")
+        self.update_cancel_button.setEnabled(True)
+        self.update_cancel_button.show()
         worker = UpdateDownloadWorker(
             request_id,
             self.available_update,
@@ -3842,6 +3906,7 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_update_download_progress)
         worker.succeeded.connect(self._on_update_download_succeeded)
         worker.failed.connect(self._on_update_download_failed)
+        worker.finished.connect(self._on_update_download_finished)
         self.background_job_manager.start_job(
             kind=JobKind.UPDATE_DOWNLOAD,
             request_id=request_id,
@@ -3850,9 +3915,32 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def _on_update_download_progress(self, request_id: int, percent: int) -> None:
-        if request_id != self._update_download_request_id or self._closing:
+        if (
+            request_id != self._update_download_request_id
+            or self._closing or self._update_download_cancel_requested
+        ):
             return
         self.update_button.setText(f"Lädt … {max(0, min(100, percent))} %")
+
+    def cancel_update_download(self) -> None:
+        if not self.background_job_manager.has_active(JobKind.UPDATE_DOWNLOAD):
+            return
+        self._update_download_cancel_requested = True
+        self.update_cancel_button.setEnabled(False)
+        self.update_button.setText("Abbruch läuft …")
+        self.background_job_manager.cancel_jobs(
+            JobKind.UPDATE_DOWNLOAD, reason="user_request"
+        )
+
+    @Slot(int)
+    def _on_update_download_finished(self, request_id: int) -> None:
+        if request_id != self._update_download_request_id:
+            return
+        self.update_cancel_button.hide()
+        if self._update_download_cancel_requested:
+            self.update_button.setText("Aktualisieren")
+            self.update_button.setEnabled(True)
+            self._update_download_cancel_requested = False
 
     @Slot(int, object)
     def _on_update_download_succeeded(
@@ -3861,15 +3949,27 @@ class MainWindow(QMainWindow):
         installer_path: Path,
     ) -> None:
         if request_id != self._update_download_request_id or self._closing:
+            self.update_service.discard_installer(installer_path)
             return
+        if self._update_download_cancel_requested:
+            self.update_service.discard_installer(installer_path)
+            return
+        self.update_cancel_button.hide()
         self.update_button.setText("Update geprüft")
-        UpdateRestartCountdownDialog(self, seconds=5).exec_countdown()
+        result = UpdateRestartCountdownDialog(self, seconds=10).exec_countdown()
+        if result == QMessageBox.DialogCode.Rejected:
+            self.update_service.discard_installer(installer_path)
+            self.update_button.setText("Aktualisieren")
+            self.update_button.setEnabled(True)
+            return
         if self._closing:
+            self.update_service.discard_installer(installer_path)
             return
         self.update_button.setText("Installation startet …")
         try:
             self.update_service.launch_installer(installer_path)
         except Exception as error:
+            self.update_service.discard_installer(installer_path)
             self._show_update_error(str(error))
             return
         application = QApplication.instance()
@@ -3888,6 +3988,7 @@ class MainWindow(QMainWindow):
         self._show_update_error(message)
 
     def _show_update_error(self, message: str) -> None:
+        self.update_cancel_button.hide()
         self.update_button.setText("Aktualisieren")
         self.update_button.setEnabled(True)
         QMessageBox.warning(
@@ -4481,13 +4582,16 @@ class MainWindow(QMainWindow):
         actions_available = bool(
             hasattr(self, "footer") and not self.footer.isHidden()
         )
-        show_generation = generation_active or not preview_is_current
+        show_generation = (
+            generation_active or self._joint_generation_paused
+            or not preview_is_current
+        )
         self.preview_action_control.setVisible(
             actions_available and show_generation
         )
         self.preview_button.setVisible(actions_available and show_generation)
         self.export_button.setVisible(
-            actions_available and not show_generation
+            actions_available and preview_is_current and not generation_active
         )
         if hasattr(self, "slicer_prediction_button"):
             self._refresh_prediction_advice(
@@ -6807,6 +6911,8 @@ class MainWindow(QMainWindow):
         )
         self._refresh_stl_availability()
         self._finish_preparation()
+        self._show_original_object_preview()
+        self._update_expansion_angle_warning()
 
     @Slot(int, str, str)
     def _on_source_preslice_failed(
@@ -7041,6 +7147,17 @@ class MainWindow(QMainWindow):
         )
         self._cleanup_source_preslice_result()
         self.prepared_analysis_source = None
+        if self._preview_dialog is not None:
+            self._preview_dialog.canvas.set_scene(None)
+            self._preview_dialog.mark_stale()
+        if hasattr(self, "generation_intro_label"):
+            self.generation_intro_label.setText(
+                "Noch kein Kühlturm generiert. Starten Sie die Generierung, "
+                "um den Fortschritt und das Ergebnis hier zu sehen."
+            )
+            self.generation_intro_label.show()
+        if hasattr(self, "maximum_expansion_angle_setting"):
+            self._update_expansion_angle_warning()
         if had_preslice and self.current_source_kind is SourceKind.STL:
             self.current_gcode_path = None
             self.analysis_snapshot = None
@@ -7052,6 +7169,47 @@ class MainWindow(QMainWindow):
             self.preslice_cancel_button.hide()
         if hasattr(self, "profile_confirmation_stack"):
             self._set_preslice_activity(False)
+
+    def _show_original_object_preview(self) -> None:
+        preslice = self.source_preslice_result
+        snapshot = self.analysis_snapshot
+        profile_match = self.profile_match_result
+        if (
+            preslice is None or preslice.preview_source_data is None
+            or snapshot is None or profile_match is None
+            or profile_match.selected is None or self._preview_dialog is None
+        ):
+            return
+        data = preslice.preview_source_data
+        geometry = parse_bed_geometry(
+            profile_match.selected.effective_profile.effective_values
+        )
+        occupied = data.occupied_bounds
+        bed = geometry.bounds if geometry is not None else BedBounds(
+            occupied.minimum_x_mm - 10.0,
+            occupied.maximum_x_mm + 10.0,
+            occupied.minimum_y_mm - 10.0,
+            occupied.maximum_y_mm + 10.0,
+        )
+        scene = PreviewScene(
+            object_segments=data.object_segments,
+            tower_segments=(),
+            bed_bounds=bed,
+            tower_center_xy_mm=(0.0, 0.0),
+            source_segment_count=data.source_segment_count,
+            displayed_segment_count=len(data.object_segments),
+            tower_height_mm=0.0,
+            object_height_mm=float(snapshot.maximum_print_z_mm),
+            object_layer_count=int(snapshot.layer_count),
+            tower_layer_count=0,
+        )
+        self._preview_dialog.set_original_object(scene)
+        self.generation_intro_label.setText(
+            "Die Vorschau zeigt derzeit nur das übergebene Originalobjekt, "
+            "da noch kein Kühlturm generiert wurde."
+        )
+        self.generation_intro_label.show()
+        self._refresh_ready_grid_layout()
 
     def _discard_generated_tower(self) -> None:
         if not hasattr(self, "current_preview"):
@@ -7073,13 +7231,15 @@ class MainWindow(QMainWindow):
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
+            self._show_original_object_preview()
         if self._joint_generation_dialog is not None:
             self._joint_generation_dialog.hide()
         if hasattr(self, "generation_intro_label"):
-            self.generation_intro_label.setText(
-                "Noch kein Kühlturm generiert. Starten Sie die Generierung, "
-                "um den Fortschritt und das Ergebnis hier zu sehen."
-            )
+            if self._preview_dialog is None or self._preview_dialog.canvas.scene is None:
+                self.generation_intro_label.setText(
+                    "Noch kein Kühlturm generiert. Starten Sie die Generierung, "
+                    "um den Fortschritt und das Ergebnis hier zu sehen."
+                )
             self.generation_intro_label.show()
         if hasattr(self, "preview_hint_label"):
             self.preview_hint_label.hide()
@@ -7671,12 +7831,18 @@ class MainWindow(QMainWindow):
         self.ready_grid.setMaximumHeight(16777215)
         self.ready_grid.refresh_layout()
         self.ready_grid.grid.invalidate()
-        required_grid_height = self.ready_grid.content_height_hint()
-        if required_grid_height > 0:
-            # Compute from each card's height-for-width result, not its current
-            # geometry.  Current geometry still contains the collapsed height
-            # during the toggle signal and caused sibling cards to stay shut.
+        # A first height query can still contain a child's old geometry when
+        # the first joint result reveals the preview and changes several labels
+        # at once. Applying that height lays out the children; measure again so
+        # the temporary surplus is not retained below the preview card.
+        for _ in range(3):
+            required_grid_height = self.ready_grid.content_height_hint()
+            if required_grid_height <= 0:
+                break
             self.ready_grid.setFixedHeight(required_grid_height)
+            self.ready_grid.grid.activate()
+            if self.ready_grid.content_height_hint() == required_grid_height:
+                break
         self.ready_grid.grid.activate()
         self.ready_grid.updateGeometry()
         self._refresh_settings_content_minimum_height()
@@ -7892,7 +8058,10 @@ class MainWindow(QMainWindow):
 
         if not hasattr(self, "footer_content_grid"):
             return
-        narrow = self.width() < METRICS.responsive_breakpoint_px
+        narrow = getattr(
+            self, "_footer_layout_narrow_required",
+            self.width() < METRICS.responsive_breakpoint_px,
+        )
         if not force and narrow == self._footer_narrow_layout:
             return
         self._footer_narrow_layout = narrow
@@ -8968,6 +9137,9 @@ class MainWindow(QMainWindow):
             return
         sender = self.sender()
         changed_setting_name = self._last_changed_setting_name
+        if sender is self.layer_time_tolerance_spin:
+            self._last_changed_setting_name = "layer_time_tolerance_s"
+            changed_setting_name = "layer_time_tolerance_s"
         for name, setting in self._setting_widgets.items():
             if sender is setting.editor:
                 self._last_changed_setting_name = name
@@ -8995,10 +9167,6 @@ class MainWindow(QMainWindow):
         self._schedule_feasibility_validation()
         self._refresh_stl_availability()
         self._update_section_summaries()
-        if sender is self.maximum_expansion_angle_spin:
-            self._refresh_geometry_section_layout(
-                self.geometry_settings_group.isChecked()
-            )
 
     def _on_numeric_input_state_changed(
         self,
@@ -9226,6 +9394,14 @@ class MainWindow(QMainWindow):
         self._update_section_summaries()
         self.validate_form()
         self._schedule_feasibility_validation()
+
+    def _on_support_simulation_changed(self, _checked: bool) -> None:
+        if self._closing:
+            return
+        self._last_changed_setting_name = "simulate_tower_without_supports"
+        self._update_expansion_angle_warning()
+        self._invalidate_preview("Die Stützen-Simulation wurde geändert.")
+        self.validate_form()
 
     def _on_source_selected(self, path: str, source_kind: str) -> None:
         kind = SourceKind(source_kind)
@@ -10438,6 +10614,11 @@ class MainWindow(QMainWindow):
                 self.default_maximum_separate_slices
             ),
             default_maximum_joint_slices=self.default_maximum_joint_slices,
+            local_reference_window=self.local_window_spin.value(),
+            default_local_reference_window=self.default_settings.local_reference_window,
+            maximum_local_reference_window=self.local_window_spin.property("validationMaximum") or 999,
+            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
+            default_layer_time_tolerance_s=self.default_settings.layer_time_tolerance_s,
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
         dialog.show_limits_checkbox.setChecked(self.show_setting_limits)
@@ -10446,6 +10627,8 @@ class MainWindow(QMainWindow):
             self._apply_maximum_separate_slices
         )
         dialog.value_applied.connect(self._apply_maximum_joint_slices)
+        dialog.local_window_applied.connect(self._apply_local_reference_window)
+        dialog.layer_time_tolerance_applied.connect(self._apply_layer_time_tolerance)
         self._joint_slice_settings_dialog = dialog
         dialog.finished.connect(
             lambda _result: setattr(
@@ -10476,12 +10659,16 @@ class MainWindow(QMainWindow):
             return
         dialog.layout().activate()
         dialog.adjustSize()
-        dialog.setFixedSize(dialog.sizeHint())
+        preferred = dialog.sizeHint()
+        dialog.setFixedSize(
+            max(dialog.minimumWidth(), preferred.width()),
+            preferred.height(),
+        )
         self._place_dialog_centered(dialog)
 
     @Slot(int)
     def _apply_maximum_separate_slices(self, value: int) -> None:
-        normalized = max(1, min(25, int(value)))
+        normalized = max(1, min(15, int(value)))
         if normalized == self.maximum_separate_slices:
             return
         self.maximum_separate_slices = normalized
@@ -10492,7 +10679,7 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _apply_maximum_joint_slices(self, value: int) -> None:
-        normalized = max(5, min(25, int(value)))
+        normalized = max(5, min(20, int(value)))
         if normalized == self.maximum_joint_slices:
             return
         self.maximum_joint_slices = normalized
@@ -10500,6 +10687,18 @@ class MainWindow(QMainWindow):
         self._invalidate_preview(
             "Die maximale Anzahl gemeinsamer Slices wurde geändert."
         )
+
+    @Slot(int)
+    def _apply_local_reference_window(self, value: int) -> None:
+        if value != self.local_window_spin.value():
+            self.local_window_spin.setValue(value)
+            self._save_user_settings()
+
+    @Slot(float)
+    def _apply_layer_time_tolerance(self, value: float) -> None:
+        if value != self.layer_time_tolerance_spin.value():
+            self.layer_time_tolerance_spin.setValue(value)
+            self._save_user_settings()
 
     def _resize_additional_options_to_content(self) -> None:
         dialog = self.additional_options_dialog
@@ -11053,6 +11252,7 @@ class MainWindow(QMainWindow):
             simulate_full_tower_infill=(
                 self.full_infill_checkbox.isChecked()
             ),
+            simulate_tower_without_supports=self.simulate_tower_without_supports_checkbox.isChecked(),
             minimum_base_radius_mm=self.minimum_base_spin.value(),
             base_margin_mm=self.base_margin_spin.value(),
             base_height_factor=self.base_height_factor_spin.value(),
@@ -11128,6 +11328,11 @@ class MainWindow(QMainWindow):
             settings.simulate_full_tower_infill
         )
         self.full_infill_checkbox.blockSignals(False)
+        self.simulate_tower_without_supports_checkbox.blockSignals(True)
+        self.simulate_tower_without_supports_checkbox.setChecked(
+            settings.simulate_tower_without_supports
+        )
+        self.simulate_tower_without_supports_checkbox.blockSignals(False)
         self.maximum_contraction_angle_spin.setEnabled(not settings.simulate_full_tower_infill)
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
@@ -11145,7 +11350,34 @@ class MainWindow(QMainWindow):
             if self.maximum_expansion_angle_spin.value() >= 51.0
             else ""
         )
+        profile_match = self.profile_match_result
+        if (
+            self.source_preslice_result is not None
+            and profile_match is not None
+            and profile_match.selected is not None
+            and not self.simulate_tower_without_supports_checkbox.isChecked()
+        ):
+            profile = profile_match.selected.effective_profile
+            if self.source_preslice_result.supports_simulated:
+                profile = with_simulated_supports(profile)
+            threshold = tower_support_warning_angle(profile)
+            if threshold is not None and self.maximum_expansion_angle_spin.value() >= threshold:
+                support_warning = (
+                    f"Ab {threshold:g}° Aufweitungswinkel kann das aktive "
+                    "Slicerprofil Stützen am Turm erzeugen. Diese verlängern "
+                    "die Layerzeit und verfälschen die Turmkalibrierung. "
+                    "Aktiviere die Einstellung <b>„Deaktivierte Turmstützen "
+                    "simulieren“</b>, um dies zu verhindern."
+                )
+                warning = (
+                    f"• {warning}<br>• {support_warning}"
+                    if warning else support_warning
+                )
         self.maximum_expansion_angle_setting.set_warning(warning)
+        if hasattr(self, "geometry_settings_group"):
+            self._refresh_geometry_section_layout(
+                self.geometry_settings_group.isChecked()
+            )
 
     def update_wall_path_preview(self) -> None:
         self._update_section_summaries()
@@ -11214,15 +11446,16 @@ class MainWindow(QMainWindow):
             )
             if object_height is None:
                 self.automatic_base_width_label.setText(
-                    "Automatische Breite: 20,00 bis höchstens 100,00 mm; "
+                    "Automatische Breite: 25,00 bis höchstens 80,00 mm; "
                     "der genaue "
                     "Wert folgt aus der ermittelten Modellhöhe."
                 )
             else:
+                rate = f"{BASE_WIDTH_PER_OBJECT_HEIGHT:g}".replace(".", ",")
                 self.automatic_base_width_label.setText(
                     f"Automatische Breite bei {object_height:.2f} mm "
                     f"{self._source_height_description()}: {width:.2f} mm "
-                    "(0,2 mm je 1 mm)"
+                    f"({rate} mm je 1 mm)"
                 )
         else:
             self.automatic_base_width_label.setText(
@@ -11237,11 +11470,11 @@ class MainWindow(QMainWindow):
             else None
         )
         if object_height is None or object_height <= 0.0:
-            return MINIMUM_BASE_WIDTH_MM
+            return MINIMUM_AUTOMATIC_BASE_WIDTH_MM
         return min(
             MAXIMUM_BASE_WIDTH_MM,
             max(
-                MINIMUM_BASE_WIDTH_MM,
+                MINIMUM_AUTOMATIC_BASE_WIDTH_MM,
                 object_height * BASE_WIDTH_PER_OBJECT_HEIGHT,
             ),
         )
@@ -11883,6 +12116,8 @@ class MainWindow(QMainWindow):
         simulations = []
         if request.settings.simulate_full_tower_infill:
             simulations.append("Turmfüllung: 100 %")
+        if request.settings.simulate_tower_without_supports:
+            simulations.append("Turmstützen: deaktiviert")
         if getattr(request.effective_profile, "supports_simulated", False):
             simulations.append("Stützen: aktiviert")
         if getattr(request.effective_profile, "draft_shield_simulated", False):
@@ -12299,10 +12534,20 @@ class MainWindow(QMainWindow):
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             self.cancel_generation()
             return
+        if self._joint_generation_paused:
+            self.cancel_generation()
+            return
         self.start_preview()
 
     def cancel_generation(self) -> None:
         if self._preview_cancel_requested:
+            return
+        if (
+            self._joint_generation_paused
+            and not self.background_job_manager.has_active(JobKind.PREVIEW)
+            and not self.background_job_manager.has_active(JobKind.EXPORT)
+        ):
+            self._finish_generation_cancelled()
             return
         cancelled = self.background_job_manager.cancel_jobs(
             JobKind.PREVIEW,
@@ -12461,11 +12706,15 @@ class MainWindow(QMainWindow):
             return
         if self.preview_state is not PreviewState.BUILDING:
             return
+        self._finish_generation_cancelled()
+
+    def _finish_generation_cancelled(self) -> None:
         self._preview_cancel_requested = False
         previous = self.current_preview
         self.current_preview = None
         self.preview_state = PreviewState.EMPTY
         self.preview_dialog.set_cancelled()
+        self._show_original_object_preview()
         if previous is not None:
             previous.dispose()
         self._joint_resume_active = False
@@ -12492,6 +12741,8 @@ class MainWindow(QMainWindow):
             state="warning",
         )
         self._refresh_prediction()
+        if not self.background_job_manager.has_active(JobKind.PREVIEW):
+            self._refresh_phase17_actions()
         for delay_ms in (0, 50):
             QTimer.singleShot(delay_ms, self._refresh_phase17_actions)
 
@@ -12785,7 +13036,10 @@ class MainWindow(QMainWindow):
             return
         self.reset_button.setText("Standardwerte wiederherstellen")
         accepting = False
-        cancelling = self.preview_state is PreviewState.BUILDING
+        cancelling = (
+            self.preview_state is PreviewState.BUILDING
+            or self._joint_generation_paused
+        )
         for widget in (self.preview_action_control, self.preview_button):
             if widget.property("cancelAction") != cancelling:
                 widget.setProperty("cancelAction", cancelling)
@@ -12793,7 +13047,7 @@ class MainWindow(QMainWindow):
             if widget.property("acceptAction") != accepting:
                 widget.setProperty("acceptAction", accepting)
                 self._refresh_widget_style(widget)
-        if self.preview_state is PreviewState.BUILDING:
+        if cancelling:
             if self._preview_cancel_requested:
                 self.preview_button.setText("Abbruch wird ausgeführt …")
             else:
@@ -12802,49 +13056,90 @@ class MainWindow(QMainWindow):
             self.preview_button.setText("Kühlturm aktualisieren")
         else:
             self.preview_button.setText("Kühlturm generieren")
-        self.export_button.setText("Kühlturm exportieren")
-        self.preview_action_control.setFixedWidth(max(
-            PREVIEW_ACTION_COMPACT_WIDTH_PX,
-            QFontMetrics(self.preview_button.font()).horizontalAdvance(
-                self.preview_button.text()
-            ) + 2 * EXPORT_ACTION_HORIZONTAL_PADDING_PX + 2,
-        ))
-        self._fit_export_button_width()
         footer_inner_width = max(0, self.width() - 44)
-        if self.width() < METRICS.responsive_breakpoint_px:
-            action_area_width = footer_inner_width
-        else:
-            action_area_width = max(0, (footer_inner_width - 13) // 2 - 12)
-        self.open_output_button.setText("Alle Exporte öffnen")
-        self.open_stl_button.setText("Letzten Export öffnen")
+        wide_action_width = max(0, (footer_inner_width - 13) // 2 - 12)
         folder_buttons = (
             self.open_output_button,
             self.open_stl_button,
             self.open_run_button,
         )
-        folder_count = sum(not button.isHidden() for button in folder_buttons)
-        primary_width = max(
-            self.preview_action_control.width(), self.export_button.width()
-        )
-        def required_action_width() -> int:
-            return (
-                sum(
-                    button.sizeHint().width()
-                    for button in folder_buttons
-                    if not button.isHidden()
+        report_visible = not self.open_run_button.isHidden()
+        action_buttons = (self.preview_action_control, self.export_button)
+        spacing = self.main_actions_layout.horizontalSpacing()
+
+        def set_labels(
+            shorten_folders: bool, report_label_level: int,
+            shorten_actions: bool,
+        ) -> None:
+            self.open_output_button.setText(
+                "Alle Exporte" if shorten_folders else "Alle Exporte öffnen"
+            )
+            self.open_stl_button.setText(
+                "Letzter Export" if shorten_folders else "Letzten Export öffnen"
+            )
+            self.open_run_button.setText((
+                "Letzten Exportbericht öffnen",
+                "Exportbericht öffnen",
+                "Exportbericht",
+            )[report_label_level])
+            self.export_button.setText(
+                "Exportieren" if shorten_actions else "Kühlturm exportieren"
+            )
+            if cancelling and not self._preview_cancel_requested:
+                self.preview_button.setText(
+                    "Abbrechen" if shorten_actions else "Generierung abbrechen"
                 )
-                + primary_width
-                + self.main_actions_layout.horizontalSpacing() * folder_count
+            self.preview_action_control.setFixedWidth(max(
+                0 if shorten_actions and cancelling
+                else PREVIEW_ACTION_COMPACT_WIDTH_PX,
+                QFontMetrics(self.preview_button.font()).horizontalAdvance(
+                    self.preview_button.text()
+                ) + 2 * EXPORT_ACTION_HORIZONTAL_PADDING_PX + 2,
+            ))
+            self._fit_export_button_width()
+
+        def required_action_width() -> int:
+            visible = [
+                button for button in (*folder_buttons, *action_buttons)
+                if not button.isHidden()
+            ]
+            return (
+                sum(button.sizeHint().width() for button in visible)
+                + spacing * max(0, len(visible) - 1)
+                # Columns 2 and 3 may still reserve grid gaps between the
+                # folder buttons and the right-aligned action group.
+                + (2 * spacing if any(
+                    not button.isHidden() for button in action_buttons
+                ) and any(
+                    not button.isHidden() for button in folder_buttons
+                ) else 0)
+                + (spacing + 2 if visible else 0)
             )
 
-        # Shorten the folder labels before their full text would move the
-        # primary action to a second row in the two-column footer.
-        compact = self.width() < 1050 or required_action_width() > action_area_width
-        if compact:
-            self.open_output_button.setText("Alle Exporte")
-            self.open_stl_button.setText("Letzter Export")
+        for narrow, action_area_width in (
+            (False, wide_action_width), (True, footer_inner_width)
+        ):
+            label_stages = [(False, 0, False)]
+            if report_visible:
+                label_stages.extend(((False, 1, False), (False, 2, False)))
+            label_stages.append((True, 2 if report_visible else 0, False))
+            label_stages.append((True, 2 if report_visible else 0, True))
+            for shorten_folders, report_label_level, shorten_actions in label_stages:
+                set_labels(shorten_folders, report_label_level, shorten_actions)
+                if required_action_width() <= action_area_width:
+                    break
+            if required_action_width() <= action_area_width:
+                break
+        self._footer_layout_narrow_required = narrow
+        self._refresh_footer_responsive_layout()
+
         required_width = required_action_width()
-        report_visible = not self.open_run_button.isHidden()
+        primary_width = sum(
+            button.sizeHint().width()
+            for button in action_buttons if not button.isHidden()
+        ) + spacing * max(0, sum(
+            not button.isHidden() for button in action_buttons
+        ) - 1)
         folder_pair_width = sum(
             button.sizeHint().width()
             for button in (self.open_output_button, self.open_stl_button)
@@ -12852,20 +13147,13 @@ class MainWindow(QMainWindow):
         )
         paired_width = (
             folder_pair_width + primary_width
-            + self.main_actions_layout.horizontalSpacing() * 3
+            + spacing * 5 + 2
         )
         mode = (
             "single"
             if required_width <= action_area_width
             else "report_above"
             if report_visible and paired_width <= action_area_width
-            else "report_and_action_same_row"
-            if report_visible and (
-                self.open_run_button.sizeHint().width()
-                + primary_width
-                + self.main_actions_layout.horizontalSpacing()
-                <= action_area_width
-            )
             else "report_and_action_above"
             if report_visible
             else "action_below"
@@ -12874,16 +13162,17 @@ class MainWindow(QMainWindow):
             self._footer_actions_layout_mode = mode
             self._footer_actions_wrapped = mode != "single"
             actions = self.main_actions_layout
-            for widget in (
+            action_widgets = (
                 self.open_output_button, self.open_stl_button,
                 self.open_run_button, self.preview_action_control,
                 self.export_button,
-            ):
-                actions.removeWidget(widget)
-            report_above = mode in {
-                "report_above", "report_and_action_same_row",
-                "report_and_action_above",
+            )
+            hidden_widgets = {
+                widget: widget.isHidden() for widget in action_widgets
             }
+            for widget in action_widgets:
+                actions.removeWidget(widget)
+            report_above = mode in {"report_above", "report_and_action_above"}
             folder_row = 1 if report_above else 0
             actions.setVerticalSpacing(8 if mode != "single" else 0)
             actions.addWidget(
@@ -12906,22 +13195,26 @@ class MainWindow(QMainWindow):
                 )
             if mode in {"action_below", "report_and_action_above"}:
                 action_row = folder_row + 1
-                for widget in (self.preview_action_control, self.export_button):
-                    actions.addWidget(
-                        widget, action_row, 0, 1, 6,
-                        Qt.AlignmentFlag.AlignRight,
-                    )
+                actions.addWidget(
+                    self.preview_action_control, action_row, 0, 1, 5,
+                    Qt.AlignmentFlag.AlignRight,
+                )
+                actions.addWidget(
+                    self.export_button, action_row, 5,
+                    Qt.AlignmentFlag.AlignRight,
+                )
             else:
-                action_row = 0 if mode == "report_and_action_same_row" else folder_row
                 actions.addWidget(
                     self.preview_action_control,
-                    action_row, 4, Qt.AlignmentFlag.AlignBottom,
+                    folder_row, 4, Qt.AlignmentFlag.AlignBottom,
                 )
                 actions.addWidget(
                     self.export_button,
-                    action_row, 5, Qt.AlignmentFlag.AlignBottom,
+                    folder_row, 5, Qt.AlignmentFlag.AlignBottom,
                 )
             actions.invalidate()
+            for widget, hidden in hidden_widgets.items():
+                widget.setVisible(not hidden)
 
     def _fit_export_button_width(self) -> None:
         """Keep exactly 25 px of horizontal text padding on each side."""
@@ -12968,7 +13261,12 @@ class MainWindow(QMainWindow):
         self._refresh_last_export_report_action()
 
     def _has_non_default_settings(self) -> bool:
-        return self.collect_settings() != self.settings_store.load_defaults()
+        defaults = self.settings_store.load_defaults()
+        return self.collect_settings() != replace(
+            defaults,
+            local_reference_window=self.local_window_spin.value(),
+            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
+        )
 
     def request_reset_defaults(self) -> None:
         if not self._has_non_default_settings():
@@ -13002,14 +13300,22 @@ class MainWindow(QMainWindow):
         self.profile_feasibility = None
         self._clear_feasibility_issues()
         self._last_changed_setting_name = None
-        self.apply_settings(self.settings_store.load_defaults())
+        self.apply_settings(replace(
+            self.settings_store.load_defaults(),
+            local_reference_window=self.local_window_spin.value(),
+            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
+        ))
         self._incomplete_setting_names.clear()
         if self.analysis_snapshot is not None:
             self._update_local_window_layer_limit(self.analysis_snapshot.layer_count)
             self._setting_widgets["local_reference_window"].refresh_reset_state()
         self._pending_preview_camera_state = None
         if self._preview_dialog is not None:
-            self._preview_dialog.canvas.reset_camera()
+            canvas = self._preview_dialog.canvas
+            if canvas.scene is not None and canvas.scene.tower_segments:
+                canvas.side_view()
+            else:
+                canvas.three_quarter_view()
         self.timing_group.setChecked(True)
         self.prediction_frame.setChecked(True)
         self.geometry_settings_group.setChecked(True)

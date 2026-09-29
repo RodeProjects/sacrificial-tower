@@ -14,6 +14,7 @@ if str(SRC_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
 from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
@@ -47,6 +48,12 @@ class UpdateRestartCountdownDialogTests(unittest.TestCase):
     def test_countdown_rejects_a_non_positive_duration(self) -> None:
         with self.assertRaisesRegex(ValueError, "mindestens eine Sekunde"):
             UpdateRestartCountdownDialog(seconds=0)
+
+    def test_cancel_button_rejects_countdown_before_installation(self) -> None:
+        dialog = UpdateRestartCountdownDialog(seconds=10)
+        QTimer.singleShot(0, dialog.cancel_button.click)
+        self.assertEqual(dialog.exec_countdown(), QDialog.DialogCode.Rejected)
+        self.assertFalse(dialog._timer.isActive())
 
     def test_countdown_closes_after_its_real_timer_expires(self) -> None:
         dialog = UpdateRestartCountdownDialog(seconds=1)

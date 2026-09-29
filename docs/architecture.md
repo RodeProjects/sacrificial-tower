@@ -212,29 +212,38 @@ laufender Slicer-Prozess wird sicher beendet, während der letzte vollständig
 geprüfte gemeinsame Kandidat erhalten bleibt. „Fortsetzen“ startet nur das
 verbleibende gemeinsame Budget mit diesem Kandidaten als Seed. Die bereits
 abgeschlossenen gemeinsamen Slices werden dabei für Mindestanzahl und
-Zielschwelle weitergezählt, sodass der erste neue Slice nach fünf Pflicht-Slices
-bereits der sechste insgesamt ist. Der Abschlusszähler gehört dabei nicht zur
+Zielschwelle weitergezählt, sodass der erste neue Slice nach drei Pflicht-Slices
+bereits der vierte insgesamt ist. Der Abschlusszähler gehört dabei nicht zur
 Geometriekompatibilität des Seeds. Eine echte neue Generierung führt dagegen
 stets erneut die getrennte Vorstufe aus. „Angleichung fortsetzen“ erscheint ab
-dem fünften gemeinsamen Slice zunächst deaktiviert und ist nur bei einem
+dem dritten gemeinsamen Slice zunächst deaktiviert und ist nur bei einem
 vorzeitig übernommenen Zwischenstand mit verbleibendem Slice-Budget bedienbar.
 Beim Fortsetzen wird es wieder deaktiviert. Nach der Übernahme bleibt das Ergebnis
 im Hauptfenster erhalten. Neben „Angleichung
 fortsetzen“ erscheint dann im Generierungsergebnis rechts „Kühlturm exportieren“;
 beide Export-Schaltflächen starten denselben Export und verwenden dieselbe Optik.
-Der Footer-Button bleibt während der gesamten Generierung „Generierung abbrechen“.
+Der Footer-Button bleibt während der gesamten Generierung und nach einer
+vorzeitigen manuellen Übernahme links neben „Kühlturm exportieren“ als
+„Generierung abbrechen“ verfügbar. Ist der Exportbericht-Button sichtbar,
+wird bei Platzmangel zuerst sein Name zu „Exportbericht öffnen“ und danach zu
+„Exportbericht“ gekürzt. Anschließend folgen die beiden linken
+Exportordner-Aktionen, zuletzt Export und Abbruch. Reicht der Platz danach
+weiterhin nicht, wechselt der Footer in die horizontal getrennte Ansicht, in der
+zunächst wieder die vollständigen Bezeichnungen verwendet werden. Reicht auch
+dort der Platz nicht, werden sie in derselben Reihenfolge gekürzt; danach
+wechselt die rechte Aktionsgruppe bei Bedarf in eine eigene Zeile.
 Ein ausdrücklicher Abbruch verwirft auch einen zuvor übernommenen Kandidaten samt
 Vorschau und ermöglicht sofort einen neuen Lauf mit unveränderten Einstellungen.
 Nur „Bestes bisheriges Ergebnis übernehmen“ im Generierungsbereich hält einen
 Kandidaten für Export und mögliche Fortsetzung fest. Während des Abbruchs zeigt
 der Footer-Button deaktiviert „Abbruch wird ausgeführt …“.
 Der finale Projektbau des übernommenen Kandidaten bleibt vom Übernahme-Event
-unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor Abschluss des fünften
+unbeeinflusst; nur ein echter Abbruch darf ihn stoppen. Vor Abschluss des dritten
 gemeinsamen Slices wird der Lauf ohne exportfähiges Ergebnis abgebrochen.
 
-Ein Kandidat, der innerhalb der fünf Pflichtslices oder später die feste
+Ein Kandidat, der innerhalb der drei Pflichtslices oder später die feste
 Zielschwelle von höchstens 0,09 Sekunden erreicht, bleibt bereits während
-der Pflichtslices das beste Anzeigeergebnis. Nach dem fünften Slice kann
+der Pflichtslices das beste Anzeigeergebnis. Nach dem dritten Slice kann
 der Lauf mit diesem Kandidaten enden; Generierungsanzeige und Exportbericht
 auf dieselbe Slicer-Auswertung. Während des Laufs bleibt der bislang beste
 Kandidat intern und in der Ergebnisanzeige erhalten; schlechtere Folgeslices
@@ -262,15 +271,20 @@ bleiben neutral. Die Ansichtsbuttons über der 3D-Vorschau stehen in einer Zeile
 Außerhalb der Toleranz wird
 nach zusätzlicher Abweichung unterschieden: bis einschließlich 0,5 s „leicht“,
 über 0,5 bis einschließlich 1 s ohne Verstärkung, über 1 s „stärker“.
-Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen.
+Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen;
+nach dem Pre-Slice erklärt er, dass die Vorschau zunächst nur das Originalobjekt
+ohne Kühlturm zeigt.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
-Unter „Turm-Einstellungen“ stehen Mindest-Layerzeit und Layerzeit-Toleranz ohne
-eigene Zwischenüberschrift. Darauf folgt „100% Turmfüllung simulieren“. Die
+Unter „Turm-Einstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
+wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.
+Der Reset im Hauptfenster lässt sie unverändert; der allgemeine Reset setzt sie
+zurück. Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
+„Deaktivierte Turmstützen simulieren“. Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Einstellungen“ ein- und ausklappbar.
-Die Checkboxen für die 100-%-Turmfüllung und die automatische Standfußbreite
+Die Checkboxen für die 100-%-Turmfüllung, die Turmstützen und die automatische Standfußbreite
 zeigen den Haken rechts neben ihrem Text. Der Text mit Checkbox der
 automatischen Standfußbreite beginnt mit dem gleichen Abstand zum Info-Hinweis
 wie die übrigen Einstellungsnamen; Breitenfeld und Reset behalten die
@@ -314,6 +328,9 @@ diesen Lauf unterschritten werden. Andere Eingabefehler bleiben gesperrt.
 Eingabegrenzen sind standardmäßig verborgen und lassen sich
 in „Allgemeine Einstellungen“ wieder einblenden. Dort befinden sich außerdem
 das Slice-Budget und der Exportordner; ein eigener Exportordner-Menüpunkt entfällt.
+Die drei Zahlenfelder des Dialogs sind gleich breit. Ein durchgehender
+Trennstrich setzt die Aktionen „Abbrechen“ und „Übernehmen“ mit gleichem
+Innenabstand vom Inhalt ab.
 Das Ausblenden verkleinert die gesamte Einstellungskarte. Einige Zahlenfelder
 zeigen zur besseren Lesbarkeit eine Nachkommastelle; die Speicherpräzision
 bleibt erhalten. Die Eingabeprüfung

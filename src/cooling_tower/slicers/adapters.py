@@ -222,6 +222,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_supports_disabled: bool = False,
     ) -> object:
         """Let the CLI create native metadata, then lock app-chosen positions."""
 
@@ -293,6 +294,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 occupied=occupied,
                 placement=placement,
                 tower_full_infill=tower_full_infill,
+                tower_supports_disabled=tower_supports_disabled,
             )
         finally:
             self.cleanup_prepared_slice(prepared)
@@ -374,6 +376,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_supports_disabled: bool = False,
     ) -> object:
         """Create only Bambu's direct fixed-position candidate assembly."""
 
@@ -396,6 +399,8 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             if tower_full_infill
             else {}
         )
+        if tower_supports_disabled:
+            tower_params["enable_support"] = "0"
         payload = {
             "plates": [
                 {
@@ -449,6 +454,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_supports_disabled: bool = False,
     ) -> object:
         """Create the export 3MF plus Bambu's reliable direct joint-slice input."""
 
@@ -460,6 +466,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             occupied=occupied,
             placement=placement,
             tower_full_infill=tower_full_infill,
+            tower_supports_disabled=tower_supports_disabled,
         )
         destination_path = Path(destination).resolve()
         from cooling_tower.calibration.joint_project import (
@@ -482,6 +489,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             occupied=occupied,
             placement=placement,
             tower_full_infill=tower_full_infill,
+            tower_supports_disabled=tower_supports_disabled,
         )
         return replace(result, slice_input_path=slice_input.slice_input_path)
 

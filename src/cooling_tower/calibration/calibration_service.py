@@ -113,6 +113,7 @@ class _DeferredJointProjectExport:
     occupied: OccupiedBounds
     placement: object
     tower_full_infill: bool
+    tower_supports_disabled: bool = False
 
 
 class CalibrationService:
@@ -408,6 +409,9 @@ class CalibrationService:
                 simulate_full_tower_infill=(
                     settings.simulate_full_tower_infill and not joint_only
                 ),
+                simulate_tower_without_supports=(
+                    settings.simulate_tower_without_supports and not joint_only
+                ),
             )
             joint_profile = isolated_profile
             joint_overrides = isolated_overrides
@@ -415,12 +419,16 @@ class CalibrationService:
                 not joint_only
                 and joint_source_stl is not None
                 and config.perform_joint_final_slice
-                and settings.simulate_full_tower_infill
+                and (
+                    settings.simulate_full_tower_infill
+                    or settings.simulate_tower_without_supports
+                )
             ):
                 joint_profile, joint_overrides = build_calibration_profile(
                     profile,
                     work_root / "profile_joint",
                     simulate_full_tower_infill=False,
+                    simulate_tower_without_supports=False,
                 )
             if profile.installation.adapter_id in {
                 "anycubic_slicer_next",
@@ -440,7 +448,7 @@ class CalibrationService:
                     )
             if isolated_overrides:
                 warnings.append(
-                    "Für die 100-%-Turmfüllung temporär angepasste "
+                    "Für die Turmkalibrierung temporär angepasste "
                     "Prozesswerte: "
                     + ", ".join(
                         f"{key}={value}"
@@ -613,6 +621,8 @@ class CalibrationService:
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
+                                **({"tower_supports_disabled": True}
+                                   if settings.simulate_tower_without_supports else {}),
                             )
                             slice_model_path = Path(
                                 getattr(slice_input, "slice_input_path")
@@ -633,6 +643,9 @@ class CalibrationService:
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
+                                tower_supports_disabled=(
+                                    settings.simulate_tower_without_supports
+                                ),
                             )
                         elif callable(project_factory):
                             candidate_project = iteration_root / (
@@ -648,6 +661,8 @@ class CalibrationService:
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
+                                **({"tower_supports_disabled": True}
+                                   if settings.simulate_tower_without_supports else {}),
                             )
                             native_slice_input = getattr(
                                 project_result, "slice_input_path", None
@@ -667,6 +682,9 @@ class CalibrationService:
                                 placement=placement,
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
+                                ),
+                                tower_supports_disabled=(
+                                    settings.simulate_tower_without_supports
                                 ),
                             )
                     except JointProjectError as error:
@@ -1500,6 +1518,8 @@ class CalibrationService:
                         tower_full_infill=(
                             deferred_project.tower_full_infill
                         ),
+                        **({"tower_supports_disabled": True}
+                           if deferred_project.tower_supports_disabled else {}),
                     )
                     candidate_project = Path(
                         getattr(project_result, "path", final_project)

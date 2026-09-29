@@ -314,8 +314,31 @@ Ganzzahlen von 1 bis 25. Ungültige Werte fallen auf 6 zurück. Der
 Kompatibilitätstoken `separate-slice-budget-v1` erlaubt eine Downgrade-Übernahme
 nur bei identischer Bedeutung und gültigem Wertebereich.
 
-`maximum_separate_slices`, `maximum_joint_slices`, die Anzeige numerischer
-Grenzen und der Exportordner gehören zu „Allgemeine Einstellungen“. Der globale
+`maximum_separate_slices`, `maximum_joint_slices`, das lokale Zeitfenster,
+die Anzeige numerischer Grenzen und der Exportordner gehören zu
+„Allgemeine Einstellungen“. Der globale
 Button „Standardwerte wiederherstellen“ verändert diese Werte nicht; jeder
-dieser Werte wird ausschließlich über seinen zugehörigen Einzel-Reset im
-Dialog zurückgesetzt.
+dieser Werte kann über seinen zugehörigen Einzel-Reset oder den gemeinsamen
+Reset links unten im Dialog zurückgesetzt werden. Die Änderungen werden erst
+mit „Übernehmen“ angewendet.
+
+## Schema 20: Simulation ohne Turmstützen
+
+19→20 ergänzt `simulate_tower_without_supports` mit dem Standardwert `false`
+und dem stabilen Bool-Kompatibilitätstoken `tower-support-simulation-v1`.
+Beim Laden alter Einstellungen wird die neue Option deaktiviert ergänzt;
+Migrationen sichern die Originaldatei und schreiben atomar. Gespeicherte
+Slice-Budgets werden seit dieser Programmversion auf 1–15 getrennte und
+5–20 gemeinsame Slices begrenzt; zu große Altwerte fallen auf die jeweiligen
+Standardwerte 6 und 12 zurück. Das lokale Zeitfenster verbleibt semantisch
+unverändert im Generierungsteil des gespeicherten Formats, erscheint aber
+in den allgemeinen Einstellungen und wird vom globalen Reset ausgenommen.
+
+## Schema 21: maximale Standfußbreite
+
+20→21 begrenzt die manuelle Standfußbreite auf 80 mm. Gespeicherte größere
+Werte werden auf 80 mm gesetzt; kleinere gültige Werte bleiben erhalten.
+Die automatische Breite verwendet jetzt 0,21 mm je 1 mm Original-Objekthöhe
+und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
+vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
+verworfen.

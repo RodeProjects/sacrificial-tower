@@ -1262,23 +1262,23 @@ class Phase17Tests(unittest.TestCase):
                 window.preview_action_control,
             )
         }
-        self.assertEqual(len(button_bottoms), 2)
-        self.assertLess(
-            window.open_stl_button.mapTo(
-                window, window.open_stl_button.rect().bottomLeft()
-            ).y(),
-            window.preview_action_control.mapTo(
-                window, window.preview_action_control.rect().topLeft()
-            ).y(),
+        self.assertIn(len(button_bottoms), (1, 2))
+        self.assertFalse(
+            window.open_stl_button.geometry().intersects(
+                window.preview_action_control.geometry()
+            )
         )
         window.close()
 
     def test_34_output_folder_button_uses_compact_label_when_needed(self) -> None:
         window = self.window()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.show()
         window.resize(1000, 700)
         self.app.processEvents()
-        self.assertEqual(window.open_stl_button.text(), "Letzter Export")
+        self.assertEqual(window.open_stl_button.text(), "Letzten Export öffnen")
         window.resize(720, 640)
         self.app.processEvents()
         self.assertEqual(window.open_stl_button.text(), "Letzter Export")

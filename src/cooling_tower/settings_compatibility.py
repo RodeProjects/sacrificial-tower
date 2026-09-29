@@ -96,6 +96,10 @@ SETTING_COMPATIBILITY_RULES = (
         group="generation.solid-geometry-v1",
     ),
     _generation_rule(
+        "simulate_tower_without_supports", "tower-support-simulation-v1", "bool",
+        group="generation.solid-geometry-v1",
+    ),
+    _generation_rule(
         "minimum_base_radius_mm", "base-radius-mm-v1", "float",
         group="generation.base-v1", minimum=0.0, maximum=500.0,
     ),
@@ -113,7 +117,7 @@ SETTING_COMPATIBILITY_RULES = (
     ),
     _generation_rule(
         "manual_base_width_mm", "manual-base-width-mm-v1", "float",
-        group="generation.base-v1", minimum=20.0, maximum=1000.0,
+        group="generation.base-v1", minimum=20.0, maximum=80.0,
     ),
     _generation_rule(
         "minimum_radius_height_factor", "radius-height-factor-v1", "float",
@@ -253,7 +257,7 @@ def _group_is_valid(group: str, payload: Mapping[str, Any]) -> bool:
             or (
                 isinstance(manual, (int, float))
                 and not isinstance(manual, bool)
-                and 20.0 <= float(manual) <= 1000.0
+                and 20.0 <= float(manual) <= 80.0
             )
         )
     return True

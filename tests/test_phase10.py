@@ -232,21 +232,21 @@ class Phase10ProfileTests(unittest.TestCase):
         self.assertEqual(GenerationSettings().minimum_outer_radius_mm, 2.5)
         self.assertEqual(GenerationSettings().base_height_mm, 1.0)
 
-    def test_16_automatic_base_width_has_twenty_mm_minimum(self) -> None:
+    def test_16_automatic_base_width_has_twenty_five_mm_minimum(self) -> None:
         radius = calculate_phase10_base_outer_radius(
-            object_height_mm=20.0,
+            object_height_mm=10.0,
             automatic_base_width=True,
             manual_base_width_mm=20.0,
         )
-        self.assertEqual(radius * 2.0, 20.0)
+        self.assertEqual(radius * 2.0, 25.0)
 
-    def test_17_automatic_base_width_uses_two_tenths_object_height(self) -> None:
+    def test_17_automatic_base_width_uses_0_21_times_object_height(self) -> None:
         radius = calculate_phase10_base_outer_radius(
             object_height_mm=200.0,
             automatic_base_width=True,
             manual_base_width_mm=20.0,
         )
-        self.assertEqual(radius * 2.0, 40.0)
+        self.assertEqual(radius * 2.0, 42.0)
 
     def test_18_manual_base_width_is_used_as_outer_diameter(self) -> None:
         radius = calculate_phase10_base_outer_radius(
@@ -264,6 +264,28 @@ class Phase10ProfileTests(unittest.TestCase):
                 manual_base_width_mm=19.9,
             )
 
+    def test_manual_base_width_accepts_80_but_rejects_more(self) -> None:
+        radius = calculate_phase10_base_outer_radius(
+            object_height_mm=20.0,
+            automatic_base_width=False,
+            manual_base_width_mm=80.0,
+        )
+        self.assertEqual(radius * 2.0, 80.0)
+        with self.assertRaises(ValueError):
+            calculate_phase10_base_outer_radius(
+                object_height_mm=20.0,
+                automatic_base_width=False,
+                manual_base_width_mm=80.1,
+            )
+
+    def test_automatic_base_width_is_capped_at_80(self) -> None:
+        radius = calculate_phase10_base_outer_radius(
+            object_height_mm=1000.0,
+            automatic_base_width=True,
+            manual_base_width_mm=20.0,
+        )
+        self.assertEqual(radius * 2.0, 80.0)
+
     def test_20_base_may_exceed_regular_maximum_radius(self) -> None:
         configured = settings(
             automatic_base_width=True,
@@ -274,7 +296,7 @@ class Phase10ProfileTests(unittest.TestCase):
             configured,
             object_height_mm=300.0,
         )
-        self.assertEqual(profile.base_outer_radius_mm, 30.0)
+        self.assertEqual(profile.base_outer_radius_mm, 31.5)
         self.assertGreater(
             profile.base_outer_radius_mm,
             configured.maximum_outer_radius_mm,
@@ -288,7 +310,7 @@ class Phase10ProfileTests(unittest.TestCase):
             object_height_mm=200.0,
         )
         self.assertEqual(profile.total_height_mm, 0.4)
-        self.assertEqual(profile.base_outer_radius_mm * 2.0, 40.0)
+        self.assertEqual(profile.base_outer_radius_mm * 2.0, 42.0)
 
     def test_21_outer_and_inner_radius_move_by_same_amount(self) -> None:
         required = calculate_wall_path_length(8.0, 2, 0.42)

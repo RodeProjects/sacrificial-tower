@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from math import ceil
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFontMetrics, QTextDocument
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QVBoxLayout, QWidget
 
 
@@ -27,6 +29,7 @@ class HintPopover(QFrame):
         self.label = QLabel(self)
         self.label.setObjectName("hintPopoverText")
         self.label.setWordWrap(True)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.label)
 
@@ -39,7 +42,10 @@ class HintPopover(QFrame):
             self.hide()
             return
 
+        self.label.setMinimumHeight(0)
+        self.label.setMaximumHeight(16777215)
         self.label.setText(hint)
+        self.label.ensurePolished()
         available = owner.rect().adjusted(8, 8, -8, -8)
         anchor = QRect(
             target.mapTo(owner, QPoint(0, 0)),
@@ -54,6 +60,16 @@ class HintPopover(QFrame):
             edge_capacity = max(180, available.right() - anchor.left() + 1)
         width = max(180, min(natural_width, attractive_limit, edge_capacity))
         self.label.setFixedWidth(max(120, width - 24))
+        if hint.startswith("<"):
+            # QLabel can underestimate wrapped HTML by one or more lines,
+            # especially when a table is followed by another paragraph.
+            # Measure the complete document at the label's actual width.
+            document = QTextDocument()
+            document.setDefaultFont(self.label.font())
+            document.setDocumentMargin(0)
+            document.setHtml(hint)
+            document.setTextWidth(self.label.width())
+            self.label.setFixedHeight(ceil(document.size().height()))
         self.adjustSize()
 
         if anchor.center().x() >= available.center().x():

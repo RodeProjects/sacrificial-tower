@@ -29,7 +29,7 @@ class TowerMeshConfig:
 
 
 def automatic_mesh_segments(profile: object) -> int:
-    """Use one segment/mm of diameter while keeping every STL ring watertight."""
+    """Use at least 25 segments, then one per millimetre of diameter."""
     radii = [
         float(
             getattr(point, "outer_radius_mm", getattr(point, "radius_mm", math.nan))
@@ -38,7 +38,7 @@ def automatic_mesh_segments(profile: object) -> int:
     ]
     if not radii or any(not math.isfinite(radius) or radius <= 0 for radius in radii):
         raise MeshGenerationError("The tower profile needs finite positive radii.")
-    return max(16, min(128, math.ceil(2.0 * max(radii))))
+    return max(25, math.ceil(2.0 * max(radii)))
 
 
 @dataclass(frozen=True, slots=True)

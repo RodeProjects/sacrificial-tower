@@ -54,9 +54,9 @@ _DEFAULT_MAXIMUM_JOINT_SLICES = 12
 _DEFAULT_MAXIMUM_SEPARATE_SLICES = 6
 _SCHEMA_14_DEFAULT_MAXIMUM_JOINT_SLICES = 10
 _MINIMUM_JOINT_SLICES = 5
-_MAXIMUM_JOINT_SLICES = 25
+_MAXIMUM_JOINT_SLICES = 20
 _MINIMUM_SEPARATE_SLICES = 1
-_MAXIMUM_SEPARATE_SLICES = 25
+_MAXIMUM_SEPARATE_SLICES = 15
 _WINDOW_SIZE_KEYS = {"width", "height"}
 _WINDOW_POSITION_KEYS = {"x", "y"}
 _CAMERA_KEYS = {"yaw_deg", "pitch_deg", "zoom", "pan_x", "pan_y"}
@@ -396,6 +396,33 @@ def _migrate_settings_18_to_19(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_19_to_20(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add an explicit, disabled-by-default tower support simulation."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    generation.setdefault("simulate_tower_without_supports", False)
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_20_to_21(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep manual stand widths within the reduced 80 mm limit."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    width = generation.get("manual_base_width_mm")
+    if (
+        isinstance(width, (int, float))
+        and not isinstance(width, bool)
+        and math.isfinite(float(width))
+        and width > 80.0
+    ):
+        generation["manual_base_width_mm"] = 80.0
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -404,6 +431,7 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
         ("layer_time_tolerance_s", 0.1, 3.0),
         ("minimum_outer_diameter_mm", 3.0, 99.0),
         ("maximum_outer_diameter_mm", 5.0, 100.0),
+        ("manual_base_width_mm", 20.0, 80.0),
     ):
         value = generation.get(name)
         if value is not None and not minimum <= value <= maximum:
@@ -537,6 +565,8 @@ _USER_SETTINGS_MIGRATIONS = {
     16: _migrate_settings_16_to_17,
     17: _migrate_settings_17_to_18,
     18: _migrate_settings_18_to_19,
+    19: _migrate_settings_19_to_20,
+    20: _migrate_settings_20_to_21,
 }
 
 

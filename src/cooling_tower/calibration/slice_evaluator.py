@@ -37,6 +37,7 @@ def build_calibration_profile(
     working_directory: Path,
     *,
     simulate_full_tower_infill: bool = False,
+    simulate_tower_without_supports: bool = False,
     resolved_profiles: Sequence[ResolvedProfile] | None = None,
 ) -> tuple[EffectiveProfile, Mapping[str, object]]:
     """Create disposable copies with only solid-tower process overrides."""
@@ -51,6 +52,11 @@ def build_calibration_profile(
     if profile.supports_simulated:
         key = SUPPORT_KEYS[profile.installation.adapter_id]
         values[key] = applied[key] = "1"
+    if simulate_tower_without_supports:
+        key = SUPPORT_KEYS.get(profile.installation.adapter_id)
+        if key is None:
+            raise ValueError("Für diesen Slicer kann die Stützen-Simulation nicht angewendet werden.")
+        values[key] = applied[key] = "0"
     if profile.draft_shield_simulated:
         values["skirt_loops"] = applied["skirt_loops"] = "0"
         if "draft_shield" in values or profile.installation.adapter_id == "anycubic_slicer_next":

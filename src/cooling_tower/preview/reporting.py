@@ -797,6 +797,14 @@ def build_user_report(
         )
     )
     lines.extend(f"- {warning}" for warning in user_warnings)
+    if request.settings.simulate_tower_without_supports:
+        lines.append(
+            "- Deaktivierte Turmstützen wurden simuliert. Die exportierte 3MF "
+            "enthält diese Einstellung; beim STL-Import selbst deaktivieren."
+            if project_path is not None else
+            "- Deaktivierte Turmstützen wurden simuliert. Beim STL-Import "
+            "die Turmstützen selbst deaktivieren."
+        )
     if getattr(request.effective_profile, "supports_simulated", False):
         lines.append(
             "- Stützen wurden simuliert. In der exportierten 3MF sind sie aktiviert; "

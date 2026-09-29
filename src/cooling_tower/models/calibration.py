@@ -76,9 +76,9 @@ class CalibrationConfig:
                 "Die Kalibrierung benötigt mindestens einen Slicer-Durchlauf "
                 "und erlaubt höchstens 50 Durchläufe."
             )
-        if not 1 <= self.maximum_joint_slices <= 25:
+        if not 1 <= self.maximum_joint_slices <= 20:
             raise ValueError(
-                "Die Kalibrierung erlaubt zwischen einem und 25 gemeinsamen "
+                "Die Kalibrierung erlaubt zwischen einem und 20 gemeinsamen "
                 "Slicer-Durchläufen."
             )
         if (

@@ -322,6 +322,7 @@ class PreviewExportResult:
     supports_simulated: bool = False
     draft_shield_simulated: bool = False
     full_tower_infill_simulated: bool = False
+    tower_supports_disabled_simulated: bool = False
 
     @property
     def simulated_project_properties(self) -> tuple[str, ...]:
@@ -331,6 +332,7 @@ class PreviewExportResult:
             (self.supports_simulated, "Aktivierte Stützen wurden simuliert"),
             (self.draft_shield_simulated, "Draft Shield wurde simuliert deaktiviert"),
             (self.full_tower_infill_simulated, "100%-Turmfüllung simuliert"),
+            (self.tower_supports_disabled_simulated, "Deaktivierte Turmstützen simuliert"),
         ) if enabled)
 
     @property

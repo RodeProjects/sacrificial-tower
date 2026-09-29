@@ -260,6 +260,19 @@ class UpdateService:
                 # directories after cancellations or validation errors.
                 shutil.rmtree(temporary_directory, ignore_errors=True)
 
+    def discard_installer(self, installer_path: str | Path) -> None:
+        """Remove only a verified download held in our own temporary folder."""
+        installer = Path(installer_path).resolve()
+        root = (self.temporary_root or Path(tempfile.gettempdir())).resolve()
+        folder = installer.parent
+        if (
+            folder.parent == root
+            and folder.name.startswith("sacrificial-tower-update-")
+            and installer.name.startswith("SacrificialTowerSetup-")
+            and installer.suffix.casefold() == ".exe"
+        ):
+            shutil.rmtree(folder, ignore_errors=True)
+
     @staticmethod
     def launch_installer(installer_path: str | Path) -> None:
         installer = Path(installer_path).resolve()

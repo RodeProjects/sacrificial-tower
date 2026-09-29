@@ -70,14 +70,17 @@ def _utc_now() -> str:
 
 
 class _ThreadIdentityProbe(QObject):
-    """Capture IDs and enter run() from inside the worker event loop."""
+    """Run the worker and relay its signals with a stable job ID."""
 
     captured = Signal(str, object, object)
 
-    def __init__(self, job_id: str, worker: QObject) -> None:
+    def __init__(
+        self, job_id: str, worker: QObject, manager: BackgroundJobManager
+    ) -> None:
         super().__init__()
         self.job_id = job_id
         self.worker = worker
+        self.manager = manager
 
     @Slot()
     def capture_and_run(self) -> None:
@@ -87,6 +90,24 @@ class _ThreadIdentityProbe(QObject):
             threading.get_native_id(),
         )
         self.worker.run()
+
+    @Slot(int)
+    def worker_finished(self, _request_id: int) -> None:
+        self.manager._worker_finished_received.emit(self.job_id)
+
+    @Slot(int, str, str)
+    def worker_failed(
+        self, _request_id: int, message: str, details: str
+    ) -> None:
+        self.manager._worker_failed_received.emit(self.job_id, message, details)
+
+    @Slot(int, object)
+    def worker_succeeded(self, _request_id: int, _result: object) -> None:
+        self.manager._worker_succeeded_received.emit(self.job_id)
+
+    @Slot()
+    def thread_finished(self) -> None:
+        self.manager._thread_finished_received.emit(self.job_id)
 
 
 @dataclass(slots=True)
@@ -165,22 +186,10 @@ class BackgroundJobManager(QObject):
         self._lock = threading.RLock()
         self._diagnostic_snapshot: tuple[dict[str, object], ...] = ()
         queued = Qt.ConnectionType.QueuedConnection
-        self._worker_finished_received.connect(
-            self._on_worker_finished,
-            queued,
-        )
-        self._thread_finished_received.connect(
-            self._on_thread_finished,
-            queued,
-        )
-        self._worker_failed_received.connect(
-            self._on_worker_failed,
-            queued,
-        )
-        self._worker_succeeded_received.connect(
-            self._on_worker_succeeded,
-            queued,
-        )
+        self._worker_finished_received.connect(self._on_worker_finished, queued)
+        self._thread_finished_received.connect(self._on_thread_finished, queued)
+        self._worker_failed_received.connect(self._on_worker_failed, queued)
+        self._worker_succeeded_received.connect(self._on_worker_succeeded, queued)
 
     def start_job(
         self,
@@ -220,7 +229,7 @@ class BackgroundJobManager(QObject):
                 )
             thread = QThread(self)
             thread.setObjectName(f"background-job-{target_job_id}")
-            identity_probe = _ThreadIdentityProbe(target_job_id, worker)
+            identity_probe = _ThreadIdentityProbe(target_job_id, worker, self)
             job = BackgroundJob(
                 job_id=target_job_id,
                 kind=normalized_kind,
@@ -258,36 +267,27 @@ class BackgroundJobManager(QObject):
             Qt.ConnectionType.DirectConnection,
         )
         finished.connect(
-            lambda _request_id, target=target_job_id: (
-                self._worker_finished_received.emit(target)
-            )
+            identity_probe.worker_finished,
+            Qt.ConnectionType.DirectConnection,
+        )
+        thread.finished.connect(
+            identity_probe.thread_finished,
+            Qt.ConnectionType.DirectConnection,
         )
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(identity_probe.deleteLater)
-        thread.finished.connect(
-            lambda target=target_job_id: self._thread_finished_received.emit(
-                target
-            ),
-            Qt.ConnectionType.DirectConnection,
-        )
         thread.finished.connect(thread.deleteLater)
         failed = getattr(worker, "failed", None)
         if failed is not None:
             failed.connect(
-                lambda _request_id, message, details, target=target_job_id: (
-                    self._worker_failed_received.emit(
-                        target,
-                        str(message),
-                        str(details),
-                    )
-                )
+                identity_probe.worker_failed,
+                Qt.ConnectionType.DirectConnection,
             )
         succeeded = getattr(worker, "succeeded", None)
         if succeeded is not None:
             succeeded.connect(
-                lambda _request_id, _result, target=target_job_id: (
-                    self._worker_succeeded_received.emit(target)
-                )
+                identity_probe.worker_succeeded,
+                Qt.ConnectionType.DirectConnection,
             )
 
         self._transition(job, JobState.STARTING)

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,7 +22,8 @@ from cooling_tower.gui.widgets.chevron_button import ChevronButton
 from cooling_tower.gui.main_window import MainWindow, INTERNAL_DIALOG_REVEAL_DELAY_MS
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
-from cooling_tower.preview import PreviewState
+from cooling_tower.models import BedBounds
+from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene, PreviewState
 from cooling_tower.persistence import ConcurrentDocumentChangeError, VersionedDocumentWriteBlockedError
 from cooling_tower.settings_compatibility import SETTING_COMPATIBILITY_CATALOG, merge_compatible_setting_changes
 
@@ -168,7 +170,57 @@ class EmbeddedGenerationTests(unittest.TestCase):
         )
         self.assertEqual(len({button.y() for button in buttons}), 1)
         self.assertEqual([button.x() for button in buttons], sorted(button.x() for button in buttons))
+        self.assertEqual([button.sizeHint().height() for button in buttons], [32] * 4)
         self.assertIn("oben links", preview.navigation_hint.text())
+
+    def test_first_two_joint_slices_leave_no_temporary_space_below_preview(self):
+        w = self.window()
+        w.resize(1856, 1334)
+        w.show()
+        w.workflow.set_slicer_step_visible(True)
+        w.workflow.source_validation_succeeded("STL", analysis_complete=True)
+        w.workflow.slicer_succeeded("Slicer")
+        w.workflow.complete_preparation()
+        self.app.processEvents()
+
+        scene = PreviewScene(
+            (LineSegment3D(Point3D(0, 0, .2), Point3D(10, 10, .2)),),
+            (LineSegment3D(Point3D(20, 20, 0), Point3D(20, 20, 5)),),
+            BedBounds(0, 100, 0, 100),
+            (20, 20),
+            1, 1, 5,
+        )
+        preview = w.preview_dialog
+        preview.set_original_object(replace(scene, tower_segments=()))
+        self.app.processEvents()
+        w.preview_state = PreviewState.BUILDING
+        preview.set_building("Gemeinsame Angleichung wird vorbereitet …")
+        panel = w.joint_generation_dialog
+        panel.set_context(())
+        panel.begin(13, .25, 0, 12)
+        panel.start_slice(0, 12)
+        self.app.processEvents()
+
+        candidate = SimpleNamespace(evaluation=SimpleNamespace(
+            layer_timings=(SimpleNamespace(combined_layer_time_s=11.9),)
+        ))
+        for completed in (1, 2):
+            # The worker emits the scene immediately before its progress
+            # result, with no layout event between those queued signals.
+            w._on_joint_scene(w._preview_request_id, scene)
+            w._on_joint_progress(w._preview_request_id, SimpleNamespace(
+                completed_count=completed, best_iteration=candidate
+            ))
+            self.app.processEvents()
+            bottom_gap = (
+                w.prediction_frame.rect().bottom()
+                - preview.mapTo(w.prediction_frame, preview.rect().bottomLeft()).y()
+            )
+            self.assertLessEqual(bottom_gap, 20, f"Slice {completed}: {bottom_gap} px")
+            panel.start_slice(completed, 12)
+            self.app.processEvents()
+        preview.set_cancelled()
+        self.assertEqual(preview.maximumHeight(), 16777215)
 
     def test_first_preparation_step_uses_short_requirement_labels(self):
         w = self.window()
@@ -284,7 +336,9 @@ class EmbeddedGenerationTests(unittest.TestCase):
                 self.assertAlmostEqual(editor.value(), value, places=3)
                 self.assertEqual(editor.text(), displayed)
         self.assertEqual(w._setting_widgets["target_layer_time_s"].unit_label.text(), "Sek.")
-        self.assertEqual(w._setting_widgets["layer_time_tolerance_s"].unit_label.text(), "Sek.")
+        w.show_joint_slice_settings()
+        self.assertEqual(w._joint_slice_settings_dialog.tolerance_spin_box.suffix(), " Sek.")
+        w._joint_slice_settings_dialog.reject()
 
     def test_live_progress_keeps_best_candidate_when_next_slice_is_worse(self):
         w = self.window()
@@ -398,7 +452,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         w = self.window()
         self.assertEqual(w.geometry_split_layout.count(), 2)
         layout = w.geometry_group.content_layout
-        ordered = [w._setting_widgets[n] for n in ("minimum_outer_diameter_mm", "maximum_outer_diameter_mm", "manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "local_reference_window")]
+        ordered = [w._setting_widgets[n] for n in ("minimum_outer_diameter_mm", "maximum_outer_diameter_mm", "manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg")]
         indices = [layout.indexOf(x) for x in ordered]
         self.assertEqual(indices, sorted(indices))
         self.assertTrue(all(i >= 0 for i in indices))
@@ -445,6 +499,47 @@ class EmbeddedGenerationTests(unittest.TestCase):
             w.cancel_generation()
             accept.assert_not_called()
             cancel.assert_called_once()
+
+    def test_paused_candidate_keeps_export_and_can_be_aborted(self):
+        w = self.window()
+        w.workflow.set_slicer_step_visible(True)
+        w.workflow.source_validation_succeeded("STL", analysis_complete=True)
+        w.workflow.slicer_succeeded("Testslicer")
+        w.workflow.complete_preparation()
+        w.resize(2600, 900)
+        w.show()
+        self.app.processEvents()
+        disposed = []
+        w.current_preview = SimpleNamespace(
+            dispose=lambda: disposed.append(True)
+        )
+        w.preview_state = PreviewState.CURRENT
+        w._joint_generation_paused = True
+        w._joint_slices_completed = 3
+        with patch.object(w, "_export_block_reason", return_value=None), patch.object(
+            w, "_current_preview_was_exported", return_value=False
+        ):
+            w._refresh_phase17_actions()
+            self.assertFalse(w.preview_action_control.isHidden())
+            self.assertFalse(w.export_button.isHidden())
+            self.assertEqual(w.preview_button.text(), "Generierung abbrechen")
+            self.assertTrue(w.preview_button.isEnabled())
+            self.assertTrue(w.export_button.isEnabled())
+            with patch.object(w.background_job_manager, "cancel_jobs") as cancel:
+                w.preview_button.click()
+                cancel.assert_not_called()
+            self.assertEqual(disposed, [True])
+            self.assertIsNone(w.current_preview)
+            self.assertEqual(w.preview_state, PreviewState.EMPTY)
+            self.assertFalse(w._joint_generation_paused)
+            self.assertEqual(w._joint_slices_completed, 0)
+            self.assertTrue(w.export_button.isHidden())
+            self.assertEqual(w.status_label.text(), "Generierung abgebrochen")
+            w.current_preview = SimpleNamespace(dispose=lambda: None)
+            w.preview_state = PreviewState.CURRENT
+            w._refresh_phase17_actions()
+            self.assertTrue(w.preview_action_control.isHidden())
+            self.assertFalse(w.export_button.isHidden())
 
     def test_resumed_generation_abort_does_not_accept_another_candidate(self):
         w = self.window()

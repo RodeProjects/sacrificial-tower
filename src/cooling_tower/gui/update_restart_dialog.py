@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 
 
 class UpdateRestartCountdownDialog(QMessageBox):
     """Show the verified-download countdown before handing off to Setup."""
 
-    def __init__(self, parent: QWidget | None = None, *, seconds: int = 5) -> None:
+    def __init__(self, parent: QWidget | None = None, *, seconds: int = 10) -> None:
         if seconds < 1:
             raise ValueError("Der Update-Neustart benötigt mindestens eine Sekunde.")
         super().__init__(parent)
@@ -18,6 +18,10 @@ class UpdateRestartCountdownDialog(QMessageBox):
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setStandardButtons(QMessageBox.StandardButton.NoButton)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        self.cancel_button = self.addButton(
+            "Abbrechen", QMessageBox.ButtonRole.RejectRole
+        )
+        self.cancel_button.setObjectName("updateRestartCancelButton")
 
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
@@ -27,7 +31,12 @@ class UpdateRestartCountdownDialog(QMessageBox):
     def exec_countdown(self) -> int:
         self._timer.start()
         try:
-            return self.exec()
+            result = self.exec()
+            return (
+                QDialog.DialogCode.Rejected
+                if self.clickedButton() is self.cancel_button
+                else result
+            )
         finally:
             self._timer.stop()
 

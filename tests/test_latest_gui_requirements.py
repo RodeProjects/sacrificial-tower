@@ -154,7 +154,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
-        window.resize(1400, 900)
+        window.resize(2000, 900)
         window.show()
         window.warning_text.setPlainText("Ein Warnhinweis")
         window._refresh_issue_panels()
@@ -1485,12 +1485,12 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         self.assertEqual(
             window._setting_widgets["manual_base_width_mm"].range_label.text(),
-            "20 - 100 mm",
+            "20 - 80 mm",
         )
-        self.assertEqual(
-            window._setting_widgets["layer_time_tolerance_s"].range_label.text(),
-            "Max. 3,00 Sek.",
-        )
+        window.show_joint_slice_settings()
+        tolerance = window._joint_slice_settings_dialog.tolerance_spin_box
+        self.assertEqual((tolerance.minimum(), tolerance.maximum()), (0.1, 3.0))
+        window._joint_slice_settings_dialog.reject()
         self.assertEqual(
             window._setting_widgets["maximum_expansion_angle_deg"].range_label.text(),
             "Max. 70,0 °",

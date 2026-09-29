@@ -82,10 +82,10 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
 
 ### Automatischer Standfuß
 
-Die automatische Außenbreite folgt `0,2 × Objekthöhe` und ist auf 20 bis
-100 mm begrenzt. Eine manuelle Breite muss ebenfalls in diesem Bereich liegen.
-Die GUI zeigt und prüft dieselben Grenzen; bei sehr hohen Objekten wird auch
-der automatisch berechnete Wert auf 100 mm begrenzt.
+Die automatische Außenbreite folgt `0,21 mm je 1 mm Original-Objekthöhe` und ist auf
+25 bis 80 mm begrenzt. Die manuelle Breite darf 20 bis 80 mm betragen.
+Die GUI zeigt und prüft diese unterschiedlichen Untergrenzen; ab rund
+381 mm Objekthöhe wird der automatische Wert auf 80 mm begrenzt.
 
 Der äußere gerade Fußrand besteht aus genau einem tatsächlichen Layer.
 Es gibt keine manuelle Höhenangabe mehr.
@@ -163,7 +163,9 @@ Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
 maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
 
 Die Kreissegmentzahl wird pro Kandidat aus dessen größtem aktuellen Durchmesser
-berechnet: `ceil(1,0 × Durchmesser in mm)`, auf 16 bis 128 begrenzt.
+berechnet: `max(25, ceil(1,0 × Durchmesser in mm))`. Damit haben
+kleine Türme mindestens 25 Segmente; bei größeren Durchmessern gilt
+ein Segment pro Millimeter ohne obere Begrenzung.
 Alle Ringe eines STL verwenden dieselbe Segmentzahl,
 damit das Netz geschlossen bleibt. Getrennte und gemeinsame Slices verwenden
 dieselbe Regel; eine veränderte Kandidatenbreite kann die Auflösung im nächsten
@@ -171,20 +173,45 @@ Kalibrierungsdurchlauf ändern.
 Die 3D-Vorschau zeigt die für den dargestellten Kandidaten verwendete Zahl als
 „Turm-Kreissegmente“ oberhalb der Höhenangabe an.
 
+Das Originalobjekt erscheint nach dem Pre-Slice zunächst in der 3/4-Ansicht.
 Nach jeder abgeschlossenen Generierung wird die Seitenansicht neu eingepasst.
+Beim Wiederherstellen der Standardwerte wird die reine Originalobjektansicht
+auf 3/4 und eine Szene mit Kühlturm auf die Seitenansicht gesetzt.
 Sie richtet sich nach der Platzierung von Objekt und Turm, sodass beide möglichst
 nebeneinander sichtbar sind. Die Vorderansicht liegt dazu um 90° gedreht.
 Höhen und Layeranzahlen werden getrennt für Originalobjekt und Turm angezeigt.
 Die Navigationsanzeige und ihr Symbol schalten denselben Navigationszustand um.
-Beide liegen als Overlay eine Zeilenhöhe oberhalb der Canvas-Standardposition;
-die Bedienelemente bleiben dabei über den Vorschauinformationen anklickbar.
+Beide liegen als Overlay links etwa eine Textzeile unter der Layer-Information.
+Die tiefer reichende Druckplatteninformation rechts bestimmt ihre Position nicht.
+Wird die Canvas nach dem Einblenden neu positioniert,
+folgen ihr die Navigationselemente. Die vier Ansichtsbuttons über der Canvas
+sind 32 px hoch.
 
 Nach Abschluss der Datei-/Slicer-Vorbereitung enthält das gemeinsame Dropdown
-„Turm-Einstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge, Auflösung und
-Zeitfenster. Die Abschnittsüberschriften wiederholen keine Einstellungswerte.
+„Turm-Einstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
+Simulation deaktivierter Turmstützen. Das lokale Zeitfenster befindet sich
+in „Allgemeine Einstellungen“ und besitzt dort einen eigenen Reset.
 Der aktuelle Standard des lokalen Zeitfensters ist 51 Layer; explizit gespeicherte
 Benutzerwerte bleiben erhalten. Das Speicherformat und die Bedeutung des Feldes
-ändern sich dadurch nicht; es ist keine Schema-Migration erforderlich.
+ändern sich dadurch nicht. Der globale Reset lässt den Wert unverändert.
+
+Die Aufweitung wird zur Vertikalen gemessen. Bei Orca-, Bambu- und
+Anycubic-Profilen ist `support_threshold_angle` dagegen zur Horizontalen
+definiert. Nach einem erfolgreichen Pre-Slice wird bei aktiven Stützen ab
+`90° − support_threshold_angle` am Aufweitungswinkel gewarnt. Der Hinweis
+entfällt bei deaktivierten Stützen oder aktivierter Simulation ohne Stützen.
+Die Simulation steht direkt unter „100% Turmfüllung simulieren“ und schreibt
+ausschließlich temporäre Profilkopien und objektspezifische Einstellungen
+im programmeigenen gemeinsamen 3MF bzw. in
+der temporären Bambu-Assembly. Die Stützeneinstellung des Originalobjekts
+bleibt unverändert.
+
+Nach dem Pre-Slice zeigt die 3D-Ansicht zunächst die Druckbahnen des
+Originalobjekts; ein kurzer Hinweis oberhalb der Trennlinie erklärt den noch
+fehlenden Kühlturm. Nach einem Generierungsabbruch kehrt sie dorthin zurück;
+alle vier Ansichtsbuttons funktionieren auch ohne Turmgeometrie. Änderungen
+an Turmeinstellungen kennzeichnen diese reine Originalobjektansicht nicht als
+veraltet; die Veraltet-Anzeige gilt erst für Szenen mit Kühlturm.
 
 ## Prüfungen
 

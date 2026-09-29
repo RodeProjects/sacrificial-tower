@@ -1081,6 +1081,32 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
             tower_before,
         )
 
+    def test_bambu_support_override_applies_only_to_tower(self) -> None:
+        runner = NativeProjectRunner()
+        _anycubic, request = self.request(runner)
+        adapter = BambuStudioAdapter(runner=runner)
+        source = PROJECT_ROOT / "tests" / "fixtures" / "stl" / "test_model_manifold.stl"
+        tower = PROJECT_ROOT / "tests" / "fixtures" / "stl" / "known_valid_tetrahedron_ascii.stl"
+        destination = self.root / "support_candidate.bambu-assemble.json"
+
+        adapter.prepare_joint_slice_input(
+            request,
+            source,
+            tower,
+            destination,
+            occupied=OccupiedBounds(0.0, 20.0, 0.0, 20.0),
+            placement=TowerPlacement(
+                80.0, 80.0, 5.0, BedBounds(0.0, 250.0, 0.0, 250.0), 10.0
+            ),
+            tower_full_infill=False,
+            tower_supports_disabled=True,
+        )
+
+        objects = json.loads(destination.read_text(encoding="utf-8"))["plates"][0]["objects"]
+        self.assertNotIn("print_params", objects[0])
+        self.assertEqual(objects[1]["print_params"], {"enable_support": "0"})
+        self.assertEqual(runner.calls, 0)
+
     def test_anycubic_cli_receives_typed_isolated_profile_copies(self) -> None:
         for record in (self.machine, self.process, self.filament):
             payload = json.loads(record.path.read_text(encoding="utf-8"))

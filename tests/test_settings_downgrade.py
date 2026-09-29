@@ -39,6 +39,19 @@ def current_payload(**generation_changes: object) -> dict[str, object]:
 
 
 class CompatibilityRuleTests(unittest.TestCase):
+    def test_manual_base_width_above_new_limit_is_rejected(self) -> None:
+        result = merge_compatible_setting_changes(
+            current_payload(manual_base_width_mm=60.0),
+            {
+                "generation.manual_base_width_mm": {
+                    "token": "manual-base-width-mm-v1",
+                    "value": 100.0,
+                }
+            },
+        )
+        self.assertEqual(result.payload["generation"]["manual_base_width_mm"], 60.0)
+        self.assertIn("generation.manual_base_width_mm", result.rejected_ids)
+
     def test_valid_value_with_same_semantics_is_accepted(self) -> None:
         result = merge_compatible_setting_changes(
             current_payload(),

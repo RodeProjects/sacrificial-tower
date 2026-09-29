@@ -23,6 +23,7 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -161,7 +162,6 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         editors = (
             window.target_time_spin,
-            window.layer_time_tolerance_spin,
             window.maximum_outer_spin,
         )
         self.assertEqual(
@@ -173,7 +173,7 @@ class Phase18UiTests(unittest.TestCase):
                 )
             },
         )
-        row = window._setting_widgets["layer_time_tolerance_s"]
+        row = window._setting_widgets["target_layer_time_s"]
         grid = row.layout()
         self.assertEqual(grid.getItemPosition(grid.indexOf(row.info_button))[:2], (0, 0))
         self.assertEqual(grid.getItemPosition(grid.indexOf(row.label))[:2], (0, 1))
@@ -498,7 +498,7 @@ class Phase18UiTests(unittest.TestCase):
             "Berechnungsdetails",
             [card.title() for card in window.findChildren(SectionCard)],
         )
-        self.assertTrue(
+        self.assertFalse(
             geometry.content_widget.isAncestorOf(window.local_window_spin)
         )
         self.assertTrue(
@@ -631,9 +631,63 @@ class Phase18UiTests(unittest.TestCase):
         QTest.qWait(30)
         self.app.processEvents()
         dialog = window._joint_slice_settings_dialog
-        self.assertGreaterEqual(dialog.width(), 650)
+        self.assertGreaterEqual(dialog.width(), 707)
+        self.assertEqual(
+            dialog.show_limits_checkbox.layoutDirection(),
+            window.full_infill_checkbox.layoutDirection(),
+        )
+        self.assertEqual(
+            dialog.show_limits_checkbox.sizeHint().height(),
+            window.full_infill_checkbox.sizeHint().height(),
+        )
+        limits_layout = dialog.layout().itemAt(0).widget().layout().itemAt(1).layout()
+        self.assertEqual(
+            (limits_layout.contentsMargins().top(),
+             limits_layout.contentsMargins().bottom()),
+            (2, 2),
+        )
+        self.assertEqual(
+            (dialog.separate_spin_box.width(), dialog.spin_box.width(),
+             dialog.local_window_spin_box.width()),
+            (165, 165, 165),
+        )
         self.assertEqual(dialog.height(), dialog.layout().sizeHint().height())
-        self.assertLess(dialog.height(), window.height() // 2)
+        self.assertLess(dialog.height(), window.height() * 0.65)
+        self.assertEqual(dialog.footer_divider.x(), 0)
+        self.assertEqual(dialog.footer_divider.width(), dialog.width())
+        browse = next(
+            button for button in dialog.findChildren(QPushButton)
+            if button.text() == "Auswählen …"
+        )
+        self.assertEqual(browse.height(), dialog.output_root_edit.height())
+        footer_buttons = (
+            dialog.general_reset_button,
+            dialog.apply_button,
+            next(button for button in dialog.findChildren(QPushButton)
+                 if button.text() == "Abbrechen"),
+        )
+        self.assertEqual(
+            {button.height() for button in footer_buttons},
+            {window.reset_button.height()},
+        )
+        self.assertEqual(
+            {button.font().pointSizeF() for button in footer_buttons},
+            {window.reset_button.font().pointSizeF()},
+        )
+        cancel = next(
+            button for button in dialog.findChildren(QPushButton)
+            if button.text() == "Abbrechen"
+        )
+        self.assertEqual(
+            dialog.footer_divider.y()
+            - browse.mapTo(dialog, QPoint(0, browse.height())).y(),
+            20,
+        )
+        self.assertEqual(
+            cancel.mapTo(dialog, QPoint(0, 0)).y()
+            - (dialog.footer_divider.y() + dialog.footer_divider.height()),
+            20,
+        )
         self.assertLessEqual(
             abs(
                 dialog.frameGeometry().center().y()
@@ -1675,7 +1729,7 @@ class Phase18UiTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(window.timing_group.isVisible())
             self.assertTrue(window.geometry_group.isVisible())
-            self.assertTrue(window.local_window_spin.isVisible())
+            self.assertFalse(window.local_window_spin.isVisible())
             self.assertTrue(window.target_time_spin.isVisible())
             self.assertIsNone(window.timing_group.graphicsEffect())
             self.assertIsNone(window.prediction_frame.graphicsEffect())
@@ -1725,7 +1779,7 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertTrue(window.minimum_outer_spin.isVisible())
         self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
-        self.assertTrue(window.local_window_spin.isVisible())
+        self.assertFalse(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
@@ -1748,7 +1802,7 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(body.isHidden())
         self.assertGreaterEqual(body.height(), body.sizeHint().height() - 2)
-        self.assertTrue(window.local_window_spin.isVisible())
+        self.assertFalse(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
@@ -1944,7 +1998,7 @@ class Phase18UiTests(unittest.TestCase):
 
     def test_export_notice_uses_content_height(self) -> None:
         window = self.window()
-        window.resize(1300, 900)
+        window.resize(2000, 900)
         window.show()
         self.app.processEvents()
         self.app.processEvents()
