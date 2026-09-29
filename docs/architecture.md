@@ -247,8 +247,11 @@ der Pflichtslices das beste Anzeigeergebnis. Nach dem dritten Slice kann
 der Lauf mit diesem Kandidaten enden; Generierungsanzeige und Exportbericht
 auf dieselbe Slicer-Auswertung. Während des Laufs bleibt der bislang beste
 Kandidat intern und in der Ergebnisanzeige erhalten; schlechtere Folgeslices
-ändern nur den Fortschrittszähler. Die Seitenansicht zeigt nach jedem erfolgreich
-geprüften gemeinsamen Slice die Form des aktuellen Kandidaten. Dafür werden
+ändern nur den Fortschrittszähler. Der erste erfolgreich geprüfte gemeinsame
+Slice stellt auf die Seitenansicht um; diese zeigt die Form des aktuellen
+Kandidaten auch nach Abschluss, bis der Benutzer die Kamera ändert. Export
+und Fortsetzen setzen sie nicht zurück; der erste neue Slice stellt wieder
+die Seitenansicht ein. Dafür werden
 die bereits vorbereiteten Objektlinien und das Turmprofil verwendet; es ist kein
 zusätzlicher Slicer-Lauf nötig. Während der Generierung bleiben Navigation und
 Ansichtsbuttons gesperrt. Bei einem fehlgeschlagenen Lauf wird die vorherige
@@ -257,6 +260,10 @@ Beim erneuten Stoppen einer Fortsetzung wird auch der zuvor übernommene
 Kandidat verworfen.
 Ein fehlgeschlagener Fortsetzungslauf lässt das zuvor exportfähige Ergebnis
 und, bei verbleibendem Slice-Budget, die Fortsetzungsoption verfügbar.
+Ein erfolgreich exportierter Kandidat wird innerhalb der Sitzung anhand von
+Anfrage und Turmdatei-Prüfsumme erkannt. Wird bei einer Fortsetzung ein neuer
+bester Turm erzeugt, sind die Exportaktionen wieder verfügbar; derselbe
+Kandidat bleibt gegen einen doppelten Export gesperrt.
 Fehler der Generierung erscheinen mit ihrer vollständigen Ursache nur im
 Statusbereich unten links. Der Ergebnisbereich zeigt bei erhaltenem Kandidaten
 weiterhin dessen Werte und mögliche Aktionen, aber keinen zweiten Fehlertext.

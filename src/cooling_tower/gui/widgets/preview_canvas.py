@@ -436,10 +436,15 @@ class PreviewCanvas(QWidget):
             )
             return gap / max(total_span, 1e-9)
 
-        # Evaluate actual preview geometry, not only its bounding boxes. This
-        # also handles diagonal corner placements whose X/Y bounding boxes
-        # overlap although object and tower are geometrically separate.
-        selected_yaw = max(candidates, key=separation_score)
+        # Keep the exported 3MF's X/Y axes in the normal side view whenever
+        # either bed axis separates the two objects. A diagonal camera angle
+        # can make the same unchanged STL appear rotated in the preview.
+        # Only use an oblique view for corner placements where both cardinal
+        # projections overlap.
+        cardinal_yaws = (0.0, -90.0)
+        selected_yaw = max(cardinal_yaws, key=separation_score)
+        if separation_score(selected_yaw) <= 0.0:
+            selected_yaw = max(candidates, key=separation_score)
 
         # A projection and the same projection rotated by 180 degrees have an
         # identical separation score, but reverse the visual order. Keep the

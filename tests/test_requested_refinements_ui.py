@@ -61,7 +61,7 @@ class RequestedRefinementsUiTests(unittest.TestCase):
             self.assertEqual(canvas.pitch_deg, 0)
         canvas.close()
 
-    def test_each_completed_generation_restores_side_and_correct_layer_labels(self):
+    def test_each_completed_generation_preserves_camera_and_layer_labels(self):
         dialog = PreviewDialog()
         scene = replace(preview_scene(), object_height_mm=0.65, tower_height_mm=0.65,
                         object_layer_count=3, tower_layer_count=3)
@@ -72,8 +72,8 @@ class RequestedRefinementsUiTests(unittest.TestCase):
                 dialog.canvas.three_quarter_view()
                 dialog.canvas.zoom = 3
                 dialog.set_preview(result)
-                self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
-                self.assertEqual(dialog.canvas.zoom, dialog.canvas.SIDE_VIEW_ZOOM)
+                self.assertEqual((dialog.canvas.yaw_deg, dialog.canvas.pitch_deg), (-38.0, 28.0))
+                self.assertEqual(dialog.canvas.zoom, 3.0)
                 self.assertFalse(dialog.canvas.navigation_enabled)
         self.assertIn(">3</span>", dialog.layers_info_label.text())
         self.assertEqual(dialog.layers_info_label.text().count(">3</span>"), 2)
@@ -92,6 +92,7 @@ class RequestedRefinementsUiTests(unittest.TestCase):
         dialog.set_intermediate_scene(scene)
         self.assertIs(dialog.canvas.scene, scene)
         self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
+        self.assertEqual(dialog.canvas.pitch_deg, 0.0)
         self.assertTrue(dialog.canvas.navigation_toggle.isHidden())
         self.assertTrue(dialog.canvas.navigation_status_label.isHidden())
         self.assertFalse(dialog.canvas.navigation_enabled)
@@ -108,6 +109,32 @@ class RequestedRefinementsUiTests(unittest.TestCase):
         self.assertIs(dialog.canvas.scene, scene)
         self.assertIn("5 mm", dialog.height_info_label.text())
         dialog.close()
+
+    def test_first_slice_resets_side_view_but_completion_and_resume_preserve_it(self):
+        dialog = PreviewDialog(embedded=True)
+        self.addCleanup(dialog.close)
+        scene = preview_scene()
+        result = SimpleNamespace(scene=scene, output_mode=OutputMode.STL)
+        dialog.canvas.three_quarter_view()
+        dialog.set_building("Erster gemeinsamer Slice")
+        self.assertEqual((dialog.canvas.yaw_deg, dialog.canvas.pitch_deg), (-38.0, 28.0))
+
+        dialog.set_intermediate_scene(scene)
+        side_camera = dialog.canvas.camera_state()
+        self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
+        with patch.object(dialog, "_quality_summary", return_value=("", "current")), \
+             patch.object(dialog, "_last_iteration_summary", return_value=""):
+            dialog.set_preview(result)
+            self.assertEqual(dialog.canvas.camera_state(), side_camera)
+
+            dialog.canvas.front_view()
+            chosen_camera = dialog.canvas.camera_state()
+            dialog.set_building("Fortsetzung vorbereitet")
+            self.assertEqual(dialog.canvas.camera_state(), chosen_camera)
+            dialog.set_intermediate_scene(scene)
+            self.assertEqual(dialog.canvas.camera_state(), side_camera)
+            dialog.set_preview(result)
+            self.assertEqual(dialog.canvas.camera_state(), side_camera)
 
     def test_generation_abort_uses_red_gradient_and_returns_to_blue(self):
         with tempfile.TemporaryDirectory() as temporary:

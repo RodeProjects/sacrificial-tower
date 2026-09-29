@@ -61,6 +61,7 @@ class ExportSessionUiTests(unittest.TestCase):
             window._export_request_id = 4
             window.current_preview = SimpleNamespace(
                 request_signature="generation-a",
+                artifact_sha256="tower-a",
                 dispose=lambda: None,
             )
             window.preview_state = PreviewState.CURRENT
@@ -68,6 +69,10 @@ class ExportSessionUiTests(unittest.TestCase):
 
             window._on_export_succeeded(4, result)
             self.app.processEvents()
+            self.assertEqual(
+                window._last_exported_preview_identity,
+                ("generation-a", "tower-a"),
+            )
             self.assertEqual(window.export_success_cancel_button.text(), "Schließen")
             self.assertEqual(
                 window.last_export_report_button.text(),
@@ -90,32 +95,58 @@ class ExportSessionUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_exact_exported_generation_is_locked_for_the_session(self) -> None:
+    def test_export_lock_tracks_tower_revision_within_one_generation(self) -> None:
         window = self.window()
         try:
             window.current_preview = SimpleNamespace(
                 request_signature="generation-a",
+                artifact_sha256="tower-a",
                 dispose=lambda: None,
             )
             window.preview_state = PreviewState.CURRENT
-            window._last_exported_preview_signature = "generation-a"
+            window._last_exported_preview_identity = ("generation-a", "tower-a")
             self.assertTrue(window._current_preview_was_exported())
 
             window.current_preview = SimpleNamespace(
-                request_signature="generation-b",
+                request_signature="generation-a",
+                artifact_sha256="better-tower-a",
                 dispose=lambda: None,
             )
             self.assertFalse(window._current_preview_was_exported())
-            window._last_exported_preview_signature = "generation-b"
+            with patch.object(window, "_export_block_reason", return_value=None):
+                window._refresh_phase17_actions()
+            self.assertTrue(window.export_button.isEnabled())
+            self.assertTrue(window.joint_generation_dialog.export_button.isEnabled())
+
+            window._last_exported_preview_identity = (
+                "generation-a", "better-tower-a"
+            )
+            self.assertTrue(window._current_preview_was_exported())
+            with patch.object(window, "_export_block_reason", return_value=None):
+                window._refresh_phase17_actions()
+            self.assertFalse(window.export_button.isEnabled())
+            self.assertFalse(window.joint_generation_dialog.export_button.isEnabled())
+
             window.current_preview = SimpleNamespace(
                 request_signature="generation-a",
+                artifact_sha256="tower-a",
                 dispose=lambda: None,
             )
             self.assertFalse(window._current_preview_was_exported())
 
-            window._last_exported_preview_signature = "generation-a"
-
             request = SimpleNamespace(signature=lambda: "generation-a")
+            with (
+                patch.object(window, "validate_form"),
+                patch.object(window, "_refresh_stl_availability"),
+                patch.object(window, "_current_preview_request", return_value=request),
+                patch.object(window.background_job_manager, "start_job") as start_job,
+            ):
+                window.export_button.setEnabled(True)
+                window.start_export()
+            start_job.assert_called_once()
+            self.assertFalse(window.export_button.isEnabled())
+
+            window._last_exported_preview_identity = ("generation-a", "tower-a")
             window.export_button.setEnabled(True)
             with (
                 patch.object(window, "validate_form"),

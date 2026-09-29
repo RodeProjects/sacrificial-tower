@@ -421,9 +421,11 @@ class PreviewDialog(QDialog):
         self._intermediate_scene_active = False
         self._scene_before_build = None
         self.state = PreviewState.CURRENT
-        self.canvas.set_scene(result.scene)
+        # The first completed joint slice already selected the side view.
+        # Completing, accepting, exporting or resuming a result must not
+        # replace the user's current camera choice.
+        self.canvas.set_scene(result.scene, preserve_view=True)
         self.tower_legend.show()
-        self.canvas.side_view()
         self.state_label.setText("✓ Vorschau ist aktuell")
         self.state_label.setProperty("state", "current")
         self.state_label.show()

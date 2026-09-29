@@ -1247,7 +1247,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(status.count("passendster erkannter slicer"), 1)
         window.close()
 
-    def test_preview_starts_in_zoomed_out_side_view_and_exports_from_dialog(self) -> None:
+    def test_preview_starts_in_bed_aligned_view_and_exports_from_dialog(self) -> None:
         window = self.window()
         scene = PreviewScene(
             object_segments=(
@@ -1272,7 +1272,10 @@ class Phase18UiTests(unittest.TestCase):
             output_mode=SimpleNamespace(value="stl"),
         )
         window.preview_dialog.set_preview(result)
-        self.assertEqual(window.preview_dialog.canvas.yaw_deg, 0.0)
+        self.assertEqual(
+            (window.preview_dialog.canvas.yaw_deg, window.preview_dialog.canvas.pitch_deg),
+            (-38.0, 28.0),
+        )
         self.assertEqual(
             window.preview_dialog.bed_legend.text(),
             "■ Druckplatte",
@@ -1311,7 +1314,7 @@ class Phase18UiTests(unittest.TestCase):
             )
         self.assertAlmostEqual(
             window.preview_dialog.canvas.zoom,
-            PreviewCanvas.SIDE_VIEW_ZOOM,
+            1.0,
         )
         window.preview_dialog.canvas.zoom = 2.0
         window.preview_dialog.side_button.click()
@@ -1356,6 +1359,38 @@ class Phase18UiTests(unittest.TestCase):
             for point in (segment.start, segment.end)
         )
         self.assertLess(max(object_x), min(tower_x))
+
+    def test_side_view_keeps_export_bed_axis_when_objects_separate_on_x(self) -> None:
+        canvas = PreviewCanvas()
+        scene = PreviewScene(
+            object_segments=(
+                LineSegment3D(Point3D(10, 10, 0), Point3D(15, 30, 8)),
+                LineSegment3D(Point3D(15, 30, 8), Point3D(30, 20, 0)),
+            ),
+            tower_segments=(
+                LineSegment3D(Point3D(70, 18, 0), Point3D(75, 23, 12)),
+            ),
+            bed_bounds=BedBounds(0, 100, 0, 100),
+            tower_center_xy_mm=(72.5, 20.5),
+            source_segment_count=2,
+            displayed_segment_count=2,
+            tower_height_mm=12,
+        )
+        canvas.set_scene(scene)
+        canvas.side_view()
+
+        self.assertEqual(canvas.yaw_deg, 0.0)
+        context = canvas._projection_context()
+        for segment in (*scene.object_segments, *scene.tower_segments):
+            for point in (segment.start, segment.end):
+                self.assertAlmostEqual(
+                    context.project_raw(point)[0], point.x - 50.0
+                )
+        canvas.front_view()
+        self.assertEqual(canvas.yaw_deg, -90.0)
+        canvas.top_view()
+        self.assertEqual(canvas.yaw_deg, 0.0)
+        self.assertEqual(canvas.pitch_deg, 89.0)
 
     def test_side_view_keeps_object_left_for_every_tower_quadrant(self) -> None:
         for tower_x_mm, tower_y_mm in (
@@ -1403,7 +1438,7 @@ class Phase18UiTests(unittest.TestCase):
                 )
                 self.assertLess(max(object_x), min(tower_x))
 
-    def test_refreshing_preview_restores_side_view_pan_fit_and_zoom(self) -> None:
+    def test_refreshing_preview_preserves_selected_view_pan_fit_and_zoom(self) -> None:
         window = self.window()
 
         def result(offset: float):
@@ -1449,13 +1484,8 @@ class Phase18UiTests(unittest.TestCase):
 
         window.preview_dialog.set_preview(result(3.0))
 
-        self.assertNotEqual(canvas.camera_state(), state_before)
-        self.assertAlmostEqual(canvas.yaw_deg, canvas._side_by_side_yaw_deg())
-        self.assertEqual(canvas.pitch_deg, 0.0)
-        self.assertEqual(canvas.pan_x, 0.0)
-        self.assertEqual(canvas.pan_y, 0.0)
-        self.assertAlmostEqual(canvas.zoom, canvas.SIDE_VIEW_ZOOM)
-        self.assertFalse(canvas._fit_whole_bed)
+        self.assertEqual(canvas.camera_state(), state_before)
+        self.assertTrue(canvas._fit_whole_bed)
         window.close()
 
     def test_side_view_handles_diagonal_placement_with_overlapping_xy_bounds(self) -> None:

@@ -173,10 +173,11 @@ Die maschinenlesbare Fassung befindet sich in
 
 - Der Zustand ist grün und eindeutig erkennbar.
 - Der Export bleibt unabhängig von der optionalen Vorschau möglich.
-- Die erste Kameraansicht und der Button „Seitenansicht“ verwenden dieselbe,
-  weiter herausgezoomte Seitenansicht.
-- In beiden Ansichten steht das Originalobjekt unabhängig von seiner Lage
-  links und der erzeugte Kühlturm rechts.
+- Nach dem Pre-Slice erscheint das Original zunächst in der 3/4-Ansicht. Der
+  erste gemeinsame Slice stellt auf Seitenansicht um; Abschluss, Export und
+  Fortsetzen behalten die aktuelle Ansicht bis zur nächsten Slice-Vorschau.
+- Der Button „Seitenansicht“ zeigt das Originalobjekt unabhängig von seiner
+  Lage links und den erzeugten Kühlturm rechts.
 - Die Vorschau nennt Breite und Tiefe der verwendeten Druckplatte.
 - Ein rechtsbündiger Button „Kühlturm exportieren“ verwendet denselben
   Exportzustand wie die Hauptansicht.

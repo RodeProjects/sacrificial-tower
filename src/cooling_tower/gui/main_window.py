@@ -843,7 +843,7 @@ class MainWindow(QMainWindow):
         self.last_export_result: PreviewExportResult | None = None
         # Session-only state: exported generations must not create duplicate
         # timestamped folders, while their confirmation remains reopenable.
-        self._last_exported_preview_signature: str | None = None
+        self._last_exported_preview_identity: tuple[str, str | None] | None = None
         self._last_export_report_result: PreviewExportResult | None = None
         self._latest_export_directory: Path | None = None
         self._latest_export_root_text: str | None = None
@@ -4603,12 +4603,21 @@ class MainWindow(QMainWindow):
     def _current_preview_was_exported(self) -> bool:
         """Return whether the exact current generation was exported this session."""
 
-        signature = getattr(self.current_preview, "request_signature", None)
-        return bool(
-            isinstance(signature, str)
-            and signature
-            and signature == self._last_exported_preview_signature
+        return (
+            self._preview_export_identity(self.current_preview)
+            == self._last_exported_preview_identity
+            and self._last_exported_preview_identity is not None
         )
+
+    @staticmethod
+    def _preview_export_identity(preview: object) -> tuple[str, str | None] | None:
+        """Identify the generated tower, not only the settings shared by its revisions."""
+
+        signature = getattr(preview, "request_signature", None)
+        if not isinstance(signature, str) or not signature:
+            return None
+        artifact_sha256 = getattr(preview, "artifact_sha256", None)
+        return signature, artifact_sha256 if isinstance(artifact_sha256, str) else None
 
     def _export_block_reason(self) -> str | None:
         if self.background_job_manager.has_active(JobKind.EXPORT):
@@ -7227,7 +7236,7 @@ class MainWindow(QMainWindow):
             self.current_preview = None
         self.preview_state = PreviewState.EMPTY
         self._preview_cancel_requested = False
-        self._last_exported_preview_signature = None
+        self._last_exported_preview_identity = None
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -12745,6 +12754,11 @@ class MainWindow(QMainWindow):
             self._refresh_phase17_actions()
         for delay_ms in (0, 50):
             QTimer.singleShot(delay_ms, self._refresh_phase17_actions)
+        # The original scene is restored before the interruption panel and
+        # status labels reach their final geometry. Recompute the card height
+        # after those changes, as on the initial original-object display.
+        self._refresh_ready_grid_layout()
+        QTimer.singleShot(0, self._refresh_ready_grid_layout)
 
     def start_export(self) -> None:
         self._bambu_multinozzle_tower_only_export_active = False
@@ -12757,9 +12771,6 @@ class MainWindow(QMainWindow):
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             self.result_label.setText(german_user_message(error))
             return
-        if request.signature() == self._last_exported_preview_signature:
-            self._refresh_phase17_actions()
-            return
         preview = self.current_preview
         if not (
             preview is not None
@@ -12769,6 +12780,9 @@ class MainWindow(QMainWindow):
             self._invalidate_preview(
                 "Die Einstellungen stimmen nicht mit der Generierung überein."
             )
+            return
+        if self._current_preview_was_exported():
+            self._refresh_phase17_actions()
             return
         self._clear_result_notices()
         self._export_request_id += 1
@@ -12847,8 +12861,8 @@ class MainWindow(QMainWindow):
             return
         self.last_export_result = result
         self._last_export_report_result = result
-        self._last_exported_preview_signature = getattr(
-            self.current_preview, "request_signature", None
+        self._last_exported_preview_identity = self._preview_export_identity(
+            self.current_preview
         )
         self._latest_export_directory = result.output_path.parent.resolve()
         self._latest_export_root_text = self.output_root_edit.text().strip()
@@ -13312,10 +13326,7 @@ class MainWindow(QMainWindow):
         self._pending_preview_camera_state = None
         if self._preview_dialog is not None:
             canvas = self._preview_dialog.canvas
-            if canvas.scene is not None and canvas.scene.tower_segments:
-                canvas.side_view()
-            else:
-                canvas.three_quarter_view()
+            canvas.three_quarter_view()
         self.timing_group.setChecked(True)
         self.prediction_frame.setChecked(True)
         self.geometry_settings_group.setChecked(True)

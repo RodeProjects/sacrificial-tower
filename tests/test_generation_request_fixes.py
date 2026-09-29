@@ -360,6 +360,48 @@ class GenerationUiTests(unittest.TestCase):
             "Der bisherige Kühlturm wurde verworfen.",
         )
 
+    def test_abort_restores_initial_space_below_original_preview(self) -> None:
+        self._ready()
+        window = self.window
+        window.resize(1856, 1334)
+        segment = LineSegment3D(Point3D(10, 10, .2), Point3D(20, 20, .2))
+        window.source_preslice_result = SimpleNamespace(cleanup=Mock(), preview_source_data=SimpleNamespace(
+            object_segments=(segment,),
+            occupied_bounds=OccupiedBounds(10, 20, 10, 20),
+            source_segment_count=1,
+        ))
+        window.analysis_snapshot = SimpleNamespace(maximum_print_z_mm=.2, layer_count=1)
+        window.profile_match_result = SimpleNamespace(selected=SimpleNamespace(
+            effective_profile=SimpleNamespace(effective_values={})
+        ))
+        window._show_original_object_preview()
+        self.app.processEvents()
+        preview = window.preview_dialog
+
+        def bottom_gap() -> int:
+            return (
+                window.prediction_frame.rect().bottom()
+                - preview.mapTo(
+                    window.prediction_frame, preview.rect().bottomLeft()
+                ).y()
+            )
+
+        initial_gap = bottom_gap()
+        window.preview_state = PreviewState.BUILDING
+        preview.set_building("Gemeinsamer Slice läuft")
+        panel = window.joint_generation_dialog
+        panel.begin(13, .25, 0, 12)
+        panel.start_slice(0, 12)
+        self.app.processEvents()
+        window._finish_generation_cancelled()
+        self.app.processEvents()
+
+        self.assertFalse(preview.navigation_hint.isHidden())
+        self.assertLessEqual(bottom_gap(), initial_gap + 2)
+        QTest.qWait(60)
+        self.app.processEvents()
+        self.assertLessEqual(bottom_gap(), initial_gap + 2)
+
     def test_original_object_stays_unstale_until_a_tower_is_shown(self) -> None:
         self._ready()
         window = self.window
@@ -423,9 +465,8 @@ class GenerationUiTests(unittest.TestCase):
         window.current_preview = SimpleNamespace(dispose=Mock())
         dialog.canvas.three_quarter_view()
         window.reset_defaults()
-        self.assertEqual(dialog.canvas.yaw_deg, dialog.canvas._side_by_side_yaw_deg())
-        self.assertEqual(dialog.canvas.pitch_deg, 0.0)
-        self.assertEqual(dialog.canvas.zoom, dialog.canvas.SIDE_VIEW_ZOOM)
+        self.assertEqual((dialog.canvas.yaw_deg, dialog.canvas.pitch_deg), (-38.0, 28.0))
+        self.assertEqual(dialog.canvas.zoom, 1.0)
 
     def test_result_precedes_simulation_and_export_is_offered_after_finish(self) -> None:
         panel = self.window.joint_generation_dialog

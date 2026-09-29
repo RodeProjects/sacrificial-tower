@@ -174,11 +174,16 @@ Die 3D-Vorschau zeigt die für den dargestellten Kandidaten verwendete Zahl als
 „Turm-Kreissegmente“ oberhalb der Höhenangabe an.
 
 Das Originalobjekt erscheint nach dem Pre-Slice zunächst in der 3/4-Ansicht.
-Nach jeder abgeschlossenen Generierung wird die Seitenansicht neu eingepasst.
-Beim Wiederherstellen der Standardwerte wird die reine Originalobjektansicht
-auf 3/4 und eine Szene mit Kühlturm auf die Seitenansicht gesetzt.
-Sie richtet sich nach der Platzierung von Objekt und Turm, sodass beide möglichst
-nebeneinander sichtbar sind. Die Vorderansicht liegt dazu um 90° gedreht.
+Der erste abgeschlossene gemeinsame Slice stellt auf die Seitenansicht um;
+weitere Zwischenstände und der Abschluss behalten diese Kamera. Nach dem
+Export oder einem Klick auf „Fortsetzen“ bleibt eine manuell gewählte Ansicht
+erhalten. Erst der erste abgeschlossene Slice der nächsten Generierungsphase
+stellt wieder auf die Seitenansicht um.
+Beim Wiederherstellen der Standardwerte gilt wieder die 3/4-Ansicht.
+Der Button „Seitenansicht“ wählt eine möglichst trennende Druckbettachse und
+zeigt das Originalobjekt links sowie den Turm rechts. Nur wenn sich beide
+Achsenprojektionen überlappen, nutzt er einen schrägen Blickwinkel. Die
+Vorderansicht liegt zur Seitenansicht um 90° gedreht.
 Höhen und Layeranzahlen werden getrennt für Originalobjekt und Turm angezeigt.
 Die Navigationsanzeige und ihr Symbol schalten denselben Navigationszustand um.
 Beide liegen als Overlay links etwa eine Textzeile unter der Layer-Information.
