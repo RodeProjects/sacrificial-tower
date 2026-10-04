@@ -1077,7 +1077,7 @@ class MainWindow(QMainWindow):
         self.reset_button = QPushButton("Standardwerte wiederherstellen")
         self.reset_button.setObjectName("headerResetButton")
         self.reset_button.setToolTip(
-            "Turm-Einstellungen außerhalb der allgemeinen Einstellungen zurücksetzen"
+            "Turmeinstellungen außerhalb der allgemeinen Einstellungen zurücksetzen"
         )
         self.reset_button.setFixedHeight(METRICS.info_button_diameter_px)
         self.reset_button.setSizePolicy(
@@ -2544,7 +2544,7 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(timing_group)
 
         geometry_group = SectionCard(
-            "Erweiterte Einstellungen",
+            "Erweiterte Turmeinstellungen",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,
@@ -2986,7 +2986,7 @@ class MainWindow(QMainWindow):
         # Timing and geometry share one collapsible card after preparation.
         # The advanced subsection collapses inside the outer settings card.
         self.geometry_settings_group = SectionCard(
-            "Turm-Einstellungen",
+            "Turmeinstellungen",
             collapsible=True,
             expanded=True,
             state=SectionState.NEUTRAL,

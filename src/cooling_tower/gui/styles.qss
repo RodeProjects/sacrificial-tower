@@ -516,24 +516,10 @@ QLabel#sectionCardBadge[severity="error"] {
 }
 
 QToolButton#sectionCardToggle {
-    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 rgba(255, 255, 255, 60), stop: 1 rgba(225, 237, 246, 35));
+    background: transparent;
     color: #405266;
     border: none;
-    border-radius: 6px;
-    min-width: 28px;
-    min-height: 28px;
-    font-size: 13pt;
-    font-weight: 700;
-}
-
-QToolButton#sectionCardToggle:hover {
-    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #f3f8fb, stop: 1 #e1edf5);
-}
-QToolButton#sectionCardToggle:pressed {
-    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #d3e2ed, stop: 1 #e7f0f6);
+    padding: 0;
 }
 
 QGroupBox {

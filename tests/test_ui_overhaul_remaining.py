@@ -110,7 +110,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
                         window.stability_group, window.overhang_group,
                         window.geometry_settings_group):
             self.assertEqual(section.summary(), "")
-        self.assertEqual(window.geometry_settings_group.title(), "Turm-Einstellungen")
+        self.assertEqual(window.geometry_settings_group.title(), "Turmeinstellungen")
         self.assertFalse(window.timing_group.isCheckable())
         self.assertTrue(window.geometry_settings_group.isAncestorOf(window.timing_group))
         window.close()

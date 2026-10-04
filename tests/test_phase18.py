@@ -269,7 +269,7 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertEqual(
             window.geometry_settings_group.title_label.text(),
-            "Turm-Einstellungen",
+            "Turmeinstellungen",
         )
         self.assertTrue(bool(window.geometry_group.property("collapsible")))
         self.assertFalse(bool(window.stability_group.property("collapsible")))
@@ -487,7 +487,7 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         geometry = window.geometry_settings_group
         self.assertTrue(geometry.isChecked())
-        self.assertEqual(geometry.title(), "Turm-Einstellungen")
+        self.assertEqual(geometry.title(), "Turmeinstellungen")
         for obsolete_alias in (
             "calculation_group",
             "advanced_group",
@@ -1099,7 +1099,7 @@ class Phase18UiTests(unittest.TestCase):
             window.source_guide.text(),
             "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
         )
-        self.assertEqual(window.geometry_group.title(), "Erweiterte Einstellungen")
+        self.assertEqual(window.geometry_group.title(), "Erweiterte Turmeinstellungen")
         self.assertEqual(window.stability_group.title(), "Standfuß")
         self.assertEqual(window.overhang_group.title(), "Überhänge")
         self.assertEqual(

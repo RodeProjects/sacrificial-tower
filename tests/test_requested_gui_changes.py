@@ -1096,7 +1096,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
     def test_geometry_fields_share_one_named_section(self) -> None:
         window = self.window()
         self.addCleanup(window.close)
-        self.assertEqual(window.geometry_group.title(), "Erweiterte Einstellungen")
+        self.assertEqual(window.geometry_group.title(), "Erweiterte Turmeinstellungen")
         for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg"):
             self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
         self.assertFalse(window.geometry_group.isAncestorOf(window._setting_widgets["local_reference_window"]))
@@ -1117,7 +1117,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         outer = window.geometry_settings_group
         self.assertTrue(advanced.isChecked())
         self.assertTrue(advanced.toggle_button.isVisible())
-        self.assertEqual(advanced.toggle_button.text(), "⌃")
+        self.assertTrue(advanced.toggle_button.isChecked())
         self.assertTrue(window.timing_group.header.isHidden())
         self.assertTrue(window.timing_group.body_divider.isHidden())
         self.assertTrue(window.timing_group.isAncestorOf(window.full_infill_checkbox))
@@ -1127,7 +1127,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(advanced.isChecked())
         self.assertTrue(advanced.content_widget.isHidden())
-        self.assertEqual(advanced.toggle_button.text(), "⌄")
+        self.assertFalse(advanced.toggle_button.isChecked())
         self.assertLess(outer.height(), expanded_height)
         self.assertLessEqual(
             outer.height() - outer.header.height() - outer.body_divider.height()
@@ -1143,7 +1143,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         QTest.mouseClick(advanced.toggle_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         self.assertTrue(advanced.isChecked())
-        self.assertEqual(advanced.toggle_button.text(), "⌃")
+        self.assertTrue(advanced.toggle_button.isChecked())
         self.assertGreater(outer.height(), expanded_height - 2)
 
     def test_single_column_prediction_order_survives_state_and_width_changes(

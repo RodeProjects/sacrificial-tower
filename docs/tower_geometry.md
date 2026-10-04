@@ -193,7 +193,7 @@ folgen ihr die Navigationselemente. Die vier Ansichtsbuttons über der Canvas
 sind 32 px hoch.
 
 Nach Abschluss der Datei-/Slicer-Vorbereitung enthält das gemeinsame Dropdown
-„Turm-Einstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
+„Turmeinstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
 Simulation deaktivierter Turmstützen. Das lokale Zeitfenster befindet sich
 in „Allgemeine Einstellungen“ und besitzt dort einen eigenen Reset.
 Der aktuelle Standard des lokalen Zeitfensters ist 51 Layer; explizit gespeicherte

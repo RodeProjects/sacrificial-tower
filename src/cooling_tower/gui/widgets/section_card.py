@@ -5,8 +5,11 @@ from html import escape
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFontMetrics, QKeyEvent, QMouseEvent, QResizeEvent
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import (
+    QFontMetrics, QKeyEvent, QMouseEvent, QPaintEvent, QPainter,
+    QPalette, QPolygonF, QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -59,6 +62,33 @@ class _ClickableHeader(QFrame):
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+class _SectionTriangleButton(QToolButton):
+    """Paint a uniform disclosure triangle without native button decoration."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setCheckable(True)
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        colour_group = (
+            QPalette.ColorGroup.Active if self.isEnabled()
+            else QPalette.ColorGroup.Disabled
+        )
+        painter.setBrush(self.palette().color(colour_group, QPalette.ColorRole.ButtonText))
+        # Rotate the same geometry around the centre of its bounding box, so
+        # neither font baselines nor the expanded state can shift the icon.
+        painter.translate(self.width() / 2, self.height() / 2)
+        if self.isChecked():
+            painter.rotate(180)
+        painter.drawPolygon(QPolygonF([
+            QPointF(-6, -4), QPointF(6, -4), QPointF(0, 4),
+        ]))
 
 
 class SectionCard(QFrame):
@@ -265,12 +295,14 @@ class SectionCard(QFrame):
         self.badge_label.setFixedHeight(METRICS.card_badge_height_px)
         self.header_layout.addWidget(self.badge_label)
 
-        self.toggle_button = QToolButton(self.header)
+        self.toggle_button = _SectionTriangleButton(self.header)
         self.toggle_button.setObjectName("sectionCardToggle")
         self.toggle_button.setAutoRaise(True)
         self.toggle_button.setToolTip("Bereich ein- oder ausklappen")
         self.toggle_button.clicked.connect(self.toggle)
-        self.header_layout.addWidget(self.toggle_button)
+        self.header_layout.addWidget(
+            self.toggle_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.content_widget = QFrame(self)
         self.content_widget.setObjectName("sectionCardBody")
@@ -832,7 +864,7 @@ class SectionCard(QFrame):
         self.content_widget.setVisible(self._expanded)
         self.body_divider.setVisible(self._expanded and not headerless)
         self.toggle_button.setVisible(self._collapsible)
-        self.toggle_button.setText("⌃" if self._expanded else "⌄")
+        self.toggle_button.setChecked(self._expanded)
         self.toggle_button.setAccessibleName(
             f"{self._base_title} {'einklappen' if self._expanded else 'ausklappen'}"
         )

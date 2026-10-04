@@ -284,13 +284,16 @@ ohne Kühlturm zeigt.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
-Unter „Turm-Einstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
+Unter „Turmeinstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
 wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.
 Der Reset im Hauptfenster lässt sie unverändert; der allgemeine Reset setzt sie
 zurück. Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
 „Deaktivierte Turmstützen simulieren“. Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
-geöffneten Unterbereich „Erweiterte Einstellungen“ ein- und ausklappbar.
+geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
+Die Dropdown-Köpfe verwenden einheitliche, selbst gezeichnete Dreiecke ohne
+eigenen Rahmen, Hintergrund oder Hover-Effekt. Beide Richtungen entstehen
+durch Drehung um die Mitte desselben festen Symbolbereichs.
 Die Checkboxen für die 100-%-Turmfüllung, die Turmstützen und die automatische Standfußbreite
 zeigen den Haken rechts neben ihrem Text. Der Text mit Checkbox der
 automatischen Standfußbreite beginnt mit dem gleichen Abstand zum Info-Hinweis
