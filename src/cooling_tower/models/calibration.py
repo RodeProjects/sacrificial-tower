@@ -221,6 +221,9 @@ class SliceEvaluation:
     metadata_source: str
     maximum_metadata_difference_s: float | None
     diagnostics: tuple[str, ...] = ()
+    # Minimum of the complete parsed G-code, including layers above the tower
+    # and layers that cannot be matched to the standalone object's profile.
+    minimum_sliced_layer_time_s: float | None = None
 
     @property
     def added_time_by_layer(self) -> dict[int, float]:
@@ -276,6 +279,7 @@ class JointSliceProgress:
     current_is_best: bool
     current_profile: Any | None = None
     placement: TowerPlacement | None = None
+    best_profile: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +385,9 @@ class CalibrationResult:
                         for timing in item.evaluation.layer_timings
                     ],
                     "diagnostics": list(item.evaluation.diagnostics),
+                    "minimum_sliced_layer_time_s": (
+                        item.evaluation.minimum_sliced_layer_time_s
+                    ),
                 }
                 for item in self.iterations
             ],

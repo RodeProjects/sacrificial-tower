@@ -352,6 +352,34 @@ class AnycubicSlicerNextAdapter(OrcaFamilyAdapter):
     adapter_id = "anycubic_slicer_next"
     detection_module_id = "anycubic_slicer_next"
 
+    def build_slice_command(
+        self,
+        request: SliceRequest,
+        model_path: Path,
+        output_directory: Path,
+        working_root: Path,
+    ) -> tuple[Path, tuple[str, ...]]:
+        from cooling_tower.gcode.slicer_layer_times import anycubic_timing_hooks
+
+        executable, arguments = super().build_slice_command(
+            request, model_path, output_directory, working_root
+        )
+        # The base adapter has already materialized these files in our own
+        # working directory. Originals in the slicer's profile catalogue stay
+        # read-only. Both preslice and every tower candidate receive clocks.
+        settings = arguments[arguments.index("--load-settings") + 1].split(";")
+        machine_copy = Path(settings[0])
+        payload = json.loads(machine_copy.read_text(encoding="utf-8"))
+        target = payload.get("setting", payload)
+        values = dict(request.profile.effective_values)
+        values.update(target)
+        target.update(anycubic_timing_hooks(values))
+        machine_copy.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return executable, arguments
+
 
 class OrcaSlicerAdapter(OrcaFamilyAdapter):
     adapter_id = "orca_slicer"
@@ -365,6 +393,40 @@ class OrcaSlicerAdapter(OrcaFamilyAdapter):
 class BambuStudioAdapter(OrcaFamilyAdapter):
     adapter_id = "bambu_studio"
     detection_module_id = "bambu_studio"
+    # Slice the exact durable project during adjustment as well as on export.
+    # A direct STL assembly can produce slightly different paths after its
+    # meshes and settings are serialized into the native 3MF container.
+    prefer_native_joint_project = True
+
+    def build_slice_command(
+        self,
+        request: SliceRequest,
+        model_path: Path,
+        output_directory: Path,
+        working_root: Path,
+    ) -> tuple[Path, tuple[str, ...]]:
+        executable, arguments = super().build_slice_command(
+            request, model_path, output_directory, working_root
+        )
+        if (
+            request.purpose == "calibration"
+            and request.preserve_model_positions
+            and not request.use_cli_assemble_list
+            and model_path.suffix.casefold() == ".3mf"
+        ):
+            # This self-contained candidate is also the eventual export.
+            # Loading role profiles again can overwrite native project values
+            # differently from a later GUI/CLI slice of that same 3MF.
+            retained: list[str] = []
+            index = 0
+            while index < len(arguments):
+                if arguments[index] in {"--load-settings", "--load-filaments"}:
+                    index += 2
+                else:
+                    retained.append(arguments[index])
+                    index += 1
+            arguments = tuple(retained)
+        return executable, arguments
 
     def prepare_joint_slice_input(
         self,

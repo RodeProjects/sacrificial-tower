@@ -87,6 +87,8 @@ from cooling_tower.gui.generation_progress_dialog import (
 from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.preview_dialog import PreviewDialog
+from cooling_tower.gui.layer_range_dialog import LayerRangeDialog
+from cooling_tower.models.layer_ranges import excluded_layer_indices, normalize_layer_ranges
 from cooling_tower.gui.preview_worker import PreviewWorker
 from cooling_tower.gui.profile_worker import (
     ProfileCatalogWorker,
@@ -128,6 +130,7 @@ from cooling_tower.gui.widgets import (
     WindowHintController,
 )
 from cooling_tower.models import (
+    SourceChangedError,
     BedBounds,
     CalibrationConfig,
     CalibrationMode,
@@ -805,6 +808,10 @@ class MainWindow(QMainWindow):
         self._analysis_failed = False
         self._closing = False
         self.analysis_snapshot: GCodeAnalysisSnapshot | None = None
+        self._excluded_layer_ranges: tuple[tuple[int, int], ...] = ()
+        self._layer_range_silhouette = None
+        self._layer_range_dialog: LayerRangeDialog | None = None
+        self._range_color_thresholds = (0.0, 1.0)
         self.tower_assessment: TowerNeedAssessment | None = None
         self.profile_feasibility: ProfileFeasibilityAssessment | None = None
         self.current_gcode_path: Path | None = None
@@ -2451,7 +2458,7 @@ class MainWindow(QMainWindow):
             5.0,
             MAXIMUM_TARGET_LAYER_TIME_S,
             2,
-            1.0,
+            0.1,
             "targetLayerTime",
         )
         self.target_time_spin.set_display_decimals(1)
@@ -2574,6 +2581,35 @@ class MainWindow(QMainWindow):
             "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
+        self.layer_range_button = QPushButton("Bereichseditor öffnen")
+        self.layer_range_button.setObjectName("layerRangeToolButton")
+        self.layer_range_button.setFixedHeight(METRICS.info_button_diameter_px)
+        self.layer_range_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self.layer_range_button.clicked.connect(self.show_layer_range_tool)
+        self.layer_range_button_row = QWidget()
+        range_button_layout = QHBoxLayout(self.layer_range_button_row)
+        range_button_layout.setContentsMargins(0, 0, 0, 0)
+        range_button_layout.setSpacing(METRICS.setting_info_text_gap_px)
+        self.layer_range_info_button = InfoToolButton(
+            "<b>Was macht dieses Werkzeug?</b><p>"
+            "&#8226; Mit diesem Werkzeug kannst du Bereiche bestimmen, in denen der Turm jegliche Layerzeit-Defizite ignoriert<br>"
+            "&#8226; Der minimale Turmdurchmesser kann dadurch nicht unterschritten werden</p>",
+            accessible_name="Informationen zum Bereichseditor",
+            accessible_hint=("Was macht dieses Werkzeug?\n"
+                "• Mit diesem Werkzeug kannst du Bereiche bestimmen, in denen der Turm jegliche Layerzeit-Defizite ignoriert\n"
+                "• Der minimale Turmdurchmesser kann dadurch nicht unterschritten werden"),
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        range_button_layout.addWidget(self.layer_range_info_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        range_button_layout.addWidget(self.layer_range_button, 0)
+        self.layer_range_summary = QLabel()
+        self.layer_range_summary.setWordWrap(False)
+        range_button_layout.addWidget(self.layer_range_summary, 0, Qt.AlignmentFlag.AlignVCenter)
+        range_button_layout.addStretch(1)
+        self._refresh_layer_range_tool()
         geometry_group.refresh_collapsed_state()
         self.content_layout.addWidget(geometry_group)
 
@@ -3032,6 +3068,7 @@ class MainWindow(QMainWindow):
                     if item.widget() is self._setting_widgets["local_reference_window"]:
                         continue
                     geometry_layout.addWidget(item.widget())
+        geometry_layout.addWidget(self.layer_range_button_row)
         stability_group.hide()
         overhang_group.hide()
         self.geometry_calculation_section.hide()
@@ -4019,6 +4056,10 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(style)
         except OSError:
             pass
+        self.layer_range_button.ensurePolished()
+        self.layer_range_button.setFixedWidth(
+            self.layer_range_button.sizeHint().width()
+        )
 
     @property
     def selected_slicer_installation(self) -> SlicerInstallation | None:
@@ -4538,6 +4579,7 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
+        self._refresh_layer_range_tool()
         block_reason = self._export_block_reason()
         generation_active = self.background_job_manager.has_active(
             JobKind.PREVIEW
@@ -4686,7 +4728,7 @@ class MainWindow(QMainWindow):
             )
         elif message.startswith("Kein Kühlturm erforderlich:"):
             self.export_availability_label.setText(
-                "Kein Kühlturm erforderlich. Alle Layer des Originalobjekts "
+                "Kein Kühlturm erforderlich. Alle berücksichtigten Layer des Originalobjekts "
                 "erreichen bereits die gewünschte Mindest-Layerzeit; "
                 "die Generierung ist deshalb deaktiviert."
             )
@@ -7131,6 +7173,10 @@ class MainWindow(QMainWindow):
             result.cleanup()
 
     def _discard_source_preslice(self, reason: str) -> None:
+        self._excluded_layer_ranges = ()
+        self._layer_range_silhouette = None
+        if self._layer_range_dialog is not None:
+            self._layer_range_dialog.close()
         if reason != "preslice_replaced":
             self._draft_shield_simulation_requested = False
         if self._draft_shield_dialog is not None and self._draft_shield_dialog.isVisible():
@@ -7178,8 +7224,10 @@ class MainWindow(QMainWindow):
             self.preslice_cancel_button.hide()
         if hasattr(self, "profile_confirmation_stack"):
             self._set_preslice_activity(False)
+        self._refresh_layer_range_tool()
 
     def _show_original_object_preview(self) -> None:
+        self._refresh_layer_range_tool()
         preslice = self.source_preslice_result
         snapshot = self.analysis_snapshot
         profile_match = self.profile_match_result
@@ -9054,7 +9102,8 @@ class MainWindow(QMainWindow):
             estimate = self._slicer_prediction_estimate_s
             estimate_kind = "Slicer-gestützte Schätzung"
         elif not assessment.tower_required:
-            estimate = snapshot.minimum_layer_time_s
+            excluded = excluded_layer_indices(snapshot.layers, self._excluded_layer_ranges)
+            estimate = min((layer.total_time_s for layer in snapshot.layers if layer.index not in excluded), default=None)
             estimate_kind = "Slicer-Analyse des Modells"
 
         target = assessment.target_layer_time_s
@@ -10035,7 +10084,8 @@ class MainWindow(QMainWindow):
             f"• Gewünschte Mindest-Layerzeit: {_de_number(assessment.target_layer_time_s, 1)} s.\n"
             f"• Kürzeste Layerzeit des Originalobjekts: "
             f"{_de_number(snapshot.minimum_layer_time_s, 3)} s.\n"
-            "• Alle analysierten Layer erreichen damit bereits die gewünschte Zeit."
+            "• Kein berücksichtigter Layer benötigt zusätzliche Zeit; festgelegte "
+            "Ausschlussbereiche werden dabei ignoriert."
         )
 
     def _show_required_tower_message(
@@ -10044,7 +10094,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         snapshot = self.analysis_snapshot
         if snapshot is not None:
-            difference = assessment.target_layer_time_s - snapshot.minimum_layer_time_s
+            difference = assessment.maximum_time_deficit_s
             if 0 < difference <= 0.5 + 1e-9:
                 self._set_tower_need_message(
                     f"Nur {_de_number(difference, 3)} s zusätzliche Layerzeit: "
@@ -11091,6 +11141,8 @@ class MainWindow(QMainWindow):
         dialog.move(target_frame.topLeft())
 
     def _resize_visible_optional_dialogs(self) -> None:
+        if self._layer_range_dialog is not None and self._layer_range_dialog.isVisible():
+            self._place_dialog_centered(self._layer_range_dialog)
         self._resize_support_simulation_dialog()
         self._resize_draft_shield_dialog()
         if self._about_dialog is not None and self._about_dialog.isVisible():
@@ -11246,6 +11298,91 @@ class MainWindow(QMainWindow):
             "visible_error": self._workflow_error_message,
         }
 
+    def _refresh_layer_range_tool(self) -> None:
+        if not hasattr(self, "layer_range_button"):
+            return
+        data = getattr(self.source_preslice_result, "preview_source_data", None)
+        manager = getattr(self, "background_job_manager", None)
+        busy = manager is not None and any(manager.has_active(kind) for kind in (
+            JobKind.PRESLICE, JobKind.PROFILE_MATCH, JobKind.PREVIEW, JobKind.EXPORT,
+        ))
+        available = bool(data is not None and self.analysis_snapshot is not None and not busy and not self._closing)
+        self.layer_range_button.setEnabled(available)
+        self.layer_range_button.setToolTip(
+            "Layerzeit-Ausgleich für ausgewählte Original-Layer ausschließen"
+            if available else "Nach abgeschlossenem Pre-Slice verfügbar; während Generierung und Export gesperrt"
+        )
+        spans = self._excluded_layer_ranges
+        self.layer_range_summary.setText(
+            f"{len(spans)} {'Ausschlussbereich' if len(spans) == 1 else 'Ausschlussbereiche'}"
+            if spans else ""
+        )
+        self.layer_range_summary.setVisible(bool(spans))
+        if self._layer_range_dialog is not None:
+            self._layer_range_dialog.set_editing_enabled(available)
+
+    def show_layer_range_tool(self) -> None:
+        self._refresh_layer_range_tool()
+        if not self.layer_range_button.isEnabled():
+            return
+        if self._layer_range_dialog is not None:
+            self._layer_range_dialog.show()
+            self._layer_range_dialog.raise_()
+            self._layer_range_dialog.activateWindow()
+            return
+        silhouette = getattr(self, "_layer_range_silhouette", None)
+        if silhouette is None and self.source_artifact is not None:
+            from cooling_tower.preview.layer_silhouette import load_layer_silhouette
+            try:
+                silhouette = load_layer_silhouette(self.source_artifact, self.analysis_snapshot.layers)
+            except (OSError, ValueError, SourceChangedError) as error:
+                QMessageBox.warning(self, "Objektvorschau nicht verfügbar", str(error))
+                return
+            self._layer_range_silhouette = silhouette
+        dialog = LayerRangeDialog(
+            self.analysis_snapshot.layers,
+            self.source_preslice_result.preview_source_data.object_segments,
+            target_time_s=self.target_time_spin.value(),
+            target_minimum=float(self.target_time_spin.property("validationMinimum")),
+            target_maximum=float(self.target_time_spin.property("validationMaximum")),
+            target_decimals=self.target_time_spin.decimals(),
+            ranges=self._excluded_layer_ranges,
+            gradient_start_deficit_s=self._range_color_thresholds[0],
+            gradient_full_deficit_s=self._range_color_thresholds[1],
+            silhouette=silhouette,
+            target_time_hint=self._setting_widgets["target_layer_time_s"].info_button.toolTip(),
+            target_default=self.settings_store.load_defaults().target_layer_time_s,
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._layer_range_dialog = dialog
+        dialog.finished.connect(self._on_layer_range_tool_closed)
+        screen = self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            dialog.resize(dialog.initial_size(QSize(available.width() - 32, available.height() - 60)))
+        dialog.show()
+        self._place_dialog_centered(dialog)
+
+    def _on_layer_range_tool_closed(self, result: int) -> None:
+        dialog = self._layer_range_dialog
+        self._layer_range_dialog = None
+        if dialog is None or result != QDialog.DialogCode.Accepted or self.analysis_snapshot is None:
+            return
+        ranges = normalize_layer_ranges(dialog.ranges, layer_count=self.analysis_snapshot.layer_count)
+        target_time = dialog.target_spin.value()
+        target_changed = target_time != self.target_time_spin.value()
+        ranges_changed = ranges != self._excluded_layer_ranges
+        self._excluded_layer_ranges = ranges
+        self._range_color_thresholds = (dialog.color_start_spin.value(), dialog.color_full_spin.value())
+        # The normal target signal refreshes validation and modified-state UI.
+        # All accepted values are already installed before that signal runs.
+        self.target_time_spin.setValue(target_time)
+        if ranges_changed and not target_changed:
+            self._last_changed_setting_name = "target_layer_time_s"
+            self._on_value_changed(None)
+        self._refresh_layer_range_tool()
+
     def collect_settings(self) -> GenerationSettings:
         manual_base_width = (
             self.manual_base_width_spin.value()
@@ -11253,6 +11390,7 @@ class MainWindow(QMainWindow):
             else self._manual_base_width_session_value
         )
         return GenerationSettings(
+            excluded_layer_ranges=self._excluded_layer_ranges,
             target_layer_time_s=self.target_time_spin.value(),
             layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
             minimum_outer_diameter_mm=self.minimum_outer_spin.value(),
@@ -11283,6 +11421,11 @@ class MainWindow(QMainWindow):
         )
 
     def apply_settings(self, settings: GenerationSettings) -> None:
+        self._excluded_layer_ranges = settings.excluded_layer_ranges
+        if self._layer_range_dialog is not None:
+            self._layer_range_dialog.set_target_time(settings.target_layer_time_s)
+            self._layer_range_dialog.set_ranges(settings.excluded_layer_ranges)
+        self._refresh_layer_range_tool()
         self._manual_base_width_session_value = float(
             settings.manual_base_width_mm
         )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from dataclasses import replace
+from cooling_tower.models.layer_ranges import excluded_layer_indices
 
 from cooling_tower.models import (
     AnalysisDiagnosticReport,
@@ -160,6 +162,10 @@ class GenerationService:
         )
         notify(40, "Turmrelevante Layer werden ausgewählt")
 
+        profile_config = replace(
+            profile_config,
+            excluded_layer_indices=excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges),
+        )
         radius_profile = build_tower_radius_profile(
             layers=tower_layers,
             config=profile_config,

@@ -60,6 +60,7 @@ JOINT_SLICE_HINT_ACCESSIBLE = (
     "oder manueller Übernahme "
     "früher enden."
 )
+from cooling_tower.calibration.candidate_evaluation import minimum_combined_layer_time
 SEPARATE_SLICE_HINT = """
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was wird begrenzt?</b></p>
 <p style="margin-top:0; margin-bottom:10px;">Die maximale Anzahl getrennter Slices, mit denen die Turmgeometrie vorbereitet wird. Danach folgen die gemeinsamen Slices mit Objekt und Kühlturm.</p>
@@ -418,16 +419,10 @@ class TowerGenerationDialog(QDialog):
         self.image_progress.animate_fill(1.0, pulse_when_finished=True)
         self.accept_button.setVisible(completed >= self._minimum_joint_slices)
         self.accept_button.setEnabled(completed >= self._minimum_joint_slices)
-        timings = tuple(
-            getattr(getattr(best_iteration, "evaluation", None), "layer_timings", ())
+        minimum = minimum_combined_layer_time(
+            getattr(best_iteration, "evaluation", None)
         )
-        values = [
-            float(item.combined_layer_time_s)
-            for item in timings
-            if getattr(item, "combined_layer_time_s", None) is not None
-        ]
-        if values:
-            minimum = min(values)
+        if minimum is not None:
             deviation = minimum - target_s
             sign = "+" if deviation >= 0.0 else "−"
             self._best_deviation_s = deviation

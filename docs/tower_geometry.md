@@ -45,8 +45,10 @@ zusätzliche Mesh-Ringe für gekrümmte Flächen sind keine Drucklayer.
    an und baut den nächsten Kandidaten erneut nach denselben Geometrie- und
    Platzierungsregeln. Mindestens fünf gemeinsame Slices werden vollständig
    ausgewertet; das Standardbudget beträgt zwölf. Der beste Kandidat wird
-   nach der absoluten Abweichung der kürzesten relevanten gemeinsamen
-   Layerzeit gewählt. Ein späterer gleich guter Kandidat verdrängt ihn nicht.
+   nach der absoluten Abweichung der kürzesten Layerzeit des vollständigen
+   gemeinsamen Projekts gewählt. Bei Ausschlüssen und gleicher Gesamtprojekt-
+   Abweichung gewinnt eine bessere Angleichung der nicht ausgeschlossenen
+   Layer; ansonsten bleibt der frühere Kandidat bestehen.
 
 Ein Turm beginnt stets am Druckbett. Genügen alle Objektlayer bereits der
 Zielzeit, erzeugt der reguläre Lauf keine Turmdatei. Nach ausdrücklicher
@@ -152,6 +154,238 @@ absteigende Höhen und Ringe ohne Flächeninhalt bleiben unzulässig.
 Das exportierte gemeinsame Projekt übernimmt die 100-%-Füllung objektspezifisch.
 
 ## Vorschau und Bedienung
+
+### Bereichseditor für ausgeschlossene Layer
+
+Nach dem abgeschlossenen Pre-Slice öffnet **Erweiterte Turmeinstellungen →
+Bereichseditor öffnen** ein separates, am Hauptfenster zentriertes Fenster.
+Der Button steht als letztes Element dieses Einstellungsbereichs, mit einem
+Info-Button links daneben. Seine Breite folgt dem Text einschließlich der
+Innenabstände; seine Höhe entspricht „Standardwerte wiederherstellen“ im Footer.
+Rechts daneben steht ausschließlich die Anzahl als „1 Ausschlussbereich“ oder
+„x Ausschlussbereiche“. Ohne Bereiche bleibt diese Anzeige verborgen.
+Die Stichpunkte des Info-Buttons erklären das Ignorieren von
+Layerzeit-Defiziten in gewählten Bereichen und den weiterhin geltenden Mindestdurchmesser.
+Links stehen die gespiegelte Mindest-Layerzeit, die beiden Farbgrenzen und
+darunter die Layerbereiche;
+rechts steht die Seitenansicht des Originalobjekts. Alle Eingaben bearbeiten
+zunächst einen Entwurf. Rechts unten übernimmt der grüne Button „Übernehmen“
+die Layerbereiche, Mindest-Layerzeit und Farbgrenzen gemeinsam. „Abbrechen“,
+Esc und das Schließen des Fensters verwerfen den Entwurf vollständig.
+Das Hauptfenster bleibt während der Bearbeitung gesperrt, damit sich der
+zugrunde liegende Zustand nicht parallel ändern kann. Die Mindest-Layerzeit
+startet mit dem Wert des Hauptfensters und wird beim Übernehmen dort aktualisiert;
+die Pfeilbuttons ändern sie in Schritten von 0,1 Sekunden. Das Eingabefeld steht
+rechts neben dem Label „Gew. Min-Layerzeit“. Ein gleichhoher Reset-Button
+rechts vom Eingabefeld stellt den Standardwert aus den Benutzervorgaben des
+Hauptfensters wieder her und ist bei diesem Wert deaktiviert.
+Die linke Spalte startet mit der für alle ungekürzten Beschriftungen
+und einzeiligen Bedienelemente erforderlichen Breite, einschließlich der
+Bereichsliste und ihres Scrollbalkens.
+Der Leerlisten-Hinweis fließt nicht in die Breitenberechnung ein und bricht
+dynamisch nach verfügbarem Platz um. Die erforderliche Breite ist zugleich
+die Mindestbreite der linken Spalte und wird bei geänderten Eingaben oder
+Bereichen aktualisiert. Beim Verkleinern des Fensters schrumpft stattdessen
+die Vorschau; das Objekt behält dabei seine Proportionen. Ihre Bedienleiste,
+Hinweise und Legende umbrechen nach verfügbarem Platz. Die bisherige
+500-px-Mindestbreite der Vorschau entfällt. Wertefelder reservieren neben dem angezeigten Wert und
+der Einheit Platz für eine weitere Ziffer und die nötigen Text-/Cursorränder.
+Sie wachsen auch während der Eingabe und bei signalblockierten Änderungen,
+damit längere Werte nicht abgeschnitten werden.
+Das Werkzeug öffnet sich mit der für seine Inhalte nötigen Größe und einer
+Vorschaufläche von bevorzugt 650 × 550 px. Reicht der Bildschirmplatz dafür
+nicht, wird die Startgröße begrenzt; 500 × 500 px bleiben erhalten, wenn
+dafür genügend Platz vorhanden ist. Größere Bildschirme vergrößern das
+Werkzeug nicht automatisch. Die manuellen Größenänderungen bleiben möglich.
+Unter 500 px Vorschau-Breite schrumpfen die seitlichen Leerabstände stufenlos.
+Layernummern, Greifer und Löschbutton behalten den benötigten Platz; die
+Überschrift „Layer“ rückt bei gleicher Höhe nach rechts. Die frei werdende
+Breite steht dem Objekt und den Bereichsflächen zur Verfügung.
+Beide Layergrenzen sowie Bereichsname und Entfernen-Button bleiben jeweils
+in einer Zeile; die Mindestbreite berücksichtigt die vollständig sichtbaren Werte.
+Während Generierung
+und Export ist die Bereichsbearbeitung gesperrt.
+
+Bereiche verwenden die **einschließlichen, ab 1 gezählten Positionen der
+tatsächlichen druckbaren Original-Layer**, auch bei variablen Layerhöhen.
+Numerische Eingaben und grafische Auswahl bearbeiten denselben Zustand.
+Vertikales Ziehen auf einer freien Vorschaufläche legt jederzeit einen Bereich
+an; ein umschaltbarer Zeichenmodus ist nicht erforderlich. Die beiden
+Greifer ändern die Grenzen; Hover und aktives Ziehen heben den jeweiligen
+Greifer durch Farbe und Kontur hervor. Ziehen der markierten Fläche verschiebt den
+gesamten Bereich. Entf, das rote X in der Vorschau oder der rote
+Entfernen-Button im Listeneintrag löscht den jeweiligen Bereich.
+Bereiche und Greifer sind blau; die roten X-Buttons bleiben als Löschaktion
+erkennbar. Nach dem Anlegen oder Abbrechen eines Ziehvorgangs können sofort
+weitere Bereiche auf freien Flächen angelegt werden. Neue Bereiche sind
+alternativ mit den Layereingaben und dem grünen Hinzufügen-Button möglich.
+Die Liste und die Namen „Ausschlussbereich 1/2/3 …“ sind absteigend nach Höhe geordnet: Ausschlussbereich 1
+ist der oberste Bereich. Die Modell-/Generierungsdaten bleiben aufsteigend
+normalisiert. Beim Auswählen scrollt die Liste den gesamten Bereichseintrag
+in den sichtbaren Ausschnitt. Ein unveränderter Klick baut die Liste nicht neu
+auf. Notwendige Anpassungen nach Änderungen berücksichtigen die verzögerte
+Aktualisierung des Scrollbereichs durch Qt; manuelles Scrollen bleibt möglich.
+Die Mindest-Layerzeit übernimmt den gleichen Hover-Hinweis wie das Hauptfenster.
+Farbgrenzen und neue Layerbereiche haben eigene Info-Buttons; die Bereichsregeln
+stehen dort als Stichpunkte. Die Aktionsbuttons sind so hoch wie der globale
+Reset im Hauptfenster. Der Fußbereich wird durch eine graue Linie über die
+volle Fensterbreite abgesetzt; die übrigen Trennlinien beachten das Fensterpadding.
+Pfeiltasten verschieben die Auswahl um einen Layer, mit Umschalt um zehn.
+Die interaktive Vorschau ist durch einen dunkleren Hintergrund und einen
+Rahmen vom Fenster abgesetzt. Das Mausrad zoomt mit unveränderten Proportionen
+an der Zeigerposition, die mittlere Maustaste verschiebt die Ansicht in beiden
+Achsen. Der Drehregler oder horizontales Ziehen mit der rechten Maustaste
+dreht das Originalobjekt um seine eigene vertikale Achse. Der Drehregler zeigt
+Markierungen alle 90° und rastet beim Ziehen bei weniger als 10° Abstand an diesen Punkten
+ein. Andere Winkel bleiben einstellbar; die Tastatur erlaubt exakte Einzelschritte.
+Der Reset rechts
+am Regler setzt ausschließlich die Drehung auf 0° zurück. Rechts daneben steht
+„Objekt einpassen“. Bei Platzmangel schrumpft zuerst der freie Reglerraum,
+dann heißt der Button „Einpassen“. Reicht auch das nicht, steht er wieder mit
+vollständigem Text unter dem Drehregler. Der Button
+stellt den vollständigen Höhenbereich wieder her, ohne Bereiche oder Drehung zu ändern.
+Er ist nur aktiv, wenn Zoom oder Verschiebung von der eingepassten Ansicht
+abweichen. Einpassen oder Zurückzoomen zur Ausgangsansicht deaktiviert ihn wieder.
+
+Überlappende und direkt angrenzende Bereiche bilden eine gemeinsame Union.
+Beim Ziehen bleiben die numerischen Bereichszeilen zunächst stabil; erst beim
+Loslassen wird vereinigt und die linke Liste aktualisiert. Esc verwirft einen
+noch nicht abgeschlossenen Ziehvorgang, ohne das Fenster zu schließen;
+außerhalb einer aktiven Vorschauaktion wirkt Esc wie „Abbrechen“.
+Während sich Bereiche beim Ziehen
+überlappen oder berühren, sind die betroffenen Flächen vorübergehend grün markiert
+und ein Hinweis „Bereiche verbinden“ erscheint am Zeiger. Beides verschwindet
+sofort, sobald sie wieder getrennt werden, sowie beim Loslassen oder Abbrechen.
+Die Vorschau und die Layereingaben
+rasten immer auf tatsächlichen Original-Layern ein.
+
+Die Färbung verwendet die gemessene Original-Layerzeit, unabhängig davon,
+ob der Layer ausgeschlossen ist: Ausreichende Layer sind grün. Die Einstellungen
+unter „Defizit-Einfärbung nach Mindest-Layerzeit“ zeigen einen Farbverlauf-Slider
+von 0 bis 2 Sekunden mit zwei Greifern und zwei Eingabefeldern darunter.
+Der aktuelle grüne Grenzwert steht links, der aktuelle rote rechts neben dem
+Slider; dazwischen nutzt der Slider die gesamte verfügbare Breite.
+Linker Greifer und linkes Wertefeld steuern die grüne Grenze, rechter Greifer
+und rechtes Wertefeld die rote Grenze. Eingaben und Greiferpositionen bleiben
+in beide Richtungen synchron. Pfeiltasten ändern die fokussierte Grenze um
+0,1 Sekunden, Bildtasten um 0,5 Sekunden; Pos1/Ende erreichen die Grenzwerte.
+Eng benachbarte Greifer liegen auf verschiedenen Seiten des Balkens, damit
+beide unabhängig erreichbar bleiben. Im linken Feld stehen „≤“, der Wert und „s“;
+im rechten Feld stehen „≥“, der Wert und „s“. Sie steuern den linearen
+Übergang von Grün zu Rot; die Standardgrenzen sind 0 und 1 Sekunde.
+Links der grünen Grenze bleibt der Slider grün, rechts der roten Grenze rot.
+Ein gemeinsamer Reset rechts neben den Eingabefeldern stellt diese beiden
+Standardgrenzen wieder her und gehört wie die übrigen Eingaben zum Entwurf.
+Er ist so hoch wie die Eingabefelder und vertikal auf deren Zeile zentriert.
+Bis zur ersten Grenze bleibt die Farbe grün, ab der zweiten bleibt sie rot.
+Die zweite Grenze ist stets größer als die erste; beim Überholen passt sich
+die jeweils andere Grenze um 0,1 Sekunden an. Anzeige und Werte verwenden
+eine Nachkommastelle. Genauere Eingaben werden dezimal kaufmännisch gerundet
+(zum Beispiel 1,25 → 1,3 Sekunden); die Pfeilbuttons ändern die Defizitgrenzen
+um 0,1 Sekunden.
+Beide Grenzen
+und die Legende aktualisieren sich im Entwurf sofort, ohne die Zielzeit oder die
+Turmberechnung zu verändern. Übernommene Ansichtseinstellungen bleiben innerhalb
+der laufenden Programmsitzung beim erneuten Öffnen und bei Quellenwechseln
+erhalten. Ausschlussbereiche liegen als transparente blaue
+Fläche darüber. Die Legende steht links unten im Vorschaubereich.
+Sie zeigt den Farbbalken und rechts daneben „Layerzeit-Defizit“ ohne Zahlen
+unter dem Balken; die Grenzwerte stehen bei den Einstellungen.
+Bedienhinweise und Legendentexte umbrechen nach verfügbarer Breite; bei
+Platzmangel werden sie über Scrollbars vollständig erreichbar gehalten.
+Die Kontur
+verwendet vollständige Schnitte der unveränderten Original-STL in der Mitte
+jedes tatsächlichen Layers. Nur die gerade vom Schnitt betroffenen Dreiecke
+werden verarbeitet; die Schnittsegmente liegen unveränderlich im Sitzungsspeicher
+und erlauben die Rotation ohne erneutes Lesen oder Sampling. Geometrieinseln
+und echte Zwischenräume bleiben erhalten. Die Aufbereitung ist auf zwei
+Millionen Schnittsegmente begrenzt (höchstens etwa 64 MB reine XY-Schnittdaten);
+bei Überschreitung erscheint eine verständliche Meldung statt unbeschränkter
+Speicherbelegung. Der Bestand wird beim Verwerfen des
+Pre-Slices zurückgesetzt. Ohne STL-Schnitte (etwa bei isolierten GUI-Fixtures)
+gibt es einen angenäherten Fallback auf die äußere Hülle der Druckbahnen.
+Die ausgedünnten 3D-Druckbahnen allein dürfen keine künstlichen Löcher in der
+STL-Silhouette verursachen. Gruppierte Farbrechtecke verwenden Winding-Füllung,
+damit überlappende Subpixel-Layer sich beim Herauszoomen nicht gegenseitig
+ausstanzen. Layerzeiten, Auswahlgrenzen und Turmberechnung verwenden immer
+sämtliche tatsächlichen Pre-Slice-Layer.
+
+`GenerationSettings.excluded_layer_ranges` enthält diese objektgebundenen
+Sitzungsdaten. Sie werden **nicht in globale Benutzereinstellungen oder
+Standardwerte gespeichert**. Übernommene Bereiche bleiben beim Schließen und
+erneuten Öffnen des Werkzeugs erhalten; eine neue Quelle, geänderte Slicerprofile oder ein neuer
+Pre-Slice setzen sie zurück. Der globale Reset entfernt sie ebenfalls.
+Das globale Einstellungsschema bleibt unverändert. Vorschau-Signaturen und
+Exportberichte enthalten die Bereiche, damit Ergebnisse eindeutig bleiben.
+
+Die Bedarfsprüfung setzt ihr lokales Zeitdefizit auf null; ausgeschlossene
+Schlusslayer verlängern den Turm nicht. Ohne verbleibenden Bedarf entsteht
+kein Turm. Radius-Schätzung und jede Kalibrierungsrunde ignorieren ihren
+lokalen Zeitbedarf. Konvergenz, vorzeitige Zielerreichung und lokale
+Zeitkorrekturen berücksichtigen nur die nicht ausgeschlossenen Layer.
+Die angezeigte beste Layerzeit und ihre Abweichung stammen dagegen aus dem
+**vollständigen gemeinsamen G-Code des ausgewählten Kandidaten**, einschließlich
+ausgeschlossener Layer und Objektlayer oberhalb des Turmendes. Derselbe gespeicherte
+Messwert wird während der Generierung, nach Übernahme sowie für Vorschau und
+Export verwendet. Die Vorschau zeigt ebenfalls die Form dieses besten Kandidaten.
+Bei gleicher Gesamtprojekt-Abweichung kann ein Kandidat mit besser angeglichenen
+nicht ausgeschlossenen Layern übernehmen; ausgeschlossene Layer erhalten dadurch
+keine eigene Zeitvorgabe. Die unveränderten Originalzeiten bleiben für Analyse
+und Färbung verfügbar.
+
+Für Anycubic Slicer Next werden in den eigenen temporären Profilkopien reine
+Kommentar-Marker an den Layergrenzen ergänzt. Der native Slicer-Postprozessor
+ersetzt seine Inline-Zeitplatzhalter durch kumulierte Normalmodus-Zeiten mit
+Millisekundenauflösung. Aus aufeinanderfolgenden Zeitständen entstehen die
+Layerzeiten für Bedarf, Angleichung, Kandidatenvergleich und Anzeige. Die
+Druckbefehle bleiben unverändert. Unvollständige, doppelte oder nicht zu den
+G-Code-Layern passende Zeitstände dürfen nicht als vollständiges Slicer-Ergebnis
+verwendet werden. Bereits vorhandene G-Codes ohne diese Marker und die übrigen
+Slicer verwenden weiterhin die bisherige Bewegungsanalyse; vorhandene native
+Layerzeit-Metadaten haben bei der Slice-Bewertung Vorrang. Ein erneuter Slice
+des 3MF muss denselben Slicerstand, dieselben Druckprofile und
+Objektüberschreibungen verwenden. Slicereigene Originalprofile bleiben lesend.
+
+Die rückwärts berechnete Hüllkurve sichert weiterhin spätere Bedarfsspitzen.
+Ohne Vollfüllung verjüngt sich der Turm innerhalb eines Bereichs unter
+Einhaltung des Verjüngungswinkels. Der Standfuß und dessen eigene Kurve bleiben
+bei beiden Füllungsvarianten erhalten: Ausgeschlossene Standfuß-Layer wirken
+wie Layer ohne Defizit. Automatische und manuelle Standfußbreiten sowie ihre
+Validierung gelten auch bei einem ausgeschlossenen ersten Layer unverändert.
+Layer auf dem Mindestdurchmesser verlängern eine Verjüngung nicht; nach deren
+Abschluss bleibt der Stamm minimal, bis späterer Bedarf eine Aufweitung verlangt.
+Mit 100-%-Füllung darf er oberhalb des Standfußübergangs direkt am
+Bereichsanfang einen geschlossenen Absatz zum kleinsten noch nötigen Radius
+bilden. Innerhalb des Standfußübergangs darf ein Ausschluss weder dessen Kurve
+abbrechen noch dessen Breite auf den Mindestdurchmesser reduzieren.
+Eine Aufweitung innerhalb der Bereiche sichert ausschließlich späteren,
+nicht ausgeschlossenen Bedarf.
+
+`test_layer_range_tool.py` prüft Bereichsvereinigung, Original-Indexzuordnung,
+variable Höhen, Turmende, Standfußschutz, spätere Spitzen, Winkel, geschlossene
+Absatz-Meshes, Kalibrierung, Quellunveränderlichkeit, Vorschauidentität sowie
+grafische und numerische Bearbeitung, Freigabe beim Loslassen, Drehung,
+Übernehmen/Verwerfen aller Einstellungen, Zeitschritte und Rücksetzung im Hauptfenster.
+Zusätzliche GUI-Prüfungen sichern die Farbgrenzen, ihre Reihenfolge und
+Synchronisation mit der Legende, die vorübergehende Überlagerungsanzeige sowie
+proportionstreuen Zoom mit verankerter Zeigerposition und Verschieben der Ansicht.
+Zusätzliche Fälle prüfen automatisches Zeichnen auf freien Flächen, absteigende
+Nummerierung, stabile vollständig sichtbare Auswahlzeilen nach echten Mausklicks
+und Listenänderungen, 90°-Einrasten, Drehungsreset, STL-Inseln und Quellschutz.
+Layoutprüfungen verwenden die tatsächlichen Styles für kompakte Eingabefelder,
+die mitwachsende Mindestbreite links, proportionale Vorschauverkleinerung,
+Umbrüche in der rechten Spalte, gestufte Einpassen-Beschriftungen
+und vollständig scrollbare Hinweistexte einschließlich großer Defizitwerte.
+Weitere Tests prüfen das Ziehen beider Farbgreifer, die Grenze von 2 Sekunden,
+bidirektionale Eingabesynchronisation, Tastaturbedienung und den Reset auf 0/1 Sekunden.
+Der Standfußfall mit ausgeschlossenen Layern 1–951 wird bei 990 Layern und
+178,22 mm Höhe für automatische/manuelle Standfüße und beide Füllungsvarianten
+gegen Mindeststamm, spätere Bedarfsspitzen und geschlossene Meshes geprüft.
+„Test-STL (manifold).stl“ wird mit 990 Layern und 178,22 mm Vorschauhöhe
+auf vollständige Geometrie bei mehreren Drehwinkeln geprüft; ein dichter
+1000-Layer-Fall verhindert ausgeblendete Bildzeilen durch überlappende Farbflächen.
+
+### 3D-Vorschau und übrige Turmeinstellungen
 
 Die Platzierung reserviert vor dem ersten gemeinsamen Slice den angegebenen
 maximalen Turmdurchmesser einschließlich eines nötigen Standfußes und eines

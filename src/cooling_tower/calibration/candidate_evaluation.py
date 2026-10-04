@@ -6,6 +6,25 @@ avoidable added time, then material. Joint/isolated precedence stays in the loop
 from __future__ import annotations
 import math
 
+
+def minimum_combined_layer_time(evaluation: object) -> float | None:
+    """Read complete-project timing evidence, without applying exclusions."""
+
+    if getattr(evaluation, "metadata_source", None) == "final_combined_gcode":
+        minimum = getattr(evaluation, "minimum_sliced_layer_time_s", None)
+        if minimum is not None:
+            value = float(minimum)
+            return value if math.isfinite(value) and value >= 0.0 else None
+    values = tuple(
+        float(timing.combined_layer_time_s)
+        for timing in getattr(evaluation, "layer_timings", ())
+        if getattr(timing, "combined_layer_time_s", None) is not None
+    )
+    if not values or not all(math.isfinite(value) and value >= 0.0 for value in values):
+        return None
+    return min(values)
+
+
 def maximum_slicer_result_change(
     previous_added_times_s: dict[int, float] | None,
     current_added_times_s: dict[int, float],

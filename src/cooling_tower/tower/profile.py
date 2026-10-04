@@ -22,6 +22,7 @@ class TowerProfileConfig:
     minimum_radius_mm: float = 6.0
     maximum_radius_mm: float = 40.0
     local_time_factor_window: int = 5
+    excluded_layer_indices: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,6 +397,7 @@ def _calculate_layer_radius(
 ) -> LayerRadiusRecord:
     time_deficit_s = max(
         0.0,
+        0.0 if layer.index in config.excluded_layer_indices else
         config.target_layer_time_s - layer.total_time_s,
     )
 

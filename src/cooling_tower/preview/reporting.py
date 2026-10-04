@@ -584,6 +584,15 @@ def build_user_report(
         ),
         "",
     ]
+    if request.settings.excluded_layer_ranges:
+        lines.extend((
+            "Ausschlussbereiche (einschließlich): " + ", ".join(
+                f"Layer {start}–{end}" for start, end in request.settings.excluded_layer_ranges
+            ),
+            "Die Zielzeitprüfung gilt nur außerhalb dieser Bereiche. Aufweitungen darin sichern ausschließlich späteren Bedarf.",
+            "Die angezeigte kleinste Layerzeit und ihre Abweichung beziehen sich auf das gesamte Projekt einschließlich der Ausschlussbereiche.",
+            "",
+        ))
     if preview.calibrated:
         lines.extend(
             (
@@ -604,9 +613,9 @@ def build_user_report(
         if preview.minimum_verified_layer_time_s is not None:
             lines.append(
                 (
-                    "Kleinste gemeinsam geprüfte relevante Layerzeit: "
+                    "Kleinste gemeinsam geprüfte Layerzeit des gesamten Projekts: "
                     if preview.joint_sliced
-                    else "Kleinste angenäherte relevante Layerzeit: "
+                    else "Kleinste angenäherte Layerzeit des gesamten Projekts: "
                 )
                 +
                 f"{preview.minimum_verified_layer_time_s:.3f} s"
@@ -624,7 +633,7 @@ def build_user_report(
         ]
         if joint_deviation is not None:
             lines.append(
-                "Größte absolute Zielabweichung im gemeinsamen Slice: "
+                "Größte absolute Zielabweichung der nicht ausgeschlossenen Bedarfslayer im gemeinsamen Slice: "
                 f"{joint_deviation:.3f} s"
             )
         completed = diagnostics["iteration_count"]
@@ -723,7 +732,7 @@ def build_user_report(
             )
             lines.extend(
                 (
-                    "- Kleinste berechnete relevante Layerzeit: "
+                    "- Kleinste berechnete Layerzeit des gesamten Projekts: "
                     f"{preview.minimum_verified_layer_time_s:.3f} s",
                     "- Abweichung dieser Layerzeit vom Ziel: "
                     f"{difference:+.3f} s",

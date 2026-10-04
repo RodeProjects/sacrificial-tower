@@ -1422,6 +1422,10 @@ class Phase16Tests(unittest.TestCase):
                 "_minimum_target_difference",
                 side_effect=(0.50, 0.05),
             ),
+            patch(
+                "cooling_tower.calibration.calibration_service.minimum_combined_layer_time",
+                side_effect=(30.50, 30.05),
+            ),
             patch.object(
                 service,
                 "_candidate_score",
@@ -1501,6 +1505,10 @@ class Phase16Tests(unittest.TestCase):
                 service,
                 "_minimum_target_difference",
                 side_effect=(0.0901, 0.0901, 0.0901, 0.0901, 0.0901, 0.0901, 0.09),
+            ),
+            patch(
+                "cooling_tower.calibration.calibration_service.minimum_combined_layer_time",
+                side_effect=(30.0901,) * 6 + (30.09,),
             ),
             patch.object(service, "_maximum_slicer_result_change", return_value=1.0),
         ):
@@ -1629,6 +1637,10 @@ class Phase16Tests(unittest.TestCase):
                 "_minimum_target_difference",
                 side_effect=(-0.37, -0.44),
             ),
+            patch(
+                "cooling_tower.calibration.calibration_service.minimum_combined_layer_time",
+                side_effect=(29.63, 29.56),
+            ),
             patch.object(
                 service,
                 "_candidate_score",
@@ -1678,6 +1690,10 @@ class Phase16Tests(unittest.TestCase):
                 "_minimum_target_difference",
                 side_effect=(0.39, -1.80),
             ),
+            patch(
+                "cooling_tower.calibration.calibration_service.minimum_combined_layer_time",
+                side_effect=(30.39, 28.20),
+            ),
             patch.object(
                 service,
                 "_candidate_score",
@@ -1720,6 +1736,10 @@ class Phase16Tests(unittest.TestCase):
                 service,
                 "_minimum_target_difference",
                 side_effect=(0.39, -0.39),
+            ),
+            patch(
+                "cooling_tower.calibration.calibration_service.minimum_combined_layer_time",
+                side_effect=(30.39, 29.61),
             ),
             patch.object(
                 service,
@@ -1933,6 +1953,43 @@ class Phase16Tests(unittest.TestCase):
             adapter.final_tower_hash,
             hashlib.sha256(result.stl_path.read_bytes()).hexdigest(),
         )
+
+    def test_bambu_native_joint_slices_use_the_actual_export_project(self) -> None:
+        source_stl = self.root / "native_bambu_source.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source_stl)
+        adapter = DeferredBambuAdapter(tower_gcode(path_size=3.0, feed=30.0))
+        adapter.prefer_native_joint_project = True
+        measured_projects = {}
+        original_slice = adapter.slice_model
+        def capture_project(request):
+            measured_projects[request.calibration_round] = request.model_path.read_bytes()
+            return original_slice(request)
+        adapter.slice_model = capture_project
+        result = CalibrationService().calibrate(
+            self.snapshot,
+            GenerationSettings(target_layer_time_s=2.0),
+            adapter=adapter,
+            profile=self.profile,
+            output_directory=self.root / "native_bambu_result",
+            config=CalibrationConfig(
+                maximum_iterations=3,
+                perform_joint_final_slice=True,
+                minimum_joint_slices=2,
+                maximum_joint_slices=3,
+                time_tolerance_s=1_000.0,
+            ),
+            source_artifact=SourceArtifact.capture(source_stl),
+        )
+        self.assertTrue(result.success, result.failures)
+        self.assertGreaterEqual(adapter.project_exports, 2)
+        self.assertEqual(adapter.prepared_tower_hashes, [])
+        self.assertTrue(all(request.model_path.suffix == ".3mf" for request in adapter.requests))
+        self.assertTrue(all(not request.use_cli_assemble_list for request in adapter.requests))
+        self.assertIsNotNone(result.project_path)
+        best = result.best_iteration
+        self.assertIsNotNone(best)
+        assert best is not None
+        self.assertEqual(result.project_path.read_bytes(), measured_projects[best.number])
 
     def test_accepting_best_candidate_does_not_cancel_final_bambu_3mf(self) -> None:
         source_stl = self.root / "accepted_deferred_bambu_source.stl"

@@ -211,7 +211,7 @@ class PreviewRequest:
             "analysis_modified_ns": getattr(
                 self.snapshot, "file_modified_ns", None
             ),
-            "settings": self.settings.to_dict(),
+            "settings": self.settings.to_dict(include_object_settings=True),
             "force_tower": self.force_tower,
             "output_mode": self.output_mode.value,
             "slicer_identity_key": self.slicer_identity_key,

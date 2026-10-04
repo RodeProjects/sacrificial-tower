@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 from cooling_tower.gcode.layer_detector import LayerRecord
+from cooling_tower.models.layer_ranges import excluded_layer_indices
 from cooling_tower.models import (
     GCodeAnalysisSnapshot,
     GenerationSettings,
@@ -24,8 +25,9 @@ def assess_tower_need(
     if not snapshot.layers:
         raise ValueError("A tower assessment requires printable layers.")
 
+    excluded = excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges)
     deficits = tuple(
-        max(0.0, target - layer.total_time_s)
+        0.0 if layer.index in excluded else max(0.0, target - layer.total_time_s)
         for layer in snapshot.layers
     )
     deficit_positions = tuple(

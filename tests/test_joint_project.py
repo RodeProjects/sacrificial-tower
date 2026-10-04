@@ -440,6 +440,34 @@ class PlacementAndProjectTests(unittest.TestCase):
         self.assertEqual(filament.read_bytes(), before)
         self.assertEqual(digest, hashlib.sha256(project.read_bytes()).hexdigest())
 
+    def test_bambu_export_omits_only_uninitialized_nozzle_statistics(self) -> None:
+        filament = self.root / "temporary_filament.json"
+        filament.write_text(json.dumps({"slow_down_layer_time": "12"}), encoding="utf-8")
+        before = filament.read_bytes()
+        for stats in (
+            {"extruder_nozzle_stats": []},
+            {"extruder_nozzle_stats_new": []},
+            {"extruder_nozzle_stats": [], "extruder_nozzle_stats_new": []},
+            {"extruder_nozzle_stats": [], "extruder_nozzle_stats_new": ["Standard#1"]},
+            {"extruder_nozzle_stats": ["Standard#1", "High Flow#1"]},
+            {},
+        ):
+            with self.subTest(stats=stats):
+                project = self.root / "nozzle_statistics.3mf"
+                values = {"slow_down_layer_time": "12", **stats}
+                with zipfile.ZipFile(project, "w") as archive:
+                    archive.writestr("Metadata/project_settings.config", json.dumps(values))
+                    archive.writestr("3D/3dmodel.model", b"unchanged mesh")
+                synchronize_bambu_project_filament_settings(project, (filament,))
+                with zipfile.ZipFile(project) as archive:
+                    actual = json.loads(archive.read("Metadata/project_settings.config"))
+                    self.assertEqual(archive.read("3D/3dmodel.model"), b"unchanged mesh")
+                self.assertEqual(actual, {key: value for key, value in values.items() if value != []})
+                repaired = project.read_bytes()
+                synchronize_bambu_project_filament_settings(project, (filament,))
+                self.assertEqual(project.read_bytes(), repaired)
+        self.assertEqual(filament.read_bytes(), before)
+
     def test_tower_infill_validation_accepts_solid_and_rejects_sparse(self) -> None:
         solid = self.root / "solid.gcode"
         solid.write_text(

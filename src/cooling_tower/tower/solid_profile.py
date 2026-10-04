@@ -156,6 +156,24 @@ def build_solid_tower_profile(
     if not phase2_profile.layers:
         raise ValueError("A solid profile requires at least one layer.")
 
+    # The config retains original indices even when the tower ends early.
+    # Also protect callers that provide a seed or a manually built profile.
+    excluded = phase2_profile.config.excluded_layer_indices
+    if settings.excluded_layer_ranges and not excluded:
+        # Translate against profile positions; a range may extend above the tower.
+        excluded = frozenset(
+            layer.layer_index for position, layer in enumerate(phase2_profile.layers, 1)
+            if any(start <= position <= end for start, end in settings.excluded_layer_ranges)
+        )
+    if excluded:
+        phase2_profile = replace(phase2_profile, layers=tuple(
+            replace(layer, calculated_radius_mm=settings.minimum_outer_radius_mm,
+                    radius_mm=settings.minimum_outer_radius_mm, time_deficit_s=0.0,
+                    additional_path_mm=0.0, safety_adjusted_path_mm=0.0)
+            if layer.layer_index in excluded else layer
+            for layer in phase2_profile.layers
+        ))
+
     last_layer_z = phase2_profile.layers[-1].z_mm
     total_height = last_layer_z if tower_end_z_mm is None else tower_end_z_mm
     if not math.isfinite(total_height) or total_height <= 0.0:
@@ -253,6 +271,7 @@ def build_solid_tower_profile(
             if (previous is not None and current is not None
                     and previous.time_deficit_s > settings.layer_time_tolerance_s
                     and current.time_deficit_s <= settings.layer_time_tolerance_s
+                    and current.layer_index not in excluded
                     and current.layer_time_s > previous.layer_time_s * 1.5):
                 abrupt_drops.add(index)
                 # A descending request before a discontinuity can come from
@@ -279,6 +298,10 @@ def build_solid_tower_profile(
         allow_steps=settings.simulate_full_tower_infill,
         base_taper_height=base_taper_height,
         abrupt_drop_indices=frozenset(abrupt_drops),
+        excluded_indices=frozenset(
+            index - plan_start for index, support in enumerate(supports)
+            if support.layer_index in excluded and index >= plan_start
+        ),
     )
     if tiered_foot:
         outer_radii = (base_outer, base_outer, foot_middle_radius) + planned_radii[1:]

@@ -1,10 +1,10 @@
 """Persistent generation controls and candidate feedback beside the preview."""
 from __future__ import annotations
 
-import math
 from html import escape
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout
+from cooling_tower.calibration.candidate_evaluation import minimum_combined_layer_time
 
 from cooling_tower.gui.generation_progress_dialog import (
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
@@ -170,8 +170,9 @@ class GenerationPanel(QWidget):
             completed >= self._minimum_joint_slices and completed < maximum
         )
         self.continue_button.setEnabled(False)
-        values = [float(t.combined_layer_time_s) for t in getattr(getattr(best_iteration, "evaluation", None), "layer_timings", ()) if getattr(t, "combined_layer_time_s", None) is not None and math.isfinite(float(t.combined_layer_time_s))]
-        self.set_achieved(min(values) if values else None)
+        self.set_achieved(minimum_combined_layer_time(
+            getattr(best_iteration, "evaluation", None)
+        ))
 
     def set_achieved(self, minimum):
         if minimum is None:

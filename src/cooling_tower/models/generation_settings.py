@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from typing import Any, Mapping
 from cooling_tower.settings_defaults import GENERATION_DEFAULTS
+from cooling_tower.models.layer_ranges import LayerRange, normalize_layer_ranges
 
 
 _UNSET = object()
@@ -50,6 +51,8 @@ class GenerationSettings:
     maximum_contraction_angle_deg: float
 
     local_reference_window: int
+    # Object-bound session data; deliberately absent from global user defaults.
+    excluded_layer_ranges: tuple[LayerRange, ...]
 
     _legacy_minimum_wall_thickness_mm: float = field(
         repr=False, compare=False
@@ -86,6 +89,7 @@ class GenerationSettings:
         maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
         layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"],
+        excluded_layer_ranges: tuple[LayerRange, ...] = (),
         **legacy: Any,
     ) -> None:
         legacy_base_height = legacy.pop("base_height_mm", legacy.pop("_legacy_base_height_mm", 1.0))
@@ -130,6 +134,7 @@ class GenerationSettings:
         }
         for name, value in public_values.items():
             object.__setattr__(self, name, value)
+        object.__setattr__(self, "excluded_layer_ranges", normalize_layer_ranges(excluded_layer_ranges))
         for name, value in hollow_values.items():
             object.__setattr__(self, f"_legacy_{name}", value)
 
@@ -167,11 +172,12 @@ class GenerationSettings:
     def maximum_wall_change_per_mm_z(self) -> float:
         return self._legacy_maximum_wall_change_per_mm_z
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_object_settings: bool = False) -> dict[str, Any]:
         return {
             item.name: getattr(self, item.name)
             for item in fields(self)
             if not item.name.startswith("_legacy_")
+            and (include_object_settings or item.name != "excluded_layer_ranges")
         }
 
     @classmethod

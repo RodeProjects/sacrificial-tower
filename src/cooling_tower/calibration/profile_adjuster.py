@@ -138,7 +138,8 @@ def adjust_radius_profile(
         observed_added = max(
             0.0, float(calibrated_added_times_s.get(item.layer_index, 0.0))
         )
-        required_added = max(0.0, target_time_s - source_time)
+        excluded = item.layer_index in profile.config.excluded_layer_indices
+        required_added = 0.0 if excluded else max(0.0, target_time_s - source_time)
         control_required_added = max(
             0.0,
             target_time_s + joint_growth_guard_s - source_time,
@@ -219,7 +220,7 @@ def adjust_radius_profile(
             and item.layer_index in combined_layer_times_s
             else None
         )
-        if combined_time is not None and math.isfinite(combined_time):
+        if not excluded and combined_time is not None and math.isfinite(combined_time):
             coupled_radius = old_radius * coupled_radius_scale
             if (
                 coupled_radius_scale > 1.0

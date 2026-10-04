@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -53,6 +54,7 @@ from cooling_tower.slicers import (
     SlicerDiscoverySource,
     protect_profile_sources,
 )
+from cooling_tower.slicers.process import SecureSlicerProcessRunner
 
 
 @unittest.skipUnless(
@@ -329,6 +331,12 @@ class RealBambuJointSliceTests(unittest.TestCase):
     def test_real_full_joint_calibration_exports_latest_measured_mesh(
         self,
     ) -> None:
+        self._verify_real_joint_candidate()
+
+    def test_real_exclusions_keep_complete_timing_and_selected_3mf_mesh(self) -> None:
+        self._verify_real_joint_candidate(exclude_first_layers=True)
+
+    def _verify_real_joint_candidate(self, *, exclude_first_layers: bool = False) -> None:
         """Regress the stale-native-project Bambu timing failure end to end."""
 
         executable = Path(r"C:\Program Files\Bambu Studio\bambu-studio.exe")
@@ -396,6 +404,10 @@ class RealBambuJointSliceTests(unittest.TestCase):
                         automatic_base_width=True,
                         maximum_expansion_angle_deg=50.0,
                         maximum_contraction_angle_deg=50.0,
+                        excluded_layer_ranges=(
+                            ((1, max(1, preslice.analysis_snapshot.layer_count // 2)),)
+                            if exclude_first_layers else ()
+                        ),
                     ),
                     adapter=adapter,
                     profile=confirmed.selected.effective_profile,
@@ -448,9 +460,27 @@ class RealBambuJointSliceTests(unittest.TestCase):
             best_joint_times = best_iteration.evaluation.combined_time_by_layer
             self.assertTrue(best_joint_times)
             predicted_minimum = min(best_joint_times.values())
+            self.assertAlmostEqual(
+                best_iteration.evaluation.minimum_sliced_layer_time_s,
+                GCodeAnalysisService().analyze(result.gcode_path).minimum_layer_time_s,
+            )
 
-            # The Bambu CLI cannot reliably re-slice its finalized 3MF in
-            # headless mode, so verify the durable artifact at the mesh level.
+            if os.environ.get("COOLING_TOWER_RETAIN_REAL_SLICER_OUTPUT") == "1":
+                suffix = "with-exclusions" if exclude_first_layers else "without-exclusions"
+                retained = PROJECT_ROOT / ".tmp" / "bambu-timing-verification" / suffix
+                retained.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(result.project_path, retained / "selected-candidate.3mf")
+                shutil.copy2(result.gcode_path, retained / "selected-candidate.gcode")
+                shutil.copy2(result.stl_path, retained / "selected-tower.stl")
+                (retained / "timing.json").write_text(
+                    json.dumps({
+                        "minimum_layer_time_s": predicted_minimum,
+                        "best_iteration_number": result.best_iteration_number,
+                    }, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                print("retained Bambu verification:", retained, flush=True)
+
             # Before the regression fix this project embedded round one's
             # roughly seven-second tower while the sidecar-driven calibration
             # measured a later roughly 9.6-second STL.
@@ -483,7 +513,44 @@ class RealBambuJointSliceTests(unittest.TestCase):
                 f"{predicted_minimum:.3f}",
             )
             self.assertTrue(matching_meshes)
-            self.assertGreater(predicted_minimum, joint_minima[0] + 2.0)
+            # Slice the durable 3MF independently, without the direct assembly
+            # or CLI profile overrides used while adjusting the candidate.
+            # Empty native nozzle statistics used to make this import fail.
+            exported_values = _project_settings(result.project_path)
+            for key in ("extruder_nozzle_stats", "extruder_nozzle_stats_new"):
+                self.assertNotEqual(exported_values.get(key), [])
+            reslice_root = root / "export_verification"
+            reslice = SecureSlicerProcessRunner().run(
+                executable,
+                (
+                    "--datadir", str(reslice_root / "data"),
+                    "--slice", "0",
+                    "--outputdir", str(reslice_root / "output"),
+                    str(result.project_path),
+                ),
+                working_directory=reslice_root,
+                timeout_s=300.0,
+            )
+            self.assertEqual(reslice.return_code, 0, (reslice.stdout, reslice.stderr))
+            resliced_gcode = next((reslice_root / "output").glob("*.gcode"))
+            resliced_snapshot = GCodeAnalysisService().analyze(resliced_gcode)
+            print("real-bambu independent 3MF minimum:", resliced_snapshot.minimum_layer_time_s, flush=True)
+            if os.environ.get("COOLING_TOWER_RETAIN_REAL_SLICER_OUTPUT") == "1":
+                shutil.copy2(resliced_gcode, retained / "resliced-export.gcode")
+                shutil.copy2(reslice_root / "output" / "result.json", retained / "reslice-result.json")
+            self.assertEqual(resliced_snapshot.layer_count, preslice.analysis_snapshot.layer_count)
+            self.assertAlmostEqual(
+                resliced_snapshot.minimum_layer_time_s,
+                predicted_minimum,
+                delta=0.01,
+            )
+            if not exclude_first_layers:
+                # Real installed profiles may start above or below the target.
+                # Selection must improve the deviation, in either direction.
+                self.assertLessEqual(
+                    abs(predicted_minimum - 10.0),
+                    min(abs(value - 10.0) for value in joint_minima) + 1e-8,
+                )
             self.assertEqual(
                 {
                     path: hashlib.sha256(path.read_bytes()).digest()

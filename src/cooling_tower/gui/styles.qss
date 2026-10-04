@@ -1,4 +1,24 @@
 /* ---------- Grundlayout und Typografie ---------- */
+QPushButton[rangeAction="add"] {
+    background: #176b45; color: white; border: 1px solid #176b45;
+    border-radius: 6px; padding: 7px 10px;
+}
+QPushButton[rangeAction="add"]:hover, QPushButton[rangeAction="add"]:checked {
+    background: #115336;
+}
+QPushButton[rangeAction="remove"] {
+    background: #b42318; color: white; border: 1px solid #b42318;
+    border-radius: 6px; padding: 7px 10px;
+}
+QPushButton[rangeAction="remove"]:hover { background: #921c13; }
+QPushButton[rangeAction]:disabled { background: #d6dee8; color: #637386; border-color: #d6dee8; }
+QFrame#layerRangeRow { background: #fff; border: 1px solid #d6dee8; border-radius: 7px; }
+QFrame#layerRangeRow[selected="true"] { background: #c6ddee; border-color: #6f9fc4; }
+QWidget#layerRangeCanvas { background: #e6ecf2; border: 1px solid #9eafbf; border-radius: 6px; }
+QSplitter#layerRangeSplitter::handle { background: #cbd6e1; border: none; }
+QDialog#layerRangeDialog QPushButton[rangeCompact="true"] {
+    min-height: 30px; max-height: 30px; padding: 0 10px;
+}
 QMainWindow, QDialog {
     background: #f3f6f9;
     color: #152536;
@@ -1906,6 +1926,10 @@ QDoubleSpinBox, QSpinBox {
     padding: 0 48px 0 8px;
 }
 
+/* The range tool uses native suffixes, without the main window's unit overlay. */
+QDialog#layerRangeDialog QDoubleSpinBox,
+QDialog#layerRangeDialog QSpinBox { padding: 0 8px; }
+
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"] {
     color: #667684;
     background: #f1f4f6;
@@ -2119,6 +2143,7 @@ QPushButton:disabled {
 }
 
 QPushButton#sourcePrimaryActionButton,
+QPushButton#layerRangeApplyButton,
 QPushButton#profileConfirmButton {
     color: #28563d;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -2136,6 +2161,7 @@ QPushButton#profileConfirmButton[confirmed="true"] {
 }
 
 QPushButton#sourcePrimaryActionButton:hover,
+QPushButton#layerRangeApplyButton:hover,
 QPushButton#profileConfirmButton:hover {
     color: #214b35;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -2156,12 +2182,14 @@ QPushButton#sourcePrimaryActionButton:hover {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #effbf3, stop: 1 #d3efdc);
 }
-QPushButton#sourcePrimaryActionButton:pressed {
+QPushButton#sourcePrimaryActionButton:pressed,
+QPushButton#layerRangeApplyButton:pressed {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #bddfc9, stop: 1 #e2f6e9);
 }
 
 QPushButton#sourcePrimaryActionButton:disabled,
+QPushButton#layerRangeApplyButton:disabled,
 QPushButton#profileConfirmButton:disabled {
     color: #7994aa;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -2169,7 +2197,8 @@ QPushButton#profileConfirmButton:disabled {
     border-color: #d3dde5;
 }
 
-QPushButton#headerResetButton {
+QPushButton#headerResetButton,
+QPushButton#layerRangeToolButton {
     min-height: 30px;
     max-height: 30px;
     padding: 0 12px;
@@ -2867,6 +2896,7 @@ QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton:press
         stop: 0 #bddfc9, stop: 1 #e2f6e9);
 }
 
+QPushButton#layerRangeCancelButton,
 QPushButton#removeSourceButton,
 QPushButton#supportSimulationCancelButton,
 QPushButton#presliceCancelButton,
@@ -2879,6 +2909,7 @@ QPushButton#updateRestartCancelButton {
     font-weight: 600;
 }
 
+QPushButton#layerRangeCancelButton:hover,
 QPushButton#removeSourceButton:hover,
 QPushButton#supportSimulationCancelButton:hover,
 QPushButton#presliceCancelButton:hover,
@@ -2890,6 +2921,7 @@ QPushButton#updateRestartCancelButton:hover {
     border-color: #cc9d9d;
 }
 
+QPushButton#layerRangeCancelButton:pressed,
 QPushButton#removeSourceButton:pressed,
 QPushButton#supportSimulationCancelButton:pressed,
 QPushButton#presliceCancelButton:pressed,
@@ -2899,6 +2931,7 @@ QPushButton#updateRestartCancelButton:pressed {
         stop: 0 #eacaca, stop: 1 #f6e7e7);
 }
 
+QPushButton#layerRangeCancelButton:disabled,
 QPushButton#removeSourceButton:disabled,
 QPushButton#supportSimulationCancelButton:disabled,
 QPushButton#supportSimulationReloadButton:disabled,

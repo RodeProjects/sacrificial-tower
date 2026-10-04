@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 from cooling_tower.models import LayerSliceTiming, SliceEvaluation
 from cooling_tower.calibration.joint_project import TowerInfillEvidenceCollector
 from cooling_tower.services.analysis_service import GCodeAnalysisService
+from cooling_tower.gcode.slicer_layer_times import read_slicer_layer_times
 from cooling_tower.slicers import EffectiveProfile, ProfileRecord, SliceResult
 from cooling_tower.slicers.orca_profile_compatibility import (
     harmonize_temporary_orca_profile_compatibility,
@@ -383,7 +384,11 @@ class SliceEvaluator:
             raise ValueError(
                 "Der Slicer-G-Code enthält keine druckbaren Kühlturm-Layer."
             )
-        metadata_times = _extract_metadata_times(result)
+        native_times = read_slicer_layer_times(result.gcode_path)
+        metadata_times = (
+            native_times.times_s if native_times is not None
+            else _extract_metadata_times(result)
+        )
         diagnostics: list[str] = []
         if len(tower_layers) != len(source_layers):
             diagnostics.append(
@@ -411,7 +416,6 @@ class SliceEvaluator:
                     else after
                 )
             approach, return_time = travels.get(source_index, (0.0, 0.0))
-            computed = tower.total_time_s + approach + return_time
             reported = None
             difference = None
             metadata_position = tower.index - 1
@@ -419,6 +423,9 @@ class SliceEvaluator:
                 reported = metadata_times[metadata_position]
                 difference = abs(reported - tower.total_time_s)
                 differences.append(difference)
+            computed = (
+                reported if reported is not None else tower.total_time_s
+            ) + approach + return_time
             timings.append(
                 LayerSliceTiming(
                     layer_index=source_index,
@@ -444,7 +451,15 @@ class SliceEvaluator:
         return SliceEvaluation(
             gcode_path=result.gcode_path.resolve(),
             layer_timings=tuple(timings),
-            metadata_source=("slicer_and_gcode" if metadata_times else "gcode"),
+            metadata_source=(
+                "slicer_native_gcode" if native_times is not None
+                else "slicer_and_gcode" if metadata_times else "gcode"
+            ),
             maximum_metadata_difference_s=maximum_difference,
             diagnostics=tuple(diagnostics),
+            minimum_sliced_layer_time_s=(
+                min(metadata_times)
+                if len(metadata_times) == len(tower_layers)
+                else snapshot.minimum_layer_time_s
+            ),
         )

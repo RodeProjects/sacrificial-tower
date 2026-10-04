@@ -22,6 +22,7 @@ from cooling_tower.models import (
     TowerPlacement,
 )
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.calibration.candidate_evaluation import minimum_combined_layer_time
 from cooling_tower.tower.mesh_generator import automatic_mesh_segments
 from cooling_tower.preview.models import (
     LineSegment3D,
@@ -346,7 +347,10 @@ class PreviewService:
 
             def report_joint_progress(progress: object) -> None:
                 if joint_scene_callback is not None:
-                    candidate_profile = getattr(progress, "current_profile", None)
+                    candidate_profile = (
+                        getattr(progress, "best_profile", None)
+                        or getattr(progress, "current_profile", None)
+                    )
                     candidate_placement = getattr(progress, "placement", None)
                     if candidate_profile is not None and candidate_placement is not None:
                         points = tuple(getattr(candidate_profile, "points", ()))
@@ -678,15 +682,12 @@ class PreviewService:
             return None
         best = getattr(calibration, "best_iteration", None)
         iteration = best if best is not None else iterations[-1]
+        minimum = minimum_combined_layer_time(iteration.evaluation)
+        if minimum is not None:
+            return minimum
         added = iteration.evaluation.added_time_by_layer
-        combined = iteration.evaluation.combined_time_by_layer
         values = [
-            (
-                float(combined[layer.index])
-                if layer.index in combined
-                else float(layer.total_time_s) + float(added[layer.index])
-            )
+            float(layer.total_time_s) + float(added.get(layer.index, 0.0))
             for layer in request.snapshot.layers
-            if layer.index in added
         ]
         return min(values) if values else None

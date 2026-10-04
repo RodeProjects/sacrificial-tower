@@ -48,6 +48,7 @@ from cooling_tower.models import (
     SourceKind,
 )
 from cooling_tower.services.tower_need_service import assess_tower_need, layers_for_tower
+from cooling_tower.models.layer_ranges import excluded_layer_indices
 from cooling_tower.slicers import (
     EffectiveProfile,
     SliceRequest,
@@ -72,6 +73,7 @@ from cooling_tower.calibration.candidate_evaluation import (
     maximum_slicer_result_change,
     maximum_target_deviation,
     minimum_target_difference,
+    minimum_combined_layer_time,
 )
 from cooling_tower.write_policy import ensure_writable_output
 
@@ -189,6 +191,7 @@ class CalibrationService:
             and seed_stl.is_file()
         )
         assessment = assess_tower_need(snapshot, settings)
+        excluded = excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges)
         if not assessment.tower_required and not force_tower:
             return CalibrationResult(
                 state=CalibrationState.CONVERGED,
@@ -220,6 +223,8 @@ class CalibrationService:
                 CalibrationFailureCode.LAYER_MISMATCH,
                 "Es wurden keine für den Kühlturm relevanten Quell-Layer gefunden.",
             )
+        relevant_layers = tuple(layer for layer in source_layers if layer.index not in excluded)
+        relevant_layer_indices = frozenset(layer.index for layer in relevant_layers)
         if not profile.installation.can_slice:
             return self._failure(
                 config, CalibrationState.UNSUPPORTED, source_hash,
@@ -240,6 +245,7 @@ class CalibrationService:
             minimum_radius_mm=settings.minimum_outer_radius_mm,
             maximum_radius_mm=settings.maximum_outer_radius_mm,
             local_time_factor_window=settings.local_reference_window,
+            excluded_layer_indices=excluded,
         )
         radius_profile = build_tower_radius_profile(source_layers, profile_config)
         if reuse_seed:
@@ -602,10 +608,13 @@ class CalibrationService:
                                 native_joint_template
                             ),
                         )
-                        lightweight_factory = getattr(
-                            adapter,
-                            "prepare_joint_slice_input",
-                            None,
+                        prefer_native_project = bool(
+                            getattr(adapter, "prefer_native_joint_project", False)
+                        )
+                        lightweight_factory = (
+                            None if prefer_native_project else getattr(
+                                adapter, "prepare_joint_slice_input", None
+                            )
                         )
                         project_factory = getattr(
                             adapter, "create_joint_project", None
@@ -667,7 +676,7 @@ class CalibrationService:
                             native_slice_input = getattr(
                                 project_result, "slice_input_path", None
                             )
-                            if native_slice_input is not None:
+                            if native_slice_input is not None and not prefer_native_project:
                                 slice_model_path = Path(native_slice_input).resolve()
                                 use_cli_assemble_list = True
                         else:
@@ -796,7 +805,7 @@ class CalibrationService:
                         )
                     evaluation = self.evaluator.evaluate(
                         slice_result,
-                        source_layers,
+                        tuple(snapshot.layers) if joint_round else source_layers,
                         metadata_tolerance_s=config.slicer_metadata_tolerance_s,
                         validate_tower_full_infill=validate_full_infill,
                         tower_center_xy_mm=(
@@ -817,7 +826,7 @@ class CalibrationService:
                     evaluation = self._combined_evaluation(
                         evaluation,
                         combined_path,
-                        source_layers,
+                        tuple(snapshot.layers),
                     )
                 elif config.mode is CalibrationMode.GCODE:
                     combined_path = iteration_root / "combined.gcode"
@@ -849,14 +858,22 @@ class CalibrationService:
                             CalibrationFailureCode.UNSUPPORTED_GCODE, str(error)
                         ))
                         break
-                    evaluation = self._combined_evaluation(
-                        evaluation, combined_path, source_layers
+                    # The inserted tower changes travel, retraction and layer
+                    # times. Measure the actual integrated output, rather than
+                    # interpreting the isolated tower's timing as plate timing.
+                    evaluation = self.evaluator.evaluate(
+                        replace(
+                            slice_result, gcode_path=combined_path, metadata_paths=()
+                        ),
+                        tuple(snapshot.layers),
+                        metadata_tolerance_s=config.slicer_metadata_tolerance_s,
                     )
-                combined_times_s = (
-                    evaluation.combined_time_by_layer if joint_round else {}
-                )
+                    evaluation = self._combined_evaluation(
+                        evaluation, combined_path, tuple(snapshot.layers)
+                    )
+                combined_times_s = evaluation.combined_time_by_layer
                 convergence = evaluate_convergence(
-                    source_layers,
+                    relevant_layers,
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                     maximum_profile_change_mm=maximum_profile_change,
@@ -865,7 +882,7 @@ class CalibrationService:
                 )
                 joint_target_deviation_s = (
                     self._maximum_target_deviation(
-                        source_layers,
+                        relevant_layers,
                         evaluation.added_time_by_layer,
                         target_time_s=settings.target_layer_time_s,
                         combined_times_s=combined_times_s,
@@ -873,11 +890,14 @@ class CalibrationService:
                     if joint_round else None
                 )
                 minimum_target_difference_s = self._minimum_target_difference(
-                    source_layers,
+                    relevant_layers,
                     evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                     combined_times_s=combined_times_s,
                 )
+                if not relevant_layers:
+                    # An explicitly forced tower can have no timing objective.
+                    minimum_target_difference_s = 0.0
                 minimum_target_reached = bool(
                     math.isfinite(minimum_target_difference_s)
                     and minimum_target_difference_s
@@ -917,7 +937,7 @@ class CalibrationService:
                     self._maximum_slicer_result_change(
                         previous_added_times_s,
                         current_added_times_s,
-                        source_layers,
+                        relevant_layers,
                     )
                 )
                 minimum_iterations_reached = number >= minimum_iteration_count
@@ -996,18 +1016,22 @@ class CalibrationService:
                 quality_score = self._candidate_score(
                     convergence,
                     solid,
-                    source_layers=source_layers,
+                    source_layers=relevant_layers,
                     added_times_s=evaluation.added_time_by_layer,
                     target_time_s=settings.target_layer_time_s,
                     combined_times_s=combined_times_s,
                 )
-                # The minimum relevant layer time is the value presented to
-                # the user as the candidate result.  Make its absolute target
-                # deviation the primary rank so a visibly worse candidate can
-                # never replace an already better one. Equal deviations keep
-                # the earlier fully evaluated candidate stable in both the
-                # live display and the eventual export.
+                # Display and rank the complete measured plate, including
+                # excluded layers and the object above the tower. Exclusions
+                # apply only to the local correction and convergence objective.
+                measured_minimum = minimum_combined_layer_time(evaluation)
+                measured_difference = (
+                    measured_minimum - settings.target_layer_time_s
+                    if measured_minimum is not None
+                    else minimum_target_difference_s
+                )
                 candidate_score = (
+                    abs(float(measured_difference)),
                     abs(float(minimum_target_difference_s)),
                     *quality_score,
                 )
@@ -1019,7 +1043,14 @@ class CalibrationService:
                     or (
                         joint_round == best_is_joint
                         and (
-                            candidate_score[0] < best_score[0] - 1e-9
+                            (
+                                candidate_score[0] < best_score[0] - 1e-9
+                                or (
+                                    bool(excluded)
+                                    and abs(candidate_score[0] - best_score[0]) <= 1e-9
+                                    and candidate_score[1] < best_score[1] - 1e-9
+                                )
+                            )
                             if joint_round
                             else candidate_score < best_score
                         )
@@ -1068,6 +1099,7 @@ class CalibrationService:
                             current_is_best=candidate_is_best,
                             current_profile=solid,
                             placement=placement,
+                            best_profile=best_profile,
                         )
                     )
                     # Keep the smooth fill transition plus the 500 ms pulse
@@ -1246,7 +1278,10 @@ class CalibrationService:
                         measurement_history=measurement_history,
                         combined_layer_times_s=combined_times_s,
                         coupled_radius_scale=self._joint_coupled_radius_scale(
-                            combined_times_s,
+                            {
+                                index: value for index, value in combined_times_s.items()
+                                if index in relevant_layer_indices
+                            },
                             target_time_s=settings.target_layer_time_s,
                             config=config,
                         ),
@@ -1271,7 +1306,10 @@ class CalibrationService:
                     measurement_history=measurement_history,
                     combined_layer_times_s=combined_times_s,
                     coupled_radius_scale=self._joint_coupled_radius_scale(
-                        combined_times_s,
+                        {
+                            index: value for index, value in combined_times_s.items()
+                            if index in relevant_layer_indices
+                        },
                         target_time_s=settings.target_layer_time_s,
                         config=config,
                     ),

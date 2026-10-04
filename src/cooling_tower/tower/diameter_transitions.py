@@ -111,6 +111,7 @@ def plan_diameter_transitions(
     allow_steps: bool,
     base_taper_height: float | None = None,
     abrupt_drop_indices: frozenset[int] = frozenset(),
+    excluded_indices: frozenset[int] = frozenset(),
 ) -> tuple[tuple[float, ...], tuple[int, ...], tuple[DiameterSegment, ...]]:
     """Reserve future expansion, then form tapers above the demand envelope.
 
@@ -176,6 +177,16 @@ def plan_diameter_transitions(
         if i <= base_index:
             value = base_radius
             taper = None
+        elif (allow_steps and i in excluded_indices
+              and not (base_taper is not None
+                       and z[i - 1] < base_taper.start_z + base_taper.duration - EPSILON)):
+            # Exclusions remove timing demand, never the structural foot.
+            # Above its taper retain the backward envelope for later peaks.
+            candidate = max(minimum_radius, demand[i] - expansion_slope * dz)
+            step = candidate if candidate < previous - EPSILON else None
+            value = min(max(candidate, demand[i]), previous + expansion_slope * dz)
+            taper = None
+            base_taper = None
         elif base_taper is not None and z[i - 1] < base_taper.start_z + base_taper.duration - EPSILON:
             taper = base_taper
             value = max(demand[i], taper.radius(z[i]))
@@ -217,6 +228,11 @@ def plan_diameter_transitions(
                         if j > i and demand[j] > demand[j - 1] + EPSILON:
                             break
                         fraction = max(0.0, (demand[j] - minimum_radius) / amplitude)
+                        # A minimum-radius layer is already satisfied after
+                        # the taper ends. It must not extend its duration.
+                        if fraction <= EPSILON:
+                            j += 1
+                            continue
                         denominator = 1.0 - math.sqrt(min(1.0, fraction))
                         if denominator > EPSILON:
                             duration = max(duration, (z[j] - z[i - 1]) / denominator)

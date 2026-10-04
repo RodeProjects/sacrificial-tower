@@ -1035,6 +1035,36 @@ class Phase14SafeProcessAndAdapterTests(unittest.TestCase):
         finally:
             adapter.cleanup_prepared_slice(prepared)
 
+    def test_bambu_native_joint_project_uses_embedded_settings_and_keeps_sources(self) -> None:
+        runner = ConfigurableRunner()
+        _anycubic, request = self.request(runner)
+        adapter = BambuStudioAdapter(runner=runner)
+        profile = replace(
+            request.profile,
+            installation=replace(request.profile.installation, adapter_id=adapter.adapter_id),
+            machine=replace(request.profile.machine, metadata={"temporary": True}),
+            process=replace(request.profile.process, metadata={"temporary": True}),
+            filaments=tuple(replace(record, metadata={"temporary": True}) for record in request.profile.filaments),
+        )
+        source_paths = tuple(record.path for record in (profile.machine, profile.process, *profile.filaments))
+        before = {path: path.read_bytes() for path in source_paths}
+        native = self.root / "joint_native.3mf"
+        native.write_bytes(b"self-contained project")
+        native_request = replace(
+            request, model_path=native, profile=profile,
+            preserve_model_positions=True, purpose="calibration",
+        )
+        _, arguments = adapter.build_slice_command(
+            native_request, native, self.root / "native_output", self.root / "native_work"
+        )
+        self.assertNotIn("--load-settings", arguments)
+        self.assertNotIn("--load-filaments", arguments)
+        self.assertNotIn("--arrange", arguments)
+        self.assertIn("--datadir", arguments)
+        self.assertIn("--slice", arguments)
+        self.assertEqual(arguments[-1], str(native))
+        self.assertEqual({path: path.read_bytes() for path in source_paths}, before)
+
     def test_bambu_candidate_assembly_does_not_export_native_project(self) -> None:
         runner = NativeProjectRunner()
         _anycubic, request = self.request(runner)

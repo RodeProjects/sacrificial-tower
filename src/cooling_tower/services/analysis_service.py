@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from hmac import compare_digest
 from pathlib import Path
 from threading import RLock
@@ -15,6 +16,7 @@ from cooling_tower.gcode.block_cache import (
 )
 from cooling_tower.gcode.layer_detector import LayerAnalysis, LayerDetector
 from cooling_tower.gcode.metadata_parser import GCodeMetadataCollector
+from cooling_tower.gcode.slicer_layer_times import read_slicer_layer_times
 from cooling_tower.gcode.native_analysis import (
     NativeAnalysisCancelled,
     NativeAnalysisResult,
@@ -334,6 +336,34 @@ class GCodeAnalysisService:
         notify(97, "Layerzeiten und Konfiguration werden zusammengefasst")
         if not analysis.layers:
             raise ValueError("No printable layers were detected in the G-code.")
+
+        if anycubic_slicer_next:
+            native_times = read_slicer_layer_times(source)
+            if native_times is not None:
+                if len(native_times.times_s) != len(analysis.layers) or any(
+                    abs(layer.z_mm - z) > 0.01
+                    for layer, z in zip(analysis.layers, native_times.z_values_mm)
+                ):
+                    raise ValueError(
+                        "Die nativen Slicer-Layerzeiten stimmen nicht mit den G-Code-Layern überein."
+                    )
+                # Full layer times are authoritative slicer data. The motion
+                # components remain estimates for the initial geometry model;
+                # they do not determine convergence or displayed result times.
+                analysis = replace(
+                    analysis,
+                    layers=tuple(
+                        replace(layer, total_time_s=duration)
+                        for layer, duration in zip(analysis.layers, native_times.times_s)
+                    ),
+                )
+                record_diagnostic(
+                    "slicer_native_layer_times",
+                    adapter="anycubic_slicer_next",
+                    layer_count=len(native_times.times_s),
+                    minimum_layer_time_s=min(native_times.times_s),
+                    clock_resolution_s=0.001,
+                )
 
         after = source.stat()
         if (

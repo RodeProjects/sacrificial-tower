@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from cooling_tower.models.layer_ranges import excluded_layer_indices
 
 from cooling_tower.models import (
     GCodeAnalysisSnapshot,
@@ -45,6 +46,7 @@ def assess_profile_feasibility(
         minimum_radius_mm=settings.minimum_outer_radius_mm,
         maximum_radius_mm=settings.maximum_outer_radius_mm,
         local_time_factor_window=settings.local_reference_window,
+        excluded_layer_indices=excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges),
     )
     validate_profile_config(profile_config)
     validate_solid_settings(settings)
@@ -80,12 +82,14 @@ def assess_profile_feasibility(
     estimate_available = all(
         layer.estimated_added_time_s is not None
         for layer in solid_profile.layers
+        if layer.index not in profile_config.excluded_layer_indices
     )
     combined_layer_times = (
         tuple(
             float(layer.layer_time_s)
             + float(layer.estimated_added_time_s)
             for layer in solid_profile.layers
+            if layer.index not in profile_config.excluded_layer_indices
         )
         if estimate_available
         else ()

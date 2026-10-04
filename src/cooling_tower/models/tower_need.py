@@ -42,6 +42,6 @@ class NoTowerRequiredResult:
     @property
     def reason(self) -> str:
         return (
-            "Kein analysierter Layer unterschreitet die eingestellte "
+            "Kein für den Ausgleich berücksichtigter Layer unterschreitet die eingestellte "
             "Ziel-Layerzeit. Es wurde keine STL erzeugt."
         )

@@ -147,6 +147,38 @@ ausschließlich das threadsichere Abbruch-Event; ein Timer im Prozess-Controller
 übersetzt es in ein queued Signal. Nur dessen Slot darf `terminate()` oder
 `kill()` am QProcess ausführen.
 
+Der Anycubic-Adapter ergänzt ausschließlich in den materialisierten
+Maschinenprofilkopien Kommentar-Marker und native Inline-Zeitplatzhalter.
+`gcode/slicer_layer_times.py` liest die vom Slicer ausgegebenen kumulierten
+Normalmodus-Zeiten und validiert ihre Vollständigkeit, Reihenfolge und Z-Höhen.
+Die zentrale Analyse verwendet ihre Differenzen als maßgebliche Layer-Gesamtzeiten;
+Bewegungskomponenten bleiben geometrische Schätzgrößen. Dadurch verwenden
+Pre-Slice, gemeinsame Angleichung und Exportbewertung dieselbe Zeitquelle.
+Parser-Version 17 verhindert die Wiederverwendung älterer Analyse- und
+Pre-Slice-Ergebnisse ohne diese Zeitdaten. Nach einer G-Code-Integration sind
+die Zeitstände der Eingabedateien ungültig. Slicerdateien werden nicht geändert.
+
+Die gemeinsamen Bambu-Slices verwenden direkt das native 3MF des jeweiligen
+Kandidaten mit dessen enthaltenen Einstellungen. Erneutes Laden von
+Maschinen-/Prozess- oder Filamentprofilen entfällt dabei, damit die Angleichung
+denselben Eingang verwendet wie das spätere Slicen des Exports.
+Der Bambu-Export enthält den tatsächlich ausgewählten Turmkandidaten und die
+Filamentwerte der gemeinsamen Slices. Leere native Einträge
+`extruder_nozzle_stats` und `extruder_nozzle_stats_new` werden nur im eigenen
+3MF weggelassen: Bambu initialisiert damit die Düsen aus dem Maschinenprofil
+wie beim direkten Slice. Nichtleere Düsenkonfigurationen bleiben erhalten.
+Die realen Integrationstests slicen das exportierte 3MF zusätzlich ohne die
+Assembly-Datei und ohne Profilüberschreibungen; Geometrie, vollständige
+Layerzahl und G-Code-Auswertung werden mit dem ausgewählten Kandidaten verglichen.
+Dieser Vergleich ersetzt keine unabhängige Prüfung der nativen Bambu-Layerzeiten.
+Die geprüfte Bambu-CLI 2.8.2.61 gibt native Gesamt- und Featurezeiten aus,
+aber keine vollständige Layerzeitliste und keine Anycubic-Inline-Zeitstempel.
+Ihre Layerzeiten werden deshalb weiterhin aus dem G-Code mit dem
+Bambu-kompatiblen Bewegungsmodell ausgewertet. Die identische Auswertung von
+Kandidat und erneut geslictem Export belegt deren Konsistenz; sie garantiert
+keine absolute Identität mit Bambus internem Zeitmodell. Die ausschließliche
+Übernahme nativer Bambu-Layerzeiten bleibt offen.
+
 Ein lokaler Qt-Eventloop verarbeitet Prozess- und Ausgabesignale ohne
 `waitForFinished()`, Shell-Aufruf oder Python-Lesethread. Der Runner kehrt erst
 zurück, nachdem das finale Prozesssignal eingetroffen ist, beide Ausgabekanäle
@@ -356,9 +388,12 @@ als Gruppen erhalten. Ihre Anordnung richtet sich nach der verfügbaren Breite;
 der Footer nimmt nur die für Meldungen und Aktionen erforderliche Höhe ein und
 verkleinert sich auch nach einer Rückvergrößerung des Fensters.
 
-Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten relevanten
-Layerzeit von der Zielzeit das Vergleichskriterium. Bei gleicher Abweichung
-bleibt der zuerst vollständig geprüfte Kandidat bestehen. Weder die Anzeige
+Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten Layerzeit des
+vollständigen Projekts von der Zielzeit das Vergleichskriterium. Ausschlüsse
+steuern die lokale Zeitkorrektur und Konvergenz, nicht die gemessene Gesamtprojekt-
+Layerzeit. Bei gleicher Abweichung bleibt der zuerst vollständig geprüfte Kandidat
+bestehen, außer ein Lauf mit Ausschlüssen erreicht eine bessere Angleichung der
+nicht ausgeschlossenen Layer. Weder die Anzeige
 noch der später exportierte Kandidat können durch einen gleichen oder
 schlechteren Folgeslice ersetzt werden.
 

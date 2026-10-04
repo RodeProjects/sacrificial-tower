@@ -901,25 +901,27 @@ def synchronize_bambu_project_filament_settings(
     project_3mf: str | Path,
     filament_profile_paths: tuple[Path, ...],
 ) -> str:
-    """Keep exported Bambu filament values identical to the joint-slice copy.
+    """Keep the Bambu export consistent with its joint-slice configuration.
 
     Bambu's native 3MF exporter occasionally shortens non-scalar filament
     values even though the CLI joint slice consumed the complete, flattened
     temporary profile. Only genuine semantic differences are restored here;
     repeated tool-slot values and equivalent numeric renderings are retained.
+    Empty native nozzle statistics are omitted so that Bambu initializes them
+    from the actual machine settings, as it does for the direct joint slice.
     Slicer-owned source profiles are opened read-only.
     """
 
     project_path = Path(project_3mf).resolve(strict=True)
     paths = tuple(Path(path).resolve(strict=True) for path in filament_profile_paths)
-    if len(paths) != 1:
-        return sha256_file(project_path)
     try:
-        loaded = json.loads(paths[0].read_text(encoding="utf-8-sig"))
-        if not isinstance(loaded, dict):
-            raise ValueError("Filament profile is not a JSON object")
-        nested = loaded.get("setting")
-        expected = nested if isinstance(nested, dict) else loaded
+        expected: dict[str, object] = {}
+        if len(paths) == 1:
+            loaded = json.loads(paths[0].read_text(encoding="utf-8-sig"))
+            if not isinstance(loaded, dict):
+                raise ValueError("Filament profile is not a JSON object")
+            nested = loaded.get("setting")
+            expected = nested if isinstance(nested, dict) else loaded
         with zipfile.ZipFile(project_path, "r") as archive:
             entries = {
                 item.filename: (item, archive.read(item.filename))
@@ -938,6 +940,15 @@ def synchronize_bambu_project_filament_settings(
                 continue
             project_values[key] = value
             changed = True
+        # A native --export-3mf can serialize an uninitialized empty list.
+        # On import Bambu treats the key's presence as a configured set of
+        # nozzles, skips machine defaults, and fails with "No valid nozzle".
+        # Keep every explicit nonempty configuration; absence requests the
+        # same machine-dependent defaults used by the original STL slice.
+        for key in ("extruder_nozzle_stats", "extruder_nozzle_stats_new"):
+            if project_values.get(key) == []:
+                del project_values[key]
+                changed = True
         if not changed:
             return sha256_file(project_path)
         entries[PROJECT_SETTINGS_PATH] = (
