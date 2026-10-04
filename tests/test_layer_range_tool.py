@@ -1109,11 +1109,26 @@ class LayerRangeUiTests(unittest.TestCase):
         QTest.qWait(20)
         for index in (9, 0, 5):
             self.dialog.select_range(index)
-            QTest.qWait(20)
-            row = self.dialog.range_rows[index][0]
-            top = row.mapTo(self.dialog.scroll.viewport(), QPoint(0, 0)).y()
+            # Qt queues rebuilding, extent changes and selection scrolling.
+            # Require a stable visible row instead of assuming 20 ms suffices.
+            settled_turns = 0
+            for _ in range(40):
+                QTest.qWait(25)
+                row = self.dialog.range_rows[index][0]
+                top = row.mapTo(self.dialog.scroll.viewport(), QPoint()).y()
+                settled = (
+                    0 <= top
+                    and top + row.height() <= self.dialog.scroll.viewport().height()
+                    and not self.dialog._rows_pending
+                    and not self.dialog._selection_scroll_timer.isActive()
+                    and not self.dialog._pane_resize_timer.isActive()
+                )
+                settled_turns = settled_turns + 1 if settled else 0
+                if settled_turns >= 2:
+                    break
             self.assertGreaterEqual(top, 0)
             self.assertLessEqual(top + row.height(), self.dialog.scroll.viewport().height())
+            self.assertGreaterEqual(settled_turns, 2)
         self.assertEqual(self.dialog.footer_divider.x(), 0)
         self.assertEqual(self.dialog.footer_divider.width(), self.dialog.width())
         self.assertEqual(self.dialog.splitter.handleWidth(), 1)
