@@ -675,6 +675,7 @@ class Phase17Tests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for width, height in ((720, 640), (1400, 1000)):
             window.resize(width, height)
             self.app.processEvents()
@@ -1217,6 +1218,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertTrue(window.reset_button.isHidden())
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         for button in (
             window.open_stl_button,
@@ -1275,6 +1277,7 @@ class Phase17Tests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.show()
         window.resize(1000, 700)
         self.app.processEvents()
@@ -1392,6 +1395,7 @@ class Phase17Tests(unittest.TestCase):
         self.complete_source_step(ready)
         ready.workflow.slicer_succeeded("Testslicer")
         ready.workflow.complete_preparation()
+        ready.automatic_generation_card.click()
         ready.show()
         self.app.processEvents()
         self.assertFalse(ready.export_button.isEnabled())
@@ -1410,6 +1414,7 @@ class Phase17Tests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.show()
         self.app.processEvents()
 

@@ -234,7 +234,10 @@ class Phase18UiTests(unittest.TestCase):
         window = self.window()
         window.resize(1400, 1000)
         window.show()
-        window.ready_grid.show()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Layoutprüfung")
+        window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         self.assertTrue(window.ready_grid.is_two_column())
         self.assertTrue(
@@ -892,6 +895,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.prediction_frame.set_state(SectionState.SUCCESS)
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         image = window.workflow_group.header.grab().toImage()
@@ -944,6 +948,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         self.assertTrue(window.preview_dialog.isVisible())
         self.assertFalse(window.preview_dialog.isWindow())
@@ -972,6 +977,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         dialog = window.preview_dialog
         empty_height = dialog.height()
@@ -1061,6 +1067,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
         self.assertFalse(hasattr(window, "slicer_prediction_button"))
@@ -1613,6 +1620,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
         inline = window._setting_widgets["target_layer_time_s"].message_label.text()
@@ -1744,6 +1752,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         prediction_height = window.prediction_frame.height()
         for width in (1400, 760):
@@ -1775,6 +1784,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
 
@@ -1824,6 +1834,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
 
@@ -1852,6 +1863,7 @@ class Phase18UiTests(unittest.TestCase):
 
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.assertTrue(window.reset_button.isVisible())
         window.workflow.reset()
         self.assertTrue(window.reset_button.isHidden())
@@ -1877,6 +1889,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         setting = window._setting_widgets["maximum_expansion_angle_deg"]
         line_edit = window.maximum_expansion_angle_spin.lineEdit()
         line_edit.setText(
@@ -1905,6 +1918,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
         window._last_changed_setting_name = "maximum_outer_diameter_mm"
@@ -1920,6 +1934,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.assertEqual(
             window.maximum_expansion_angle_spin.property("validationMaximum"),
             70.0,
@@ -2009,6 +2024,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
         geometry = window.geometry_settings_group
@@ -2038,6 +2054,7 @@ class Phase18UiTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Layoutprüfung")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.assertFalse(window.footer.isHidden())
         window.warning_text.setPlainText(
             "Die Sliceroptimierung hat die Zielzeit noch nicht vollständig "

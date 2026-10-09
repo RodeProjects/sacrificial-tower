@@ -316,6 +316,37 @@ ohne Kühlturm zeigt.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
+### Auswahl der Generierungsmethode und Sitzungszustände
+
+Nach bestätigter Datei-/Slicer-Vorbereitung zeigt `generation_workspace`
+zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
+„Automatisch“ und einem dunkleren Blauton für „Manuell“. `GenerationMode` kennzeichnet die
+ausgewählte Methode; `None` bedeutet Methodenauswahl. Die Vorbereitung und
+deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
+Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
+er wird lediglich ausgeblendet. Die manuelle Ansicht ist derzeit ein Platzhalter.
+Ein Methodenwechsel startet keinen Slice und invalidiert kein Ergebnis.
+Bei erneut erforderlicher Vorbereitung kehrt die Navigation zur Auswahl zurück.
+Laufende Generierung und Export sperren die Rücknavigation.
+
+`generation_sessions` enthält pro Methode einen eigenen `GenerationSession`
+mit Vorschauergebnis/-status, Exportergebnis und Identität des exportierten
+Turmstands. Die bisherigen Attribute `current_preview`, `preview_state`,
+`last_export_result` und `_last_exported_preview_identity` greifen ausdrücklich
+auf die automatische Sitzung zu. So können automatische Callbacks kein
+manuelles Ergebnis überschreiben, auch wenn die automatische Ansicht verborgen ist.
+Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen beider Methoden;
+beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
+Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
+Die Einstellungen und Fortschrittssteuerung der Automatik bleiben in ihrem
+bestehenden Arbeitsbereich. Künftige manuelle Eingaben benötigen eigene
+Steuerelemente und verwenden ausschließlich die manuelle Sitzung.
+Für die spätere feste manuelle Geometrie ist ein gemeinsamer Slice zur
+Ergebnisprüfung vorgesehen; die automatische iterative Angleichung wird dabei
+nicht verwendet. Dieser manuelle Ablauf ist noch nicht implementiert.
+Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert;
+das persistierte Schema bleibt unverändert.
+
 Unter „Turmeinstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
 wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.
 Der Reset im Hauptfenster lässt sie unverändert; der allgemeine Reset setzt sie

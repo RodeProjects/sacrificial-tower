@@ -82,9 +82,13 @@ die bekannten Anbieter-, Vertriebs- und Abschlussnachweise zurückstellen. Name,
 Marke und Kontakt, die erfolgreiche `main`-CI oder die dokumentierte
 Zeitlimit-Ausnahme, die Lieferumfangsprüfung,
 Installerprüfungen, Signatur und Integritätskontrollen bleiben verpflichtend.
-Das GitHub-Release wird sichtbar als Prerelease bezeichnet, und auch die
-signierten Versionshinweise nennen die Entwicklungsversion. Die offenen Angaben
-müssen vor einem kommerziellen Release nachgetragen werden.
+Der Releasetitel, die Releasebeschreibung und die signierten Versionshinweise
+kennzeichnen die Entwicklungsversion weiterhin ausdrücklich. GitHub-Releases
+erhalten auch für Entwicklungsversionen kein Prerelease-Flag, damit die neueste
+veröffentlichte Version mit `--latest` als „Latest“ angezeigt werden kann.
+GitHub erlaubt diese Markierung nicht für Prereleases. Die Markierung als
+„Latest“ begründet keine kommerzielle Freigabe; die offenen Angaben müssen vor
+einem kommerziellen Release nachgetragen werden.
 
 Das Skript startet den Workflow
 `Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den

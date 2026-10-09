@@ -426,7 +426,20 @@ Wird die Canvas nach dem Einblenden neu positioniert,
 folgen ihr die Navigationselemente. Die vier Ansichtsbuttons über der Canvas
 sind 32 px hoch.
 
-Nach Abschluss der Datei-/Slicer-Vorbereitung enthält das gemeinsame Dropdown
+Nach Abschluss der Datei-/Slicer-Vorbereitung schließt sich deren Bereich und
+die zentrierte Auswahlüberschrift „Wie soll der Kühlturm erstellt werden?“ erscheint. Die Karten
+„Automatisch“ und „Manuell“ stehen bei ausreichend Platz nebeneinander,
+ansonsten untereinander. Die gemeinsame Kartenbreite ist auf 980 px begrenzt;
+die Gruppe steht zentriert. Beim Verkleinern schrumpfen zunächst die seitlichen
+Freiräume bis zum regulären Seitenrand, bevor die Karten unter 800 px
+verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
+„Automatisch“ öffnet den bestehenden Arbeitsbereich;
+„Manuell“ öffnet vorerst einen Hinweis auf die spätere Umsetzung.
+Über „Zur Methodenauswahl“ ist die Rückkehr möglich. Einstellungen, Vorschau,
+Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
+Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
+
+Im automatischen Arbeitsbereich enthält das gemeinsame Dropdown
 „Turmeinstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
 Simulation deaktivierter Turmstützen. Das lokale Zeitfenster befindet sich
 in „Allgemeine Einstellungen“ und besitzt dort einen eigenen Reset.

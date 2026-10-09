@@ -426,6 +426,7 @@ class GuiCase(unittest.TestCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.app.processEvents()
         self.assertFalse(self.window.footer.isHidden())
         self.assertTrue(self.window.settings_load_notice_panel.isVisible())
@@ -709,6 +710,7 @@ class NumericSettingWidgetTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Tastaturtest")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         QTest.qWait(300)
         editor = self.window.target_time_spin
         editor.setFocus()
@@ -731,6 +733,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.wait_until(lambda: self.window.profile_feasibility is not None)
         snapshot = self.window.analysis_snapshot
 
@@ -758,6 +761,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.wait_until(lambda: self.window.profile_feasibility is not None)
 
         self.window.target_time_spin.setValue(10.0)
@@ -782,6 +786,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.app.processEvents()
 
         reason = self.window.export_availability_label.text()
@@ -804,6 +809,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.window.target_time_spin.setValue(11.0)
         self.app.processEvents()
 
@@ -830,6 +836,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.app.processEvents()
 
         target_row = self.window._setting_widgets["target_layer_time_s"]
@@ -883,6 +890,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.app.processEvents()
 
         with patch.object(self.window, "_current_preview_request") as request:
@@ -895,6 +903,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.window.target_time_spin.setValue(8.0)
         self.app.processEvents()
 
@@ -989,6 +998,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
             message="Grenze nicht erreichbar.",
@@ -1019,6 +1029,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         self.window.minimum_outer_spin.setValue(30)
         self.window.maximum_outer_spin.setValue(1001)
         self.assertFalse(bool(self.window.minimum_outer_spin.property("invalid")))
@@ -1035,6 +1046,7 @@ class LiveValidationTests(GuiCase):
         self.complete_source_step()
         self.window.workflow.slicer_succeeded("Testslicer")
         self.window.workflow.complete_preparation()
+        self.window.automatic_generation_card.click()
         line_edit = self.window.target_time_spin.lineEdit()
         line_edit.clear()
         self.app.processEvents()
@@ -1117,6 +1129,7 @@ class StartupLayoutAndLifecycleTests(GuiCase):
                 "win.workflow.source_validation_succeeded('layout.stl geprüft', analysis_complete=True)",
                 "win.workflow.slicer_succeeded('Layouttest')",
                 "win.workflow.complete_preparation()",
+                "win.automatic_generation_card.click()",
                 "win.show()",
                 "[group.setChecked(True) for group in (win.geometry_group,win.stability_group,win.geometry_settings_group)]",
                 "for width,height in ((720,640),(1024,768),(1280,720),(1920,1080)):",

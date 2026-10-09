@@ -2137,6 +2137,9 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(window.workflow_group.isCheckable())
             self.assertEqual(window.workflow_group.status_icon.text(), "✓")
             self.assertFalse(window.workflow_group.isChecked())
+            self.assertTrue(window.ready_grid.isHidden())
+            self.assertFalse(window.generation_method_picker.isHidden())
+            window.automatic_generation_card.click()
             self.assertFalse(window.ready_grid.isHidden())
         finally:
             window.close()

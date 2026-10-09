@@ -5,10 +5,10 @@ from html import escape
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import (
     QFontMetrics, QKeyEvent, QMouseEvent, QPaintEvent, QPainter,
-    QPalette, QPolygonF, QResizeEvent,
+    QPalette, QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QFrame,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.disclosure_triangle import draw_disclosure_triangle
 
 
 class SectionState(str, Enum):
@@ -74,21 +75,14 @@ class _SectionTriangleButton(QToolButton):
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
         colour_group = (
             QPalette.ColorGroup.Active if self.isEnabled()
             else QPalette.ColorGroup.Disabled
         )
-        painter.setBrush(self.palette().color(colour_group, QPalette.ColorRole.ButtonText))
-        # Rotate the same geometry around the centre of its bounding box, so
-        # neither font baselines nor the expanded state can shift the icon.
-        painter.translate(self.width() / 2, self.height() / 2)
-        if self.isChecked():
-            painter.rotate(180)
-        painter.drawPolygon(QPolygonF([
-            QPointF(-6, -4), QPointF(6, -4), QPointF(0, 4),
-        ]))
+        draw_disclosure_triangle(
+            painter, self.rect(), opened=self.isChecked(),
+            colour=self.palette().color(colour_group, QPalette.ColorRole.ButtonText),
+        )
 
 
 class SectionCard(QFrame):

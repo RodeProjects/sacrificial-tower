@@ -583,6 +583,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
         for card in (
@@ -824,6 +825,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
         self.assertFalse(hasattr(window, "slicer_iterations_spin"))
@@ -873,6 +875,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for _ in range(5):
             self.app.processEvents()
 
@@ -908,6 +911,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for _ in range(8):
             self.app.processEvents()
 
@@ -924,7 +928,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         bottom_space = (
             window.settings_content.height()
-            - window.ready_grid.geometry().bottom()
+            - window.ready_grid.mapTo(
+                window.settings_content, window.ready_grid.rect().bottomLeft()
+            ).y()
             - 1
         )
         standard_margin = window.content_layout.contentsMargins().bottom()
@@ -943,6 +949,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for _ in range(8):
             self.app.processEvents()
 
@@ -981,6 +988,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         expected_units = {
             "target_layer_time_s": "Sek.",
@@ -1038,6 +1046,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         self.assertTrue(all(action.isHidden() for action in actions))
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.assertTrue(all(action.isVisible() for action in actions[:-1]))
         self.assertTrue(window.export_button.isHidden())
         window.close()
@@ -1067,6 +1076,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
         window.geometry_settings_group.setChecked(False)
@@ -1111,6 +1121,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
         advanced = window.geometry_group
@@ -1155,6 +1166,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for _ in range(6):
             self.app.processEvents()
 
@@ -1249,6 +1261,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         for _ in range(5):
             self.app.processEvents()
         height_before = window.geometry_settings_group.height()
@@ -1344,6 +1357,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.error_panel.set_expanded(True)
         extra_error.set_expanded(True)
         for _ in range(8):
@@ -1408,6 +1422,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.show()
         for _ in range(5):
             self.app.processEvents()
@@ -1479,6 +1494,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.show()
         window.current_preview = SimpleNamespace(dispose=lambda: None)
         window.preview_state = PreviewState.CURRENT

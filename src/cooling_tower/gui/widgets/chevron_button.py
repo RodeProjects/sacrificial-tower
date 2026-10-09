@@ -1,31 +1,27 @@
-"""Buttons with an optically centered disclosure chevron at the right edge."""
+"""Buttons with the shared filled disclosure triangle at the right edge."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetrics, QPainter, QResizeEvent
+from PySide6.QtGui import QPainter, QResizeEvent
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
+from cooling_tower.gui.widgets.disclosure_triangle import draw_disclosure_triangle
 
 
 class _CenteredChevron(QLabel):
     def paintEvent(self, event) -> None:  # noqa: N802
-        glyph = self.text()
-        bounds = QFontMetrics(self.font()).tightBoundingRect(glyph)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        painter.setPen(self.palette().color(self.foregroundRole()))
-        painter.drawText(
-            round((self.width() - bounds.width()) / 2 - bounds.left()),
-            round((self.height() - bounds.height()) / 2 - bounds.top()),
-            glyph,
+        draw_disclosure_triangle(
+            painter, self.rect(), opened=self.text() == "▲",
+            colour=self.palette().color(self.foregroundRole()),
         )
 
 
 class ChevronButton(QPushButton):
-    """Expose the same centered up/down glyph for collapsible controls."""
+    """Expose the same centered up/down triangle as the section headers."""
 
     def __init__(self, caption: str, parent: QWidget | None = None) -> None:
         super().__init__(caption, parent)
-        self.chevron_label = _CenteredChevron("⌄", self)
+        self.chevron_label = _CenteredChevron("▼", self)
         self.chevron_label.setObjectName("disclosureChevron")
         self.chevron_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chevron_label.setAttribute(
@@ -33,7 +29,7 @@ class ChevronButton(QPushButton):
         )
 
     def set_opened(self, opened: bool) -> None:
-        self.chevron_label.setText("⌃" if opened else "⌄")
+        self.chevron_label.setText("▲" if opened else "▼")
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)

@@ -12,9 +12,12 @@ nicht für den regulären Verkauf freigegebene Entwicklungsversion sowie sämtli
 technischen Build-, CI-, Signatur-, Integritäts- und Lieferumfangsprüfungen voraus.
 Noch offene Anschrift-, Datenschutz-, Vertriebs- und Abschlussnachweise werden in
 der Anwendung verständlich als ausstehend angezeigt und bleiben für jeden
-kommerziellen Release verpflichtend. Entwicklungsreleases werden als GitHub-
-Prerelease und in den signierten Updatehinweisen gekennzeichnet; sie stellen keine
-kommerzielle Freigabe dar.
+kommerziellen Release verpflichtend. Entwicklungsreleases werden im Releasetitel,
+in der Releasebeschreibung und in den signierten Updatehinweisen gekennzeichnet.
+Auch Entwicklungsversionen werden auf GitHub ohne Prerelease-Flag veröffentlicht,
+damit die neueste Version als „Latest“ angezeigt wird. Einzelheiten zur
+Veröffentlichung stehen im [Updatekanal](update_channel.md). Diese Markierung
+stellt keine kommerzielle Freigabe dar.
 
 ## Eigene Rechte und Rechtstexte
 

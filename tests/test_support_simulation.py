@@ -192,6 +192,7 @@ class SupportSimulationTests(unittest.TestCase):
         window.workflow.source_validation_succeeded('STL', analysis_complete=True)
         window.workflow.slicer_succeeded('Testslicer')
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         selected = window.profile_match_result.selected
         profile = replace(selected.effective_profile, effective_values={
             **selected.effective_profile.effective_values,
@@ -255,6 +256,7 @@ class SupportSimulationTests(unittest.TestCase):
         window.workflow.source_validation_succeeded('STL', analysis_complete=True)
         window.workflow.slicer_succeeded('Testslicer')
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         segment = LineSegment3D(Point3D(1, 1, 0.2), Point3D(2, 2, 0.2))
         window.source_preslice_result = SimpleNamespace(
             supports_simulated=False,

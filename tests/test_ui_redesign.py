@@ -112,6 +112,7 @@ class UiRedesignTests(unittest.TestCase):
         )
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         self.assertTrue(window.error_panel.isHidden())
         window.minimum_outer_spin.setValue(0.0)

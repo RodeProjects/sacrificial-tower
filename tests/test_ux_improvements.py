@@ -231,6 +231,7 @@ class UxImprovementTests(unittest.TestCase):
         )
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.resize(1300, 900)
         window.show()
         self.app.processEvents()

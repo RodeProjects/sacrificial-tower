@@ -542,6 +542,75 @@ QToolButton#sectionCardToggle {
     padding: 0;
 }
 
+QLabel#generationMethodHeading {
+    color: #153b60;
+    font-size: 18pt;
+    font-weight: 700;
+    padding: 12px 0 4px;
+}
+QLabel#generationMethodLabel {
+    color: #526274;
+}
+QPushButton[generationModeCard="true"] {
+    background: #ffffff;
+    border: 2px solid #cbd7e3;
+    border-radius: 12px;
+    padding: 0;
+    text-align: left;
+}
+QPushButton[generationModeCard="true"]:hover {
+    background: #eef6fc;
+    border-color: #6f9fc4;
+}
+QPushButton[generationModeCard="true"]:focus {
+    border: 2px solid #1769aa;
+}
+QPushButton[generationModeCard="true"]:pressed {
+    background: #dcecf8;
+    border-color: #1769aa;
+}
+QLabel#generationModeCardTitle {
+    color: #153b60;
+    font-size: 16pt;
+    font-weight: 700;
+}
+QLabel#generationModeCardDescription {
+    color: #526274;
+    font-size: 10.5pt;
+}
+QLabel#generationModeCardAction {
+    color: #1769aa;
+    font-weight: 600;
+}
+QPushButton[generationMode="automatic"] {
+    background: #f4effc;
+    border-color: #c4b2e5;
+}
+QPushButton[generationMode="automatic"]:hover {
+    background: #ece3fb;
+    border-color: #9a7bcc;
+}
+QPushButton[generationMode="automatic"]:focus { border-color: #7753b9; }
+QPushButton[generationMode="automatic"]:pressed { background: #e2d6f5; }
+QPushButton[generationMode="automatic"] QLabel#generationModeCardTitle,
+QPushButton[generationMode="automatic"] QLabel#generationModeCardAction {
+    color: #65429d;
+}
+QPushButton[generationMode="manual"] {
+    background: #e1eaf5;
+    border-color: #8da6c4;
+}
+QPushButton[generationMode="manual"]:hover {
+    background: #d5e2f2;
+    border-color: #597da7;
+}
+QPushButton[generationMode="manual"]:focus { border-color: #274f7b; }
+QPushButton[generationMode="manual"]:pressed { background: #c9d8ec; }
+QPushButton[generationMode="manual"] QLabel#generationModeCardTitle,
+QPushButton[generationMode="manual"] QLabel#generationModeCardAction {
+    color: #254b74;
+}
+
 QGroupBox {
     background: #ffffff;
     border: 1px solid #d6dee8;

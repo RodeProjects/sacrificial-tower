@@ -105,6 +105,7 @@ class GenerationUiTests(unittest.TestCase):
         window.workflow.source_validation_succeeded("STL", analysis_complete=True)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
     def test_footer_actions_fit_and_height_shrinks_after_resizing(self) -> None:

@@ -107,6 +107,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         QTest.qWait(100)
         self.app.processEvents()
 
@@ -130,6 +131,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         setting = window.maximum_expansion_angle_setting
         window.maximum_expansion_angle_spin.setValue(71.0)
         self.app.processEvents()
@@ -154,6 +156,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.resize(2000, 900)
         window.show()
         window.warning_text.setPlainText("Ein Warnhinweis")
@@ -225,6 +228,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
         self.assertFalse(target.message_container.isHidden())
         self.assertFalse(target.range_label.isHidden())
@@ -238,6 +242,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         self.app.processEvents()
 
         for setting in window._setting_widgets.values():
@@ -268,6 +273,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
         window._last_changed_setting_name = "minimum_outer_diameter_mm"
@@ -675,6 +681,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         panel = window.error_panel
         panel.show()
         window.show()
@@ -701,6 +708,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.resize(1300, 900)
         window.show()
         self.app.processEvents()
@@ -727,6 +735,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.resize(1500, 900)
         window.show()
         self.app.processEvents()
@@ -773,6 +782,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         setting = window._setting_widgets["maximum_outer_diameter_mm"]
         setting.set_error(
             "Erste kurze Fehlermeldung.\nZweite kurze Fehlermeldung."
@@ -856,6 +866,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.minimum_outer_spin.setValue(30.0)
         window.maximum_outer_spin.setValue(20.0)
         window.local_window_spin.setValue(4)
@@ -883,6 +894,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.target_time_spin.setValue(29.0)
         window._last_changed_setting_name = "target_layer_time_s"
         issues = (
@@ -1003,6 +1015,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.target_time_spin.setValue(0.0)
         self.app.processEvents()
 
@@ -1033,6 +1046,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.target_time_spin.setValue(29.0)
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
@@ -1094,6 +1108,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window._last_changed_setting_name = "target_layer_time_s"
         expansion_issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
@@ -1161,6 +1176,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         issue = FeasibilityIssue(
             code="MAXIMUM_OUTER_DIAMETER_REACHED",
             message="Maximum outer diameter reached.",
@@ -1207,6 +1223,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
             code="MAXIMUM_OUTER_DIAMETER_REACHED",
@@ -1235,6 +1252,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window._last_changed_setting_name = "target_layer_time_s"
         issues = (
             FeasibilityIssue(
@@ -1282,6 +1300,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.maximum_outer_spin.setValue(500.0)
         issue = FeasibilityIssue(
             code="MAXIMUM_OUTER_DIAMETER_REACHED",
@@ -1311,6 +1330,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window._last_changed_setting_name = "target_layer_time_s"
         issue = FeasibilityIssue(
             code="EXPANSION_ANGLE_TOO_SMALL",
@@ -1345,6 +1365,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
 
         window._on_feasibility_succeeded(
             window._feasibility_request_id,
@@ -1378,6 +1399,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.target_time_spin.setValue(121.0)
         window.maximum_expansion_angle_spin.setValue(71.0)
         self.app.processEvents()
@@ -1407,6 +1429,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window.error_panel.hide()
         window.notice_panel.hide()
         window.action_availability_widget.hide()
@@ -1453,6 +1476,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
         window._update_local_window_layer_limit(891)
 
         dual_bounds = {

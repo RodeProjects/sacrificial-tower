@@ -80,6 +80,8 @@ from cooling_tower.gui.background_jobs import (
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.generation_panel import GenerationPanel
+from cooling_tower.gui.generation_session import GenerationMode, GenerationSession
+from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
@@ -840,6 +842,10 @@ class MainWindow(QMainWindow):
         self._generation_phase_transition_request_id: int | None = None
         self._generation_phase_transition_target: tuple[int, int] | None = None
         self._generation_phase_transition_stage: str | None = None
+        self.generation_sessions = {
+            mode: GenerationSession() for mode in GenerationMode
+        }
+        self.generation_mode: GenerationMode | None = None
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
@@ -3093,11 +3099,85 @@ class MainWindow(QMainWindow):
             equal_height=False,
             stacked_right_first=True,
         )
-        self.content_layout.addWidget(self.ready_grid)
+        self.generation_workspace = QWidget()
+        self.generation_workspace.setObjectName("generationWorkspace")
+        self.generation_workspace.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        generation_layout = QVBoxLayout(self.generation_workspace)
+        generation_layout.setContentsMargins(0, 0, 0, 0)
+        generation_layout.setSpacing(METRICS.card_spacing_px)
+        self.generation_method_navigation = QWidget()
+        navigation_layout = QHBoxLayout(self.generation_method_navigation)
+        navigation_layout.setContentsMargins(0, 0, 0, 0)
+        self.generation_method_back_button = QPushButton("← Zur Methodenauswahl")
+        self.generation_method_back_button.setObjectName("generationMethodBackButton")
+        self.generation_method_back_button.setToolTip(
+            "Andere Methode wählen. Ihre Einstellungen und generierten Türme bleiben erhalten."
+        )
+        self.generation_method_back_button.clicked.connect(
+            self.show_generation_method_selection
+        )
+        navigation_layout.addWidget(self.generation_method_back_button)
+        self.generation_method_label = QLabel()
+        self.generation_method_label.setObjectName("generationMethodLabel")
+        self.generation_method_label.setWordWrap(True)
+        navigation_layout.addWidget(self.generation_method_label, 1)
+        generation_layout.addWidget(self.generation_method_navigation)
+        self.generation_method_picker = QWidget()
+        picker_layout = QVBoxLayout(self.generation_method_picker)
+        picker_layout.setContentsMargins(0, 0, 0, 0)
+        picker_layout.setSpacing(16)
+        self.generation_method_heading = QLabel("Wie soll der Kühlturm erstellt werden?")
+        self.generation_method_heading.setObjectName("generationMethodHeading")
+        self.generation_method_heading.setWordWrap(True)
+        self.generation_method_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        picker_layout.addWidget(self.generation_method_heading)
+        self.generation_method_grid = GenerationModeGrid()
+        self.automatic_generation_card = GenerationModeCard(
+            "Automatisch",
+            "Der Kühlturm wird passend zum Kühlbedarf Ihres Modells berechnet "
+            "und schrittweise an die gewünschte Layerzeit angepasst.",
+            "Automatische Erstellung öffnen →",
+        )
+        self.manual_generation_card = GenerationModeCard(
+            "Manuell",
+            "Die Turmform selbst festlegen und anschließend prüfen, "
+            "welche Layerzeiten das Modell mit diesem Kühlturm erreicht.",
+            "Demnächst verfügbar →",
+        )
+        self.automatic_generation_card.setProperty("generationMode", "automatic")
+        self.manual_generation_card.setProperty("generationMode", "manual")
+        self.automatic_generation_card.clicked.connect(
+            lambda: self.select_generation_mode(GenerationMode.AUTOMATIC)
+        )
+        self.manual_generation_card.clicked.connect(
+            lambda: self.select_generation_mode(GenerationMode.MANUAL)
+        )
+        self.generation_method_grid.add_pair(
+            self.automatic_generation_card, self.manual_generation_card
+        )
+        picker_layout.addWidget(
+            self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
+        )
+        generation_layout.addWidget(self.generation_method_picker)
+        generation_layout.addWidget(self.ready_grid)
+        self.manual_generation_placeholder = SectionCard(
+            "Manuelle Turmerstellung", collapsible=False
+        )
+        manual_notice = QLabel(
+            "Die manuelle Turmerstellung wird in einem kommenden Schritt ergänzt. "
+            "Hier werden Sie die Turmform selbst festlegen und anschließend "
+            "das Ergebnis prüfen können."
+        )
+        manual_notice.setWordWrap(True)
+        self.manual_generation_placeholder.content_layout.addWidget(manual_notice)
+        generation_layout.addWidget(self.manual_generation_placeholder)
+        self.content_layout.addWidget(self.generation_workspace)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
         self.content_layout.setAlignment(
-            self.ready_grid,
+            self.generation_workspace,
             Qt.AlignmentFlag.AlignTop,
         )
         # The trailing stretch is enabled only after preparation. Before that,
@@ -3122,7 +3202,7 @@ class MainWindow(QMainWindow):
             )
         )
 
-        workflow_widgets = (self.ready_grid,)
+        workflow_widgets = (self.generation_workspace,)
 
         self.workflow = WorkflowController(
             source_card=source_group,
@@ -3558,11 +3638,15 @@ class MainWindow(QMainWindow):
     def _on_workflow_stage_changed(self, stage_value: str) -> None:
         """Show fixed footer actions only after both prerequisites succeeded."""
 
-        actions_visible = bool(
+        preparation_ready = bool(
             stage_value == WorkflowStage.READY.value
             and getattr(self.workflow, "preparation_acknowledged", True)
         )
-        self._set_preparation_viewport_fill(not actions_visible)
+        if not preparation_ready:
+            self.generation_mode = None
+        self._refresh_generation_workspace(preparation_ready)
+        actions_visible = preparation_ready and self.generation_mode is GenerationMode.AUTOMATIC
+        self._set_preparation_viewport_fill(not preparation_ready)
         if hasattr(self, "footer"):
             self.footer.setVisible(actions_visible)
         self._set_setting_feedback_enabled(actions_visible)
@@ -3600,6 +3684,83 @@ class MainWindow(QMainWindow):
                 self._refresh_issue_panels()
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
+
+    def _generation_method_change_available(self) -> bool:
+        return not (
+            self.background_job_manager.has_active(JobKind.PREVIEW)
+            or self.background_job_manager.has_active(JobKind.EXPORT)
+        )
+
+    def select_generation_mode(self, mode: GenerationMode) -> None:
+        if (
+            self.workflow.stage is not WorkflowStage.READY
+            or not self.workflow.preparation_acknowledged
+            or not self._generation_method_change_available()
+        ):
+            return
+        self.generation_mode = GenerationMode(mode)
+        self._on_workflow_stage_changed(self.workflow.stage.value)
+        self._refresh_phase17_actions()
+
+    def show_generation_method_selection(self) -> None:
+        if not self._generation_method_change_available():
+            return
+        self.generation_mode = None
+        self._on_workflow_stage_changed(self.workflow.stage.value)
+
+    def _refresh_generation_workspace(self, preparation_ready: bool) -> None:
+        selecting = self.generation_mode is None
+        self.generation_method_picker.setVisible(preparation_ready and selecting)
+        self.generation_method_navigation.setVisible(preparation_ready and not selecting)
+        self.ready_grid.setVisible(
+            preparation_ready and self.generation_mode is GenerationMode.AUTOMATIC
+        )
+        self.manual_generation_placeholder.setVisible(
+            preparation_ready and self.generation_mode is GenerationMode.MANUAL
+        )
+        self.generation_method_label.setText(
+            "Automatische Turmerstellung"
+            if self.generation_mode is GenerationMode.AUTOMATIC
+            else "Manuelle Turmerstellung"
+        )
+        self.generation_method_back_button.setEnabled(
+            self._generation_method_change_available()
+        )
+
+    # The existing generator owns the automatic session even while its view
+    # is hidden. Manual generation can use its own session and controls without
+    # routing automatic callbacks into a different method's result.
+    @property
+    def current_preview(self) -> PreviewResult | None:
+        return self.generation_sessions[GenerationMode.AUTOMATIC].preview
+
+    @current_preview.setter
+    def current_preview(self, value: PreviewResult | None) -> None:
+        self.generation_sessions[GenerationMode.AUTOMATIC].preview = value
+
+    @property
+    def preview_state(self) -> PreviewState:
+        return self.generation_sessions[GenerationMode.AUTOMATIC].preview_state
+
+    @preview_state.setter
+    def preview_state(self, value: PreviewState) -> None:
+        self.generation_sessions[GenerationMode.AUTOMATIC].preview_state = value
+
+    @property
+    def last_export_result(self) -> PreviewExportResult | None:
+        return self.generation_sessions[GenerationMode.AUTOMATIC].export_result
+
+    @last_export_result.setter
+    def last_export_result(self, value: PreviewExportResult | None) -> None:
+        self.generation_sessions[GenerationMode.AUTOMATIC].export_result = value
+
+    @property
+    def _last_exported_preview_identity(self) -> tuple[str, str | None] | None:
+        return self.generation_sessions[GenerationMode.AUTOMATIC].exported_preview_identity
+
+    @_last_exported_preview_identity.setter
+    def _last_exported_preview_identity(self, value: tuple[str, str | None] | None) -> None:
+        self.generation_sessions[GenerationMode.AUTOMATIC].exported_preview_identity = value
 
     def _set_preparation_viewport_fill(self, enabled: bool) -> None:
         """Fill the usable scroll viewport while preparation is unfinished."""
@@ -3742,7 +3903,7 @@ class MainWindow(QMainWindow):
         selector.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _finish_preparation(self) -> None:
-        """Acknowledge a fully ready preparation and reveal tower settings."""
+        """Acknowledge a fully ready preparation and reveal method selection."""
 
         if not self._current_preparation_state().preparation_completed:
             self._update_preparation_requirements()
@@ -3750,7 +3911,7 @@ class MainWindow(QMainWindow):
         if not self.workflow.complete_preparation():
             return
         self.workflow_group.setChecked(False)
-        self.ready_grid.show()
+        self.generation_workspace.show()
         self._on_workflow_stage_changed(self.workflow.stage.value)
         self._refresh_preparation_section_layout()
 
@@ -4579,6 +4740,9 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
+        self.generation_method_back_button.setEnabled(
+            self._generation_method_change_available()
+        )
         self._refresh_layer_range_tool()
         block_reason = self._export_block_reason()
         generation_active = self.background_job_manager.has_active(
@@ -7285,6 +7449,7 @@ class MainWindow(QMainWindow):
         self.preview_state = PreviewState.EMPTY
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
+        self.generation_sessions[GenerationMode.MANUAL].discard_preview()
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -7902,9 +8067,15 @@ class MainWindow(QMainWindow):
                 break
         self.ready_grid.grid.activate()
         self.ready_grid.updateGeometry()
+        # The method navigation adds a parent layout with its own cached
+        # height-for-width. Refresh it before measuring the scroll content,
+        # then settle its minimum once the new column widths have been applied.
+        self.generation_workspace.layout().invalidate()
+        self.generation_workspace.layout().activate()
+        self.generation_workspace.updateGeometry()
         self._refresh_settings_content_minimum_height()
-        # ``content_height_hint`` already evaluates every child at its target
-        # width, so a deferred second sizing pass is no longer necessary.
+        if self.ready_grid.isVisible():
+            QTimer.singleShot(0, self._refresh_settings_content_minimum_height)
 
     def _refresh_settings_content_minimum_height(self) -> None:
         content = self.settings_scroll.widget()
@@ -9292,9 +9463,8 @@ class MainWindow(QMainWindow):
             JobKind.PREVIEW,
             reason="source_removed",
         )
-        if self.current_preview is not None:
-            self.current_preview.dispose()
-        self.current_preview = None
+        for session in self.generation_sessions.values():
+            session.discard_preview()
         self.preview_state = PreviewState.EMPTY
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
@@ -13534,9 +13704,8 @@ class MainWindow(QMainWindow):
 
         self._save_user_settings()
         self._cleanup_source_preslice_result()
-        if self.current_preview is not None:
-            self.current_preview.dispose()
-            self.current_preview = None
+        for session in self.generation_sessions.values():
+            session.discard_preview()
         if self._preview_dialog is not None:
             self._preview_dialog.close()
         if self._additional_options_dialog is not None:

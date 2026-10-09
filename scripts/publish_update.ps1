@@ -179,11 +179,9 @@ try {
         "release", "create", $tag, $installer.FullName,
         "--repo", $UpdateRepository,
         "--title", $releaseTitle,
-        "--notes", $releaseNotes
+        "--notes", $releaseNotes,
+        "--latest"
     )
-    if ($DevelopmentRelease) {
-        $releaseArguments += "--prerelease"
-    }
     & $gh @releaseArguments
     Assert-NativeSuccess "Das Erstellen des Sacrificial-Tower-Releases"
     $releaseCreated = $true
