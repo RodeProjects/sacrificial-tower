@@ -238,6 +238,18 @@ keine Netzwerkübertragung des Modells statt.
 
 ## Tests und reale Abnahme
 
+Beide Generierungsmethoden lesen denselben bestätigten `SourceArtifact`-,
+`PreparedAnalysisSource`- und Profilkontext. Ein Quellen-/Profilwechsel verwirft
+auch den quellengebundenen manuellen Entwurf und dessen geprüfte Ergebnisse.
+Wiederverwendbare manuelle Einstellungen bleiben in einer eigenen Datei erhalten.
+Es gibt keinen zweiten Vorbereitungsworkflow. Die aktuelle GUI nimmt STL als
+Originalquelle an; vorhandene Analyse-G-Code-Snapshots lassen sich im manuellen
+Dienst separat bewerten. Ohne verifizierte Original-STL beziehungsweise native
+Projektfähigkeit entsteht ausschließlich eine deutlich gekennzeichnete
+Zeitprognose, niemals eine behauptete gemeinsame Verifikation.
+Ein erfolgreich geprüftes natives gemeinsames 3MF bewahrt exakt die geslicte
+Form und feste Anordnung. Einzelheiten stehen im [manuellen Editor](manual_editor.md).
+
 Die normalen Tests verwenden synthetische STL-Fälle, die bereitgestellten
 Regressionen, Fake-Slicer sowie temporäre Verzeichnisse. Der reale
 Anycubic-Slicer-Test ist bewusst opt-in:

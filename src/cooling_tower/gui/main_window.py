@@ -81,6 +81,8 @@ from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_session import GenerationMode, GenerationSession
+from cooling_tower.gui.manual_panel import ManualGenerationPanel
+from cooling_tower.gui.manual_controller import ManualGenerationController
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
@@ -3162,17 +3164,10 @@ class MainWindow(QMainWindow):
         )
         generation_layout.addWidget(self.generation_method_picker)
         generation_layout.addWidget(self.ready_grid)
-        self.manual_generation_placeholder = SectionCard(
-            "Manuelle Turmerstellung", collapsible=False
-        )
-        manual_notice = QLabel(
-            "Die manuelle Turmerstellung wird in einem kommenden Schritt ergänzt. "
-            "Hier werden Sie die Turmform selbst festlegen und anschließend "
-            "das Ergebnis prüfen können."
-        )
-        manual_notice.setWordWrap(True)
-        self.manual_generation_placeholder.content_layout.addWidget(manual_notice)
-        generation_layout.addWidget(self.manual_generation_placeholder)
+        self.manual_generation_panel = ManualGenerationPanel()
+        self.manual_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.manual_controller = ManualGenerationController(self, self.manual_generation_panel)
+        generation_layout.addWidget(self.manual_generation_panel)
         self.content_layout.addWidget(self.generation_workspace)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
@@ -3594,6 +3589,7 @@ class MainWindow(QMainWindow):
             self._fit_footer_height
         )
         self._footer_height_timer.start(0)
+        self.manual_controller.attach_footer()
 
         self.automatic_base_checkbox.stateChanged.connect(
             self._on_base_mode_changed
@@ -3645,11 +3641,11 @@ class MainWindow(QMainWindow):
         if not preparation_ready:
             self.generation_mode = None
         self._refresh_generation_workspace(preparation_ready)
-        actions_visible = preparation_ready and self.generation_mode is GenerationMode.AUTOMATIC
+        actions_visible = preparation_ready and self.generation_mode in {GenerationMode.AUTOMATIC, GenerationMode.MANUAL}
         self._set_preparation_viewport_fill(not preparation_ready)
         if hasattr(self, "footer"):
             self.footer.setVisible(actions_visible)
-        self._set_setting_feedback_enabled(actions_visible)
+        self._set_setting_feedback_enabled(actions_visible and self.generation_mode is GenerationMode.AUTOMATIC)
         for widget in (
             self.open_output_button,
             self.open_stl_button,
@@ -3662,7 +3658,7 @@ class MainWindow(QMainWindow):
         if not actions_visible and hasattr(self, "action_availability_widget"):
             self.export_availability_label.clear()
             self.action_availability_widget.hide()
-        if actions_visible and hasattr(self, "geometry_settings_group"):
+        if actions_visible and self.generation_mode is GenerationMode.AUTOMATIC and hasattr(self, "geometry_settings_group"):
             # The workflow area receives its real width only after becoming
             # visible. Re-measure after layout activation so a construction-
             # time height from the hidden 100 px geometry cannot survive.
@@ -3675,7 +3671,7 @@ class MainWindow(QMainWindow):
                 )
         self._refresh_folder_action_states()
         if hasattr(self, "validation_label"):
-            if actions_visible:
+            if actions_visible and self.generation_mode is GenerationMode.AUTOMATIC:
                 self.validate_form()
             else:
                 self._apply_inline_errors({})
@@ -3684,6 +3680,9 @@ class MainWindow(QMainWindow):
                 self._refresh_issue_panels()
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.refresh()
+            QTimer.singleShot(0,self.manual_controller.fit_editor_to_window)
 
     def _generation_method_change_available(self) -> bool:
         return not (
@@ -3700,6 +3699,8 @@ class MainWindow(QMainWindow):
             return
         self.generation_mode = GenerationMode(mode)
         self._on_workflow_stage_changed(self.workflow.stage.value)
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.ensure_context()
         self._refresh_phase17_actions()
 
     def show_generation_method_selection(self) -> None:
@@ -3715,7 +3716,7 @@ class MainWindow(QMainWindow):
         self.ready_grid.setVisible(
             preparation_ready and self.generation_mode is GenerationMode.AUTOMATIC
         )
-        self.manual_generation_placeholder.setVisible(
+        self.manual_generation_panel.setVisible(
             preparation_ready and self.generation_mode is GenerationMode.MANUAL
         )
         self.generation_method_label.setText(
@@ -4743,6 +4744,9 @@ class MainWindow(QMainWindow):
         self.generation_method_back_button.setEnabled(
             self._generation_method_change_available()
         )
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.refresh()
+            return
         self._refresh_layer_range_tool()
         block_reason = self._export_block_reason()
         generation_active = self.background_job_manager.has_active(
@@ -7449,7 +7453,7 @@ class MainWindow(QMainWindow):
         self.preview_state = PreviewState.EMPTY
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
-        self.generation_sessions[GenerationMode.MANUAL].discard_preview()
+        self.manual_controller.invalidate_context()
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -8239,7 +8243,7 @@ class MainWindow(QMainWindow):
                 for panel in active_panels:
                     panel.set_expanded(False)
             self._last_footer_notice_signature = signature
-        self.footer_notice_host.setVisible(bool(active_panels))
+        self.footer_notice_host.setVisible(bool(active_panels) and self.generation_mode is not GenerationMode.MANUAL)
         if hasattr(self, "footer_status_layout"):
             self.footer_status_layout.setContentsMargins(0, 0, 0, 0)
         self.footer_notice_layout.invalidate()
@@ -8250,6 +8254,18 @@ class MainWindow(QMainWindow):
 
         if not hasattr(self, "footer_action_area"):
             return
+        if hasattr(self,"manual_footer_status_widget"):
+            manual = self.generation_mode is GenerationMode.MANUAL
+            self.manual_controller.update_scrollbar_policy(manual)
+            self.manual_footer_status_widget.setVisible(manual)
+            saved = getattr(self,"_automatic_footer_status_hidden_before_manual",None)
+            if manual:
+                if saved is None:
+                    self._automatic_footer_status_hidden_before_manual = self.footer_status_widget.isHidden()
+                self.footer_status_widget.hide()
+            elif saved is not None:
+                self.footer_status_widget.setVisible(not saved)
+                self._automatic_footer_status_hidden_before_manual = None
         action_widgets = (
             self.isolated_progress_widget,
             self.open_output_button,
@@ -11069,6 +11085,8 @@ class MainWindow(QMainWindow):
             "gemeinsam angeordnet inklusive aller simulierten "
             "Einstellungen.</p>"
         )
+        if getattr(result, "generation_method", None) == "manual":
+            self.manual_controller.describe_export(result)
         self._refresh_widget_style(self.export_success_deviation_label)
         self.export_success_error_label.clear()
         self.export_success_error_label.hide()
@@ -11725,7 +11743,10 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.automatic_base_reset_button)
         self._refresh_widget_style(self.output_root_reset_button)
         if hasattr(self, "reset_button"):
-            self.reset_button.setEnabled(self._has_non_default_settings())
+            if self.generation_mode is GenerationMode.MANUAL:
+                self.manual_controller.refresh_footer()
+            else:
+                self.reset_button.setEnabled(self._has_non_default_settings())
         self._update_automatic_base_width_preview()
 
     def _update_automatic_base_width_preview(self) -> None:
@@ -12853,6 +12874,9 @@ class MainWindow(QMainWindow):
         self._refresh_phase17_actions()
 
     def _on_generation_button_clicked(self) -> None:
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.primary_action()
+            return
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             self.cancel_generation()
             return
@@ -13138,6 +13162,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_main_export_clicked(self) -> None:
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.export()
+            return
         self.start_export()
 
     @Slot()
@@ -13301,6 +13328,8 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
+        if self.generation_mode is GenerationMode.MANUAL:
+            QTimer.singleShot(0,self.manual_controller.fit_editor_to_window)
         self._update_responsive_action_labels()
         self._update_slicer_combo_widths()
         if hasattr(self, "slicer_columns"):
@@ -13362,11 +13391,16 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "open_stl_button"):
             return
         self.reset_button.setText("Standardwerte wiederherstellen")
+        manual = self.generation_mode is GenerationMode.MANUAL
+        controller = self.manual_controller
+        if not manual:
+            self.reset_button.setToolTip("Turmeinstellungen außerhalb der allgemeinen Einstellungen zurücksetzen")
         accepting = False
         cancelling = (
-            self.preview_state is PreviewState.BUILDING
-            or self._joint_generation_paused
+            controller.job_id is not None and controller.operation != "export"
+            if manual else self.preview_state is PreviewState.BUILDING or self._joint_generation_paused
         )
+        cancel_requested = controller.cancelled if manual else self._preview_cancel_requested
         for widget in (self.preview_action_control, self.preview_button):
             if widget.property("cancelAction") != cancelling:
                 widget.setProperty("cancelAction", cancelling)
@@ -13374,8 +13408,12 @@ class MainWindow(QMainWindow):
             if widget.property("acceptAction") != accepting:
                 widget.setProperty("acceptAction", accepting)
                 self._refresh_widget_style(widget)
-        if cancelling:
-            if self._preview_cancel_requested:
+        if manual:
+            self.preview_button.setText(controller.panel.cancel_button.text() if cancelling else
+                "Vorschau erneut vorbereiten" if controller.panel.draft is None and not controller.panel.retry_button.isHidden() else
+                controller.panel.generate_button.text())
+        elif cancelling:
+            if cancel_requested:
                 self.preview_button.setText("Abbruch wird ausgeführt …")
             else:
                 self.preview_button.setText("Generierung abbrechen")
@@ -13412,9 +13450,9 @@ class MainWindow(QMainWindow):
             self.export_button.setText(
                 "Exportieren" if shorten_actions else "Kühlturm exportieren"
             )
-            if cancelling and not self._preview_cancel_requested:
+            if cancelling and not cancel_requested:
                 self.preview_button.setText(
-                    "Abbrechen" if shorten_actions else "Generierung abbrechen"
+                    "Abbrechen" if shorten_actions or manual else "Generierung abbrechen"
                 )
             self.preview_action_control.setFixedWidth(max(
                 0 if shorten_actions and cancelling
@@ -13596,6 +13634,9 @@ class MainWindow(QMainWindow):
         )
 
     def request_reset_defaults(self) -> None:
+        if self.generation_mode is GenerationMode.MANUAL:
+            self.manual_controller.request_reset_defaults()
+            return
         if not self._has_non_default_settings():
             return
         box = self._create_reset_defaults_message_box()
@@ -13650,6 +13691,7 @@ class MainWindow(QMainWindow):
         self._schedule_feasibility_validation()
 
     def _save_user_settings(self) -> None:
+        self.manual_controller.save_settings()
         try:
             window_geometry = self.normalGeometry()
             window_position = self.pos()

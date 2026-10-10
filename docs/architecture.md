@@ -324,7 +324,8 @@ zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
 ausgewählte Methode; `None` bedeutet Methodenauswahl. Die Vorbereitung und
 deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
 Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
-er wird lediglich ausgeblendet. Die manuelle Ansicht ist derzeit ein Platzhalter.
+er wird lediglich ausgeblendet. `ManualGenerationPanel` besitzt einen eigenen
+eingebetteten Editor mit links angeordneten Einstellungen und rechts der Vorschau.
 Ein Methodenwechsel startet keinen Slice und invalidiert kein Ergebnis.
 Bei erneut erforderlicher Vorbereitung kehrt die Navigation zur Auswahl zurück.
 Laufende Generierung und Export sperren die Rücknavigation.
@@ -339,13 +340,25 @@ Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen beider Methoden;
 beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
 Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
 Die Einstellungen und Fortschrittssteuerung der Automatik bleiben in ihrem
-bestehenden Arbeitsbereich. Künftige manuelle Eingaben benötigen eigene
-Steuerelemente und verwenden ausschließlich die manuelle Sitzung.
-Für die spätere feste manuelle Geometrie ist ein gemeinsamer Slice zur
-Ergebnisprüfung vorgesehen; die automatische iterative Angleichung wird dabei
-nicht verwendet. Dieser manuelle Ablauf ist noch nicht implementiert.
-Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert;
-das persistierte Schema bleibt unverändert.
+bestehenden Arbeitsbereich. Manuelle Eingaben verwenden ausschließlich die
+manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.
+`ManualGenerationController` orchestriert methodenspezifische Worker; negative
+Request-IDs und eigene Signalverbindungen trennen sie von automatischen Jobs.
+Die vorhandenen Jobarten `PREVIEW` und `EXPORT` erhalten alle gemeinsamen Sperren
+und die kontrollierte Thread-/Prozessfreigabe. `ManualGenerationService` erzeugt
+eine ausdrücklich gestaltete Form und bewertet sie mit einem vollständigen
+Prüfslice, ohne `CalibrationService.calibrate()` oder automatische Formung.
+Die manuellen Fachmodule unter `manual/` bleiben Qt-unabhängig.
+Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert.
+Das automatische Einstellungsschema 21 bleibt unverändert; manuelle,
+wiederverwendbare Werte liegen getrennt in `manual_settings.json` (Schema 1).
+Modell, Zustände, Bedienung und Prüfnachweise stehen im
+[manuellen Editor](manual_editor.md).
+Beide Methoden verwenden die bestehenden Aktionen und die responsive Anordnung
+des Hauptfenster-Footers. Manuelle Status-/Ergebniswidgets sind dort separat
+eingebunden; Buttonaktionen und Reset werden nach der aktiven Methode geroutet.
+Die Vorschauhöhe wird bei Fenster-/Methodenwechseln an den verfügbaren Bereich
+angepasst und bleibt bei Einstellungs- bzw. Grenzmeldungen stabil.
 
 Unter „Turmeinstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
 wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.

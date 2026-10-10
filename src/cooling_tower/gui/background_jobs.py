@@ -27,6 +27,7 @@ class JobKind(str, Enum):
     SLICER_PREDICTION = "prediction"
     PREVIEW = "preview"
     EXPORT = "export"
+    MANUAL_VIEW = "manual-view"
 
 
 class JobState(str, Enum):

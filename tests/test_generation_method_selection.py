@@ -60,7 +60,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertFalse(window.workflow_group.isChecked())
         self.assertTrue(window.generation_method_picker.isVisible())
         self.assertTrue(window.ready_grid.isHidden())
-        self.assertTrue(window.manual_generation_placeholder.isHidden())
+        self.assertTrue(window.manual_generation_panel.isHidden())
         self.assertTrue(window.footer.isHidden())
         self.assertTrue(window.generation_method_navigation.isHidden())
         window.automatic_generation_card.click()
@@ -92,9 +92,9 @@ class GenerationMethodSelectionTests(unittest.TestCase):
             window.generation_method_back_button.click()
             self.assertTrue(window.generation_method_picker.isVisible())
             window.manual_generation_card.click()
-            self.assertTrue(window.manual_generation_placeholder.isVisible())
+            self.assertTrue(window.manual_generation_panel.isVisible())
             self.assertTrue(window.ready_grid.isHidden())
-            self.assertTrue(window.footer.isHidden())
+            self.assertTrue(window.footer.isVisible())
             window.generation_method_back_button.click()
             window.automatic_generation_card.click()
             window._refresh_phase17_actions()
@@ -205,7 +205,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         window.manual_generation_card.setFocus()
         QTest.keyClick(window.manual_generation_card, Qt.Key.Key_Space)
         self.assertIs(window.generation_mode, GenerationMode.MANUAL)
-        self.assertTrue(window.manual_generation_placeholder.isVisible())
+        self.assertTrue(window.manual_generation_panel.isVisible())
 
     def test_picker_is_centered_and_uses_side_space_before_stacking(self) -> None:
         window = self.window

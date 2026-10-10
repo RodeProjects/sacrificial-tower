@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from cooling_tower.preview import PreviewExportResult, PreviewResult, PreviewState
 
@@ -18,6 +19,9 @@ class GenerationSession:
     preview_state: PreviewState = PreviewState.EMPTY
     export_result: PreviewExportResult | None = None
     exported_preview_identity: tuple[str, str | None] | None = None
+    manual_draft: Any = None
+    successful_request: Any = None
+    running_request: Any = None
 
     def discard_preview(self) -> None:
         if self.preview is not None:
@@ -25,3 +29,4 @@ class GenerationSession:
             self.preview = None
         self.preview_state = PreviewState.EMPTY
         self.exported_preview_identity = None
+        self.successful_request = None

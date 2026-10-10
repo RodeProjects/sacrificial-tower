@@ -9,6 +9,7 @@ bei Änderungen zuerst das zuständige Thema lesen.
 |---|---|
 | Komponenten, Verantwortlichkeiten, Datenfluss und Erweiterung | [Architektur](architecture.md) |
 | Turmhöhe, lineare Verbreiterung, konkave Verjüngung und Absätze | [Turmgeometrie](tower_geometry.md) |
+| Manueller Béziereditor, feste Slicerprüfung, Zustände und Abnahme | [Manueller Editor](manual_editor.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Proprietäre Distribution, Rechtstexte, Freigaben | [Kommerzieller Vertrieb](commercial_release.md) |
@@ -30,7 +31,9 @@ bei Änderungen zuerst das zuständige Thema lesen.
 - [UI-Abnahmekriterien](ui_overarbeitung_abnahmekriterien.md): ursprünglicher
   Anforderungskatalog; aktuelle Umsetzung und Tests haben Vorrang.
 
-Anbieterangaben werden nur in `config/legal_profile.json`, aktuelle
-Produktstandardwerte nur in `config/default_settings.json` gepflegt.
+Anbieterangaben werden nur in `config/legal_profile.json`, gemeinsame und
+automatische Produktstandardwerte in `config/default_settings.json` gepflegt.
+Die unabhängigen manuellen Standards stehen in `ManualSettings`;
+gemeinsame Anfangswerte beziehen sich auf die unveränderlichen Produktdefaults.
 Die überprüften Windows-Artefakte stehen in `requirements-windows.lock` und
 `config/dependency_artifacts.json`; eine Änderung erfordert gemeinsame Aktualisierung.

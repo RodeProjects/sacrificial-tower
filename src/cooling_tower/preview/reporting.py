@@ -400,6 +400,10 @@ def build_technical_report(
     created_at: datetime,
     project_path: Path | None = None,
 ) -> dict[str, Any]:
+    if getattr(request, "generation_method", None) == "manual":
+        from cooling_tower.manual.reporting import technical_report
+        return technical_report(preview, request, output_path=output_path, output_sha256=output_sha256,
+                                created_at=created_at, project_path=project_path)
     snapshot = request.snapshot
     calibration = calibration_diagnostics(preview, request)
     status = (
@@ -559,6 +563,10 @@ def build_user_report(
     created_at: datetime,
     project_path: Path | None = None,
 ) -> str:
+    if getattr(request, "generation_method", None) == "manual":
+        from cooling_tower.manual.reporting import user_report
+        return user_report(preview, request, output_path=output_path, technical_report_path=technical_report_path,
+                           created_at=created_at, project_path=project_path)
     diagnostics = calibration_diagnostics(preview, request)
     lines = [
         "Kühlturm-Export – Kurzbericht",

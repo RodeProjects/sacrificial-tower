@@ -342,3 +342,26 @@ Die automatische Breite verwendet jetzt 0,21 mm je 1 mm Original-Objekthöhe
 und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
+
+## Getrennte manuelle Einstellungen (eigenes Schema 1)
+
+`manual_settings.json` verwendet den eigenen Schlüssel
+`manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
+automatische Format bleibt bei Schema 21. `ManualSettingsStore` normalisiert
+strikte boolesche Werte, endliche Zahlen und gekoppelte Durchmesser-/Farbgrenzen.
+Die explizite Legacy-Migration 0→1 ergänzt den Schemaschlüssel; vor Umschreibungen
+wird das Original gesichert, anschließend atomar gespeichert. Es existiert
+keine ältere veröffentlichte manuelle Schema-Version und deshalb noch kein
+mehrstufiger manueller Versionssprung.
+
+Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
+zwischenzeitliche externe Änderungen werden vom vorhandenen Bytesvergleich
+erkannt. Explizite Wiederherstellung nutzt `replace_with_recovery()` mit Backup.
+Die manuelle Datei hat keinen gemeinsamen Kompatibilitätskatalog mit der
+Automatik: Downgrades können manuelle Werte niemals anhand ähnlicher Feldnamen
+in automatische Werte übernehmen. Neue manuelle Schemata benötigen eine direkte
+Migration und die bestehenden Sicherungs-/Fehler-/Downgrade-Prüfungen.
+
+Gespeichert werden wiederverwendbare manuelle Werte einschließlich der eigenen
+Kreissegmentzahl. Profilpunkte, Turmhöhe, Quellidentität, laufende Aufträge,
+Artefakte und Exportidentitäten bleiben ausschließlich sitzungsgebunden.

@@ -434,10 +434,25 @@ die Gruppe steht zentriert. Beim Verkleinern schrumpfen zunächst die seitlichen
 Freiräume bis zum regulären Seitenrand, bevor die Karten unter 800 px
 verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
 „Automatisch“ öffnet den bestehenden Arbeitsbereich;
-„Manuell“ öffnet vorerst einen Hinweis auf die spätere Umsetzung.
+„Manuell“ öffnet den eingebetteten [Profil- und Béziereditor](manual_editor.md).
 Über „Zur Methodenauswahl“ ist die Rückkehr möglich. Einstellungen, Vorschau,
 Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
 Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
+
+Die automatische Segmentanzeige verwendet unverändert
+`max(25, ceil(größter tatsächlicher Außendurchmesser in mm))`. Der manuelle
+Editor leitet seinen ersten Segmentstandard einmalig aus seiner eigenen
+initialen Geometrie einschließlich Fuß ab und verwaltet danach eine eigene
+editierbare Kreissegmentzahl. Beide Auflösungen bleiben unabhängig.
+
+Das manuelle Radiusprofil besteht aus kubischen Bézierkurven mit analytisch
+geprüften Durchmesser- und Steigungsextrema. Die Winkel verwenden `atan(dr/dz)`
+zur Vertikalen; Aufweitung und Verjüngung sind getrennt aktivierbar. Die
+STL-Tessellierung begrenzt den vertikalen radialen Kurvenfehler auf 0,02 mm;
+Kreispolygonfehler und Drucklayer sind separate Größen. Das Mesh beginnt bei
+Z=0 und besitzt geschlossenen Boden und Deckel. Fachliche Invarianten,
+Fußabhängigkeiten und Sicherheitsgrenzen stehen zentral in
+[Manueller Editor – Geometrie](manual_editor.md#geometriemodell-und-invarianten).
 
 Im automatischen Arbeitsbereich enthält das gemeinsame Dropdown
 „Turmeinstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
