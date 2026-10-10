@@ -93,7 +93,8 @@ class ManualGenerationTests(unittest.TestCase):
         hashes={p:sha256_file(p) for p in (*f.profile.source_paths,f.source,request.source_artifact.original_path)}
         result=service.prepare(request); self.addCleanup(result.dispose)
         self.assertEqual(len(adapter.requests),1)
-        self.assertEqual(adapter.requests[0].model_path,result.project_path)
+        self.assertIsNotNone(result.project_path)
+        self.assertTrue(adapter.requests[0].model_path.samefile(result.project_path))
         self.assertTrue(adapter.requests[0].preserve_model_positions)
         self.assertEqual(adapter.requests[0].purpose,"calibration")
         self.assertEqual(adapter.tower_hash,result.artifact_sha256)
