@@ -346,24 +346,27 @@ class RequestedGuiChangesTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_step_one_stl_hints_are_unboxed_but_keep_state_colours(self) -> None:
+    def test_step_one_stl_hints_colour_only_their_headings(self) -> None:
         stylesheet = (
             PROJECT_ROOT / "src" / "cooling_tower" / "gui" / "styles.qss"
         ).read_text(encoding="utf-8")
         for severity, colour in (
-            ("error", "#8f2118"),
-            ("warning", "#76520b"),
-            ("success", "#145c3c"),
+            ("error", "#b42318"),
+            ("warning", "#9b6411"),
+            ("success", "#176b45"),
         ):
             block_start = stylesheet.index(
-                f'QLabel#stlValidationMessage[severity="{severity}"]'
+                f'QLabel#stlFeedbackTitle[severity="{severity}"]'
             )
             block = stylesheet[
                 block_start:stylesheet.index("}", block_start)
             ]
-            self.assertIn("background: transparent;", block)
-            self.assertIn("border: none;", block)
             self.assertIn(f"color: {colour};", block)
+        block_start = stylesheet.index('QLabel#stlValidationMessage,')
+        block = stylesheet[block_start:stylesheet.index("}", block_start)]
+        self.assertIn("background: transparent;", block)
+        self.assertIn("border: none;", block)
+        self.assertIn("color: #506371;", block)
 
     @staticmethod
     def write_export_folder(

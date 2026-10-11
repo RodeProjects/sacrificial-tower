@@ -17,6 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QEventLoop, QMimeData, QTimer, Qt, QUrl
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cooling_tower.gui.main_window import (
@@ -143,7 +144,7 @@ class StlValidationGuiTests(unittest.TestCase):
             margins = window.stl_validation_message.contentsMargins()
             self.assertEqual(
                 (margins.left(), margins.top(), margins.right(), margins.bottom()),
-                (10, 8, 10, 8),
+                (0, 0, 0, 0),
             )
             self.assertFalse(window.stl_validation_details_toggle.isHidden())
             self.assertFalse(window.accept_rejected_stl_button.isHidden())
@@ -154,7 +155,7 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertIn("Offene Kanten: 161", window.stl_validation_details.toPlainText())
             self.assertIs(
                 window.stl_validation_message.parent(),
-                window.source_group.content_widget,
+                window.stl_validation_feedback,
             )
             self.assertTrue(window.source_guide_row.isHidden())
             self.assertEqual(
@@ -268,6 +269,11 @@ class StlValidationGuiTests(unittest.TestCase):
                 "warning",
             )
             self.assertIn("user-bestätigt", window.stl_validation_message.text())
+            self.assertEqual(
+                window.stl_validation_feedback.heading.title.text(),
+                "STL auf eigenes Risiko akzeptiert",
+            )
+            self.assertEqual(window.stl_validation_feedback.heading.icon.text(), "!")
             self.assertIn("Akzeptanz: user-bestätigt", window.stl_validation_details.toPlainText())
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
         finally:
@@ -400,16 +406,19 @@ class StlValidationGuiTests(unittest.TestCase):
                 "Es wurden keine offenen Kanten erkannt.",
                 window.stl_validation_message.text(),
             )
+            feedback = window.stl_validation_feedback
             success_notice = window.stl_validation_message.text()
             warning_notice = window.stl_validation_warning_message.text()
-            self.assertIn("✓", success_notice)
-            self.assertIn("<b>STL-Datei akzeptiert.</b>", success_notice)
-            self.assertEqual(success_notice.count("<b>"), 1)
+            self.assertEqual(feedback.heading.icon.text(), "✓")
+            self.assertEqual(feedback.heading.title.text(), "STL-Datei akzeptiert")
+            self.assertNotIn("<b>", success_notice)
             self.assertIn("&#x2022;", success_notice)
             self.assertNotIn("- Das Mesh", success_notice)
-            self.assertIn("&#x26A0;", warning_notice)
-            self.assertIn("<b>Hinweis:</b>", warning_notice)
-            self.assertEqual(warning_notice.count("<b>"), 1)
+            self.assertEqual(feedback.warning_heading.icon.text(), "ⓘ")
+            self.assertEqual(
+                feedback.warning_heading.title.text(), "Kleine Geometrieabweichungen"
+            )
+            self.assertNotIn("<b>", warning_notice)
             self.assertIn("&#x2022;", warning_notice)
             self.assertNotIn("- Es wurden", warning_notice)
             self.assertIn(
@@ -417,17 +426,17 @@ class StlValidationGuiTests(unittest.TestCase):
                 warning_notice,
             )
             self.assertIn(
-                "zuverlässig verarbeitbaren G-Code",
+                "zuverlässig verarbeitbaren G‑Code",
                 warning_notice,
             )
             self.assertIn(
-                "Im letzten Vorbereitungsschritt prüft ein Pre-Slice zusätzlich",
+                "Ein Pre-Slice prüft im letzten Vorbereitungsschritt zusätzlich",
                 warning_notice,
             )
             margins = window.stl_validation_message.contentsMargins()
             self.assertEqual(
                 (margins.left(), margins.top(), margins.right(), margins.bottom()),
-                (10, 8, 10, 8),
+                (0, 0, 0, 0),
             )
             self.assertEqual(
                 window.source_group.summary_note_label.text(),
@@ -464,19 +473,14 @@ class StlValidationGuiTests(unittest.TestCase):
                     upper.geometry().bottom(),
                     lower.geometry().top(),
                 )
-            for upper, lower in zip(
-                (
-                    drop_zone,
-                    window.stl_validation_details_toggle,
-                    window.stl_validation_message,
-                    window.stl_validation_warning_message,
-                ),
-                (
-                    window.stl_validation_details_toggle,
-                    window.stl_validation_message,
-                    window.stl_validation_warning_message,
-                ),
-            ):
+            self.assertLess(drop_zone.geometry().bottom(), feedback.geometry().top())
+            blocks = (
+                window.stl_validation_details_toggle,
+                window.stl_validation_message,
+                feedback.warning_heading,
+                window.stl_validation_warning_message,
+            )
+            for upper, lower in zip(blocks, blocks[1:]):
                 self.assertLess(
                     upper.geometry().bottom(),
                     lower.geometry().top(),
@@ -510,11 +514,81 @@ class StlValidationGuiTests(unittest.TestCase):
             )
             self.assertIs(
                 window.stl_validation_message.parent(),
-                window.source_group.content_widget,
+                window.stl_validation_feedback,
             )
             self.assertTrue(window.drop_zone.property("completed"))
             self.assertTrue(window.drop_zone.prompt_label.isHidden())
             self.assertTrue(window.source_guide_row.isHidden())
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_notice_headings_share_disclosure_row_and_follow_open_details(self) -> None:
+        window = self.window()
+        window.show()
+        try:
+            for filename, title, icon in (
+                ("known_valid_tetrahedron_ascii.stl", "STL-Datei akzeptiert", "✓"),
+                ("test_model_manifold.stl", "STL-Datei akzeptiert", "✓"),
+                ("test_model_non_manifold.stl", "STL-Geometrie prüfen", "×"),
+            ):
+                with self.subTest(source=filename):
+                    self.assertTrue(window.drop_zone.set_file(self.fixture_root / filename))
+                    self.wait_for_stl_result(window)
+                    feedback = window.stl_validation_feedback
+                    self.assertEqual(feedback.heading.title.text(), title)
+                    self.assertEqual(feedback.heading.icon.text(), icon)
+                    for width in (760, 1000, 1440):
+                        with self.subTest(width=width):
+                            window.resize(width, 1100)
+                            for _ in range(4):
+                                self.app.processEvents()
+                            heading = feedback.heading
+                            toggle = feedback.details_toggle
+                            body = feedback.message
+                            closed_height = window.preparation_tabs.height()
+                            self.assertLess(heading.geometry().right(), toggle.geometry().left())
+                            self.assertLessEqual(
+                                abs(heading.geometry().center().y() - toggle.geometry().center().y()),
+                                2,
+                            )
+                            self.assertGreater(body.geometry().top(), toggle.geometry().bottom())
+                            self.assertLess(body.geometry().left(), toggle.geometry().left())
+                            self.assertGreaterEqual(body.geometry().right(), toggle.geometry().right())
+                            self.assertLessEqual(body.geometry().top() - heading.geometry().bottom(), 10)
+                            self.assertGreaterEqual(body.height(), body.heightForWidth(body.width()))
+
+                            QTest.mouseClick(toggle, Qt.MouseButton.LeftButton)
+                            for _ in range(4):
+                                self.app.processEvents()
+                            self.assertTrue(toggle.isChecked())
+                            self.assertTrue(feedback.details.isVisibleTo(window))
+                            self.assertLess(toggle.geometry().bottom(), feedback.details.geometry().top())
+                            self.assertLess(feedback.details.geometry().bottom(), heading.geometry().top())
+                            self.assertLess(heading.geometry().bottom(), body.geometry().top())
+                            self.assertGreater(window.preparation_tabs.height(), closed_height)
+                            self.assertLessEqual(body.geometry().bottom(), feedback.rect().bottom())
+
+                            QTest.mouseClick(toggle, Qt.MouseButton.LeftButton)
+                            for _ in range(4):
+                                self.app.processEvents()
+                            self.assertFalse(toggle.isChecked())
+                            self.assertTrue(feedback.details.isHidden())
+                            self.assertEqual(window.preparation_tabs.height(), closed_height)
+                            self.assertLess(heading.geometry().right(), toggle.geometry().left())
+                            if not feedback.warning_message.isHidden():
+                                self.assertLess(
+                                    body.geometry().bottom(), feedback.warning_heading.geometry().top()
+                                )
+                                self.assertLessEqual(
+                                    feedback.warning_message.geometry().top()
+                                    - feedback.warning_heading.geometry().bottom(),
+                                    5,
+                                )
+                                self.assertLessEqual(
+                                    feedback.warning_message.geometry().bottom(), feedback.rect().bottom()
+                                )
         finally:
             window.close()
             window.deleteLater()
@@ -536,6 +610,9 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.stl_validation_message.isHidden())
             self.assertEqual(window.stl_validation_warning_message.text(), "")
             self.assertTrue(window.stl_validation_warning_message.isHidden())
+            self.assertTrue(window.stl_validation_feedback.heading.isHidden())
+            self.assertTrue(window.stl_validation_feedback.warning_heading.isHidden())
+            self.assertTrue(window.stl_validation_feedback.isHidden())
             self.assertEqual(window.source_group.summary_note_label.text(), "")
             self.assertTrue(window.source_group.summary_note_label.isHidden())
         finally:
@@ -677,6 +754,11 @@ class StlValidationGuiTests(unittest.TestCase):
                 "nicht vollständig und sicher gelesen",
                 window.stl_validation_message.text(),
             )
+            self.assertEqual(
+                window.stl_validation_feedback.heading.title.text(),
+                "STL-Datei konnte nicht geprüft werden",
+            )
+            self.assertEqual(window.stl_validation_feedback.heading.icon.text(), "×")
         finally:
             window.close()
             window.deleteLater()

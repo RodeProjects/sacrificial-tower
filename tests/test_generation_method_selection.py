@@ -232,6 +232,22 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 else:
                     self.assertGreater(left_space, 0)
 
+    def test_every_method_description_fits_after_repeated_width_changes(self) -> None:
+        from PySide6.QtCore import QRect
+        window=self.window
+        self.finish_preparation()
+        for width in (1800,1060,860,760,950,1400,1800):
+            window.resize(width,900)
+            for _ in range(4):self.app.processEvents()
+            for card in (window.automatic_generation_card,window.manual_generation_card):
+                for label in (card.title_label,card.description_label,card.action_label):
+                    with self.subTest(width=width,text=label.text()):
+                        required=label.fontMetrics().boundingRect(QRect(0,0,label.width(),100000),
+                            Qt.TextFlag.TextWordWrap,label.text()).height()
+                        self.assertGreaterEqual(label.height(),required)
+                        self.assertGreaterEqual(label.y(),0)
+                        self.assertLess(label.geometry().bottom(),card.height())
+
 
 if __name__ == "__main__":
     unittest.main()

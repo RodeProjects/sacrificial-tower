@@ -143,6 +143,15 @@ vollständig neu und `STL entfernen` stellt als einzige Aktion wieder die leere
 Startübersicht mit Drop-Bereich her. Dieselben drei Aktionen stehen auch nach
 erfolgreicher Prüfung zur Verfügung.
 
+Die Prüfergebnisse verwenden kompakte Meldungen mit jeweils eigener Überschrift
+und einem Status-Icon. Nur diese tragen einen dezenten Farbakzent; die
+Erklärungstexte bleiben neutral und erhalten weder farbige Flächen noch Rahmen.
+Geringfügige lokale Überschneidungen erscheinen als ergänzender Geometriehinweis
+mit Info-Symbol. Bei eingeklappten technischen Details steht die erste Überschrift
+links neben dem Detail-Link, während ihr Text die gesamte Breite darunter nutzt.
+Beim Aufklappen rückt die vollständige Meldung unter die technischen Details;
+beim Einklappen kehrt die Überschrift in die gemeinsame Zeile zurück.
+
 ## Slicer- und Profilbestätigung
 
 Beide Eingabearten verwenden einen gemeinsamen, quellenneutralen

@@ -1840,25 +1840,52 @@ QFrame#sourceDropZone QLabel[replacementHint="true"] {
     padding: 3px 0 5px 0;
 }
 
-QLabel#stlValidationMessage[severity="error"],
-QLabel#stlValidationWarningMessage[severity="error"] {
+QWidget#stlValidationFeedback,
+QWidget#stlNoticeHeading {
     background: transparent;
     border: none;
-    color: #8f2118;
 }
 
-QLabel#stlValidationMessage[severity="warning"],
-QLabel#stlValidationWarningMessage[severity="warning"] {
+QLabel#stlValidationMessage,
+QLabel#stlValidationWarningMessage {
     background: transparent;
     border: none;
-    color: #76520b;
+    color: #506371;
+    font-size: 9pt;
+    font-weight: 400;
+    padding: 0;
 }
 
-QLabel#stlValidationMessage[severity="success"],
-QLabel#stlValidationWarningMessage[severity="success"] {
+QLabel#stlFeedbackTitle {
     background: transparent;
     border: none;
-    color: #145c3c;
+    font-size: 9pt;
+    font-weight: 600;
+    text-decoration: underline;
+    padding: 0;
+}
+
+QLabel#stlFeedbackIcon {
+    background: transparent;
+    border: none;
+    font-size: 11pt;
+    font-weight: 600;
+    padding: 0;
+}
+
+QLabel#stlFeedbackTitle[severity="success"],
+QLabel#stlFeedbackIcon[severity="success"] {
+    color: #176b45;
+}
+
+QLabel#stlFeedbackTitle[severity="warning"],
+QLabel#stlFeedbackIcon[severity="warning"] {
+    color: #9b6411;
+}
+
+QLabel#stlFeedbackTitle[severity="error"],
+QLabel#stlFeedbackIcon[severity="error"] {
+    color: #b42318;
 }
 
 QLabel#sourceInfoCaption {
@@ -1925,6 +1952,17 @@ QPushButton[compactDisclosure="true"]:focus {
         stop: 0 rgba(255, 255, 255, 35), stop: 1 rgba(230, 240, 247, 20));
     border: none;
     outline: none;
+}
+
+QPushButton#stlValidationDetailsToggle,
+QPushButton#stlValidationDetailsToggle:checked,
+QPushButton#stlValidationDetailsToggle:pressed,
+QPushButton#stlValidationDetailsToggle:focus {
+    color: #7b858d;
+}
+
+QPushButton#stlValidationDetailsToggle:hover {
+    color: #5e6c77;
 }
 
 QScrollArea#slicerAnalysisDetails,
@@ -2267,12 +2305,14 @@ QPushButton#profileConfirmButton:disabled {
 }
 
 QPushButton#headerResetButton,
+QPushButton#towerResetButton,
 QPushButton#layerRangeToolButton {
     min-height: 30px;
     max-height: 30px;
     padding: 0 12px;
 }
-QPushButton#headerResetButton:disabled {
+QPushButton#headerResetButton:disabled,
+QPushButton#towerResetButton:disabled {
     color: #8995a0;
     background: #edf0f2;
     border-color: #d8dee3;

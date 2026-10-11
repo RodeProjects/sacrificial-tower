@@ -45,7 +45,7 @@ def create_fixture(test,*,joint=False,count=100):
     reference=service.prepare_reference(request)
     d=initial_draft(ManualSettings(),f.snapshot.layers,reference.context.maximum_height_mm,reference.context.key)
     request=replace(request,draft=d,context=reference.context,profile_source_hashes=reference.profile_source_hashes,
-                    settings=GenerationSettings(target_layer_time_s=d.settings.target_layer_time_s,layer_time_tolerance_s=d.settings.layer_time_tolerance_s))
+                    settings=GenerationSettings())
     return f,service,reference,request,adapter
 
 
@@ -76,7 +76,7 @@ class ManualGenerationTests(unittest.TestCase):
         self.assertEqual(request.draft.artifact_payload(),before)
         self.assertEqual(result.scene.tower_height_mm,f.snapshot.maximum_print_z_mm)
         self.assertFalse(result.joint_sliced)
-        self.assertFalse(result.manual_evaluation.target_reached)
+        self.assertNotIn("target_reached",result.manual_evaluation.to_dict())
         self.assertTrue(result.manual_evaluation.layer_times)
         exported=ManualExportService().export(result,request,f.root/"exports")
         self.assertEqual(len(adapter.requests),1)
@@ -114,7 +114,7 @@ class ManualGenerationTests(unittest.TestCase):
         result=service.prepare(request); self.addCleanup(result.dispose)
         self.assertEqual(len(result.manual_evaluation.layer_times),100)
         self.assertAlmostEqual(result.manual_evaluation.layer_times[-1][2],f.snapshot.layers[-1].total_time_s)
-        self.assertGreater(result.manual_evaluation.layer_times[-1][3],0)
+        self.assertNotIn("remaining_deficit_s",result.manual_evaluation.to_dict()["layers"][-1])
 
     def test_unsafe_layer_matching_fails_instead_of_claiming_verification(self):
         f,service,ref,request,adapter=create_fixture(self)

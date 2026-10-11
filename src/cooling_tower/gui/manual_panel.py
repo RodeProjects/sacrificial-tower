@@ -3,32 +3,44 @@ from __future__ import annotations
 
 from dataclasses import replace
 from functools import partial
+import math
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal, QSize
+from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLayout, QLabel, QPushButton, QSizePolicy,
                               QCheckBox, QScrollArea, QSplitter, QSlider, QProgressBar)
 
 from cooling_tower.gui.widgets import SectionCard, NumericSettingWidget, WheelSafeComboBox
 from cooling_tower.gui.widgets.manual_canvas import ManualCanvas
 from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox
-from cooling_tower.gui.design_tokens import COLORS
-from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, bounded_edit, initial_draft,
-                                          insert_point, move_point, remove_point, set_curve, couple_point, validate, validate_settings)
+from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
+from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider
+from cooling_tower.gui.widgets.manual_xray_controls import XRayControls,PreviewToolsRow
+from cooling_tower.gui.widgets.manual_settings_pane import ManualSettingsPane
+from cooling_tower.gui.design_tokens import COLORS,METRICS
+from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, OBJECT_RESOLUTION_STAGES, bounded_edit, bounded_coordinate_edit, initial_draft,
+                                          insert_point, move_point, remove_point, set_curve, reset_point_curves, couple_point, validate, validate_settings)
+from cooling_tower.manual.layer_snap import snap_layer_height
 
 
 class ManualGenerationPanel(QWidget):
+    FORM_SETTINGS = ("minimum_diameter_mm","maximum_diameter_mm","foot_diameter_mm","maximum_foot_diameter_mm",
+                     "foot_height_mm","circle_segments","expansion_enabled","expansion_angle_deg",
+                     "contraction_enabled","contraction_angle_deg")
     draft_changed = Signal(object)
     generate_requested = Signal()
     export_requested = Signal()
     cancel_requested = Signal()
     retry_reference_requested = Signal()
     status_changed = Signal()
+    layout_changed = Signal(bool)
+    settings_visibility_changed = Signal()
 
     LABELS = {
-        "target_layer_time_s": ("Gewünschte Mindest-Layerzeit", "s", 5, 30),
-        "layer_time_tolerance_s": ("Layerzeit-Toleranz ±", "s", .1, 3),
+        "color_reference_time_s": ("Farbreferenz für Original-Layer", "s", 5, 30),
         "minimum_diameter_mm": ("Minimaler Turm-Außendurchmesser", "mm", .1, 1000),
         "maximum_diameter_mm": ("Maximaler Turm-Außendurchmesser", "mm", .1, 1000),
+        "top_diameter_mm": ("Außendurchmesser der Turmspitze", "mm", .1, 1000),
         "base_diameter_mm": ("Grunddurchmesser am Körperbeginn", "mm", .1, 1000),
         "foot_diameter_mm": ("Aktueller Fuß-Außendurchmesser", "mm", .1, 1000),
         "maximum_foot_diameter_mm": ("Maximaler Fuß-Außendurchmesser", "mm", .1, 1000),
@@ -57,6 +69,11 @@ class ManualGenerationPanel(QWidget):
         self._syncing = False
         self._point_defaults = {}
         self._control_defaults = {}
+        self._settings_collapsed = False
+        self._settings_transitioning = False
+        self._settings_horizontal_extent = 480
+        self._settings_vertical_extent = 360
+        self._settings_scroll_position = 0
         self.rows, self.editors, self.checks = {}, {}, {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0,0,0,0)
@@ -71,18 +88,21 @@ class ManualGenerationPanel(QWidget):
         self.settings_scroll.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Ignored)
         self.settings_scroll.setMinimumWidth(460)
         self.settings_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.settings_content = QWidget()
         form = QVBoxLayout(self.settings_content)
         form.setContentsMargins(0,0,14,0)
         self.settings_scroll.setWidget(self.settings_content)
-        self.splitter.addWidget(self.settings_scroll)
+        self.settings_pane = ManualSettingsPane(self.settings_scroll)
+        self.settings_collapse_button = self.settings_pane.button
+        self.settings_pane.toggle_requested.connect(self.toggle_settings)
+        self.splitter.addWidget(self.settings_pane)
         for title, names in (
-            ("Layerzeit und Bewertung", ("target_layer_time_s","layer_time_tolerance_s")),
             ("Turm und Standfuß", ("minimum_diameter_mm","maximum_diameter_mm","base_diameter_mm","foot_diameter_mm",
-                                  "maximum_foot_diameter_mm","foot_height_mm","height_mm","circle_segments")),
+                                  "maximum_foot_diameter_mm","foot_height_mm","height_mm","top_diameter_mm","circle_segments")),
             ("Geometrische Winkelgrenzen", ("expansion_angle_deg","contraction_angle_deg")),
             ("Ausgewählter Profilpunkt und Kurve", ("point_diameter_mm","point_height_mm","control_diameter_mm","control_height_mm")),
-            ("Visuelle Prüfung", ("overhang_angle_deg","gradient_start_deficit_s","gradient_full_deficit_s"))):
+            ("Visuelle Prüfung", ("overhang_angle_deg","color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"))):
             card = SectionCard(title)
             form.addWidget(card)
             for name in names:
@@ -102,6 +122,11 @@ class ManualGenerationPanel(QWidget):
                 self.height_note.setWordWrap(True)
                 card.content_layout.addWidget(self.height_note)
             elif title.startswith("Ausgewählter"):
+                box = QCheckBox("Vertikale Greifer auf Layer einrasten")
+                box.setToolTip("Aktiv: Greifer rasten auf Druckschichten ein. Aus: Höhen stufenlos ziehen. Zahlenfelder bleiben frei eingebbar.")
+                box.toggled.connect(partial(self.change_setting,"layer_snap_enabled"))
+                self.checks["layer_snap_enabled"] = box
+                card.content_layout.insertWidget(0,box)
                 self.selection_label = QLabel("Greifer auswählen oder Profil doppelklicken.")
                 self.selection_label.setWordWrap(True)
                 card.content_layout.insertWidget(0,self.selection_label)
@@ -131,7 +156,7 @@ class ManualGenerationPanel(QWidget):
                 self.critical_note = QLabel()
                 self.critical_note.setWordWrap(True)
                 card.content_layout.addWidget(self.critical_note)
-        self.reset_button = QPushButton("↺ Manuellen Entwurf zurücksetzen")
+        self.reset_button = QPushButton("Alles zurücksetzen")
         self.reset_button.clicked.connect(self.reset_all)
         form.addWidget(self.reset_button)
         form.addStretch()
@@ -142,53 +167,116 @@ class ManualGenerationPanel(QWidget):
         preview_layout = QVBoxLayout(preview)
         preview_layout.setContentsMargins(14,0,0,0)
         preview_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-        tools = QHBoxLayout()
-        self.view_combo = WheelSafeComboBox()
-        self.view_combo.addItems(["Seitenansicht", "Vorderansicht", "3/4-Ansicht", "Draufsicht", "Freie 3D-Ansicht"])
-        self.view_names = ("side","front","three_quarter","top","free")
-        self.view_combo.currentIndexChanged.connect(lambda i:self.canvas.set_view(self.view_names[i]))
-        tools.addWidget(self.view_combo,1)
-        self.fit_button = QPushButton("Einpassen")
-        self.fit_button.clicked.connect(lambda:self.canvas.fit_scene())
-        tools.addWidget(self.fit_button)
-        preview_layout.addLayout(tools)
+        self.highlight_host = XRayControls()
+        self.highlight_title = self.highlight_host.title
+        self.highlight_group = self.highlight_host.group
+        self.highlight_buttons = self.highlight_host.buttons
+        self.highlight_host.choice_changed.connect(lambda choice:self.canvas.set_highlight(choice))
+        self.resolution_host = QWidget()
+        self.resolution_host.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+        resolution_group = QVBoxLayout(self.resolution_host)
+        resolution_group.setContentsMargins(0,0,0,0)
+        resolution_group.setSpacing(1)
+        self.resolution_heading = ResolutionHeading()
+        self.resolution_title = self.resolution_heading.title
+        resolution_header = QHBoxLayout()
+        resolution_header.setSpacing(3)
+        resolution_header.addWidget(self.resolution_heading,1)
+        resolution_group.addLayout(resolution_header)
+        resolution = QHBoxLayout()
+        resolution.setSpacing(3)
+        self.resolution_slider = ResolutionSlider()
+        self.resolution_slider.setMinimumWidth(65)
+        self.resolution_slider.setToolTip("performance → optik: 1, 3, 5, 10, 15, 20, 25, 50, 75, 100 %. Analyse und Druckdaten bleiben gleich.")
+        self.resolution_slider.setRange(1,10)
+        self.resolution_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.resolution_slider.setTickInterval(1)
+        self.resolution_slider.setSingleStep(1)
+        # Stop positions follow the ten slider stages; colors follow their real
+        # percentages, keeping the many low-resolution stages predominantly green.
+        colors = (QColor("#41a878"),QColor("#e5bf48"),QColor("#e5484d"))
+        stops = []
+        for index,percent in enumerate(OBJECT_RESOLUTION_STAGES):
+            first,last = colors[:2] if percent <= 50 else colors[1:]
+            fraction = percent/50 if percent <= 50 else (percent-50)/50
+            rgb = [round(a+(b-a)*fraction) for a,b in zip(first.getRgb()[:3],last.getRgb()[:3])]
+            stops.append(f"stop:{index/(len(OBJECT_RESOLUTION_STAGES)-1):.6f} {QColor(*rgb).name()}")
+        self.resolution_slider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 4px; border: none; border-radius: 2px; "
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "+", ".join(stops)+"); } "
+            "QSlider::sub-page:horizontal, QSlider::add-page:horizontal { background: transparent; border: none; } "
+            "QSlider::handle:horizontal { width: 10px; margin: -4px 0; border: 2px solid #536980; "
+            "border-radius: 6px; background: #f8fbfd; }")
+        self.resolution_slider.valueChanged.connect(lambda value:self.change_setting("object_resolution_percent",OBJECT_RESOLUTION_STAGES[value-1]))
+        resolution.addWidget(self.resolution_slider,1)
+        self.resolution_label = QLabel()
+        self.resolution_label.setStyleSheet("font-size: 8pt; padding: 0;")
+        self.resolution_label.setMinimumWidth(self.resolution_label.fontMetrics().horizontalAdvance("100 %"))
+        resolution_group.addLayout(resolution)
+        resolution.addWidget(self.resolution_label)
+        self.resolution_reset = QPushButton("↺")
+        self.resolution_reset.setObjectName("settingResetButton")
+        self.resolution_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
+        self.resolution_reset.setAccessibleName("Auflösung des Originalobjekts zurücksetzen")
+        self.resolution_reset.setToolTip("Standardauflösung des Originalobjekts wiederherstellen")
+        self.resolution_reset.clicked.connect(lambda:self.change_setting("object_resolution_percent",self.default_value("object_resolution_percent")))
+        resolution.addWidget(self.resolution_reset)
+        resolution_header.addSpacing(self.resolution_label.minimumWidth()+self.resolution_reset.width()+6)
+        self.rotation_host = QWidget()
+        self.rotation_host.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+        rotation_group = QVBoxLayout(self.rotation_host)
+        rotation_group.setContentsMargins(0,0,0,0)
+        rotation_group.setSpacing(1)
+        self.rotation_title = QLabel("Originalobjekt drehen")
+        self.rotation_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.rotation_title.setStyleSheet("font-size: 8pt; padding: 0;")
+        rotation_group.addWidget(self.rotation_title)
+        rotation = QHBoxLayout()
+        rotation.setSpacing(3)
+        self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rotation_slider.setMinimumWidth(50)
+        self.rotation_slider.setRange(0,360)
+        self.rotation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.rotation_slider.setTickInterval(45)
+        self.rotation_slider.setToolTip("Originalobjekt drehen · Rastpunkte alle 45°")
+        self.rotation_slider.valueChanged.connect(self._queue_rotation)
+        rotation.addWidget(self.rotation_slider,1)
+        self.rotation_label = QLabel("0,00°")
+        self.rotation_label.setStyleSheet("font-size: 8pt; padding: 0;")
+        rotation.addWidget(self.rotation_label)
+        self.rotation_reset = QPushButton("↺")
+        self.rotation_reset.setObjectName("settingResetButton")
+        self.rotation_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
+        self.rotation_reset.setProperty("modified",False)
+        self.rotation_reset.setEnabled(False)
+        self.rotation_reset.setAccessibleName("Objektdrehung zurücksetzen")
+        self.rotation_reset.setToolTip("Originalorientierung wiederherstellen")
+        self.rotation_reset.clicked.connect(self.reset_rotation)
+        rotation.addWidget(self.rotation_reset)
+        rotation_group.addLayout(rotation)
+        self.preview_tools = PreviewToolsRow(self.highlight_host,self.resolution_host,self.rotation_host)
+        preview_layout.addWidget(self.preview_tools)
         self.canvas = ManualCanvas()
-        self.canvas.move_requested.connect(self.move)
-        self.canvas.control_requested.connect(self.move_control)
+        self.canvas.view_state_changed.connect(lambda:self.reset_button.setEnabled(self.can_reset_all()))
+        self.view_buttons = self.canvas.view_controls.view_buttons
+        self.fit_button = self.canvas.view_controls.fit_button
+        self.canvas.move_requested.connect(self._move_from_canvas)
+        self.canvas.control_requested.connect(self._control_from_canvas)
         self.canvas.selection_changed.connect(self.select)
         self.canvas.insert_requested.connect(self.insert)
         self.canvas.remove_requested.connect(self.remove)
+        self.canvas.curve_reset_requested.connect(self.reset_point_curves)
         self.canvas.interaction_started.connect(self._begin_interaction)
         self.canvas.interaction_finished.connect(self._end_interaction)
         self.canvas.view_changed.connect(self._view_changed)
         preview_layout.addWidget(self.canvas,1)
-        self.view_hint = QLabel()
-        self.view_hint.setWordWrap(True)
-        preview_layout.addWidget(self.view_hint)
-        rotation = QHBoxLayout()
-        rotation.addWidget(QLabel("Original drehen"))
-        self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
-        self.rotation_slider.setRange(0,360)
-        self.rotation_slider.valueChanged.connect(self._queue_rotation)
-        rotation.addWidget(self.rotation_slider,1)
-        self.rotation_label = QLabel("0,00°")
-        rotation.addWidget(self.rotation_label)
-        self.rotation_reset = QPushButton("↺")
-        self.rotation_reset.setObjectName("settingResetButton")
-        self.rotation_reset.clicked.connect(lambda:self.rotation_slider.setValue(0))
-        rotation.addWidget(self.rotation_reset)
-        preview_layout.addLayout(rotation)
         self._rotation_timer = QTimer(self)
         self._rotation_timer.setSingleShot(True)
         self._rotation_timer.setInterval(16)
         self._rotation_timer.timeout.connect(lambda:self.canvas.set_rotation(self.rotation_slider.value()))
-        self.highlight_combo = WheelSafeComboBox()
-        self.highlight_combo.addItems(["Beide hervorheben", "Turm hervorheben", "Original hervorheben"])
-        self.highlight_combo.currentIndexChanged.connect(lambda i:self.canvas.set_highlight(("both","tower","object")[i]))
-        preview_layout.addWidget(self.highlight_combo)
-        legend = QLabel("● Violett: Fuß / Fußhöhe   ● Blau: Grunddurchmesser / Turmhöhe   ● Grün: freie Punkte   ■ Grau: Kurvengriffe")
-        legend.setWordWrap(True)
-        preview_layout.addWidget(legend)
+        self.preview_information = ManualPreviewInformation()
+        self.view_hint = self.preview_information.instructions
+        preview_layout.addWidget(self.preview_information)
         self.result_label = QLabel()
         self.result_label.setWordWrap(True)
         preview_layout.addWidget(self.result_label)
@@ -226,6 +314,11 @@ class ManualGenerationPanel(QWidget):
         self.splitter.addWidget(preview)
         self.splitter.setStretchFactor(1,1)
         self.splitter.setSizes([480,850])
+        self._settings_animation = QVariantAnimation(self)
+        self._settings_animation.setDuration(250)
+        self._settings_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._settings_animation.valueChanged.connect(self._animate_settings_extent)
+        self._settings_animation.finished.connect(self._finish_settings_animation)
         self._sync()
         self.set_actions(False,False,False,False)
         self._view_changed("side")
@@ -255,7 +348,7 @@ class ManualGenerationPanel(QWidget):
 
     def default_value(self,name):
         if name.startswith("point_"):
-            identity = "base" if self.selected == "foot_height" else self.selected
+            identity = "base" if self.selected == "foot_height" else "top" if self.selected == "top_width" else self.selected
             p = self._point_defaults.get(identity)
             if p: return p.diameter_mm if name == "point_diameter_mm" else p.z_mm
         if name.startswith("control_") and self.draft is not None:
@@ -267,6 +360,7 @@ class ManualGenerationPanel(QWidget):
         if self.initial is not None:
             if name == "base_diameter_mm": return self.initial.base_diameter_mm
             if name == "height_mm": return self.initial.height_mm
+            if name == "top_diameter_mm": return self.initial.points[-1].position.diameter_mm
             if hasattr(self.initial.settings,name): return getattr(self.initial.settings,name)
         value = getattr(ManualSettings(),name,None)
         return value if value is not None else 25 if name == "circle_segments" else 0.1
@@ -297,8 +391,9 @@ class ManualGenerationPanel(QWidget):
         s = self.settings
         values = s.to_dict()
         if self.draft:
-            values.update(base_diameter_mm=self.draft.base_diameter_mm,height_mm=self.draft.height_mm)
-            point = next((p for p in self.draft.points if p.identity == self.selected),None)
+            values.update(base_diameter_mm=self.draft.base_diameter_mm,height_mm=self.draft.height_mm,
+                          top_diameter_mm=self.draft.points[-1].position.diameter_mm)
+            point = next((p for p in self.draft.points if p.identity == ("top" if self.selected == "top_width" else self.selected)),None)
             if point:
                 values.update(point_diameter_mm=point.position.diameter_mm,point_height_mm=point.position.z_mm)
                 self.selection_label.setText(f"{'Freier Profilpunkt' if point.kind == 'free' else {'foot':'Fußrand','base':'Körperbeginn','top':'Oberer Abschluss'}[point.kind]} · {point.position.z_mm:.2f} mm")
@@ -306,6 +401,8 @@ class ManualGenerationPanel(QWidget):
                 p = self.draft.points[1]
                 values.update(point_diameter_mm=p.position.diameter_mm,point_height_mm=p.position.z_mm)
                 self.selection_label.setText("Fußübergang · vertikal verschieben")
+            if self.selected in self.canvas.LIMITS:
+                self.selection_label.setText(self.LABELS[self.selected][0]+" · horizontal verschieben")
             control = self._selected_control()
             if control:
                 i,n = control
@@ -316,8 +413,8 @@ class ManualGenerationPanel(QWidget):
             self.rows["control_height_mm"].setVisible(control is not None)
             self.rows["point_diameter_mm"].setVisible(control is None)
             self.rows["point_height_mm"].setVisible(control is None)
-            self.editors["point_diameter_mm"].setEnabled(point is not None and point.kind != "top")
-            self.editors["point_height_mm"].setEnabled(self.selected == "foot_height" or (point is not None and point.kind in {"free","top"}))
+            self.editors["point_diameter_mm"].setEnabled(point is not None and (point.kind != "top" or self.selected == "top_width"))
+            self.editors["point_height_mm"].setEnabled(self.selected == "foot_height" or (point is not None and (point.kind == "free" or self.selected == "top")))
             self.remove_point_button.setEnabled(point is not None and point.kind == "free")
             self.smooth_checkbox.setEnabled(point is not None and point.kind in {"base","free"})
             with QSignalBlocker(self.smooth_checkbox): self.smooth_checkbox.setChecked(point.smooth if point else False)
@@ -325,8 +422,7 @@ class ManualGenerationPanel(QWidget):
             self.segment_combo.setEnabled(index is not None and index > 0)
             with QSignalBlocker(self.segment_combo):
                 self.segment_combo.setCurrentIndex(int(self.draft.curves[index].curved) if index is not None else 0)
-            count = sum(l.total_time_s < s.target_layer_time_s-s.layer_time_tolerance_s for l in self.reference.context.layers)
-            self.critical_note.setText(f"Original: {count} von {len(self.reference.context.layers)} Layern unter Ziel − Toleranz. Die Farben zeigen das tatsächliche Defizit.")
+            self.critical_note.setText(f"Die Farben vergleichen ausschließlich die Original-Layer mit der Farbreferenz von {s.color_reference_time_s:g} s; sie bewerten nicht den manuellen Turm.")
         for name,spin in self.editors.items():
             with QSignalBlocker(spin):
                 value = values.get(name,self.default_value(name))
@@ -334,6 +430,11 @@ class ManualGenerationPanel(QWidget):
             self.rows[name].refresh_reset_state()
         for name,box in self.checks.items():
             with QSignalBlocker(box): box.setChecked(getattr(s,name))
+        with QSignalBlocker(self.resolution_slider):
+            self.resolution_slider.setValue(OBJECT_RESOLUTION_STAGES.index(s.object_resolution_percent)+1)
+        self.resolution_label.setText(f"{s.object_resolution_percent} %")
+        self._refresh_resolution_reset()
+        self.preview_information.set_state(self.canvas.view,s.critical_layers_enabled)
         self._syncing = False
         self._apply_view_editability()
 
@@ -370,10 +471,10 @@ class ManualGenerationPanel(QWidget):
         if self.draft is None:
             if hasattr(self.settings,name): self.change_setting(name,value)
             return
-        if name in {"base_diameter_mm","foot_diameter_mm","foot_height_mm","height_mm"}:
-            identity = {"base_diameter_mm":"base","foot_diameter_mm":"foot","foot_height_mm":"foot_height","height_mm":"top"}[name]
-            p = self.draft.points[1 if identity == "foot_height" else 0 if identity == "foot" else -1 if identity == "top" else 1].position
-            self.move(identity,value if name in {"base_diameter_mm","foot_diameter_mm"} else p.diameter_mm,
+        if name in {"base_diameter_mm","foot_diameter_mm","foot_height_mm","height_mm","top_diameter_mm"}:
+            identity = {"base_diameter_mm":"base","foot_diameter_mm":"foot","foot_height_mm":"foot_height","height_mm":"top","top_diameter_mm":"top_width"}[name]
+            p = self.draft.points[1 if identity == "foot_height" else 0 if identity == "foot" else -1 if identity in {"top","top_width"} else 1].position
+            self.move(identity,value if name in {"base_diameter_mm","foot_diameter_mm","top_diameter_mm"} else p.diameter_mm,
                       value if name in {"height_mm","foot_height_mm"} else p.z_mm)
         elif name in {"point_diameter_mm","point_height_mm"}:
             self.move(self.selected,self.editors["point_diameter_mm"].value(),self.editors["point_height_mm"].value())
@@ -388,28 +489,122 @@ class ManualGenerationPanel(QWidget):
         # limits, so a typed attempt reaches the same validator as a drag.
         self._interaction_feedback.clear()
 
-    def move(self,identity,diameter,z):
+    def _move_from_canvas(self,identity,diameter,z):
+        if self._busy or self.draft is None:
+            return
+        if identity in self.canvas.LIMITS:
+            if self.canvas.horizontal_drag_snaps():
+                self.move_limit(identity,diameter)
+            return
+        error = self.move(identity,diameter,z,layer_snap=self.canvas.vertical_drag_snaps(),
+                          diameter_snap=self.canvas.horizontal_drag_snaps())
+        actual_identity="top" if identity == "top_width" else identity
+        point = next((p for p in self.draft.points if p.identity == actual_identity),None)
+        if self.canvas.horizontal_drag_snaps():
+            setting = None
+            if error is not None and error.setting in {"minimum_diameter_mm","maximum_diameter_mm","maximum_foot_diameter_mm"}:
+                setting = error.setting
+            elif point is not None:
+                bounds=("maximum_foot_diameter_mm",) if point.kind == "foot" else ("minimum_diameter_mm","maximum_diameter_mm")
+                for name in bounds:
+                    boundary = getattr(self.settings,name)
+                    if math.isclose(point.position.diameter_mm,boundary,rel_tol=0,abs_tol=1e-7):
+                        setting = name
+                        break
+            self.canvas.set_width_limit_feedback(setting,diameter)
+
+    def move_limit(self,name,diameter):
+        if self._busy or self.draft is None or name not in self.canvas.LIMITS:
+            return
+        old = self.draft
+        start = getattr(old.settings,name)
+        target = min(1000,max(.1,round(diameter*10)/10))
+        def operation(value):
+            return self._checked(validate(replace(old,settings=replace(old.settings,**{name:value}))))
+        candidate,error = bounded_edit(old,lambda t:operation(start+(target-start)*t))
+        if error:
+            boundary = getattr(candidate.settings,name)*10
+            snapped = (math.floor(boundary+1e-8) if target > start else math.ceil(boundary-1e-8))/10
+            candidate = old
+            if min(start,target)-1e-8 <= snapped <= max(start,target)+1e-8:
+                try:
+                    candidate = operation(snapped)
+                except GeometryError:
+                    pass
+            self.feedback(error,name)
+        else:
+            self.status_label.clear()
+        self.commit(candidate)
+
+    def _control_from_canvas(self,index,n,diameter,z):
+        self.move_control(index,n,diameter,z,layer_snap=self.canvas.vertical_drag_snaps(),
+                          diameter_snap=self.canvas.horizontal_drag_snaps())
+
+    def _edit_coordinate(self,old,coordinate_for,destination,operation,layer_snap,diameter_snap):
+        if not layer_snap and not diameter_snap:
+            return bounded_coordinate_edit(old,coordinate_for,destination,operation)
+        try:
+            return operation(old,destination),None
+        except GeometryError as error:
+            limiting = error
+        # A continuous boundary can sit between layers. Keep radial motion,
+        # then stop on the last reachable layer instead of accepting that boundary.
+        start = coordinate_for(old)
+        horizontal,_ = bounded_coordinate_edit(old,coordinate_for,
+            Coordinate(destination.radius_mm,start.z_mm),operation)
+        if diameter_snap:
+            boundary = coordinate_for(horizontal).radius_mm*20
+            radius = (math.floor(boundary+1e-8) if destination.radius_mm > start.radius_mm
+                      else math.ceil(boundary-1e-8))/20
+            horizontal = old
+            if min(start.radius_mm,destination.radius_mm)-1e-8 <= radius <= max(start.radius_mm,destination.radius_mm)+1e-8:
+                try:
+                    horizontal = operation(old,Coordinate(radius,start.z_mm))
+                except GeometryError:
+                    pass
+        start = coordinate_for(horizontal)
+        vertical,_ = bounded_coordinate_edit(horizontal,coordinate_for,
+            Coordinate(start.radius_mm,destination.z_mm),operation)
+        if not layer_snap:
+            return vertical,limiting
+        boundary = coordinate_for(vertical).z_mm
+        z = snap_layer_height(boundary,self.canvas._layer_tops,
+            lower=min(start.z_mm,destination.z_mm),upper=max(start.z_mm,destination.z_mm),
+            direction=-1 if destination.z_mm > start.z_mm else 1)
+        if z is not None:
+            try:
+                return operation(horizontal,Coordinate(start.radius_mm,z)),limiting
+            except GeometryError:
+                pass
+        return horizontal,limiting
+
+    def move(self,identity,diameter,z,*,layer_snap=False,diameter_snap=False):
         if self._busy or self.draft is None: return
-        actual = "base" if identity == "foot_height" else identity
+        actual = "base" if identity == "foot_height" else "top" if identity == "top_width" else identity
         p = next((p for p in self.draft.points if p.identity == actual),None)
         if p is None: return
-        if identity == "base": z = p.position.z_mm
-        if identity == "foot_height": diameter = p.position.diameter_mm
+        if identity in {"base","top_width"}: z = p.position.z_mm
+        if identity in {"foot_height","top"}: diameter = p.position.diameter_mm
+        if diameter_snap:
+            diameter = round(diameter*10)/10
         old = self.draft
-        def operation(t):
-            return self._checked(move_point(old,actual,diameter_mm=p.position.diameter_mm+(diameter-p.position.diameter_mm)*t,
-                                           z_mm=p.position.z_mm+(z-p.position.z_mm)*t))
-        candidate,error = bounded_edit(old,operation)
+        candidate,error = self._edit_coordinate(
+            old, lambda d: next(point.position for point in d.points if point.identity == actual),
+            Coordinate(diameter/2,z),
+            lambda d,pos: self._checked(move_point(d,actual,diameter_mm=pos.diameter_mm,z_mm=pos.z_mm)),layer_snap,diameter_snap)
         if error: self.feedback(error,"point_height_mm")
         else: self.status_label.clear()
         self.commit(candidate)
+        return error
 
-    def move_control(self,index,n,diameter,z):
+    def move_control(self,index,n,diameter,z,*,layer_snap=False,diameter_snap=False):
         if self._busy or self.draft is None: return
+        if diameter_snap:
+            diameter = round(diameter*10)/10
         old = self.draft
-        p = getattr(old.curves[index],f"control{n}")
-        candidate,error = bounded_edit(old,lambda t:self._checked(set_curve(old,index,control=n,
-                                                      position=p.lerp(Coordinate(diameter/2,z),t))))
+        candidate,error = self._edit_coordinate(
+            old, lambda d: getattr(d.curves[index],f"control{n}"), Coordinate(diameter/2,z),
+            lambda d,pos: self._checked(set_curve(d,index,control=n,position=pos)),layer_snap,diameter_snap)
         if error: self.feedback(error,"control_height_mm")
         else: self.status_label.clear()
         self.commit(candidate)
@@ -419,14 +614,30 @@ class ManualGenerationPanel(QWidget):
         self._sync()
         self.canvas.update()
 
+    def reset_point_curves(self,identity):
+        if self._busy or self.draft is None: return
+        try:
+            candidate = self._checked(reset_point_curves(self.draft,identity))
+        except GeometryError as error:
+            self.feedback(error,"points")
+            return
+        self.selected = self.canvas.selected = identity
+        self.canvas._revealed_control_anchor = {"foot_height":"base","top_width":"top"}.get(identity,identity)
+        for i,curve in enumerate(candidate.curves):
+            if curve != self.draft.curves[i]:
+                for n in (1,2):
+                    self._control_defaults[(candidate.points[i].identity,n)] = getattr(curve,f"control{n}")
+        self.commit(candidate)
+
     def _selected_control(self):
         return tuple(map(int,self.selected.split(":")[1:])) if self.selected.startswith("control:") else None
 
     def _segment_index(self):
         if self.selected in {"foot","foot_height"}: return 0
+        if self.selected in {"top","top_width"} and self.draft is not None: return len(self.draft.curves)-1
         control = self._selected_control()
         if control: return control[0]
-        return next((i for i,p in enumerate(self.draft.points[:-1]) if p.identity == self.selected),None) if self.draft else None
+        return next((i for i,p in enumerate(self.draft.points[:-1]) if p.identity == ("top" if self.selected == "top_width" else self.selected)),None) if self.draft else None
 
     def _segment_changed(self,index):
         if self._syncing or self._busy or self.draft is None: return
@@ -449,6 +660,7 @@ class ManualGenerationPanel(QWidget):
             self.feedback(e,"point_height_mm")
             return
         self.selected = self.canvas.selected = identity
+        self.canvas._revealed_control_anchor = identity
         self._point_defaults[identity] = next(p.position for p in draft.points if p.identity == identity)
         for i,c in enumerate(draft.curves):
             for n in (1,2): self._control_defaults.setdefault((draft.points[i].identity,n),getattr(c,f"control{n}"))
@@ -463,17 +675,23 @@ class ManualGenerationPanel(QWidget):
 
     def remove(self,identity):
         if self._busy or self.draft is None: return
-        try: draft = self._checked(remove_point(self.draft,identity))
+        try:
+            index = next(i for i,p in enumerate(self.draft.points) if p.identity == identity)
+            draft = self._checked(remove_point(self.draft,identity))
         except (GeometryError,StopIteration) as e:
             self.feedback(e,"points")
             return
         self.selected = self.canvas.selected = "base"
+        self._point_defaults.pop(identity,None)
+        self._control_defaults = {key:value for key,value in self._control_defaults.items() if key[0] != identity}
+        for n in (1,2):
+            self._control_defaults[(draft.points[index-1].identity,n)] = getattr(draft.curves[index-1],f"control{n}")
         self.commit(draft)
 
     def reset_value(self,name):
         self._interaction_feedback.clear()
         if name.startswith("point_") and self.draft is not None:
-            identity = "base" if self.selected == "foot_height" else self.selected
+            identity = "base" if self.selected == "foot_height" else "top" if self.selected == "top_width" else self.selected
             default = self._point_defaults.get(identity)
             current = next((p.position for p in self.draft.points if p.identity == identity),None)
             if default and current:
@@ -506,8 +724,65 @@ class ManualGenerationPanel(QWidget):
             self.feedback(e,"points")
             return
         self.initial = draft
+        self._restore_form(draft)
+        self.reset_rotation()
+        self.highlight_buttons["both"].setChecked(True)
+        self.canvas.set_highlight("both")
+        self.canvas.set_view(self.canvas.view)
+
+    def can_reset_all(self):
+        return (not self._busy and self.draft is not None and self.initial is not None and
+                (self.draft != self.initial or self.canvas.object_rotation%360 != 0 or
+                 self.rotation_slider.value() != 0 or self.canvas.highlight != "both" or
+                 self.canvas.zoom != 1 or self.canvas.pan != QPointF() or
+                 (self.canvas.view == "free" and (self.canvas.yaw_deg,self.canvas.pitch_deg) != (-35,25))))
+
+    def _restore_form(self,draft):
         self.selected = self.canvas.selected = "base"
+        self.canvas._revealed_control_anchor = None
+        self._point_defaults = {p.identity:p.position for p in draft.points}
+        self._control_defaults = {(draft.points[i].identity,n):getattr(c,f"control{n}")
+                                  for i,c in enumerate(draft.curves) for n in (1,2)}
+        self.status_label.clear()
         self.commit(draft)
+
+    def tower_reset_draft(self):
+        defaults = ManualSettings()
+        settings = replace(self.settings,**{name:getattr(defaults,name) for name in self.FORM_SETTINGS})
+        return self._checked(initial_draft(settings,self.reference.context.layers,
+                                          self.reference.context.maximum_height_mm,self.reference.context.key))
+
+    def can_reset_tower(self):
+        if self._busy or self.draft is None or self.reference is None:
+            return False
+        try:
+            target = self.tower_reset_draft()
+        except GeometryError:
+            return False
+        return self.draft != target
+
+    def reset_tower(self):
+        if self._busy or self.reference is None or self.draft is None:
+            return
+        try:
+            draft = self.tower_reset_draft()
+        except GeometryError as error:
+            self.feedback(error,"points")
+            return
+        self._restore_form(draft)
+
+    def reset_rotation(self):
+        self.rotation_slider.setValue(0)
+        self._queue_rotation(0)
+        self._rotation_timer.stop()
+        self.canvas.set_rotation(0)
+
+    def _refresh_resolution_reset(self):
+        modified = self.settings.object_resolution_percent != self.default_value("object_resolution_percent")
+        self.resolution_reset.setProperty("modified",modified)
+        self.resolution_reset.setEnabled(modified and not self._busy and self.reference is not None)
+        self.resolution_reset.style().unpolish(self.resolution_reset)
+        self.resolution_reset.style().polish(self.resolution_reset)
 
     def feedback(self,error,fallback):
         name = getattr(error,"setting",fallback)
@@ -523,27 +798,42 @@ class ManualGenerationPanel(QWidget):
     def _end_interaction(self): self._interaction_feedback.clear(); self._sync()
 
     def _queue_rotation(self,angle):
+        if self.rotation_slider.isSliderDown():
+            snapped = round(angle/45)*45
+            if angle != snapped and abs(angle-snapped) <= 3:
+                self.rotation_slider.setValue(snapped)
+                return
         self.rotation_label.setText(f"{angle:.2f}°".replace(".",","))
+        self.rotation_reset.setProperty("modified",angle != 0)
+        self.rotation_reset.setEnabled(angle != 0)
+        self.rotation_reset.style().unpolish(self.rotation_reset)
+        self.rotation_reset.style().polish(self.rotation_reset)
         if not self._rotation_timer.isActive(): self._rotation_timer.start()
 
     def _view_changed(self,view):
-        with QSignalBlocker(self.view_combo): self.view_combo.setCurrentIndex(self.view_names.index(view))
-        self.view_hint.setText("Greifer ziehen · Profil doppelklicken: Punkt hinzufügen · Mausrad: Zoom · Mitteltaste oder freie Fläche: Pan" if view in {"side","front"} else
-                               "Profilbearbeitung in Seiten- und Vorderansicht. Freie 3D-Ansicht: rechte Maustaste dreht die Kamera.")
+        self.view_buttons[view].setChecked(True)
+        self.resolution_host.show()
+        self.preview_information.set_state(view,self.settings.critical_layers_enabled)
+        if view in {"top","bottom"}:
+            self.selected = self.canvas.selected = "top_width" if view == "top" else "foot"
         if self.draft is not None: self._sync()
         self._apply_view_editability()
 
     def _apply_view_editability(self):
         if not hasattr(self,"canvas"): return
         editable = self.canvas.view in {"side","front"}
+        plan_field = {"top":"top_diameter_mm","bottom":"foot_diameter_mm"}.get(self.canvas.view)
+        plan_limit = {"top":"maximum_diameter_mm","bottom":"maximum_foot_diameter_mm"}.get(self.canvas.view)
         self.smooth_checkbox.setEnabled(editable and self.draft is not None and self.selected in {p.identity for p in self.draft.points[1:-1]})
         for name,row in self.rows.items():
-            if name not in {"target_layer_time_s","layer_time_tolerance_s","overhang_angle_deg","gradient_start_deficit_s","gradient_full_deficit_s"}:
-                row.setEnabled(editable)
+            if name not in {"color_reference_time_s","overhang_angle_deg","gradient_start_deficit_s","gradient_full_deficit_s"}:
+                row.setEnabled(editable or (plan_field is not None and name in {plan_field,plan_limit}))
         for name in ("expansion_enabled","contraction_enabled"):
             self.checks[name].setEnabled(editable)
+        if plan_field is not None and self.selected in {"top_width","foot"}:
+            self.rows["point_diameter_mm"].setEnabled(True)
         self.add_point_button.setEnabled(editable)
-        self.reset_button.setEnabled(editable)
+        self.reset_button.setEnabled(self.can_reset_all())
         if not editable:
             self.segment_combo.setEnabled(False)
             self.smooth_checkbox.setEnabled(False)
@@ -551,6 +841,8 @@ class ManualGenerationPanel(QWidget):
 
     def set_busy(self,busy,cancelling=False,exporting=False):
         self._busy = busy
+        self.resolution_slider.setEnabled(not busy and self.reference is not None)
+        self._refresh_resolution_reset()
         self.settings_content.setEnabled(not busy and self.reference is not None)
         self.canvas.editing_enabled = not busy
         self.canvas.update()
@@ -574,15 +866,118 @@ class ManualGenerationPanel(QWidget):
         self.action_hint.setText("Export und Analyse beziehen sich auf den bisherigen geprüften Stand. Die Vorschau zeigt den aktuellen Entwurf." if has_result and dirty else
                                  "Dieser geprüfte Stand wurde bereits exportiert." if exported else "")
 
-    def resizeEvent(self,event):
-        narrow = self.width() < 1000
+    @property
+    def settings_collapsed(self):
+        return self._settings_collapsed
+
+    def toggle_settings(self):
+        self.set_settings_collapsed(not self._settings_collapsed)
+
+    def _should_stack_settings(self):
+        return self.width() < max(1000,self.settings_pane.expanded_minimum_width+
+                                  self.preview_tools.minimumSizeHint().width()+30)
+
+    def set_settings_collapsed(self,collapsed):
+        if collapsed == self._settings_collapsed:
+            return
+        reversing=self._settings_transitioning
+        self._settings_animation.stop()
+        if collapsed and not reversing:
+            self._settings_scroll_position=self.settings_scroll.verticalScrollBar().value()
+            if self.splitter.orientation() == Qt.Orientation.Horizontal:
+                self._settings_horizontal_extent=self.settings_pane.width()
+            else:
+                self._settings_vertical_extent=self.settings_pane.height()
+        self._settings_collapsed=collapsed
+        self._settings_transitioning=True
+        self.settings_pane.set_target_collapsed(collapsed)
+        self.settings_pane.begin_animation()
+        self.settings_pane.setMinimumHeight(0)
+        self.settings_pane.setMaximumHeight(16777215)
+        if not collapsed:
+            orientation=Qt.Orientation.Vertical if self._should_stack_settings() else Qt.Orientation.Horizontal
+            self._configure_settings_margins(orientation == Qt.Orientation.Vertical)
+            if orientation != self.splitter.orientation():
+                self.splitter.setOrientation(orientation)
+                start=0 if orientation == Qt.Orientation.Vertical else self.settings_pane.RAIL_WIDTH
+            else:
+                start=self.splitter.sizes()[0]
+        else:
+            start=self.splitter.sizes()[0]
+        vertical=self.splitter.orientation() == Qt.Orientation.Vertical
+        self.splitter.setCollapsible(0,vertical)
+        if collapsed:
+            end=0 if vertical else self.settings_pane.RAIL_WIDTH
+        elif vertical:
+            end=max(240,min(360,self._settings_vertical_extent,
+                            self.splitter.height()-self.preview_container.minimumHeight()-1))
+        else:
+            end=max(self.settings_pane.expanded_minimum_width,
+                    min(self._settings_horizontal_extent,self.splitter.width()-self.preview_container.minimumSizeHint().width()-1))
+        self._settings_animation.setStartValue(float(start))
+        self._settings_animation.setEndValue(float(end))
+        self._animate_settings_extent(float(start))
+        self._settings_animation.start()
+
+    def _animate_settings_extent(self,value):
+        total=(self.splitter.height() if self.splitter.orientation() == Qt.Orientation.Vertical else self.splitter.width())
+        total-=self.splitter.handleWidth()
+        self.splitter.setSizes([round(value),max(1,total-round(value))])
+
+    def _finish_settings_animation(self):
+        self._settings_transitioning=False
+        self.settings_pane.finish_animation(self._settings_collapsed)
+        self.splitter.setCollapsible(0,False)
+        self._configure_settings_layout()
+        if self._settings_collapsed:
+            self._animate_settings_extent(self.settings_pane.RAIL_WIDTH)
+        else:
+            self.settings_pane._position_children()
+        self.settings_visibility_changed.emit()
+        if not self._settings_collapsed:
+            QTimer.singleShot(0,self._restore_settings_scroll_position)
+
+    def _restore_settings_scroll_position(self):
+        if not self._settings_collapsed and not self._settings_transitioning:
+            self.settings_scroll.verticalScrollBar().setValue(self._settings_scroll_position)
+
+    def _configure_settings_margins(self,narrow):
+        self.settings_content.layout().setContentsMargins(0,0,0 if narrow else 14,14 if narrow else 0)
+        self.preview_container.layout().setContentsMargins(0 if narrow else 14,14 if narrow else 0,0,0)
+
+    def _configure_settings_layout(self):
+        narrow=not self._settings_collapsed and self._should_stack_settings()
         self.splitter.setOrientation(Qt.Orientation.Vertical if narrow else Qt.Orientation.Horizontal)
-        self.settings_content.layout().setContentsMargins(0,0,0,14) if narrow else self.settings_content.layout().setContentsMargins(0,0,14,0)
-        self.preview_container.layout().setContentsMargins(0,14,0,0) if narrow else self.preview_container.layout().setContentsMargins(14,0,0,0)
+        self._configure_settings_margins(narrow)
         self.settings_scroll.setMaximumHeight(360 if narrow else 16777215)
         self.settings_scroll.setMinimumHeight(240 if narrow else 0)
+        self.settings_pane.setMaximumHeight(360 if narrow else 16777215)
+        self.settings_pane.setMinimumHeight(240 if narrow else 0)
         if not getattr(self,"footer_hosted",False):
             self.setMinimumHeight(950 if narrow else 740)
+        if narrow != getattr(self,"_narrow_layout",None):
+            self._narrow_layout=narrow
+            self.layout_changed.emit(narrow)
+
+    def resizeEvent(self,event):
+        baseline = max(34,self.reset_button.sizeHint().height())
+        self.canvas.view_controls.set_button_height(max(12,round(baseline/3)))
+        height = max(baseline,self.rotation_reset.height()+self.rotation_title.fontMetrics().height()+1)
+        for host,title in ((self.highlight_host,self.highlight_title),(self.resolution_host,self.resolution_title),
+                           (self.rotation_host,self.rotation_title)):
+            host.setFixedHeight(height)
+            title.setFixedHeight(title.fontMetrics().height())
+        self.resolution_heading.setFixedHeight(self.resolution_title.height())
+        for button in self.highlight_buttons.values():
+            button.setFixedHeight(max(14,height-self.highlight_title.height()-1))
+        for title,widgets in ((self.resolution_title,(self.resolution_slider,self.resolution_label)),
+                              (self.rotation_title,(self.rotation_slider,self.rotation_label))):
+            for widget in widgets:
+                widget.setFixedHeight(max(14,height-title.height()-1))
+        if not self._settings_transitioning:
+            self._configure_settings_layout()
+            if self._settings_collapsed:
+                self._animate_settings_extent(self.settings_pane.RAIL_WIDTH)
         super().resizeEvent(event)
 
     def minimumSizeHint(self):

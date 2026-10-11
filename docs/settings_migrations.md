@@ -343,16 +343,43 @@ und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
 
-## Getrennte manuelle Einstellungen (eigenes Schema 1)
+## Getrennte manuelle Einstellungen (eigenes Schema 5)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
 automatische Format bleibt bei Schema 21. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen und gekoppelte Durchmesser-/Farbgrenzen.
-Die explizite Legacy-Migration 0→1 ergänzt den Schemaschlüssel; vor Umschreibungen
-wird das Original gesichert, anschließend atomar gespeichert. Es existiert
-keine ältere veröffentlichte manuelle Schema-Version und deshalb noch kein
-mehrstufiger manueller Versionssprung.
+Die explizite Legacy-Migration 0→1 ergänzt den Schemaschlüssel. 1→2 ersetzt
+`target_layer_time_s` durch `color_reference_time_s` und entfernt
+`layer_time_tolerance_s`. Die bisherige Zielzeit dient damit ausschließlich als
+Farbreferenz für Originalschichten, nicht als Bewertung des manuellen Turms.
+Gültige Werte von 5–30 s bleiben erhalten; inkompatible Typen, nicht endliche
+Zahlen, andere Einheiten und Werte außerhalb dieses Bereichs fallen auf den
+Standard zurück. Andere gültige manuelle Werte bleiben erhalten.
+2→3 ergänzt `layer_snap_enabled` mit dem Standard `true`. Das boolesche
+Feld steuert ausschließlich vertikale Greiferbewegungen; vorhandene numerische
+Geometriepräferenzen bleiben unverändert. Im aktuellen Schema wird auch ein
+ausgeschalteter Toggle gespeichert; andere Typen werden nicht als boolesche
+Werte interpretiert und fallen auf den aktivierten Standard zurück.
+3→4 ergänzt `object_resolution_percent` mit dem Standard `50`. Der Wert
+steuert ausschließlich die räumliche Darstellung des Originalobjekts; er ist
+in Schema 4 ein strikter Integer von 10 bis 100 in Zehnerschritten.
+Vorhandene gültige Einstellungen einschließlich eines ausgeschalteten
+Layer-Snappings bleiben erhalten. Bei 100 wird die volle Originalauflösung
+angezeigt; Druckdaten und Artefaktsignaturen hängen nicht von dieser Präferenz ab.
+4→5 ersetzt die lineare Stufenfolge durch `1, 3, 5, 10, 15, 20, 25, 50, 75, 100`.
+Vorhandene gültige Prozentwerte werden auf die nächste unterstützte Stufe abgebildet;
+bei gleichem Abstand gewinnt die präzisere Stufe. Bereits unterstützte Werte bleiben
+erhalten, etwa 50 oder 100. Alte ungültige Typen, Einheiten und Werte außerhalb
+der damaligen Zehnerschritte fallen auf den aktuellen Standard 10 zurück. Im aktuellen
+Schema werden ausschließlich die zehn strikten Integer-Stufen akzeptiert; der
+Standard entspricht Sliderposition 4 (10 %). Neue Dateien starten
+mit diesem Standard, bestehende gültige Präferenzen behalten ihren Prozentwert
+bzw. dessen nächstgelegene Stufe. Die Änderung des Standardwerts von 15 auf 10 %
+ändert weder Format noch Bedeutung gespeicherter Prozentwerte und benötigt
+deshalb keine zusätzliche Schemamigration.
+Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5 wird das Original gesichert,
+anschließend atomar gespeichert. Alle früheren Migrationsschritte bleiben erhalten.
 
 Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
 zwischenzeitliche externe Änderungen werden vom vorhandenen Bytesvergleich

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent,QRect, QSize, Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy, QVBoxLayout
 from cooling_tower.gui.widgets.responsive_card_grid import ResponsiveCardGrid
 
@@ -51,4 +51,32 @@ class GenerationModeCard(QPushButton):
         return QSize(0, self.minimumHeight())
 
     def heightForWidth(self, width: int) -> int:  # noqa: N802
-        return max(self.minimumHeight(), self.layout().totalHeightForWidth(width))
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        inner = max(1,width-margins.left()-margins.right())
+        labels = (self.title_label,self.description_label,self.action_label)
+        height = sum(self._label_height(label,inner) for label in labels)
+        return max(190,height+margins.top()+margins.bottom()+layout.spacing()*(layout.count()-1))
+
+    @staticmethod
+    def _label_height(label,width):
+        margins = label.contentsMargins()
+        inner = max(1,width-margins.left()-margins.right())
+        rectangle = label.fontMetrics().boundingRect(QRect(0,0,inner,100000),Qt.TextFlag.TextWordWrap,label.text())
+        return rectangle.height()+margins.top()+margins.bottom()+2
+
+    def _fit_wrapped_text(self):
+        margins = self.layout().contentsMargins()
+        width = max(1,self.width()-margins.left()-margins.right())
+        for label in (self.title_label,self.description_label,self.action_label):
+            label.setMinimumHeight(self._label_height(label,width))
+        self.setMinimumHeight(self.heightForWidth(self.width()))
+
+    def resizeEvent(self,event):
+        self._fit_wrapped_text()
+        super().resizeEvent(event)
+
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type() in {QEvent.Type.FontChange,QEvent.Type.StyleChange} and hasattr(self,"action_label"):
+            self._fit_wrapped_text()

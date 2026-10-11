@@ -79,7 +79,7 @@ class ManualRequest(PreviewRequest):
         return {key: value for key, value in source.items() if key in
                 {"source", "original_source", "gcode_origin", "analysis_gcode_sha256", "analysis_file_size",
                  "analysis_modified_ns", "slicer_identity_key", "profile_fingerprint", "supports_simulated", "draft_shield_simulated"}} | {
-                     "manual_request_schema_version": 1,
+                     "manual_request_schema_version": 2,
                      "geometry": self.draft.artifact_payload() if self.draft else None,
                      "effective_profile": dict(self.effective_profile.effective_values),
                      "profile_source_hashes": self.profile_source_hashes}
@@ -100,8 +100,7 @@ class ManualReference:
 @dataclass(frozen=True, slots=True)
 class ManualEvaluation:
     joint_sliced: bool
-    target_reached: bool
-    layer_times: tuple[tuple[int, float, float, float], ...]  # ID, Z, total, deficit
+    layer_times: tuple[tuple[int, float, float], ...]  # ID, Z, total
     time_source: str
     diagnostics: tuple[str, ...]
     gcode_path: Path
@@ -114,10 +113,10 @@ class ManualEvaluation:
     def to_dict(self):
         return {"technically_complete": True, "fixed_geometry": True, "slice_count": 1,
                 "time_verification": "joint_slice" if self.joint_sliced else "separate_tower_prognosis",
-                "target_reached": self.target_reached, "time_source": self.time_source,
+                "time_source": self.time_source,
                 "minimum_layer_time_s": self.minimum_time_s,
-                "layers": [{"index": i, "z_mm": z, "total_time_s": t, "remaining_deficit_s": d}
-                           for i, z, t, d in self.layer_times],
+                "layers": [{"index": i, "z_mm": z, "total_time_s": t}
+                           for i, z, t in self.layer_times],
                 "diagnostics": list(self.diagnostics), "evaluated_gcode_sha256": self.gcode_sha256}
 
 
@@ -131,7 +130,6 @@ class ManualResult(PreviewResult):
 class ManualExportResult(PreviewExportResult):
     generation_method: str = "manual"
     joint_sliced: bool = False
-    target_reached: bool = False
 
 
 class _CancelableAnalysis:
@@ -279,11 +277,11 @@ class ManualGenerationService:
                 rows = []
                 for layer in request.snapshot.layers:
                     t = measured[layer.index] if joint else layer.total_time_s+measured.get(layer.index, 0)
-                    rows.append((layer.index, layer.z_mm, t, max(0.0, request.settings.target_layer_time_s-t)))
+                    rows.append((layer.index, layer.z_mm, t))
                 if joint:
                     # Include layers newly introduced by supports or slicing.
                     known = {round(row[1], 6) for row in rows}
-                    rows.extend((l.index, l.z_mm, l.total_time_s, max(0.0, request.settings.target_layer_time_s-l.total_time_s))
+                    rows.extend((l.index, l.z_mm, l.total_time_s)
                                 for l in actual_layers if round(l.z_mm,6) not in known)
                 warnings.extend(evaluation.diagnostics)
                 if evaluation.metadata_source == "gcode":
@@ -301,10 +299,7 @@ class ManualGenerationService:
                 raise ValueError("Quelle oder Profile wurden während der Prüfung verändert.")
             if sha256_file(request.source_path) != data.key.content_sha256 or not request.snapshot.matches_file(request.source_path):
                 raise ValueError("Der Analyse-G-Code wurde während der manuellen Prüfung verändert.")
-            reached = all(row[3] <= request.settings.layer_time_tolerance_s+1e-9 for row in rows)
-            if not reached:
-                warnings.append("Die gewünschte Mindest-Layerzeit ist nicht auf allen Layern erreicht. Der vollständig geprüfte Stand ist mit dieser Warnung exportierbar.")
-            result_evaluation = ManualEvaluation(joint, reached, tuple(rows), evaluation.metadata_source,
+            result_evaluation = ManualEvaluation(joint, tuple(rows), evaluation.metadata_source,
                                                  tuple(warnings), Path(sliced.gcode_path), sha256_file(sliced.gcode_path))
             scene = PreviewScene(data.object_segments, wireframe(request.draft, placement), placement.bed_bounds,
                                  (placement.center_x_mm, placement.center_y_mm), data.source_segment_count, len(data.object_segments),
@@ -318,8 +313,6 @@ class ManualGenerationService:
                                   project_path=project, project_sha256=sha256_file(project) if project is not None else None,
                                   joint_sliced=joint, completed_joint_slice_count=int(joint), configured_joint_slice_count=int(joint),
                                   minimum_verified_layer_time_s=result_evaluation.minimum_time_s,
-                                  target_layer_time_s=request.settings.target_layer_time_s,
-                                  calibration_time_tolerance_s=request.settings.layer_time_tolerance_s,
                                   warnings=tuple(warnings), _temporary_owner=owner,
                                   manual_evaluation=result_evaluation, diagnostics_directory=root)
             owner = None
@@ -358,4 +351,4 @@ class ManualExportService(PreviewExportService):
             shutil.rmtree(result.run_directory, ignore_errors=True)
             raise
         return ManualExportResult(**{f.name:getattr(result,f.name) for f in fields(result)},
-                                  joint_sliced=e.joint_sliced,target_reached=e.target_reached)
+                                  joint_sliced=e.joint_sliced)

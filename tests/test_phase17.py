@@ -1250,7 +1250,8 @@ class Phase17Tests(unittest.TestCase):
             action_x[window.open_stl_button],
             action_x[window.preview_action_control],
         )
-        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
+        self.assertIs(window.reset_button.parentWidget(), window.footer_reset_host)
+        self.assertTrue(window.footer_message_area.isAncestorOf(window.reset_button))
         self.assertEqual(
             window.reset_button.height(),
             window.options_button.height(),

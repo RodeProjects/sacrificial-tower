@@ -8,7 +8,7 @@ from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 
 from cooling_tower.manual.geometry import (Coordinate, Cubic, ManualSettings, GeometryError, initial_draft,
-                                          validate, move_point, insert_point, remove_point, set_curve, couple_point,
+                                          validate, move_point, insert_point, remove_point, set_curve, set_point_curve_mode, reset_point_curves, couple_point,
                                           bounded_edit, tessellate, create_mesh, CURVE_RADIAL_ERROR_MM)
 from cooling_tower.tower.mesh_generator import validate_triangle_mesh
 from cooling_tower.preview import PreviewCancelled
@@ -19,6 +19,63 @@ def draft(height=100,settings=None):
 
 
 class ManualGeometryTests(unittest.TestCase):
+    def test_removing_a_point_resets_only_the_neighbor_controls_facing_it(self):
+        original=draft()
+        fixed,identity=insert_point(original,50)
+        fixed=set_curve(fixed,0,control=2,position=Coordinate(3.5,6))
+        fixed=set_curve(fixed,1,control=1,position=Coordinate(4,15))
+        fixed=set_curve(fixed,2,control=2,position=Coordinate(5,90))
+        reset=remove_point(fixed,identity)
+        self.assertEqual(reset.curves[0],fixed.curves[0])
+        self.assertEqual(reset.points,original.points)
+        self.assertEqual(reset.curves[1].control1,reset.curves[1].start.lerp(reset.curves[1].end,1/3))
+        self.assertEqual(reset.curves[1].control2,reset.curves[1].start.lerp(reset.curves[1].end,2/3))
+        d=draft()
+        identities=[]
+        for z in (30,50,70):
+            d,identity=insert_point(d,z)
+            identities.append(identity)
+            d=move_point(d,identity,diameter_mm=12)
+        for index,curve in enumerate(d.curves[1:],1):
+            d=set_curve(d,index,control=1,position=Coordinate(7,curve.start.lerp(curve.end,1/3).z_mm))
+            d=set_curve(d,index,control=2,position=Coordinate(7,curve.start.lerp(curve.end,2/3).z_mm))
+        d=couple_point(d,identities[0],True)
+        d=couple_point(d,identities[2],True)
+        reset=remove_point(d,identities[1])
+        self.assertEqual(reset.curves[:2],d.curves[:2])
+        self.assertEqual(reset.curves[3:],d.curves[4:])
+        bridge=reset.curves[2]
+        self.assertEqual(bridge.control1,bridge.start.lerp(bridge.end,1/3))
+        self.assertEqual(bridge.control2,bridge.start.lerp(bridge.end,2/3))
+        self.assertTrue(bridge.curved)
+        self.assertTrue(all(not point.smooth for point in reset.points if point.identity in {identities[0],identities[2]}))
+        validate(reset)
+
+    def test_curve_reset_restores_defaults_for_free_and_fixed_points_without_moving_endpoints(self):
+        original=draft()
+        changed=set_curve(original,0,control=1,position=Coordinate(7,3))
+        for identity in ("foot","foot_height","base"):
+            reset=reset_point_curves(changed,identity)
+            self.assertEqual(reset.points,original.points)
+            self.assertEqual(reset.curves[0],original.curves[0])
+        changed,identity=insert_point(original,50)
+        changed=set_curve(changed,1,control=2,position=Coordinate(6,40))
+        reset=reset_point_curves(changed,identity)
+        self.assertEqual(reset.points,changed.points)
+        for curve in reset.curves[1:]:
+            self.assertTrue(curve.curved)
+            self.assertEqual(curve.control1,curve.start.lerp(curve.end,1/3))
+            self.assertEqual(curve.control2,curve.start.lerp(curve.end,2/3))
+        self.assertEqual(reset_point_curves(reset,identity),reset)
+
+    def test_insertion_uses_point_one_gap_but_later_movement_keeps_point_zero_five(self):
+        d=draft();base=d.points[1].position.z_mm
+        with self.assertRaises(GeometryError):insert_point(d,base+.075)
+        d,identity=insert_point(d,base+.1)
+        moved=move_point(d,identity,z_mm=base+.05)
+        self.assertAlmostEqual(moved.points[2].position.z_mm,base+.05)
+        with self.assertRaises(GeometryError):insert_point(d,d.height_mm-.075)
+
     def test_initial_full_height_minimum_body_true_foot_and_caps(self):
         d = draft()
         self.assertEqual(d.height_mm,100)
@@ -78,6 +135,66 @@ class ManualGeometryTests(unittest.TestCase):
         edited = move_point(new,identity,diameter_mm=20,z_mm=55)
         self.assertEqual(edited.points[2].identity,identity)
         self.assertEqual(edited.points[2].position,Coordinate(10,55))
+
+    def test_inserted_point_stays_linear_inside_a_linear_segment(self):
+        d=draft()
+        position=d.curves[1].at(d.curves[1].parameter_at_z(50))
+        result,identity=insert_point(d,50)
+        self.assertEqual(result.points[2].position,position)
+        self.assertEqual(result.curves[0],d.curves[0])
+        self.assertFalse(any(c.curved for c in result.curves[1:]))
+        midpoint=(result.curves[1].start.z_mm+50)/2
+        expected=(result.curves[1].start.radius_mm+position.radius_mm)/2
+        self.assertAlmostEqual(result.radius_at_z(midpoint),expected)
+
+    def test_insertion_preserves_curves_and_coupling_at_fixed_and_manual_neighbors(self):
+        for neighbor_heights in ((),(30,),(70,),(30,70)):
+            with self.subTest(neighbor_heights=neighbor_heights):
+                d=draft()
+                for z in neighbor_heights:
+                    d,identity=insert_point(d,z)
+                    d=move_point(d,identity,diameter_mm=12)
+                index=next(i for i,c in enumerate(d.curves) if c.start.z_mm < 50 < c.end.z_mm)
+                for point in d.points[index:index+2]:
+                    if point.kind == "free":
+                        d=couple_point(d,point.identity,True)
+                curve=d.curves[index]
+                d=set_curve(d,index,control=1,position=Coordinate(curve.start.radius_mm+2,
+                                                                 curve.start.lerp(curve.end,1/3).z_mm))
+                d=set_curve(d,index,control=2,position=Coordinate(curve.end.radius_mm+1,
+                                                                 curve.start.lerp(curve.end,2/3).z_mm))
+                before=[d.radius_at_z(z) for z in range(1,101)]
+                result,identity=insert_point(d,50)
+                self.assertEqual(tuple(p for p in result.points if p.identity != identity),d.points)
+                self.assertEqual(result.curves[:index],d.curves[:index])
+                self.assertEqual(result.curves[index+2:],d.curves[index+1:])
+                left,right=result.curves[index:index+2]
+                self.assertTrue(left.curved and right.curved)
+                self.assertNotEqual(left.control1,left.start.lerp(left.end,1/3))
+                self.assertNotEqual(right.control2,right.start.lerp(right.end,2/3))
+                for z,radius in enumerate(before,1):
+                    self.assertAlmostEqual(result.radius_at_z(z),radius,places=10)
+                original=d.curves[index]
+                for old,new,t in ((original,left,0),(original,right,1)):
+                    self.assertAlmostEqual(old.derivative(t,"radius_mm")/old.derivative(t,"z_mm"),
+                                           new.derivative(t,"radius_mm")/new.derivative(t,"z_mm"),places=10)
+                validate(result)
+
+    def test_point_curve_switch_discards_edits_and_restarts_with_basic_controls(self):
+        d,identity=insert_point(draft(),50)
+        d=move_point(d,identity,diameter_mm=30)
+        d=set_point_curve_mode(d,identity,True)
+        d=set_curve(d,1,control=2,position=Coordinate(17,45))
+        original=d.points[2].position
+        linear=set_point_curve_mode(d,identity,False)
+        self.assertFalse(any(c.curved for c in linear.curves[1:]))
+        restored=set_point_curve_mode(linear,identity,True)
+        self.assertEqual(restored.points[2].position,original)
+        self.assertNotEqual(restored.curves[1].control2,d.curves[1].control2)
+        self.assertTrue(all(c.curved for c in restored.curves[1:]))
+        self.assertEqual(restored.curves[1].control2,restored.curves[1].start.lerp(original,2/3))
+        for identity in ("base","foot","top"):
+            with self.assertRaises(GeometryError):set_point_curve_mode(restored,identity,False)
 
     def test_multiple_widenings_and_base_does_not_scale_free_points(self):
         d = draft()

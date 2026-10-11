@@ -123,7 +123,8 @@ class GenerationUiTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(window.footer.height(), window.footer.minimumHeight())
                 self.assertEqual(window.footer.height(), window.footer.maximumHeight())
-                self.assertIs(window.reset_button.parentWidget(), window.footer_message_area)
+                self.assertIs(window.reset_button.parentWidget(), window.footer_reset_host)
+                self.assertTrue(window.footer_message_area.isAncestorOf(window.reset_button))
                 self.assertLessEqual(
                     window.reset_button.mapTo(window.footer, QPoint(0, 0)).x(),
                     window.open_output_button.mapTo(window.footer, QPoint(0, 0)).x(),

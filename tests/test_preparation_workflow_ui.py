@@ -329,10 +329,10 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 )
             )
             self.assertLess(
-                window.source_group.content_layout.indexOf(
+                window.stl_validation_feedback.grid.indexOf(
                     window.stl_validation_details_toggle
                 ),
-                window.source_group.content_layout.indexOf(
+                window.stl_validation_feedback.grid.indexOf(
                     window.stl_validation_message
                 ),
             )
@@ -1206,6 +1206,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             window.preparation_tabs.setCurrentIndex(0)
             window.stl_validation_details.setPlainText("A\nB\nC")
             window.stl_validation_details_toggle.show()
+            window.stl_validation_feedback.show()
             window._refresh_preparation_section_layout()
             self.app.processEvents()
             stl_closed_height = window.preparation_tabs.height()
@@ -1530,13 +1531,12 @@ class PreparationWorkflowUiTests(unittest.TestCase):
 
             source_blocks = (
                 drop_zone,
-                window.stl_validation_details_toggle,
-                window.stl_validation_message,
+                window.stl_validation_feedback,
             )
             for upper, lower in zip(source_blocks, source_blocks[1:]):
                 self.assertLess(upper.geometry().bottom(), lower.geometry().top())
             self.assertLessEqual(
-                window.stl_validation_message.geometry().bottom(),
+                window.stl_validation_feedback.geometry().bottom(),
                 window.source_group.content_widget.rect().bottom()
                 - window.source_group.content_layout.contentsMargins().bottom(),
             )

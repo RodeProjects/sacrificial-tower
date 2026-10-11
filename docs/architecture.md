@@ -346,12 +346,14 @@ manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.
 Request-IDs und eigene Signalverbindungen trennen sie von automatischen Jobs.
 Die vorhandenen Jobarten `PREVIEW` und `EXPORT` erhalten alle gemeinsamen Sperren
 und die kontrollierte Thread-/Prozessfreigabe. `ManualGenerationService` erzeugt
-eine ausdrücklich gestaltete Form und bewertet sie mit einem vollständigen
-Prüfslice, ohne `CalibrationService.calibrate()` oder automatische Formung.
+eine ausdrücklich gestaltete Form und ermittelt ihre Layerzeiten mit einem
+vollständigen Prüfslice, ohne `CalibrationService.calibrate()` oder automatische
+Formung. Die manuelle Methode bewertet keine Zielzeit oder Toleranz.
 Die manuellen Fachmodule unter `manual/` bleiben Qt-unabhängig.
 Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert.
 Das automatische Einstellungsschema 21 bleibt unverändert; manuelle,
-wiederverwendbare Werte liegen getrennt in `manual_settings.json` (Schema 1).
+wiederverwendbare Werte liegen getrennt in `manual_settings.json`; dessen eigenes
+Schema und Migrationen stehen in [Persistenz](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-2).
 Modell, Zustände, Bedienung und Prüfnachweise stehen im
 [manuellen Editor](manual_editor.md).
 Beide Methoden verwenden die bestehenden Aktionen und die responsive Anordnung
@@ -359,6 +361,14 @@ des Hauptfenster-Footers. Manuelle Status-/Ergebniswidgets sind dort separat
 eingebunden; Buttonaktionen und Reset werden nach der aktiven Methode geroutet.
 Die Vorschauhöhe wird bei Fenster-/Methodenwechseln an den verfügbaren Bereich
 angepasst und bleibt bei Einstellungs- bzw. Grenzmeldungen stabil.
+Die manuelle Einstellungsseite besitzt eine 250-ms-Pfeilleiste außerhalb ihres
+Scrollbereichs; der rein flüchtige Zustand verändert keine Fachwerte oder
+persistierten Einstellungen. Neben den viewportunabhängigen Originalflächen
+speichert der Canvas ein fertiges Originalbild für den aktuellen Bildausschnitt.
+Turm, Skalen und Bearbeitungsgriffe bleiben eigene, anschließend gezeichnete
+Elemente. Transformation, Deckkraft, Pixeldichte und Original-Zeichenfolge bestimmen
+die Bildgültigkeit. Details zu Einpassung, Mindestmaßgriff und verlustfreien
+Renderoptimierungen stehen im [manuellen Editor](manual_editor.md).
 
 Unter „Turmeinstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
 wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.
@@ -424,7 +434,9 @@ ist stets aktiv; eine Dev-Umgehung existiert nicht. Fehlermeldungen an den
 Einstellungen prüfen jeweils nur den eigenen Wert und wachsen mit dem Inhalt,
 ohne die Bedienelemente zu überdecken.
 
-„Standardwerte wiederherstellen“ befindet sich links unten im Footer. Nach dem
+In der automatischen Methode befindet sich „Standardwerte wiederherstellen“
+links unten im Footer. Die manuellen Resets beschreibt [manual_editor.md](manual_editor.md).
+Nach dem
 Zurücksetzen wird das lokale Zeitfenster an die analysierte Layerzahl angepasst
 und die Geometrieprüfung mit den neuen Werten erneut gestartet. Rechts
 bleiben Exportordner, letzter Export, Exportbericht und die aktuelle Hauptaktion

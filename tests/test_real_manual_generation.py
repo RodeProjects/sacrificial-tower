@@ -188,7 +188,7 @@ class RealManualGenerationTests(unittest.TestCase):
                 "profile_points":len(draft.points),"frames":len(frames),"mean_ms":sum(frames)/len(frames),"maximum_ms":max(frames),
                 "first_spatial_frame_ms":spatial_ms,
                 "complete_spatial_image_ready_ms":spatial_ready_ms,
-                "minimum_verified_time_s":result.minimum_verified_layer_time_s,"target_reached":result.manual_evaluation.target_reached,
+                "minimum_verified_time_s":result.minimum_verified_layer_time_s,
                 "export_directory":str(exported.run_directory)}
         (root/"acceptance.json").write_text(json.dumps(record,indent=2),encoding="utf-8")
         print(json.dumps(record),flush=True)

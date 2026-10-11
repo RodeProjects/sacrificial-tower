@@ -2,10 +2,47 @@
 from dataclasses import fields, replace
 from pathlib import Path
 
-from cooling_tower.manual.geometry import GeometryError, ManualSettings, validate_settings
+from cooling_tower.manual.geometry import GeometryError, ManualSettings, OBJECT_RESOLUTION_STAGES, validate_settings
 from cooling_tower.persistence.versioned_json import VersionedJsonStore, VersionedDocumentError
 
-MANUAL_SCHEMA_VERSION = 1
+MANUAL_SCHEMA_VERSION = 5
+
+
+def migrate_manual_v1(payload):
+    """Keep the old threshold only as a visual reference; discard tolerance."""
+    raw = payload.get("manual",{})
+    manual = dict(raw) if isinstance(raw,dict) else {}
+    manual["color_reference_time_s"] = manual.pop("target_layer_time_s",ManualSettings().color_reference_time_s)
+    manual.pop("layer_time_tolerance_s",None)
+    return {**payload,"manual_settings_schema_version":2,"manual":manual}
+
+
+def migrate_manual_v2(payload):
+    """Enable the new layer grid without changing existing geometry preferences."""
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw, dict) else {}
+    manual["layer_snap_enabled"] = True
+    return {**payload, "manual_settings_schema_version": 3, "manual": manual}
+
+
+def migrate_manual_v3(payload):
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw,dict) else {}
+    manual["object_resolution_percent"] = 50
+    return {**payload, "manual_settings_schema_version": 4, "manual": manual}
+
+
+def migrate_manual_v4(payload):
+    """Keep supported percentages; map old stages to the nearest new stage."""
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw,dict) else {}
+    value = manual.get("object_resolution_percent")
+    if type(value) is int and value in range(10,101,10):
+        manual["object_resolution_percent"] = min(OBJECT_RESOLUTION_STAGES,
+                                                   key=lambda stage:(abs(stage-value),-stage))
+    else:
+        manual["object_resolution_percent"] = ManualSettings().object_resolution_percent
+    return {**payload, "manual_settings_schema_version": 5, "manual": manual}
 
 
 def normalize_manual_settings(payload):
@@ -41,7 +78,11 @@ class ManualSettingsStore:
     def __init__(self, path: Path):
         self.store = VersionedJsonStore(path, schema_key="manual_settings_schema_version",
                                         current_version=MANUAL_SCHEMA_VERSION,
-                                        migrations={0: lambda p: {**p, "manual_settings_schema_version": 1}},
+                                        migrations={0: lambda p: {**p, "manual_settings_schema_version": 1},
+                                                    1: migrate_manual_v1,
+                                                    2: migrate_manual_v2,
+                                                    3: migrate_manual_v3,
+                                                    4: migrate_manual_v4},
                                         normalizer=normalize_manual_settings,
                                         document_name="Die manuellen Einstellungen")
         self.warning = None
@@ -57,7 +98,7 @@ class ManualSettingsStore:
 
     def save(self, settings):
         validate_settings(settings)
-        self.store.save({"manual_settings_schema_version": 1, "manual": settings.to_dict()})
+        self.store.save({"manual_settings_schema_version": MANUAL_SCHEMA_VERSION, "manual": settings.to_dict()})
 
     def recover(self):
         return self.store.replace_with_recovery(normalize_manual_settings({}))

@@ -39,6 +39,8 @@ class ManualGenerationController(QObject):
         self._result_received = False
         self._locked_inputs = []
         self._automatic_scrollbar_policy = None
+        self._automatic_viewport_margins = None
+        window.settings_scroll.verticalScrollBar().rangeChanged.connect(self._sync_scrollbar_gutter)
         panel.generate_requested.connect(self.generate)
         panel.export_requested.connect(self.export)
         panel.cancel_requested.connect(self.cancel)
@@ -46,6 +48,8 @@ class ManualGenerationController(QObject):
         panel.draft_changed.connect(self.draft_changed)
         panel.status_changed.connect(self.refresh_footer)
         panel.canvas.view_changed.connect(self.refresh_footer)
+        panel.canvas.view_state_changed.connect(self._refresh_reset_actions)
+        panel.settings_visibility_changed.connect(lambda:QTimer.singleShot(0,self.fit_editor_to_window))
         window.background_job_manager.job_released.connect(self.job_released)
         if self.store.warning:
             panel.status_label.setText(self.store.warning)
@@ -66,9 +70,7 @@ class ManualGenerationController(QObject):
         # Freeze nested values too; UI/session changes cannot alter a running job.
         profile = replace(profile,effective_values=copy.deepcopy(dict(profile.effective_values)))
         settings = draft.settings if draft is not None else ManualSettings()
-        export_settings = GenerationSettings(target_layer_time_s=settings.target_layer_time_s,
-                                             layer_time_tolerance_s=settings.layer_time_tolerance_s,
-                                             minimum_outer_diameter_mm=settings.minimum_diameter_mm,
+        export_settings = GenerationSettings(minimum_outer_diameter_mm=settings.minimum_diameter_mm,
                                              maximum_outer_diameter_mm=settings.maximum_diameter_mm,
                                              automatic_base_width=False,manual_base_width_mm=settings.foot_diameter_mm,
                                              simulate_full_tower_infill=False,simulate_tower_without_supports=False,
@@ -200,9 +202,8 @@ class ManualGenerationController(QObject):
             if previous is not None: previous.dispose()
             e = result.manual_evaluation
             mode = "Gemeinsamer Prüfslice" if e.joint_sliced else "Separate Zeitprognose"
-            self.panel.result_label.setText(f"Geprüfter Stand: {mode} · kleinste Layerzeit {e.minimum_time_s:.3f} s · "
-                                            f"Ziel {result.target_layer_time_s:g} s ± {result.calibration_time_tolerance_s:g} s · "
-                                            f"{'Ziel erreicht' if e.target_reached else 'Ziel nicht auf allen Layern erreicht'}\n"+"\n".join(result.warnings))
+            self.panel.result_label.setText(f"Geprüfter Stand: {mode} · kleinste Layerzeit {e.minimum_time_s:.3f} s\n"+
+                                            "\n".join(result.warnings))
             self.panel.status_label.setText("Manueller Turm vollständig geprüft.")
         elif self.operation == "export":
             self.session.export_result = result
@@ -302,13 +303,13 @@ class ManualGenerationController(QObject):
     def fit_editor_to_window(self):
         """Resize for window changes, never for inline feedback during editing."""
         w,p = self.window,self.panel
-        if w._closing or w.generation_mode is not GenerationMode.MANUAL or not p.isVisible():
+        if w._closing or w.generation_mode is not GenerationMode.MANUAL or not p.isVisible() or p._settings_transitioning:
             return
         w._fit_footer_height()
         w.centralWidget().layout().activate()
         w.content_layout.activate()
         top = p.mapTo(w.settings_scroll.viewport(),QPoint()).y()+w.settings_scroll.verticalScrollBar().value()
-        available = w.settings_scroll.viewport().height()-top-12
+        available = w.settings_scroll.viewport().height()-top-w.content_layout.contentsMargins().bottom()
         layout = p.preview_container.layout()
         margins = layout.contentsMargins()
         width = max(1,p.preview_container.width()-margins.left()-margins.right())
@@ -329,19 +330,49 @@ class ManualGenerationController(QObject):
         # controls need, even when both panes ignore their content size hints.
         p.preview_container.setMinimumHeight(minimum)
         if p.splitter.orientation() == Qt.Orientation.Vertical:
-            minimum += p.settings_scroll.minimumHeight()+p.splitter.handleWidth()
+            minimum += p.settings_pane.minimumHeight()+p.splitter.handleWidth()
         p.setFixedHeight(max(minimum,available))
+        p.layout().activate()
+        if p.splitter.orientation() == Qt.Orientation.Vertical:
+            settings_height = min(p.settings_pane.maximumHeight(),
+                                  max(p.settings_pane.minimumHeight(),p.height()-p.preview_container.minimumHeight()-p.splitter.handleWidth()))
+            p.splitter.setSizes([settings_height,p.height()-settings_height-p.splitter.handleWidth()])
 
     def update_scrollbar_policy(self,manual):
-        """Reserve scroll width during manual editing; restore the prior policy."""
+        """Scroll only for real overflow; restore the other method's policy."""
         scroll = self.window.settings_scroll
         if manual:
             if self._automatic_scrollbar_policy is None:
                 self._automatic_scrollbar_policy = scroll.verticalScrollBarPolicy()
-            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+                self._automatic_viewport_margins = scroll.viewportMargins()
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._sync_scrollbar_gutter()
         elif self._automatic_scrollbar_policy is not None:
-            scroll.setVerticalScrollBarPolicy(self._automatic_scrollbar_policy)
+            policy,margins = self._automatic_scrollbar_policy,self._automatic_viewport_margins
             self._automatic_scrollbar_policy = None
+            self._automatic_viewport_margins = None
+            scroll.setVerticalScrollBarPolicy(policy)
+            scroll.setViewportMargins(margins)
+
+    def _sync_scrollbar_gutter(self,*_):
+        if self._automatic_viewport_margins is None:
+            return
+        scroll = self.window.settings_scroll
+        margins = self._automatic_viewport_margins
+        bar = scroll.verticalScrollBar()
+        right = margins.right()+(bar.sizeHint().width() if bar.maximum() == 0 else 0)
+        current = scroll.viewportMargins()
+        if (current.left(),current.top(),current.right(),current.bottom()) != (margins.left(),margins.top(),right,margins.bottom()):
+            scroll.setViewportMargins(margins.left(),margins.top(),right,margins.bottom())
+
+    def sync_footer_content_visibility(self):
+        w,p = self.window,self.panel
+        for label in (p.status_label,p.result_label,p.action_hint):
+            label.setVisible(bool(label.text().strip()))
+        w.manual_footer_status_widget.setVisible(
+            w.generation_mode is GenerationMode.MANUAL and
+            (not p.progress.isHidden() or any(label.text().strip() for label in
+                (p.status_label,p.result_label,p.action_hint))))
 
     def refresh_footer(self,*_):
         w,p = self.window,self.panel
@@ -357,9 +388,7 @@ class ManualGenerationController(QObject):
         w.export_button.setVisible(visible and not p.export_button.isHidden())
         w.export_button.setEnabled(p.export_button.isEnabled())
         w.export_button.setToolTip(p.export_button.toolTip())
-        modified = p.draft is not None and p.initial is not None and p.draft != p.initial
-        w.reset_button.setEnabled(self.job_id is None and modified and p.canvas.editable)
-        w.reset_button.setToolTip("Nur die manuellen Einstellungen und den manuellen Anfangsentwurf zurücksetzen")
+        self._refresh_reset_actions()
         w.action_availability_widget.hide()
         w._refresh_footer_auxiliary_visibility()
         w._update_responsive_action_labels()
@@ -374,11 +403,21 @@ class ManualGenerationController(QObject):
         else:
             self.generate()
 
+    def _refresh_reset_actions(self):
+        if self.window.generation_mode is not GenerationMode.MANUAL:
+            return
+        w,p = self.window,self.panel
+        w.reset_button.setEnabled(self.job_id is None and p.can_reset_all())
+        w.reset_button.setToolTip("Alle manuellen Werte, die Turmform und die Vorschau auf Standardwerte zurücksetzen")
+        w.tower_reset_button.setEnabled(self.job_id is None and p.can_reset_tower())
+        w.tower_reset_button.setToolTip("Turmform, Durchmessergrenzen und geometrische Winkelgrenzen zurücksetzen")
+
     def request_reset_defaults(self):
-        if self.job_id is not None or self.panel.reference is None or not self.panel.canvas.editable:
+        if self.job_id is not None or self.panel.reference is None:
             return
         box = self.window._create_reset_defaults_message_box()
-        box.setText("Die manuellen Einstellungen und der manuelle Entwurf werden auf ihre Standardwerte zurückgesetzt. Die automatische Methode und die Dateivorbereitung bleiben erhalten.")
+        box.setWindowTitle("Alles zurücksetzen")
+        box.setText("Alle Werte der manuellen Methode, die Turmform und die Vorschau werden auf ihre Standardwerte zurückgesetzt. Die automatische Methode und die Dateivorbereitung bleiben erhalten.")
         box.exec()
         if box.clickedButton() is box._reset_yes_button:
             self.panel.reset_all()
@@ -391,9 +430,8 @@ class ManualGenerationController(QObject):
         w = self.window
         evidence = "gemeinsam geprüfte" if result.joint_sliced else "prognostizierte"
         w.export_success_achieved_label.setText(f"Kleinste {evidence} Layerzeit: {result.minimum_verified_layer_time_s:.3f} s")
-        w.export_success_deviation_label.setText("Gewünschte Mindest-Layerzeit erreicht." if result.target_reached else
-                                                "Gewünschte Mindest-Layerzeit nicht auf allen Layern erreicht.")
-        w.export_success_deviation_label.setProperty("status","within" if result.target_reached else "outside")
+        w.export_success_deviation_label.clear()
+        w.export_success_deviation_label.hide()
         if result.joint_sliced:
             usage = "Die gestaltete Form wurde in einem vollständigen gemeinsamen Slice geprüft. Das exportierte native 3MF enthält exakt die geprüfte Anordnung. Beim getrennten STL-Import müssen Anordnung und bestätigte Profile erhalten bleiben."
         else:

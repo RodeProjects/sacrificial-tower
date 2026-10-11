@@ -437,26 +437,28 @@ class UxImprovementTests(unittest.TestCase):
 
         window = self.window()
         window.show()
+        feedback = window.stl_validation_feedback
+        self.assertIs(feedback.parent(), window.source_group.content_widget)
         self.assertIs(
             window.stl_validation_message.parent(),
-            window.source_group.content_widget,
+            feedback,
         )
         self.assertIs(
             window.stl_validation_details_toggle.parent(),
-            window.source_group.content_widget,
+            feedback,
         )
         source_layout = window.source_group.content_layout
         self.assertLess(
             source_layout.indexOf(window.drop_zone),
-            source_layout.indexOf(window.stl_validation_details_toggle),
+            source_layout.indexOf(feedback),
         )
         self.assertLess(
-            source_layout.indexOf(window.stl_validation_details_toggle),
-            source_layout.indexOf(window.stl_validation_details),
+            feedback.grid.getItemPosition(feedback.grid.indexOf(window.stl_validation_details_toggle))[0],
+            feedback.grid.getItemPosition(feedback.grid.indexOf(window.stl_validation_details))[0],
         )
         self.assertLess(
-            source_layout.indexOf(window.stl_validation_details),
-            source_layout.indexOf(window.stl_validation_message),
+            feedback.grid.getItemPosition(feedback.grid.indexOf(window.stl_validation_details))[0],
+            feedback.grid.getItemPosition(feedback.grid.indexOf(window.stl_validation_message))[0],
         )
         self.assertTrue(window.slicer_combo.property("important"))
         self.assertTrue(window.machine_profile_combo.property("important"))

@@ -2094,7 +2094,8 @@ class Phase18UiTests(unittest.TestCase):
                     )
                 )
             )
-        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
+        self.assertIs(window.reset_button.parentWidget(), window.footer_reset_host)
+        self.assertTrue(window.footer_message_area.isAncestorOf(window.reset_button))
         window.close()
 
     def test_manual_slicer_prediction_action_is_removed(self) -> None:

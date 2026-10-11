@@ -170,7 +170,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             window.footer_notice_layout.indexOf(window.notice_panel), 0
         )
-        self.assertEqual(window.reset_button.parent().objectName(), "footerMessageArea")
+        self.assertIs(window.reset_button.parentWidget(), window.footer_reset_host)
+        self.assertTrue(window.footer_message_area.isAncestorOf(window.reset_button))
 
         window.validation_label.setText("Ein kritischer Fehler")
         window.error_panel.show()

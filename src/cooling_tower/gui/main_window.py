@@ -84,6 +84,7 @@ from cooling_tower.gui.generation_session import GenerationMode, GenerationSessi
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.manual_controller import ManualGenerationController
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
+from cooling_tower.gui.widgets.stl_validation_feedback import StlValidationFeedback
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
@@ -1331,30 +1332,18 @@ class MainWindow(QMainWindow):
         self.preslice_cancel_button.clicked.connect(self.cancel_source_preslice)
         self.preslice_cancel_button.hide()
 
-        self.stl_validation_message = QLabel()
-        self.stl_validation_message.setObjectName("stlValidationMessage")
-        self.stl_validation_message.setProperty("severity", "neutral")
-        self.stl_validation_message.setWordWrap(True)
-        # Match the 10 px horizontal / 8 px vertical padding of the other
-        # notice cards. Explicit contents margins remain effective for every
-        # severity, including future colour variants.
-        self.stl_validation_message.setContentsMargins(10, 8, 10, 8)
-        self.stl_validation_message.hide()
-        source_layout.insertWidget(
-            source_layout.indexOf(self.drop_zone) + 1,
-            self.stl_validation_message,
+        self.stl_validation_feedback = StlValidationFeedback()
+        self.stl_validation_message = self.stl_validation_feedback.message
+        self.stl_validation_warning_message = (
+            self.stl_validation_feedback.warning_message
         )
-        self.stl_validation_warning_message = QLabel()
-        self.stl_validation_warning_message.setObjectName(
-            "stlValidationWarningMessage"
+        self.stl_validation_details_toggle = (
+            self.stl_validation_feedback.details_toggle
         )
-        self.stl_validation_warning_message.setProperty("severity", "neutral")
-        self.stl_validation_warning_message.setWordWrap(True)
-        self.stl_validation_warning_message.setContentsMargins(10, 8, 10, 8)
-        self.stl_validation_warning_message.hide()
-        source_layout.insertWidget(
-            source_layout.indexOf(self.stl_validation_message) + 1,
-            self.stl_validation_warning_message,
+        self.stl_validation_details = self.stl_validation_feedback.details
+        source_layout.addWidget(self.stl_validation_feedback)
+        self.stl_validation_details_toggle.toggled.connect(
+            self._toggle_stl_validation_details
         )
         self.accept_rejected_stl_button = QPushButton("STL trotzdem verwenden")
         self.accept_rejected_stl_button.setObjectName(
@@ -1367,53 +1356,7 @@ class MainWindow(QMainWindow):
             self._confirm_rejected_stl
         )
         self.accept_rejected_stl_button.hide()
-        self.stl_validation_details_toggle = QPushButton(
-            "Technische Details anzeigen ▸"
-        )
-        self.stl_validation_details_toggle.setObjectName(
-            "stlValidationDetailsToggle"
-        )
-        self.stl_validation_details_toggle.setProperty(
-            "compactDisclosure", True
-        )
-        self.stl_validation_details_toggle.setCheckable(True)
-        self.stl_validation_details_toggle.setFocusPolicy(
-            Qt.FocusPolicy.NoFocus
-        )
-        self.stl_validation_details_toggle.setMinimumHeight(24)
-        self.stl_validation_details_toggle.setSizePolicy(
-            QSizePolicy.Policy.Maximum,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.stl_validation_details_toggle.hide()
-        self.stl_validation_details = QTextEdit()
-        self.stl_validation_details.setObjectName("stlValidationDetails")
-        self.stl_validation_details.setReadOnly(True)
-        self.stl_validation_details.setFixedHeight(150)
-        self.stl_validation_details.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.stl_validation_details.hide()
-        self.stl_validation_details_toggle.toggled.connect(
-            self._toggle_stl_validation_details
-        )
-        # Technical diagnostics belong to the file result, but are secondary
-        # information.  Keep the disclosure compact and directly below the
-        # drop zone instead of presenting it as the final call to action.
-        source_details_index = source_layout.indexOf(self.drop_zone) + 1
-        source_layout.insertWidget(
-            source_details_index,
-            self.stl_validation_details_toggle,
-            0,
-            Qt.AlignmentFlag.AlignRight,
-        )
-        source_layout.insertWidget(
-            source_details_index + 1,
-            self.stl_validation_details,
-        )
-        source_layout.insertWidget(
-            source_layout.indexOf(self.stl_validation_warning_message) + 1,
+        source_layout.addWidget(
             self.accept_rejected_stl_button,
             0,
             Qt.AlignmentFlag.AlignRight,
@@ -3114,6 +3057,7 @@ class MainWindow(QMainWindow):
         navigation_layout.setContentsMargins(0, 0, 0, 0)
         self.generation_method_back_button = QPushButton("← Zur Methodenauswahl")
         self.generation_method_back_button.setObjectName("generationMethodBackButton")
+        self.generation_method_back_button.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed)
         self.generation_method_back_button.setToolTip(
             "Andere Methode wählen. Ihre Einstellungen und generierten Türme bleiben erhalten."
         )
@@ -3123,8 +3067,15 @@ class MainWindow(QMainWindow):
         navigation_layout.addWidget(self.generation_method_back_button)
         self.generation_method_label = QLabel()
         self.generation_method_label.setObjectName("generationMethodLabel")
-        self.generation_method_label.setWordWrap(True)
-        navigation_layout.addWidget(self.generation_method_label, 1)
+        self.generation_method_label.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Preferred)
+        navigation_layout.addWidget(self.generation_method_label)
+        self.generation_method_recommendation = QLabel("(Zweispaltige Ansicht empfohlen - Fenster verbreitern)")
+        self.generation_method_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.generation_method_recommendation.setWordWrap(True)
+        self.generation_method_recommendation.setStyleSheet("color: #b42318;")
+        self.generation_method_recommendation.hide()
+        navigation_layout.addWidget(self.generation_method_recommendation,1)
+        navigation_layout.addStretch(1)
         generation_layout.addWidget(self.generation_method_navigation)
         self.generation_method_picker = QWidget()
         picker_layout = QVBoxLayout(self.generation_method_picker)
@@ -3146,7 +3097,7 @@ class MainWindow(QMainWindow):
             "Manuell",
             "Die Turmform selbst festlegen und anschließend prüfen, "
             "welche Layerzeiten das Modell mit diesem Kühlturm erreicht.",
-            "Demnächst verfügbar →",
+            "Manuelle Erstellung öffnen →",
         )
         self.automatic_generation_card.setProperty("generationMode", "automatic")
         self.manual_generation_card.setProperty("generationMode", "manual")
@@ -3549,9 +3500,21 @@ class MainWindow(QMainWindow):
         self.footer_message_layout.setSpacing(8)
         self.footer_message_layout.addWidget(self.footer_messages_scroll)
         self.footer_message_layout.addStretch(1)
-        self.footer_message_layout.addWidget(
-            self.reset_button, 0, Qt.AlignmentFlag.AlignLeft
-        )
+        self.footer_reset_host = QWidget()
+        resets = QHBoxLayout(self.footer_reset_host)
+        resets.setContentsMargins(0,0,0,0)
+        resets.setSpacing(8)
+        resets.addWidget(self.reset_button)
+        self.tower_reset_button = QPushButton("Turmform zurücksetzen")
+        self.tower_reset_button.setObjectName("towerResetButton")
+        self.tower_reset_button.setToolTip("Manuelle Turmform mit den aktuellen Einstellungen zurücksetzen")
+        self.tower_reset_button.setFixedHeight(METRICS.info_button_diameter_px)
+        self.tower_reset_button.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed)
+        self.tower_reset_button.clicked.connect(self.manual_generation_panel.reset_tower)
+        self.tower_reset_button.hide()
+        resets.addWidget(self.tower_reset_button)
+        resets.addStretch(1)
+        self.footer_message_layout.addWidget(self.footer_reset_host)
 
         self.footer_action_area = QWidget()
         self.footer_action_area.setObjectName("footerActionArea")
@@ -3590,6 +3553,7 @@ class MainWindow(QMainWindow):
         )
         self._footer_height_timer.start(0)
         self.manual_controller.attach_footer()
+        self.manual_generation_panel.layout_changed.connect(self._refresh_generation_method_label)
 
         self.automatic_base_checkbox.stateChanged.connect(
             self._on_base_mode_changed
@@ -3719,14 +3683,18 @@ class MainWindow(QMainWindow):
         self.manual_generation_panel.setVisible(
             preparation_ready and self.generation_mode is GenerationMode.MANUAL
         )
-        self.generation_method_label.setText(
-            "Automatische Turmerstellung"
-            if self.generation_mode is GenerationMode.AUTOMATIC
-            else "Manuelle Turmerstellung"
-        )
+        self._refresh_generation_method_label()
         self.generation_method_back_button.setEnabled(
             self._generation_method_change_available()
         )
+
+    def _refresh_generation_method_label(self,*_):
+        manual = self.generation_mode is GenerationMode.MANUAL
+        text = "Manuelle Turmerstellung" if manual else "Automatische Turmerstellung"
+        self.generation_method_label.setText(text)
+        narrow = manual and getattr(self.manual_generation_panel,"_narrow_layout",False)
+        self.generation_method_recommendation.setVisible(narrow)
+        self.generation_method_navigation.layout().setStretch(3,0 if narrow else 1)
 
     # The existing generator owns the automatic session even while its view
     # is hidden. Manual generation can use its own session and controls without
@@ -8256,8 +8224,11 @@ class MainWindow(QMainWindow):
             return
         if hasattr(self,"manual_footer_status_widget"):
             manual = self.generation_mode is GenerationMode.MANUAL
+            self.footer_content_grid.setAlignment(self.footer_message_area,
+                                                  Qt.AlignmentFlag.AlignBottom if manual else Qt.AlignmentFlag.AlignTop)
+            self.tower_reset_button.setVisible(manual)
             self.manual_controller.update_scrollbar_policy(manual)
-            self.manual_footer_status_widget.setVisible(manual)
+            self.manual_controller.sync_footer_content_visibility()
             saved = getattr(self,"_automatic_footer_status_hidden_before_manual",None)
             if manual:
                 if saved is None:
@@ -8421,11 +8392,10 @@ class MainWindow(QMainWindow):
             else self.footer_messages_layout.sizeHint().height(),
             self.footer_messages_layout.minimumSize().height(),
         )
-        left_natural_height = (
-            messages_natural_height
-            + self.footer_message_layout.spacing()
-            + self.reset_button.height()
-        )
+        self.footer_messages_scroll.setVisible(messages_natural_height > 0)
+        message_spacing = self.footer_message_layout.spacing() if messages_natural_height else 0
+        reset_height = self.reset_button.sizeHint().height() if not self.reset_button.isHidden() else 0
+        left_natural_height = messages_natural_height+message_spacing+reset_height
         action_height = self.main_actions_layout.sizeHint().height()
         notice_height = (
             max(
@@ -8462,8 +8432,7 @@ class MainWindow(QMainWindow):
             content_height = max(visible_left_height, right_natural_height)
         self.footer_messages_content.setMinimumHeight(messages_natural_height)
         self.footer_messages_scroll.setFixedHeight(
-            max(0, visible_left_height - self.footer_message_layout.spacing()
-                - self.reset_button.height())
+            max(0, visible_left_height-message_spacing-reset_height)
         )
         self.footer_action_area.setMinimumHeight(right_natural_height)
         target_height = margins.top() + margins.bottom() + content_height
@@ -9039,16 +9008,16 @@ class MainWindow(QMainWindow):
     def _toggle_stl_validation_details(self, expanded: bool) -> None:
         """Toggle the STL evidence while keeping its compact control stable."""
 
-        self.stl_validation_details.setVisible(expanded)
+        self.stl_validation_feedback.set_expanded(expanded)
         self.stl_validation_details_toggle.setText(
-            "Technische Details ausblenden ▾"
+            "Details ausblenden ▾"
             if expanded
-            else "Technische Details anzeigen ▸"
+            else "Details anzeigen ▸"
         )
         self.stl_validation_details_toggle.setAccessibleName(
-            "Technische Details ausblenden"
+            "Details ausblenden"
             if expanded
-            else "Technische Details einblenden"
+            else "Details einblenden"
         )
         self._refresh_preparation_section_layout()
         QTimer.singleShot(0, self._refresh_preparation_section_layout)
@@ -9796,10 +9765,7 @@ class MainWindow(QMainWindow):
             return
         self.stl_validation_result = result
         self.source_artifact = result.source_artifact
-        self.stl_validation_warning_message.clear()
-        self.stl_validation_warning_message.setProperty("severity", "neutral")
-        self._refresh_widget_style(self.stl_validation_warning_message)
-        self.stl_validation_warning_message.hide()
+        self.stl_validation_feedback.clear_warning()
         self.source_progress_bar.setValue(100)
         accepted = bool(getattr(result, "accepted", result.valid))
         self._finish_source_progress(completed=accepted)
@@ -9818,7 +9784,8 @@ class MainWindow(QMainWindow):
                 icon="✕",
                 state="error",
             )
-            self.stl_validation_message.setText(
+            self.stl_validation_feedback.set_primary(
+                "STL-Geometrie prüfen",
                 "Die STL ist non-manifold (nicht vollständig geschlossen) "
                 "oder geometrisch nicht gültig. Das Modell "
                 "enthält offene, überlappende oder fehlerhaft verbundene "
@@ -9826,11 +9793,10 @@ class MainWindow(QMainWindow):
                 "geschlossen) sein, damit Layerzeiten zuverlässig ermittelt "
                 "werden können. "
                 "Bitte im Slicer, CAD- oder "
-                "3D-Programm korrigieren und erneut exportieren."
+                "3D-Programm korrigieren und erneut exportieren.",
+                severity="error",
+                icon="×",
             )
-            self.stl_validation_message.setProperty("severity", "error")
-            self._refresh_widget_style(self.stl_validation_message)
-            self.stl_validation_message.show()
             self.stl_validation_details.setPlainText(result.technical_summary)
             self.stl_validation_details_toggle.show()
             self.accept_rejected_stl_button.setVisible(
@@ -10038,61 +10004,46 @@ class MainWindow(QMainWindow):
             state="warning" if user_confirmed else "success",
         )
         if user_confirmed:
-            self.stl_validation_message.setText(
+            self.stl_validation_feedback.set_primary(
+                "STL auf eigenes Risiko akzeptiert",
                 "Die STL wurde trotz fehlgeschlagener Prüfung auf deinen "
                 "ausdrücklichen Wunsch als „user-bestätigt“ akzeptiert. "
                 "Unerwartete oder nicht zufriedenstellende Ergebnisse, "
-                "Fehler oder Fehlverhalten sind weiterhin möglich."
+                "Fehler oder Fehlverhalten sind weiterhin möglich.",
+                severity="warning",
+                icon="!",
             )
-            self.stl_validation_message.setProperty("severity", "warning")
-            self._refresh_widget_style(self.stl_validation_message)
-            self.stl_validation_message.show()
-            self.stl_validation_details.setPlainText(result.technical_summary)
-            self.stl_validation_details_toggle.show()
         elif result.warning_issues:
-            self.stl_validation_message.setText(
-                "<p style='margin:0 0 12px 0; font-weight:400;'>"
-                "<span style='color:#176b45;'>✓</span>&nbsp; "
-                "<b>STL-Datei akzeptiert.</b></p>"
-                "<p style='margin:0; font-weight:400;'>"
+            self.stl_validation_feedback.set_primary(
+                "STL-Datei akzeptiert",
+                "<p style='margin:0;'>"
                 "&#x2022; Das Mesh ist geschlossen und topologisch manifold.<br>"
-                "&#x2022; Es wurden keine offenen Kanten erkannt.</p>"
+                "&#x2022; Es wurden keine offenen Kanten erkannt.</p>",
+                severity="success",
+                icon="✓",
             )
-            self.stl_validation_message.setProperty("severity", "success")
-            self._refresh_widget_style(self.stl_validation_message)
-            self.stl_validation_message.show()
-            self.stl_validation_warning_message.setText(
-                "<p style='margin:0 0 12px 0; font-weight:400;'>"
-                "<span style='color:#a86700;'>&#x26A0;</span>&nbsp; "
-                "<b>Hinweis:</b></p>"
-                "<p style='margin:0 0 12px 0; font-weight:400;'>"
+            self.stl_validation_feedback.set_warning(
+                "Kleine Geometrieabweichungen",
+                "<p style='margin:0;'>"
                 "&#x2022; Es wurden geringfügige lokale Flächenüberschneidungen "
                 "erkannt.<br>"
-                "&#x2022; Diese beeinträchtigen die weitere Verarbeitung "
-                "voraussichtlich nicht.</p>"
-                "<p style='margin:0; font-weight:400;'>"
-                "Im letzten Vorbereitungsschritt prüft ein Pre-Slice "
-                "zusätzlich, ob der ausgewählte Slicer aus der übergebenen "
-                "STL-Datei einen zuverlässig verarbeitbaren G-Code erzeugen "
-                "kann.</p>"
+                "&#x2022; Eine reguläre Weiterverarbeitung ist "
+                "voraussichtlich möglich.</p>"
+                "<p style='margin:13px 0 0 0;'>"
+                "Ein Pre-Slice prüft im letzten Vorbereitungsschritt zusätzlich, "
+                "ob der ausgewählte Slicer einen zuverlässig verarbeitbaren "
+                "G‑Code erzeugen kann.</p>"
             )
-            self.stl_validation_warning_message.setProperty(
-                "severity", "warning"
-            )
-            self._refresh_widget_style(self.stl_validation_warning_message)
-            self.stl_validation_warning_message.show()
-            self.stl_validation_details.setPlainText(result.technical_summary)
-            self.stl_validation_details_toggle.show()
         else:
-            self.stl_validation_message.setText(
+            self.stl_validation_feedback.set_primary(
+                "STL-Datei akzeptiert",
                 "Die STL ist manifold (vollständig geschlossen), geometrisch "
-                "konsistent und für die weitere Verarbeitung geeignet."
+                "konsistent und für die weitere Verarbeitung geeignet.",
+                severity="success",
+                icon="✓",
             )
-            self.stl_validation_message.setProperty("severity", "success")
-            self._refresh_widget_style(self.stl_validation_message)
-            self.stl_validation_message.show()
-            self.stl_validation_details.setPlainText(result.technical_summary)
-            self.stl_validation_details_toggle.show()
+        self.stl_validation_details.setPlainText(result.technical_summary)
+        self.stl_validation_details_toggle.show()
         self.workflow.source_validation_succeeded(
             f"{self.current_source_path.name} · {result.face_count} Dreiecke"
             + (" · user-bestätigt" if user_confirmed else ""),
@@ -10135,10 +10086,7 @@ class MainWindow(QMainWindow):
             return
         self.stl_validation_result = None
         self.source_artifact = None
-        self.stl_validation_warning_message.clear()
-        self.stl_validation_warning_message.setProperty("severity", "neutral")
-        self._refresh_widget_style(self.stl_validation_warning_message)
-        self.stl_validation_warning_message.hide()
+        self.stl_validation_feedback.clear_warning()
         self._analysis_failed = True
         self._workflow_error_message = german_user_message(message)
         self.drop_zone.set_status("STL-Prüfung fehlgeschlagen")
@@ -10151,13 +10099,13 @@ class MainWindow(QMainWindow):
             icon="✕",
             state="error",
         )
-        self.stl_validation_message.setText(
+        self.stl_validation_feedback.set_primary(
+            "STL-Datei konnte nicht geprüft werden",
             "Die STL konnte nicht vollständig und sicher gelesen werden. "
-            "Bitte die Datei erneut exportieren oder eine andere STL auswählen."
+            "Bitte die Datei erneut exportieren oder eine andere STL auswählen.",
+            severity="error",
+            icon="×",
         )
-        self.stl_validation_message.setProperty("severity", "error")
-        self._refresh_widget_style(self.stl_validation_message)
-        self.stl_validation_message.show()
         self.stl_validation_details.setPlainText(details)
         self.stl_validation_details_toggle.show()
         self.workflow.source_invalid("STL-Prüfung fehlgeschlagen")
@@ -10174,18 +10122,7 @@ class MainWindow(QMainWindow):
     def _clear_stl_validation_details(self) -> None:
         if not hasattr(self, "stl_validation_details"):
             return
-        self.stl_validation_message.clear()
-        self.stl_validation_message.setProperty("severity", "neutral")
-        self._refresh_widget_style(self.stl_validation_message)
-        self.stl_validation_message.hide()
-        self.stl_validation_warning_message.clear()
-        self.stl_validation_warning_message.setProperty("severity", "neutral")
-        self._refresh_widget_style(self.stl_validation_warning_message)
-        self.stl_validation_warning_message.hide()
-        self.stl_validation_details.clear()
-        self.stl_validation_details.hide()
-        self.stl_validation_details_toggle.setChecked(False)
-        self.stl_validation_details_toggle.hide()
+        self.stl_validation_feedback.clear()
         if hasattr(self, "accept_rejected_stl_button"):
             self.accept_rejected_stl_button.hide()
         if hasattr(self, "source_group"):
@@ -11085,6 +11022,7 @@ class MainWindow(QMainWindow):
             "gemeinsam angeordnet inklusive aller simulierten "
             "Einstellungen.</p>"
         )
+        self.export_success_deviation_label.show()
         if getattr(result, "generation_method", None) == "manual":
             self.manual_controller.describe_export(result)
         self._refresh_widget_style(self.export_success_deviation_label)
@@ -13390,8 +13328,8 @@ class MainWindow(QMainWindow):
     def _update_responsive_action_labels(self) -> None:
         if not hasattr(self, "open_stl_button"):
             return
-        self.reset_button.setText("Standardwerte wiederherstellen")
         manual = self.generation_mode is GenerationMode.MANUAL
+        self.reset_button.setText("Alles zurücksetzen" if manual else "Standardwerte wiederherstellen")
         controller = self.manual_controller
         if not manual:
             self.reset_button.setToolTip("Turmeinstellungen außerhalb der allgemeinen Einstellungen zurücksetzen")

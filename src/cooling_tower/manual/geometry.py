@@ -15,16 +15,17 @@ from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 from cooling_tower.tower.mesh_generator import TriangleMesh
 
 MINIMUM_POINT_GAP_MM = 0.05
+MINIMUM_INSERTION_GAP_MM = 0.1
 CURVE_RADIAL_ERROR_MM = 0.02
 MAXIMUM_CURVE_Z_STEP_MM = 1.0
 MAXIMUM_PROFILE_POINTS = 2048
 EPS = 1e-9
+OBJECT_RESOLUTION_STAGES = (1, 3, 5, 10, 15, 20, 25, 50, 75, 100)
 
 
 @dataclass(frozen=True, slots=True)
 class ManualSettings:
-    target_layer_time_s: float = GENERATION_DEFAULTS["target_layer_time_s"]
-    layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"]
+    color_reference_time_s: float = GENERATION_DEFAULTS["target_layer_time_s"]
     minimum_diameter_mm: float = GENERATION_DEFAULTS["minimum_outer_diameter_mm"]
     maximum_diameter_mm: float = GENERATION_DEFAULTS["maximum_outer_diameter_mm"]
     foot_diameter_mm: float = 25.0
@@ -39,6 +40,8 @@ class ManualSettings:
     overhang_angle_deg: float = 45.0
     overhang_user_set: bool = False
     critical_layers_enabled: bool = False
+    layer_snap_enabled: bool = True
+    object_resolution_percent: int = 10
     gradient_start_deficit_s: float = 0.0
     gradient_full_deficit_s: float = 1.0
 
@@ -194,9 +197,7 @@ class ManualDraft:
         return {"curves": [[(p.radius_mm, p.z_mm) for p in
                              (c.start, c.control1, c.control2, c.end)] for c in self.curves],
                 "first_layer_z_mm": self.first_layer_z_mm,
-                "circle_segments": self.settings.circle_segments,
-                "target_layer_time_s": self.settings.target_layer_time_s,
-                "layer_time_tolerance_s": self.settings.layer_time_tolerance_s}
+                "circle_segments": self.settings.circle_segments}
 
 
 def validate_settings(s):
@@ -208,6 +209,9 @@ def validate_settings(s):
         elif name == "circle_segments":
             if value is not None and (type(value) is not int or not 12 <= value <= 720):
                 raise GeometryError(name, "Die Kreissegmentzahl muss zwischen 12 und 720 liegen.")
+        elif name == "object_resolution_percent":
+            if type(value) is not int or value not in OBJECT_RESOLUTION_STAGES:
+                raise GeometryError(name, "Die Vorschauauflösung benötigt eine der zehn vorgegebenen Prozentstufen.")
         elif isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
             raise GeometryError(name, "Der Wert muss eine endliche Zahl sein.")
     for name in ("minimum_diameter_mm", "maximum_diameter_mm", "foot_diameter_mm",
@@ -221,10 +225,8 @@ def validate_settings(s):
     for name in ("expansion_angle_deg", "contraction_angle_deg", "overhang_angle_deg"):
         if not 0.1 <= getattr(s, name) <= 89.0:
             raise GeometryError(name, "Der Winkel zur Vertikalen muss zwischen 0,1° und 89° liegen.")
-    if not 5 <= s.target_layer_time_s <= 30:
-        raise GeometryError("target_layer_time_s", "Die Ziel-Layerzeit muss zwischen 5 und 30 s liegen.")
-    if not 0.1 <= s.layer_time_tolerance_s <= 3:
-        raise GeometryError("layer_time_tolerance_s", "Die Toleranz muss zwischen 0,1 und 3 s liegen.")
+    if not 5 <= s.color_reference_time_s <= 30:
+        raise GeometryError("color_reference_time_s", "Die Farbreferenz muss zwischen 5 und 30 s liegen.")
     if not 0 <= s.gradient_start_deficit_s < s.gradient_full_deficit_s <= 30:
         raise GeometryError("gradient_full_deficit_s", "Die Farbgrenzen müssen 0 ≤ Beginn < vollständig Rot ≤ 30 s erfüllen.")
 
@@ -313,8 +315,6 @@ def move_point(draft, identity, *, diameter_mm=None, z_mm=None):
     z = old.z_mm if z_mm is None else z_mm
     if index == 0:
         z = draft.first_layer_z_mm
-    if index == len(positions)-1:
-        radius = old.radius_mm
     positions[index] = Coordinate(radius, z)
     if index == 1:
         if radius*2 > draft.settings.maximum_foot_diameter_mm:
@@ -336,7 +336,9 @@ def move_point(draft, identity, *, diameter_mm=None, z_mm=None):
         curves = (replace(new_foot, control1=foot_control(old_foot.control1, new_foot.control1),
                           control2=foot_control(old_foot.control2, new_foot.control2)), *curves[1:])
     s = replace(draft.settings, foot_diameter_mm=positions[0].diameter_mm, foot_height_mm=positions[1].z_mm)
-    updated = replace(draft, points=points, curves=curves, settings=s)
+    updated = replace(draft, points=points, curves=curves, settings=s,
+                      top_follows_base=draft.top_follows_base and not (
+                          index == len(positions)-1 and abs(radius-old.radius_mm) > EPS))
     for i,p in enumerate(points[1:-1],1):
         if p.smooth:
             incoming,outgoing = updated.curves[i-1:i+1]
@@ -351,17 +353,51 @@ def move_point(draft, identity, *, diameter_mm=None, z_mm=None):
     return validate(updated)
 
 
-def insert_point(draft, z_mm):
+def insert_point(draft, z_mm, *, linear=False):
+    """Split the existing profile without resetting its shape or neighbor tangents."""
     if len(draft.points) >= MAXIMUM_PROFILE_POINTS:
         raise GeometryError("points", "Das Schutzlimit von 2048 Profilpunkten wurde erreicht.")
     for i, c in enumerate(draft.curves[1:], 1):
-        if c.start.z_mm+MINIMUM_POINT_GAP_MM <= z_mm <= c.end.z_mm-MINIMUM_POINT_GAP_MM:
+        if c.start.z_mm+MINIMUM_INSERTION_GAP_MM-EPS <= z_mm <= c.end.z_mm-MINIMUM_INSERTION_GAP_MM+EPS:
             left, right = c.split(c.parameter_at_z(z_mm))
             point = ProfilePoint(uuid4().hex, left.end)
             result = replace(draft, points=(*draft.points[:i+1], point, *draft.points[i+1:]),
                              curves=(*draft.curves[:i], left, right, *draft.curves[i+1:]), top_follows_base=False)
-            return validate(result), point.identity
-    raise GeometryError("point_height_mm", "Ein neuer Körperpunkt benötigt 0,05 mm Abstand zu seinen Nachbarn und zum Fuß.")
+            return (set_point_curve_mode(result,point.identity,False) if linear else validate(result)), point.identity
+    raise GeometryError("point_height_mm", "Ein neuer Körperpunkt benötigt 0,1 mm Abstand zu seinen Nachbarn und zum Fuß.")
+
+
+def set_point_curve_mode(draft, identity, curved):
+    """Reset both adjoining body segments and their tangent coupling atomically."""
+    index = next(i for i,p in enumerate(draft.points) if p.identity == identity)
+    if draft.points[index].kind != "free":
+        raise GeometryError("points", "Der Kurvenmodus gehört zu einem freien Profilpunkt.")
+    curves = list(draft.curves)
+    for i in (index-1,index):
+        curves[i] = replace(Cubic.line(curves[i].start,curves[i].end),curved=curved)
+    points = tuple(replace(p,smooth=False) if abs(i-index)<=1 else p for i,p in enumerate(draft.points))
+    return validate(replace(draft,curves=tuple(curves),points=points))
+
+
+def reset_point_curves(draft, identity):
+    """Restore adjoining curves without moving their endpoints or hiding anchors."""
+    canonical = {"foot_height":"base","top_width":"top"}.get(identity,identity)
+    index = next(i for i,p in enumerate(draft.points) if p.identity == canonical)
+    indices = (0,) if identity in {"foot","foot_height"} else tuple(
+        i for i in (index-1,index) if 0 <= i < len(draft.curves))
+    curves = list(draft.curves)
+    touched = set()
+    for i in indices:
+        start,end = curves[i].start,curves[i].end
+        if i == 0:
+            dz,dr = end.z_mm-start.z_mm,start.radius_mm-end.radius_mm
+            curves[i] = Cubic(start,Coordinate(end.radius_mm+dr*.2,start.z_mm+dz*.3),
+                              Coordinate(end.radius_mm,start.z_mm+dz*.7),end)
+        else:
+            curves[i] = replace(Cubic.line(start,end),curved=True)
+        touched.update((i,i+1))
+    points = tuple(replace(p,smooth=False) if i in touched else p for i,p in enumerate(draft.points))
+    return validate(replace(draft,curves=tuple(curves),points=points))
 
 
 def remove_point(draft, identity):
@@ -369,8 +405,10 @@ def remove_point(draft, identity):
     if draft.points[i].kind != "free":
         raise GeometryError("points", "Fuß, Körperanschluss und oberer Abschluss können nicht entfernt werden.")
     a, b = draft.curves[i-1], draft.curves[i]
-    c = Cubic(a.start, a.control1, b.control2, b.end) if a.curved or b.curved else Cubic.line(a.start, b.end)
-    return validate(replace(draft, points=(*draft.points[:i], *draft.points[i+1:]),
+    c = replace(Cubic.line(a.start,b.end),curved=a.curved or b.curved)
+    points = tuple(replace(p,smooth=False) if index in {i-1,i+1} else p
+                   for index,p in enumerate(draft.points) if index != i)
+    return validate(replace(draft, points=points,
                             curves=(*draft.curves[:i-1], c, *draft.curves[i+1:])))
 
 
@@ -431,6 +469,26 @@ def bounded_edit(draft, operation):
         else:
             lo, best = mid, candidate
     return best, limiting
+
+
+def bounded_coordinate_edit(draft, coordinate_for, destination, operation):
+    """Keep valid motion along either axis after a diagonal reaches a limit.
+
+    Each accepted step still validates the complete profile and placement.
+    The first boundary remains available for the interaction's feedback.
+    """
+    start = coordinate_for(draft)
+    candidate, error = bounded_edit(draft, lambda t: operation(draft, start.lerp(destination, t)))
+    if error is None:
+        return candidate, None
+    for axis in ("z_mm", "radius_mm"):
+        start = coordinate_for(candidate)
+        target = replace(start, **{axis: getattr(destination, axis)})
+        if abs(getattr(target, axis)-getattr(start, axis)) <= EPS:
+            continue
+        current = candidate
+        candidate, _ = bounded_edit(current, lambda t: operation(current, start.lerp(target, t)))
+    return candidate, error
 
 
 @dataclass(frozen=True, slots=True)

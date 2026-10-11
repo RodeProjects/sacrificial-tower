@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY","1")
 
 from PySide6.QtCore import QPointF,Qt,QPoint
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QWheelEvent,QFont,QFontDatabase,QColor,QImage,QPainter
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from cooling_tower.gui.main_window import MainWindow
@@ -24,9 +24,33 @@ from cooling_tower.preview import PreviewState
 from test_manual_generation import create_fixture
 
 
+def preview_test_application():
+    app=QApplication.instance() or QApplication([])
+    previous_font=QFont(app.font())
+    font_id=-1
+    # The Windows offscreen plugin can start without system font discovery.
+    # Use the same installed font as the application for meaningful layout QA.
+    font_path=Path("C:/Windows/Fonts/segoeui.ttf")
+    if os.name == "nt" and font_path.is_file():
+        font_id=QFontDatabase.addApplicationFont(str(font_path))
+        if font_id >= 0:
+            app.setFont(QFont(QFontDatabase.applicationFontFamilies(font_id)[0],10))
+    return app,previous_font,font_id
+
+
+def restore_preview_test_application(app,previous_font,font_id):
+    if font_id >= 0:
+        QFontDatabase.removeApplicationFont(font_id)
+    app.setFont(previous_font)
+    app.processEvents()
+
+
 class ManualGuiTests(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+    def setUpClass(cls):cls.app,cls._previous_font,cls._test_font_id=preview_test_application()
+
+    @classmethod
+    def tearDownClass(cls):restore_preview_test_application(cls.app,cls._previous_font,cls._test_font_id)
 
     def setUp(self):
         self.f,self.service,self.reference,self.request,self.adapter=create_fixture(self,joint=True,count=200)
@@ -50,17 +74,17 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.draft.height_mm,35)
         self.assertEqual(self.panel.draft.points[-1].position.diameter_mm,20)
 
-    def test_height_grip_snaps_near_object_top_but_other_heights_remain_continuous(self):
+    def test_height_grip_snaps_to_object_top_and_layers_with_optional_continuous_drag(self):
         p=self.panel;canvas=p.canvas
         object_top=self.reference.context.layers[-1].z_mm
         for view in ("side","front"):
             canvas.set_view(view)
-            canvas.zoom=1.6;canvas.pan=QPointF(17,-20)
+            canvas.zoom=8;canvas.pan=QPointF(17,-20)
             p.move("top",5,object_top)
-            top=canvas.profile_to_screen(p.draft.points[-1].position.radius_mm,object_top)
+            top=next(pos for name,pos,_ in canvas.handles() if name=="top")
             canvas.pan+=QPointF(0,canvas.height()/2-top.y())
-            top=canvas.profile_to_screen(p.draft.points[-1].position.radius_mm,object_top)
-            near=(top+QPointF(0,10)).toPoint()
+            top=next(pos for name,pos,_ in canvas.handles() if name=="top")
+            near=(top+QPointF(0,3)).toPoint()
             QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=top.toPoint())
             QTest.mouseMove(canvas,near)
             self.assertEqual(p.draft.height_mm,object_top)
@@ -77,7 +101,8 @@ class ManualGuiTests(unittest.TestCase):
             self.assertIsNone(canvas._height_snap_z)
             self.assertIsNone(canvas._drag_height_z)
             farther=(top+QPointF(0,36)).toPoint()
-            expected=canvas.screen_to_profile(QPointF(farther))[1]
+            from cooling_tower.manual.layer_snap import snap_layer_height
+            expected=snap_layer_height(canvas.screen_to_profile(QPointF(farther))[1],canvas._layer_tops)
             QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=top.toPoint())
             QTest.mouseMove(canvas,farther)
             QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=farther)
@@ -86,6 +111,15 @@ class ManualGuiTests(unittest.TestCase):
             self.assertIsNone(canvas._height_snap_z)
         p.editors["height_mm"].setValue(object_top-.03)
         self.assertAlmostEqual(p.draft.height_mm,object_top-.03)
+        self.assertIsNone(canvas._height_snap_z)
+        p.checks["layer_snap_enabled"].setChecked(False)
+        top=next(pos for name,pos,_ in canvas.handles() if name=="top")
+        target=(top+QPointF(0,7)).toPoint()
+        expected=canvas.screen_to_profile(QPointF(target))[1]
+        QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=top.toPoint())
+        QTest.mouseMove(canvas,target)
+        QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
+        self.assertAlmostEqual(p.draft.height_mm,expected)
         self.assertIsNone(canvas._height_snap_z)
 
     def test_vertical_drag_guide_tracks_accepted_height_and_clears_on_release(self):
@@ -97,7 +131,7 @@ class ManualGuiTests(unittest.TestCase):
             for identity in ("top","foot_height",free,"control:0:1"):
                 with self.subTest(view=view,identity=identity):
                     p.commit(original)
-                    p.select("foot" if identity.startswith("control:") else identity)
+                    p.select("foot_height" if identity=="control:0:2" else "foot" if identity.startswith("control:") else identity)
                     canvas.fit_scene();canvas.zoom=2
                     handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
                     canvas.pan+=QPointF(0,canvas.height()/2-handle.y())
@@ -124,6 +158,1147 @@ class ManualGuiTests(unittest.TestCase):
         QTest.mouseMove(canvas,handle+QPoint(20,0))
         self.assertIsNone(canvas._drag_height_z)
         QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=handle+QPoint(20,0))
+
+    def test_manual_width_limit_guide_flashes_expires_and_reappears_on_new_attempts(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            with self.subTest(view=view):
+                p.reset_all();c.set_view(view)
+                p.change_setting("maximum_diameter_mm",12)
+                p.insert(20);identity=p.selected;c.fit_scene();c.grab()
+                original_cache=c._object_cache
+                handle=next(pos for name,pos,_ in c.handles() if name==identity).toPoint()
+                target=handle+QPoint(round((12-5)/2*c.transform()[0])+8,0)
+                QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=handle)
+                QTest.mouseMove(c,target)
+                self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
+                self.assertAlmostEqual(p.draft.points[2].position.diameter_mm,12)
+                image=c.grab().toImage()
+                position=c.profile_to_screen(6,12).toPoint()
+                self.assertTrue(any(image.pixelColor(x,y).blue()>image.pixelColor(x,y).red()+70 and
+                                    image.pixelColor(x,y).blue()>image.pixelColor(x,y).green()+35
+                                    for x in range(position.x()-2,position.x()+3)
+                                    for y in range(position.y()-2,position.y()+3)))
+                elapsed=c._width_limit_animation.currentTime()
+                QTest.qWait(80)
+                self.assertEqual(c._width_limit_opacity,1)
+                QTest.mouseMove(c,target+QPoint(2,0))
+                self.assertGreater(c._width_limit_animation.currentTime(),elapsed)
+                QTest.qWait(c.WIDTH_LIMIT_GUIDE_DURATION_MS+80)
+                self.assertIsNone(c._width_limit_setting)
+                QTest.mouseMove(c,target+QPoint(4,0))
+                self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
+                QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=target+QPoint(4,0))
+                QTest.qWait(c.WIDTH_LIMIT_GUIDE_DURATION_MS+80)
+                self.assertIsNone(c._width_limit_setting)
+                handle=next(pos for name,pos,_ in c.handles() if name==identity).toPoint()
+                QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=handle)
+                QTest.mouseMove(c,handle+QPoint(8,0))
+                self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
+                self.assertIs(c._object_cache,original_cache)
+                QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=handle+QPoint(8,0))
+                c.set_view("top")
+                self.assertIsNone(c._width_limit_setting)
+                self.assertEqual(c._width_limit_opacity,0)
+                self.assertEqual(c._width_limit_animation.state(),c._width_limit_animation.State.Stopped)
+
+    def test_width_limit_guide_holds_for_350_ms_then_fades_for_200_ms(self):
+        c=self.panel.canvas
+        c.grab();original_image=c._object_image_cache
+        c.set_width_limit_feedback("maximum_diameter_mm",41)
+        self.assertEqual(c._width_limit_opacity,1)
+        self.assertEqual(c._width_limit_animation.duration(),550)
+        c._width_limit_animation.setCurrentTime(350)
+        self.assertEqual(c._width_limit_opacity,1)
+        c._width_limit_animation.setCurrentTime(450)
+        self.assertAlmostEqual(c._width_limit_opacity,.5)
+        c.grab()
+        self.assertIs(c._object_image_cache,original_image)
+        c._width_limit_animation.setCurrentTime(550)
+        self.assertIsNone(c._width_limit_setting)
+        self.assertEqual(c._width_limit_opacity,0)
+        c.set_width_limit_feedback("maximum_diameter_mm",42)
+        self.assertEqual(c._width_limit_opacity,1)
+        c.set_view("top")
+        self.assertIsNone(c._width_limit_setting)
+        self.assertEqual(c._width_limit_opacity,0)
+
+    def test_width_limit_guide_only_responds_to_horizontal_canvas_edits(self):
+        p=self.panel;c=p.canvas
+        p.change_setting("maximum_diameter_mm",12)
+        p.insert(20);identity=p.selected
+        p.move(identity,12,20)
+        self.assertIsNone(c._width_limit_setting)
+        with patch.object(c,"horizontal_drag_snaps",return_value=True):
+            p._move_from_canvas("base",15,8)
+            self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
+            c._hide_width_limit_guide()
+            p._move_from_canvas(identity,10,20)
+            p._move_from_canvas(identity,12,20)
+            self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
+            p._move_from_canvas(identity,4,20)
+            self.assertEqual(c._width_limit_setting,"minimum_diameter_mm")
+            self.assertAlmostEqual(p.draft.points[2].position.diameter_mm,5)
+            before=p.draft
+            p.set_busy(True)
+            p._move_from_canvas(identity,10,20)
+            self.assertIs(p.draft,before)
+            p.set_busy(False)
+        c.invalidate_reference()
+        self.assertIsNone(c._width_limit_setting)
+
+    def test_fixed_base_tip_and_foot_show_their_own_width_limits_without_rendering_original_again(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            p.reset_all();c.set_view(view)
+            p.change_setting("maximum_diameter_mm",12)
+            p.change_setting("maximum_foot_diameter_mm",30)
+            c.fit_scene();c.grab()
+            picture=c._object_cache;image=c._object_image_cache
+            with patch.object(c,"horizontal_drag_snaps",return_value=True):
+                for identity,requested,value,setting in (
+                    ("base",15,12,"maximum_diameter_mm"),
+                    ("base",2,5,"minimum_diameter_mm"),
+                    ("top_width",15,12,"maximum_diameter_mm"),
+                    ("top_width",2,5,"minimum_diameter_mm"),
+                    ("foot",35,30,"maximum_foot_diameter_mm")):
+                    with self.subTest(view=view,identity=identity,setting=setting):
+                        c._hide_width_limit_guide();c._width_limit_last_request=None
+                        actual="top" if identity=="top_width" else identity
+                        point=next(point for point in p.draft.points if point.identity==actual)
+                        p._move_from_canvas(identity,requested,point.position.z_mm)
+                        self.assertEqual(c._width_limit_setting,setting)
+                        self.assertEqual(c._width_limit_opacity,1)
+                        point=next(point for point in p.draft.points if point.identity==actual)
+                        self.assertAlmostEqual(point.position.diameter_mm,value)
+                        start,end=c.width_limit_guide_geometry()
+                        radius=getattr(p.settings,setting)/2
+                        self.assertEqual(start,c.profile_to_screen(radius,0))
+                        self.assertEqual(end.x(),start.x())
+                        painter=Mock();c._draw_scales(painter)
+                        axis=next(call.args for call in painter.drawLine.call_args_list
+                                  if len(call.args)==2 and all(point.x()==c.width()-43 for point in call.args))
+                        self.assertEqual(end.y(),axis[0].y())
+                        c.grab()
+                        self.assertIs(c._object_cache,picture)
+                        self.assertIs(c._object_image_cache,image)
+
+    def test_all_vertical_handles_snap_and_keep_free_numeric_heights(self):
+        from cooling_tower.manual.layer_snap import snap_layer_height
+        p=self.panel;canvas=p.canvas
+        self.assertTrue(p.checks["layer_snap_enabled"].isChecked())
+        p.insert(20);free=p.selected
+        original=p.draft
+        for view in ("side","front"):
+            for identity in ("top","foot_height",free,"control:0:1","control:0:2"):
+                with self.subTest(view=view,identity=identity):
+                    p.commit(original);canvas.set_view(view)
+                    p.select("foot_height" if identity=="control:0:2" else "foot" if identity.startswith("control:") else identity)
+                    canvas.zoom=4
+                    handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
+                    canvas.pan+=QPointF(0,canvas.height()/2-handle.y())
+                    handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
+                    target=(handle+QPointF(0,25)).toPoint()
+                    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=handle.toPoint())
+                    QTest.mouseMove(canvas,target)
+                    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
+                    height=canvas._vertical_handle_height(identity)
+                    self.assertAlmostEqual(height,snap_layer_height(height,canvas._layer_tops))
+        p.commit(original);p.select(free)
+        p.editors["point_height_mm"].setValue(20.07)
+        self.assertAlmostEqual(canvas._vertical_handle_height(free),20.07)
+        before=p.draft.artifact_payload()
+        p.checks["layer_snap_enabled"].setChecked(False)
+        self.assertEqual(p.draft.artifact_payload(),before)
+        handle=next(pos for name,pos,_ in canvas.handles() if name==free)
+        target=(handle+QPointF(0,13)).toPoint()
+        expected=canvas.screen_to_profile(QPointF(target))[1]
+        QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=handle.toPoint())
+        QTest.mouseMove(canvas,target)
+        QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
+        self.assertAlmostEqual(canvas._vertical_handle_height(free),expected)
+
+    def test_layer_snap_stops_on_valid_layer_at_neighbors_and_preserves_radial_motion(self):
+        p=self.panel;canvas=p.canvas
+        p.insert(20);free=p.selected
+        # The geometric 39.95 mm boundary lies between actual 0.2 mm layers.
+        p.move(free,18,40,layer_snap=True)
+        point=next(point.position for point in p.draft.points if point.identity==free)
+        self.assertAlmostEqual(point.z_mm,39.8)
+        self.assertAlmostEqual(point.diameter_mm,18)
+        p.move_control(1,1,0,40,layer_snap=True)
+        self.assertLess(min(abs(p.draft.curves[1].control1.z_mm-z) for z in canvas._layer_tops),1e-8)
+        self.reference.context.validate(p.draft)
+
+    def test_double_click_resets_curves_keeps_anchors_and_selection_hides_neighbors(self):
+        p=self.panel;canvas=p.canvas
+        p.insert(20);free=p.selected
+        p.select("base")
+        handle=next(pos for name,pos,_ in canvas.handles() if name==free).toPoint()
+        before=p.draft
+        QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertEqual(p.selected,free)
+        expected={"control:1:2","control:2:1"}
+        self.assertEqual({name for name,_,kind in canvas.handles() if kind=="control"},expected)
+        self.assertEqual(p.draft,before)
+        QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertEqual(p.draft,before)
+        QTest.mouseDClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertEqual({name for name,_,kind in canvas.handles() if kind=="control"},expected)
+        self.assertEqual(p.draft.points,before.points)
+        p.select("control:1:2")
+        self.assertEqual({name for name,_,kind in canvas.handles() if kind=="control"},expected)
+        p.move_control(1,2,7,18)
+        self.assertTrue(p.draft.curves[1].curved)
+        p.select(free)
+        QTest.mouseDClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertTrue(all(c.curved for c in p.draft.curves[1:]))
+        self.assertEqual({name for name,_,kind in canvas.handles() if kind=="control"},expected)
+        reset=p.draft
+        QTest.mouseDClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertEqual(p.draft,reset)
+        self.assertTrue(all(c.curved for c in p.draft.curves[1:]))
+        for c in p.draft.curves[1:]:
+            self.assertEqual(c.control1,c.start.lerp(c.end,1/3))
+            self.assertEqual(c.control2,c.start.lerp(c.end,2/3))
+        p.select("base");canvas.handles()
+        self.assertEqual({name for name,_,kind in canvas.handles() if kind=="control"},{"control:0:2","control:1:1"})
+
+    def test_new_point_immediately_shows_its_own_controls_for_both_creation_actions(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            for action in ("profile","button"):
+                p.reset_all();c.set_view(view)
+                if action == "profile":
+                    position=c.profile_to_screen(p.draft.radius_at_z(20),20).toPoint()
+                    QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                else:
+                    p.add_point_button.click()
+                self.assertEqual(len(p.draft.points),4)
+                self.assertEqual(p.draft.points[2].identity,p.selected)
+                self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                                 {"control:1:2","control:2:1"})
+                self.assertFalse(any(curve.curved for curve in p.draft.curves[1:]))
+                self.reference.context.validate(p.draft)
+
+    def test_both_creation_actions_keep_existing_neighbor_curves_and_show_new_anchors(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            for action in ("profile","button"):
+                with self.subTest(view=view,action=action):
+                    p.reset_all();c.set_view(view)
+                    p.move_control(1,1,14,15)
+                    p.move_control(1,2,10,30)
+                    before=p.draft
+                    p.select("base")
+                    if action == "profile":
+                        position=c.profile_to_screen(before.radius_at_z(24),24).toPoint()
+                        QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                    else:
+                        p.add_point_button.click()
+                    self.assertEqual(len(p.draft.points),4)
+                    self.assertEqual(p.draft.points[2].identity,p.selected)
+                    self.assertEqual(p.draft.curves[0],before.curves[0])
+                    self.assertTrue(all(curve.curved for curve in p.draft.curves[1:]))
+                    for z in range(8,41):
+                        self.assertAlmostEqual(p.draft.radius_at_z(z),before.radius_at_z(z),places=10)
+                    self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                                     {"control:1:2","control:2:1"})
+                    self.reference.context.validate(p.draft)
+
+    def test_double_click_resets_fixed_point_curves_and_keeps_own_anchors_visible(self):
+        p=self.panel;c=p.canvas
+        for view,identities in (("side",("foot","foot_height","base","top","top_width")),
+                                ("front",("foot","foot_height","base","top","top_width"))):
+            for identity in identities:
+                p.reset_all();c.set_view("side")
+                original=p.draft
+                p.move_control(0,1,14,3)
+                p.move_control(1,2,7,30)
+                c.set_view(view);p.select(identity)
+                position=next(pos.toPoint() for name,pos,_ in c.handles() if name==identity)
+                QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                self.assertEqual(p.selected,identity)
+                self.assertEqual(p.draft.points,original.points)
+                if identity in {"foot","foot_height","base"}:
+                    self.assertEqual(p.draft.curves[0],original.curves[0])
+                if identity in {"base","top","top_width"}:
+                    curve=p.draft.curves[-1]
+                    self.assertTrue(curve.curved)
+                    self.assertEqual(curve.control2,curve.start.lerp(curve.end,2/3))
+                if view in {"side","front"}:
+                    self.assertTrue(any(kind=="control" for _,_,kind in c.handles()))
+                self.reference.context.validate(p.draft)
+
+    def test_plan_views_ignore_curve_reset_double_clicks_and_omit_the_help_item(self):
+        p=self.panel;c=p.canvas
+        p.move_control(0,1,14,3);p.move_control(1,2,7,30)
+        for view,identity in (("top","top_width"),("bottom","foot")):
+            c.set_view(view)
+            before=p.draft
+            position=next(pos.toPoint() for name,pos,_ in c.handles() if name==identity)
+            with patch.object(p,"reset_point_curves") as reset:
+                QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                reset.assert_not_called()
+            self.assertEqual(p.draft,before)
+            self.assertNotIn("Doppelklick",p.view_hint.text())
+
+    def test_preview_hover_has_no_popup_hint_on_handles_or_empty_space(self):
+        c=self.panel.canvas
+        for view in ("side","front","top","bottom","free"):
+            c.set_view(view)
+            positions=[QPoint(100,100),*(pos.toPoint() for _,pos,_ in c.handles())]
+            for position in positions:
+                QTest.mouseMove(c,position)
+                self.assertEqual(c.toolTip(),"")
+
+    def test_profile_views_render_only_the_original_as_a_shaded_mesh_with_aligned_heights(self):
+        import numpy as np
+        from cooling_tower.gui.widgets import manual_canvas
+        from cooling_tower.gui import manual_view_worker
+        p=self.panel;c=p.canvas
+        source=self.reference.object_triangles.copy()
+        for view,yaw in (("side",0),("front",90)):
+            c.set_view(view)
+            c._object_cache=None
+            with patch.object(c,"_tower_picture",wraps=c._tower_picture) as tower,\
+                 patch.object(manual_view_worker,"draw_surface",wraps=manual_view_worker.draw_surface) as surfaces:
+                c.grab()
+                tower.assert_not_called()
+                self.assertEqual(surfaces.call_count,len(source))
+            frame=c._spatial_frame()
+            self.assertEqual((frame.yaw,frame.pitch),(yaw,0))
+            projected,_=frame.project(np.array([(*c._object_center,0),(*c._object_center,20)]))
+            for z,point in zip((0,20),projected):
+                self.assertAlmostEqual(point[1],c.profile_to_screen(0,z).y())
+            self.assertTrue(p.resolution_host.isVisible())
+            original=c._object_cache
+            with patch.object(manual_canvas,"render_spatial_object",wraps=manual_canvas.render_spatial_object) as render:
+                p.resolution_slider.setValue(10 if view=="side" else 1);c.grab()
+                self.assertEqual(render.call_count,1)
+            self.assertIsNot(c._object_cache,original)
+            np.testing.assert_array_equal(self.reference.object_triangles,source)
+
+    def test_profile_tower_actions_reuse_original_surfaces_and_rotation_rebuilds_once_per_changed_value(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            p.reset_all();c.set_view(view);c.grab()
+            original=c._object_cache
+            with patch.object(c,"_render_object",wraps=c._render_object) as render:
+                p.move("base",8,p.settings.foot_height_mm);c.grab()
+                p.move("foot_height",8,9);c.grab()
+                p.insert(20);free=p.selected;c.grab()
+                p.reset_point_curves(free);c.grab()
+                p.move_control(1,2,7,18);c.grab()
+                p.remove(free);c.grab()
+                p.change_setting("maximum_diameter_mm",50);c.grab()
+                p.change_setting("circle_segments",60);c.grab()
+                p.reset_tower();c.grab()
+                p.reset_all();c.grab()
+                render.assert_not_called()
+                self.assertIs(c._object_cache,original)
+                c.set_rotation(37);c.grab()
+                self.assertEqual(render.call_count,1)
+                rotated=c._object_cache
+                c.set_rotation(37);c.grab();c.grab()
+                self.assertEqual(render.call_count,1)
+                self.assertIs(c._object_cache,rotated)
+                c.set_rotation(38);c.grab();c.grab()
+                self.assertEqual(render.call_count,2)
+
+    def test_single_click_reveals_both_own_controls_after_dragging_linear_point(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            p.reset_all();c.set_view(view);p.insert(20);free=p.selected
+            p.select("base")
+            before=next(point.position for point in p.draft.points if point.identity==free)
+            position=next(pos.toPoint() for name,pos,_ in c.handles() if name==free)
+            QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=position)
+            QTest.mouseMove(c,position+QPoint(13,-7))
+            QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(13,-7))
+            after=next(point.position for point in p.draft.points if point.identity==free)
+            self.assertNotEqual(after,before)
+            self.assertFalse(any(curve.curved for curve in p.draft.curves[1:]))
+            self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                             {"control:1:2","control:2:1"})
+            draft=p.draft
+            position=next(pos.toPoint() for name,pos,_ in c.handles() if name==free)
+            QTest.mouseClick(c,Qt.MouseButton.LeftButton,pos=position)
+            self.assertEqual(p.draft,draft)
+            self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                             {"control:1:2","control:2:1"})
+            self.reference.context.validate(p.draft)
+            # Revealed controls must not capture the point's next drag.
+            QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=position)
+            QTest.mouseMove(c,position+QPoint(-9,4))
+            QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(-9,4))
+            self.assertNotEqual(next(point.position for point in p.draft.points if point.identity==free),after)
+            self.assertFalse(any(curve.curved for curve in p.draft.curves[1:]))
+            self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                             {"control:1:2","control:2:1"})
+
+    def test_single_click_controls_follow_selected_point_and_can_edit_linear_segments(self):
+        p=self.panel;c=p.canvas
+        p.insert(20);first=p.selected
+        p.insert(30);second=p.selected
+        p.select("base")
+        before=p.draft
+        for free,index in ((first,2),(second,3)):
+            position=next(pos.toPoint() for name,pos,_ in c.handles() if name==free)
+            QTest.mouseClick(c,Qt.MouseButton.LeftButton,pos=position)
+            self.assertEqual(p.draft,before)
+            self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                             {f"control:{index-1}:2",f"control:{index}:1"})
+        control="control:2:2"
+        position=next(pos.toPoint() for name,pos,_ in c.handles() if name==control)
+        QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=position)
+        QTest.mouseMove(c,position+QPoint(13,0))
+        QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(13,0))
+        self.assertEqual(p.selected,control)
+        self.assertEqual(p.draft.points,before.points)
+        self.assertTrue(p.draft.curves[2].curved)
+        self.assertFalse(p.draft.curves[3].curved)
+        self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                         {"control:2:2","control:3:1"})
+
+    def test_double_click_existing_point_shows_controls_without_inserting(self):
+        p=self.panel;canvas=p.canvas
+        p.insert(20);free=p.selected
+        handle=next(pos for name,pos,_ in canvas.handles() if name==free).toPoint()
+        count=len(p.draft.points)
+        QTest.mouseDClick(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        self.assertEqual(len(p.draft.points),count)
+        self.assertEqual(p.selected,free)
+        self.assertEqual(len([h for h in canvas.handles() if h[2]=="control"]),2)
+
+    def test_right_click_removes_free_points_and_preserves_required_grips(self):
+        p=self.panel;canvas=p.canvas
+        for view in ("side","front"):
+            canvas.set_view(view);p.insert(20);free=p.selected
+            p.select("base")
+            handle=next(pos for name,pos,_ in canvas.handles() if name==free).toPoint()
+            QTest.mouseClick(canvas,Qt.MouseButton.RightButton,pos=handle)
+            self.assertNotIn(free,{point.identity for point in p.draft.points})
+            for identity in ("foot","base","top","foot_height","top_width"):
+                before=p.draft
+                handle=next(pos for name,pos,_ in canvas.handles() if name==identity).toPoint()
+                QTest.mouseClick(canvas,Qt.MouseButton.RightButton,pos=handle)
+                self.assertEqual(p.draft,before)
+
+    def test_height_grip_has_generous_object_top_snap_across_neighbor_layers(self):
+        p=self.panel;canvas=p.canvas
+        object_top=self.reference.context.layers[-1].z_mm
+        for view in ("side","front"):
+            canvas.set_view(view);canvas.zoom=1.6
+            p.move("top",5,object_top)
+            top=next(pos for name,pos,_ in canvas.handles() if name=="top")
+            canvas.pan+=QPointF(0,canvas.height()/2-top.y())
+            top=next(pos for name,pos,_ in canvas.handles() if name=="top").toPoint()
+            target=top+QPoint(0,10)
+            self.assertLess(canvas.screen_to_profile(QPointF(target))[1],object_top-.2)
+            QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=top)
+            QTest.mouseMove(canvas,target)
+            self.assertEqual(p.draft.height_mm,object_top)
+            self.assertEqual(canvas._height_snap_z,object_top)
+            QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
+
+    def test_resolution_changes_only_original_view_and_has_ten_stages(self):
+        p=self.panel;canvas=p.canvas
+        self.assertEqual((p.resolution_slider.minimum(),p.resolution_slider.maximum(),p.resolution_slider.value()),(1,10,4))
+        self.assertEqual(p.settings.object_resolution_percent,10)
+        canvas.set_view("free");canvas.grab()
+        original=canvas._object_cache;tower=canvas._tower_cache;key=canvas._spatial_key()
+        artifact=p.draft.artifact_payload();source=self.reference.object_triangles.copy()
+        p.resolution_slider.setValue(10);canvas.grab()
+        self.assertEqual(p.settings.object_resolution_percent,100)
+        self.assertNotEqual(canvas._spatial_key(),key)
+        self.assertIsNot(canvas._object_cache,original)
+        self.assertIs(canvas._tower_cache,tower)
+        self.assertEqual(p.draft.artifact_payload(),artifact)
+        import numpy as np
+        np.testing.assert_array_equal(self.reference.object_triangles,source)
+        cache=canvas._object_cache
+        with patch.object(canvas,"_render_object",wraps=canvas._render_object) as render:
+            p.highlight_buttons["object"].click();canvas.grab()
+            self.assertEqual(canvas.highlight,"object")
+            self.assertTrue(p.highlight_buttons["object"].isChecked())
+            self.assertFalse(p.highlight_buttons["both"].isChecked())
+            render.assert_not_called()
+        self.assertIs(canvas._object_cache,cache)
+        p.set_busy(True)
+        self.assertFalse(p.resolution_slider.isEnabled())
+        p.set_busy(False)
+        self.assertTrue(p.resolution_slider.isEnabled())
+
+    def test_resolution_slider_uses_requested_percentages(self):
+        for stage,percent in enumerate((1,3,5,10,15,20,25,50,75,100),1):
+            self.panel.resolution_slider.setValue(stage)
+            self.assertEqual(self.panel.settings.object_resolution_percent,percent)
+            self.assertEqual(self.panel.resolution_label.text(),f"{percent} %")
+
+    def test_limit_grips_use_diameter_scale_and_drag_in_tenth_millimetres(self):
+        p=self.panel;c=p.canvas
+        p.change_setting("maximum_diameter_mm",50)
+        p.change_setting("maximum_foot_diameter_mm",50)
+        artifact=p.draft.artifact_payload()
+        maxima=["maximum_diameter_mm","maximum_foot_diameter_mm"]
+        for view,names in (("side",maxima),("front",maxima),
+                           ("top",["maximum_diameter_mm"]),("bottom",["maximum_foot_diameter_mm"])):
+            c.set_view(view)
+            for name in names:
+                p.change_setting(name,50)
+                c.fit_scene()
+                handle=next(pos for identity,pos,_ in c.handles() if identity==name)
+                edge,limit=c.limit_geometry(name)
+                self.assertEqual(handle,limit)
+                if view in {"side","front"}:
+                    self.assertAlmostEqual(c.screen_to_profile(handle)[0],25)
+                else:
+                    z=p.draft.height_mm if view=="top" else p.draft.points[0].position.z_mm
+                    center=c._placement.center_x_mm,c._placement.center_y_mm
+                    import numpy as np
+                    axis,_=c._project_world(np.array([(center[0],center[1],z)]))
+                    self.assertAlmostEqual(handle.x()-axis[0,0],25*c.transform()[0])
+                self.assertAlmostEqual(edge.y(),limit.y())
+                self.assertEqual(c.hit_test(handle),name)
+                position=handle.toPoint()
+                QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=position)
+                QTest.mouseMove(c,position+QPoint(13,-18))
+                value=getattr(p.settings,name)
+                self.assertAlmostEqual(value*10,round(value*10))
+                self.assertGreater(value,50)
+                self.assertIn(f"Ø {value:.2f} mm".replace(".",","),c.selected_handle_text())
+                QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(13,-18))
+                self.assertEqual(p.draft.artifact_payload(),artifact)
+                self.assertEqual(p.editors[name].value(),value)
+
+    def test_minimum_measure_is_symmetric_and_drags_only_the_limit_in_tenths(self):
+        p=self.panel;c=p.canvas
+        p.move("base",20,8)
+        original=p.draft.artifact_payload()
+        for view in ("side","front"):
+            c.set_view(view)
+            left,right,left_end,right_end=c.minimum_measure_geometry()
+            axis=c.profile_to_screen(0,0)
+            self.assertAlmostEqual(axis.x()-left.x(),right.x()-axis.x())
+            self.assertAlmostEqual(right.x()-left.x(),p.settings.minimum_diameter_mm*c.transform()[0])
+            self.assertEqual((left.x(),right.x()),(left_end.x(),right_end.x()))
+            self.assertEqual(left_end.y(),right_end.y())
+            self.assertGreater(right_end.y(),axis.y())
+            self.assertLess(right_end.y()+23,c.height())
+            self.assertEqual(c.hit_test(right_end),"minimum_diameter_mm")
+            target=right_end.toPoint()+QPoint(12,-10)
+            QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=right_end.toPoint())
+            QTest.mouseMove(c,target)
+            QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=target)
+            value=p.settings.minimum_diameter_mm
+            self.assertGreater(value,5)
+            self.assertAlmostEqual(value*10,round(value*10))
+            self.assertEqual(p.editors["minimum_diameter_mm"].value(),value)
+            self.assertIn(f"Minimum: Ø {value:.2f} mm".replace(".",","),c.selected_handle_text())
+            self.assertEqual(p.draft.artifact_payload(),original)
+            left,right,left_end,right_end=c.minimum_measure_geometry()
+            self.assertAlmostEqual(right.x()-left.x(),value*c.transform()[0])
+            self.assertAlmostEqual(c.profile_to_screen(0,0).x()-left.x(),right.x()-c.profile_to_screen(0,0).x())
+        p.move_limit("minimum_diameter_mm",100)
+        self.assertEqual(p.settings.minimum_diameter_mm,20)
+        self.assertEqual(p.draft.artifact_payload(),original)
+        for view in ("top","bottom","free"):
+            c.set_view(view)
+            self.assertNotIn("minimum_diameter_mm",[name for name,_,_ in c.handles()])
+
+    def test_minimum_measure_dashed_lines_fade_from_baseline_gray_to_light_gray(self):
+        c=self.panel.canvas
+        pen=c._minimum_measure_pen()
+        self.assertEqual(pen.style(),Qt.PenStyle.DashLine)
+        self.assertEqual(pen.widthF(),1)
+        gradient=pen.brush().gradient()
+        left,_,end,_=c.minimum_measure_geometry()
+        self.assertEqual(gradient.start(),left)
+        self.assertEqual(gradient.finalStop(),end)
+        self.assertEqual(gradient.stops(),[(0.,QColor("#a3b1c0").darker(150)),(1.,QColor("#bec5ce"))])
+        rectangle=c.minimum_measure_label_rect()
+        self.assertGreaterEqual(rectangle.width(),c.fontMetrics().horizontalAdvance("Min. Turm-Ø")+8)
+        self.assertLess(rectangle.bottom(),c.height())
+        self.assertAlmostEqual(rectangle.center().x(),c.profile_to_screen(0,0).x())
+
+    def test_settings_rail_animates_without_changing_form_and_survives_reversal_and_resize(self):
+        p=self.panel;rail=p.settings_collapse_button
+        p.move("base",10,8);before=p.draft
+        width=p.settings_pane.width();preview_width=p.preview_container.width()
+        self.assertEqual(rail.height(),p.settings_scroll.height())
+        self.assertEqual(rail.x(),p.settings_scroll.width())
+        self.assertEqual(rail.arrowType(),Qt.ArrowType.LeftArrow)
+        self.assertEqual(p._settings_animation.duration(),250)
+        rail.click();QTest.qWait(90)
+        self.assertTrue(p._settings_transitioning)
+        self.assertLess(p.settings_pane.width(),width)
+        self.assertGreater(p.settings_pane.width(),p.settings_pane.RAIL_WIDTH)
+        QTest.qWait(220)
+        self.assertTrue(p.settings_collapsed)
+        self.assertEqual(p.settings_pane.width(),p.settings_pane.RAIL_WIDTH)
+        self.assertTrue(p.settings_scroll.isHidden())
+        self.assertEqual(rail.x(),0)
+        self.assertEqual(rail.height(),p.splitter.height())
+        self.assertEqual(rail.arrowType(),Qt.ArrowType.RightArrow)
+        self.assertGreater(p.preview_container.width(),preview_width)
+        p.resize(800,1050);self.app.processEvents()
+        self.assertEqual(p.splitter.orientation(),Qt.Orientation.Horizontal)
+        rail.click();QTest.qWait(310)
+        self.assertFalse(p.settings_collapsed)
+        self.assertEqual(p.splitter.orientation(),Qt.Orientation.Vertical)
+        self.assertTrue(p.settings_scroll.isVisible())
+        self.assertEqual(p.draft,before)
+        bar=p.settings_scroll.verticalScrollBar();bar.setValue(bar.maximum())
+        scroll_position=bar.value()
+        rail.click();QTest.qWait(310);rail.click();QTest.qWait(310)
+        self.assertEqual(bar.value(),scroll_position)
+        rail.click();QTest.qWait(70);rail.click();QTest.qWait(310)
+        self.assertFalse(p.settings_collapsed)
+        self.assertFalse(p._settings_transitioning)
+        self.assertTrue(p.settings_scroll.isVisible())
+        self.assertEqual(p.draft,before)
+
+    def test_original_bitmap_matches_direct_picture_pixels_and_reuses_only_valid_frames(self):
+        import math
+        p=self.panel;c=p.canvas
+        p.change_setting("object_resolution_percent",100)
+        for view in ("side","front","top","bottom","free"):
+            c.set_view(view);c.grab()
+            for highlight in ("both","object"):
+                c.set_highlight(highlight)
+                for ratio in (1.,2.):
+                    with patch.object(c,"devicePixelRatioF",return_value=ratio):
+                        cached=c._original_image()
+                        direct=QImage(math.ceil(c.width()*ratio),math.ceil(c.height()*ratio),
+                                      QImage.Format.Format_ARGB32_Premultiplied)
+                        direct.setDevicePixelRatio(ratio);direct.fill(QColor("#e6ecf2"))
+                        painter=QPainter(direct)
+                        c._draw_spatial_picture(painter,c._object_cache,.28 if highlight=="object" else 1)
+                        painter.end()
+                        self.assertEqual(cached,direct)
+                        self.assertIs(c._original_image(),cached)
+        c.set_view("side");c.set_highlight("both");c.grab()
+        picture=c._object_cache;bitmap=c._object_image_cache
+        p.move("base",10,8);p.select("foot");c.grab()
+        self.assertIs(c._object_cache,picture)
+        self.assertIs(c._object_image_cache,bitmap)
+        c.set_highlight("tower");c.grab()
+        self.assertIs(c._object_image_cache,bitmap)
+        for change in (lambda:setattr(c,"pan",QPointF(10,12)),
+                       lambda:setattr(c,"zoom",1.5),lambda:c.resize(c.width()+20,c.height()),
+                       lambda:c.set_highlight("object"),c.fit_scene):
+            before=c._object_image_cache
+            change();c.grab()
+            self.assertIsNot(c._object_image_cache,before)
+            self.assertIs(c._object_cache,picture)
+        before=c._object_image_cache
+        c.set_rotation(45);c.grab()
+        self.assertIsNot(c._object_cache,picture)
+        self.assertIsNot(c._object_image_cache,before)
+
+    def test_fitted_tall_profile_uses_height_above_the_minimum_measure(self):
+        p=self.panel;c=p.canvas
+        _,_,reference,_,_=create_fixture(self,joint=True,count=600)
+        p.initialize(reference)
+        self.assertEqual(p.draft.height_mm,120)
+        for view in ("side","front"):
+            c.set_view(view)
+            rectangle=c.plot_rect()
+            top=c.profile_to_screen(0,120)
+            bottom=c.profile_to_screen(0,0)
+            self.assertAlmostEqual(top.y(),rectangle.top())
+            self.assertAlmostEqual(bottom.y(),rectangle.bottom())
+            self.assertGreaterEqual(top.y(),c.view_controls.geometry().bottom()+13)
+            self.assertEqual(c.height()-bottom.y(),52)
+            self.assertLess(c.minimum_measure_geometry()[-1].y()+23,c.height())
+
+    def test_scale_values_do_not_overlap_units_when_the_fitted_object_reaches_the_top(self):
+        p=self.panel;c=p.canvas
+        _,_,reference,_,_=create_fixture(self,joint=True,count=600)
+        p.initialize(reference);c.fit_scene()
+        image=QImage(c.width(),c.height(),QImage.Format.Format_ARGB32_Premultiplied)
+        painter=QPainter(image)
+        try:
+            with patch.object(QPainter,"drawText") as draw:
+                c._draw_scales(painter)
+            labels=[(call.args[0],call.args[-1]) for call in draw.call_args_list]
+            units=[rectangle for rectangle,text in labels if text in {"mm","Layer"}]
+            values=[rectangle for rectangle,text in labels if text not in {"mm","Layer"}]
+            self.assertTrue(values)
+            self.assertFalse(any(unit.intersects(value) for unit in units for value in values))
+            layer_rectangle=next(rectangle for rectangle,text in labels if text=="Layer")
+            self.assertLess(layer_rectangle.right(),c.width()-43)
+            self.assertTrue(all(rectangle.left()>c.width()-43 for rectangle,text in labels if text.isdigit()
+                                and rectangle.left()>c.width()/2))
+        finally:painter.end()
+
+    def test_spatial_fit_contains_actual_segments_and_rotated_original_without_world_padding(self):
+        import math
+        import numpy as np
+        from cooling_tower.gui.manual_view_worker import rotate_object
+        p=self.panel;c=p.canvas
+        _,_,reference,_,_=create_fixture(self,joint=True,count=600)
+        p.initialize(reference)
+        for view in ("top","bottom","free"):
+            for rotation in (0,37,90):
+                c.set_view(view);c.set_rotation(rotation);c.fit_scene()
+                center=c._placement.center_x_mm,c._placement.center_y_mm
+                count=p.settings.circle_segments
+                tower=np.array([(center[0]+point.radius_mm*math.cos(math.tau*i/count),
+                                 center[1]+point.radius_mm*math.sin(math.tau*i/count),point.z_mm)
+                                for point in c._rings for i in range(count)])
+                if view in {"top","bottom"}:
+                    z=p.draft.points[-1 if view=="top" else 0].position.z_mm
+                    radius=getattr(p.settings,"maximum_diameter_mm" if view=="top" else "maximum_foot_diameter_mm")/2
+                    tower=np.concatenate((tower,[(center[0]+radius,center[1],z)]))
+                source=rotate_object(reference.object_triangles.reshape(-1,3),reference.silhouette.center_xy,
+                                     c._object_center,rotation)
+                screen,_=c._project_world(np.concatenate((tower,source)))
+                rectangle=c.plot_rect()
+                low,high=screen.min(axis=0),screen.max(axis=0)
+                self.assertGreaterEqual(low[0],rectangle.left()-1e-7)
+                self.assertGreaterEqual(low[1],rectangle.top()-1e-7)
+                self.assertLessEqual(high[0],rectangle.right()+1e-7)
+                self.assertLessEqual(high[1],rectangle.bottom()+1e-7)
+                self.assertTrue(abs(high[0]-low[0]-rectangle.width())<1e-7 or
+                                abs(high[1]-low[1]-rectangle.height())<1e-7)
+
+    def test_limit_grips_stop_at_profile_bounds_and_do_not_edit_when_busy(self):
+        p=self.panel
+        p.move("base",10.03,8)
+        artifact=p.draft.artifact_payload()
+        p.move_limit("maximum_diameter_mm",.1)
+        self.assertEqual(p.settings.maximum_diameter_mm,10.1)
+        p.move_limit("maximum_foot_diameter_mm",.1)
+        self.assertEqual(p.settings.maximum_foot_diameter_mm,25)
+        self.assertEqual(p.draft.artifact_payload(),artifact)
+        p.move_limit("maximum_foot_diameter_mm",1200)
+        self.assertEqual(p.settings.maximum_foot_diameter_mm,1000)
+        p.set_busy(True);before=p.draft
+        p.move_limit("maximum_diameter_mm",50)
+        self.assertEqual(p.draft,before)
+        self.assertFalse(p.canvas.handles())
+
+    def test_limit_grip_click_and_vertical_motion_preserve_typed_precision(self):
+        p=self.panel;c=p.canvas
+        p.change_setting("maximum_diameter_mm",50.03)
+        p.select("maximum_diameter_mm")
+        before=p.draft
+        position=next(pos.toPoint() for name,pos,_ in c.handles() if name==p.selected)
+        QTest.mouseClick(c,Qt.MouseButton.LeftButton,pos=position)
+        self.assertEqual(p.draft,before)
+        QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=position)
+        QTest.mouseMove(c,position+QPoint(0,18))
+        QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(0,18))
+        self.assertEqual(p.draft,before)
+        self.assertIn("50,03 mm",c.selected_handle_text())
+
+    def test_spatial_tower_uses_all_segments_and_updates_without_object_resolution(self):
+        p=self.panel;c=p.canvas
+        p.change_setting("circle_segments",120)
+        c.set_view("free")
+        c._tower_render_key=None
+        from cooling_tower.gui.widgets import manual_canvas
+        with patch.object(manual_canvas,"draw_surface",wraps=manual_canvas.draw_surface) as surface:
+            c.grab()
+            self.assertEqual(surface.call_count,120*(len(c._display_rings())-1))
+        tower=c._tower_cache
+        p.change_setting("object_resolution_percent",1);c.grab()
+        self.assertIs(c._tower_cache,tower)
+        p.change_setting("object_resolution_percent",100);c.grab()
+        self.assertIs(c._tower_cache,tower)
+        p.move("top_width",6,p.draft.height_mm);c.grab()
+        self.assertIsNot(c._tower_cache,tower)
+        for view in ("side","front"):
+            c.set_view(view)
+            with patch.object(c,"_tower_picture",wraps=c._tower_picture) as spatial:
+                c.grab()
+                spatial.assert_not_called()
+
+    def test_legend_uses_two_columns_of_four_when_space_allows(self):
+        from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
+        info=ManualPreviewInformation()
+        self.addCleanup(info.close)
+        info.set_state("side",False)
+        widths=[label.fontMetrics().horizontalAdvance(label.text())+row.layout().spacing()+row.layout().itemAt(0).widget().width()
+                for row,label in zip(info.legend_rows,info.legend_labels)]
+        needed=max(widths[:4])+max(widths[4:])+info.legend_grid.horizontalSpacing()
+        info.resize(needed*2+89,300);info.show();self.app.processEvents()
+        info.heightForWidth(info.width())
+        self.assertEqual(info.legend_columns,2)
+        for i,row in enumerate(info.legend_rows):
+            index=info.legend_grid.indexOf(row)
+            self.assertEqual(info.legend_grid.getItemPosition(index)[:2],(i%4,i//4))
+        info.resize(max(100,needed*2-60),300);self.app.processEvents()
+        info.heightForWidth(info.width())
+        self.assertEqual(info.legend_columns,1)
+        self.assertTrue(all(line.startswith("• ") for line in info.instructions.text().splitlines()))
+
+    def test_wrapped_legend_entries_keep_text_and_swatch_on_the_same_top_line(self):
+        from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
+        info=ManualPreviewInformation()
+        self.addCleanup(info.close)
+        widths=[label.fontMetrics().horizontalAdvance(label.text())+row.layout().spacing()+row.layout().itemAt(0).widget().width()
+                for row,label in zip(info.legend_rows,info.legend_labels)]
+        needed=max(widths[:4])+max(widths[4:])+info.legend_grid.horizontalSpacing()
+        for width in (needed*2+29,needed*2+41):
+            info.resize(width,300);info.show();self.app.processEvents()
+            info.heightForWidth(info.width());self.app.processEvents()
+            self.assertEqual(info.legend_columns,2)
+            base,profile=info.legend_labels[3],info.legend_labels[7]
+            self.assertGreater(base.heightForWidth(base.width()),base.fontMetrics().height())
+            self.assertEqual(base.mapTo(info,QPoint()).y(),profile.mapTo(info,QPoint()).y())
+            self.assertEqual(profile.mapTo(info,QPoint()).y(),info.swatches["profile"].mapTo(info,QPoint()).y())
+
+    def test_preview_help_uses_requested_wording_without_periods_and_zoom_last(self):
+        info=self.panel.preview_information
+        for view in ("side","front","top","bottom","free"):
+            info.set_state(view,False)
+            lines=info.instructions.text().splitlines()
+            self.assertEqual(lines[-2:],["• Mittlere Maustaste: Ansicht verschieben","• Mausrad: Zoom"])
+            self.assertTrue(all(not line.endswith(".") for line in lines))
+            if view in {"side","front"}:
+                self.assertEqual(lines[:4],["• Punkt ziehen: Form ändern",
+                    "• Doppelklick auf Turmprofil: Punkt hinzufügen",
+                    "• Doppelklick auf Punkt: Bézier zurücksetzen",
+                    "• Manuellen Punkt rechtsklicken: Punkt entfernen"])
+
+    def test_preview_toolbar_rotation_and_two_columns_remain_in_order(self):
+        p=self.panel
+        p.canvas.set_view("free")
+        for width,height in ((1400,1000),(720,1300),(1100,1000)):
+            p.resize(width,height)
+            for _ in range(4):self.app.processEvents()
+            position=lambda widget:widget.mapTo(p.preview_container,QPoint())
+            self.assertEqual(p.highlight_host.height(),p.resolution_host.height())
+            self.assertEqual(p.highlight_host.height(),p.rotation_host.height())
+            for title in (p.highlight_title,p.resolution_title,p.rotation_title):
+                self.assertEqual(title.alignment(),Qt.AlignmentFlag.AlignCenter)
+                self.assertEqual(position(title).y(),position(p.highlight_title).y())
+            self.assertLess(position(p.highlight_host).x()+p.highlight_host.width(),position(p.resolution_host).x())
+            self.assertLess(position(p.resolution_host).x()+p.resolution_host.width(),position(p.rotation_host).x())
+            self.assertIs(p.fit_button.parentWidget(),p.canvas.view_controls)
+            self.assertLessEqual(p.canvas.view_controls.geometry().right(),p.canvas.width()-8)
+            self.assertLess(position(p.rotation_slider).y()+p.rotation_slider.height(),position(p.canvas).y())
+            self.assertLess(position(p.canvas).y()+p.canvas.height(),position(p.preview_information).y())
+            self.assertLess(p.preview_information.legend.geometry().right(),p.preview_information.controls.x())
+            self.assertLess(p.preview_information.legend.geometry().right(),p.preview_information.separator.x())
+            self.assertLess(p.preview_information.separator.x(),p.preview_information.controls.x())
+            self.assertEqual(p.preview_information.instructions.x(),p.preview_information.controls_title.x())
+        p.change_setting("critical_layers_enabled",True)
+        swatch=p.preview_information.swatches["object"]
+        self.assertTrue(swatch.split)
+        image=swatch.grab().toImage()
+        self.assertEqual(image.pixelColor(1,1).name(),"#e5484d")
+        self.assertEqual(image.pixelColor(image.width()-2,image.height()-2).name(),"#41a878")
+        p.change_setting("critical_layers_enabled",False)
+        self.assertFalse(swatch.split)
+
+    def test_scale_number_anchors_have_mirrored_edge_margins(self):
+        painter=Mock()
+        canvas=self.panel.canvas
+        canvas._draw_scales(painter)
+        calls=[call.args for call in painter.drawText.call_args_list]
+        left=next(rect for rect,alignment,text in calls if alignment==Qt.AlignmentFlag.AlignRight and text not in {"mm","Layer"})
+        right=next(rect for rect,alignment,text in calls if alignment==Qt.AlignmentFlag.AlignLeft and text!="Layer")
+        self.assertAlmostEqual(left.right(),canvas.width()-right.left())
+
+    def test_preview_view_buttons_align_right_wrap_in_two_rows_and_keep_geometry(self):
+        p=self.panel;c=p.canvas;controls=c.view_controls
+        before=p.draft
+        for view,button in p.view_buttons.items():
+            button.click()
+            self.assertEqual(c.view,view)
+            self.assertTrue(button.isChecked())
+            self.assertEqual(p.draft,before)
+        c.set_view("side")
+        for width,rows in ((1200,1),(360,2),(1200,1)):
+            c.resize(width,500);controls.relayout()
+            self.assertEqual(controls.rows,rows)
+            self.assertEqual(controls.geometry().right(),c.width()-9)
+            self.assertEqual(controls.y(),8)
+            for i,button in enumerate(controls.buttons):
+                index=controls.grid.indexOf(button)
+                expected=(0,i) if rows==1 else divmod(i,3)
+                self.assertEqual(controls.grid.getItemPosition(index)[:2],expected)
+                self.assertEqual(button.height(),controls.button_height)
+                self.assertGreaterEqual(button.height(),button.fontMetrics().height()+4)
+            if rows==2:
+                self.assertEqual(controls.width(),c.width()-16)
+                self.assertFalse(c.caption_visible())
+                painter=Mock();c._draw_scales(painter)
+                headers=[call.args[0] for call in painter.drawText.call_args_list if call.args[2] in {"mm","Layer"}]
+                self.assertTrue(all(rect.top()>controls.geometry().bottom() for rect in headers))
+            else:
+                self.assertTrue(c.caption_visible())
+            self.assertEqual(p.fit_button.geometry().right(),controls.width()-1)
+        c.zoom=2;c.pan=QPointF(20,30)
+        p.fit_button.click()
+        self.assertEqual(c.zoom,1)
+        self.assertEqual(c.pan,QPointF())
+
+    def test_fit_button_marks_changed_framing_and_clears_when_fitted(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front","top","bottom","free"):
+            c.set_view(view)
+            self.assertFalse(p.fit_button.property("needsFit"))
+            start=QPoint(c.width()//2,c.height()//2)
+            QTest.mousePress(c,Qt.MouseButton.MiddleButton,pos=start)
+            QTest.mouseMove(c,start+QPoint(24,15))
+            QTest.mouseRelease(c,Qt.MouseButton.MiddleButton,pos=start+QPoint(24,15))
+            self.assertTrue(p.fit_button.property("needsFit"))
+            p.fit_button.click()
+            self.assertFalse(p.fit_button.property("needsFit"))
+            event=QWheelEvent(QPointF(start),QPointF(start),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,
+                              Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.NoScrollPhase,False)
+            c.wheelEvent(event)
+            self.assertTrue(p.fit_button.property("needsFit"))
+            p.fit_button.click()
+            c.resize(c.width()+20,c.height()+20);c.grab()
+            c.set_highlight("object")
+            p.change_setting("object_resolution_percent",100)
+            self.assertFalse(p.fit_button.property("needsFit"))
+        c.set_rotation(45)
+        self.assertTrue(p.fit_button.property("needsFit"))
+        p.fit_button.click()
+        self.assertFalse(p.fit_button.property("needsFit"))
+        start=QPoint(c.width()//2,c.height()//2)
+        QTest.mousePress(c,Qt.MouseButton.RightButton,pos=start)
+        QTest.mouseRelease(c,Qt.MouseButton.RightButton,pos=start+QPoint(24,15))
+        self.assertTrue(p.fit_button.property("needsFit"))
+
+    def test_resolution_controls_show_in_all_views_with_percentage_gradient(self):
+        p=self.panel
+        for view in ("side","top","front","bottom","free","side"):
+            p.canvas.set_view(view);self.app.processEvents()
+            self.assertTrue(p.resolution_host.isVisible())
+        p.canvas.set_view("free");self.app.processEvents()
+        slider=p.resolution_slider
+        slider.resize(420,36);slider.setValue(10)
+        image=slider.grab().toImage()
+        # Sample the actual groove, away from the thumb. Most stage positions
+        # must still be green, while the high-resolution end is red.
+        for fraction in (.1,.45,.65):
+            column=round((image.width()-1)*fraction)
+            self.assertTrue(any(image.pixelColor(column,y).green()>image.pixelColor(column,y).red()
+                                for y in range(image.height())))
+        column=round((image.width()-1)*.95)
+        self.assertTrue(any(image.pixelColor(column,y).red()>image.pixelColor(column,y).green()+60
+                            for y in range(image.height())))
+
+    def test_resolution_heading_hides_side_hints_before_overlap_and_marks_all_stages(self):
+        p=self.panel;p.canvas.set_view("free");self.app.processEvents()
+        heading=p.resolution_heading
+        threshold=heading.title.sizeHint().width()+2*max(heading.faster.sizeHint().width(),heading.precise.sizeHint().width())+16
+        for width,visible in ((420,True),(threshold-1,False),(threshold,True),
+                              (heading.minimumWidth(),False),(420,True)):
+            heading.resize(width,heading.height());self.app.processEvents()
+            self.assertEqual(heading.faster.isVisible(),visible)
+            self.assertEqual(heading.precise.isVisible(),visible)
+            self.assertEqual(heading.title.text(),"Auflösung (STL)")
+            self.assertEqual((heading.faster.text(),heading.precise.text()),("performance","optik"))
+            self.assertFalse(any(label.wordWrap() for label in (heading.title,heading.faster,heading.precise)))
+            if visible:
+                title_left=(width-heading.title.sizeHint().width())/2
+                self.assertLess(heading.faster.geometry().right(),title_left)
+                self.assertGreater(heading.precise.x(),width-title_left)
+        slider=p.resolution_slider
+        slider.resize(420,36)
+        with patch("cooling_tower.gui.widgets.manual_resolution_control.QPainter") as painter:
+            slider.grab()
+            marks=painter.return_value.drawLine.call_args_list
+        self.assertEqual(len(marks),10)
+        positions=[call.args[0] for call in marks]
+        self.assertEqual(len(set(positions)),10)
+        self.assertTrue(all(0 <= x < slider.width() for x in positions))
+        p.change_setting("object_resolution_percent",75)
+        self.assertTrue(p.resolution_reset.isEnabled())
+        self.assertTrue(p.resolution_reset.property("modified"))
+        p.set_busy(True)
+        self.assertFalse(p.resolution_reset.isEnabled())
+        p.set_busy(False)
+        p.resolution_reset.click()
+        self.assertEqual(p.settings.object_resolution_percent,10)
+        self.assertFalse(p.resolution_reset.isEnabled())
+        self.assertEqual(p.resolution_reset.size(),p.rotation_reset.size())
+
+    def test_preview_highlight_buttons_have_equal_widths_and_all_actions_have_gradients(self):
+        p=self.panel
+        self.assertEqual(len({button.width() for button in p.highlight_buttons.values()}),1)
+        self.assertTrue(all("qlineargradient" in button.styleSheet() for button in p.highlight_buttons.values()))
+        self.assertIn("qlineargradient",p.canvas.view_controls.styleSheet())
+        self.assertGreaterEqual(p.fit_button.height(),p.fit_button.fontMetrics().height()+8)
+
+    def test_xray_controls_shrink_last_keep_equal_widths_and_shorten_the_title(self):
+        p=self.panel;row=p.preview_tools;xray=p.highlight_host
+        p.preview_container.layout().removeWidget(row)
+        row.setParent(None);row.show()
+        self.addCleanup(lambda:p.preview_container.layout().insertWidget(0,row))
+        other_minimum=row._other_minimum_width()
+        self.assertEqual([p.highlight_buttons[key].text() for key in ("tower","both","object")],
+                         ["Turm","Keine","STL"])
+        self.assertTrue(p.highlight_buttons["both"].isChecked())
+        for width,expected in ((other_minimum+xray.preferred_width+100,xray.preferred_width),
+                               (other_minimum+xray.preferred_width,xray.preferred_width),
+                               (other_minimum+xray.preferred_width-9,xray.preferred_width-9),
+                               (other_minimum+xray.minimum_width,xray.minimum_width),
+                               (other_minimum+xray.minimum_width-15,xray.minimum_width),
+                               (other_minimum+xray.preferred_width+100,xray.preferred_width)):
+            row.resize(width,row.height());self.app.processEvents()
+            self.assertEqual(xray.width(),expected)
+            widths={button.width() for button in p.highlight_buttons.values()}
+            self.assertEqual(len(widths),1)
+            self.assertGreaterEqual(min(widths),xray.minimum_button_width)
+            self.assertEqual(len({button.y() for button in p.highlight_buttons.values()}),1)
+            self.assertEqual(p.highlight_title.text(),"X-Ray (Transparenz)" if expected==xray.preferred_width else "X-Ray")
+        for button in p.highlight_buttons.values():
+            style=button.styleSheet()
+            checked=style.split("QPushButton:checked {",1)[1].split("}",1)[0]
+            self.assertIn("background: qlineargradient",checked)
+            self.assertIn("font-weight: bold",checked)
+            self.assertNotIn("border:",checked)
+            self.assertIn("border: 1px solid",style)
+
+    def test_xray_buttons_make_only_the_named_surface_transparent_in_every_view(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front","top","bottom","free"):
+            c.set_view(view);p.highlight_buttons["both"].click();c.grab()
+            original=c._object_cache
+            tower=c._tower_cache
+            for choice,object_opacity,tower_opacity in (("tower",1,.35),("object",.28,1),("both",1,1)):
+                with self.subTest(view=view,choice=choice):
+                    p.highlight_buttons[choice].click()
+                    c._object_image_cache=None
+                    with patch.object(c,"_draw_spatial_picture",wraps=c._draw_spatial_picture) as draw:
+                        image=c.grab().toImage()
+                    self.assertEqual(draw.call_args_list[0].args[2],object_opacity)
+                    if view in {"top","bottom","free"}:
+                        self.assertEqual(draw.call_args_list[1].args[2],tower_opacity)
+                        self.assertIs(c._tower_cache,tower)
+                    elif view=="side":
+                        position=c.profile_to_screen(0,20).toPoint()
+                        color=image.pixelColor(position)
+                        if tower_opacity==1:
+                            self.assertEqual(color.name(),c.TOWER_COLOR)
+                        else:
+                            self.assertGreater(color.blue(),QColor(c.TOWER_COLOR).blue()+60)
+                    self.assertIs(c._object_cache,original)
+                    self.assertEqual(c.highlight,choice)
+                    self.assertTrue(p.highlight_buttons[choice].isChecked())
+
+    def test_rotation_slider_magnetically_snaps_every_45_degrees_only_while_dragged(self):
+        p=self.panel;slider=p.rotation_slider
+        self.assertEqual(slider.tickInterval(),45)
+        slider.setSliderDown(True)
+        for stop in range(0,361,45):
+            slider.setValue(stop+2 if stop<360 else stop-2)
+            self.assertEqual(slider.value(),stop)
+            self.assertEqual(p.rotation_label.text(),f"{stop},00°")
+        slider.setValue(17)
+        self.assertEqual(slider.value(),17)
+        slider.setValue(38)
+        self.assertEqual(slider.value(),38)
+        slider.setSliderDown(False)
+        slider.setValue(47)
+        self.assertEqual(slider.value(),47)
+        deadline=time.monotonic()+1
+        while p.canvas.object_rotation != 47 and time.monotonic()<deadline:
+            QTest.qWait(20)
+        self.assertEqual(p.canvas.object_rotation,47)
+
+    def test_rotation_reset_uses_standard_size_style_and_modified_state(self):
+        p=self.panel
+        standard=p.rows["maximum_diameter_mm"].reset_button
+        self.assertEqual(p.rotation_reset.objectName(),standard.objectName())
+        self.assertEqual(p.rotation_reset.size(),standard.size())
+        self.assertEqual(p.rotation_reset.text(),standard.text())
+        self.assertEqual(p.rotation_reset.styleSheet(),standard.styleSheet())
+        self.assertFalse(p.rotation_reset.isEnabled())
+        p.rotation_slider.setValue(47)
+        self.assertTrue(p.rotation_reset.isEnabled())
+        self.assertTrue(p.rotation_reset.property("modified"))
+        p.rotation_reset.click()
+        self.assertEqual(p.rotation_slider.value(),0)
+        self.assertFalse(p.rotation_reset.isEnabled())
+        self.assertFalse(p.rotation_reset.property("modified"))
+
+    def test_selected_handle_shows_relevant_diameter_height_or_layer(self):
+        p=self.panel;canvas=p.canvas
+        for identity,expected in (("top_width","Spitze: Ø 5,00 mm"),("base","Grund: Ø 5,00 mm"),
+                                  ("foot","Fuß: Ø 25,00 mm"),("foot_height","Layer: 40")):
+            p.select(identity)
+            self.assertEqual(canvas.selected_handle_text(),expected)
+        p.insert(20);free=p.selected
+        self.assertEqual(canvas.selected_handle_text(),"Layer: 100")
+        p.checks["layer_snap_enabled"].setChecked(False)
+        self.assertEqual(canvas.selected_handle_text(),"Höhe: 20,00 mm")
+        p.select("foot_height")
+        self.assertEqual(canvas.selected_handle_text(),"Höhe: 8,00 mm")
+        p.select("control:0:1")
+        self.assertIn("Höhe:",canvas.selected_handle_text())
+        p.move("base",10.3,8);p.select("base")
+        self.assertEqual(canvas.selected_handle_text(),"Grund: Ø 10,30 mm")
+
+    def test_horizontal_drags_snap_all_width_handles_to_tenths(self):
+        p=self.panel;canvas=p.canvas
+        p.insert(20);free=p.selected
+        original=p.draft
+        for snap_layers in (True,False):
+            for view,identity in (("side","base"),("side","foot"),("side","top_width"),("side",free),
+                                  ("side","control:0:1"),("side","control:0:2"),("front",free),
+                                  ("top","top_width"),("bottom","foot")):
+                with self.subTest(snap_layers=snap_layers,view=view,identity=identity):
+                    p.commit(original);p.change_setting("layer_snap_enabled",snap_layers)
+                    canvas.set_view(view);p.select("foot_height" if identity=="control:0:2" else "foot" if identity.startswith("control:") else identity)
+                    handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
+                    canvas.pan+=QPointF(canvas.width()/2-handle.x(),canvas.height()/2-handle.y())
+                    handle=next(pos for name,pos,_ in canvas.handles() if name==identity).toPoint()
+                    before=canvas._vertical_handle_height(identity)
+                    target=handle+QPoint(17,0)
+                    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=handle)
+                    QTest.mouseMove(canvas,target)
+                    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
+                    diameter=canvas._horizontal_handle_radius(identity)*2
+                    self.assertAlmostEqual(diameter*10,round(diameter*10))
+                    self.assertEqual(canvas._vertical_handle_height(identity),before)
+        p.commit(original);canvas.set_view("side");p.select(free);p.move(free,10.07,20)
+        handle=next(pos for name,pos,_ in canvas.handles() if name==free).toPoint()
+        QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=handle)
+        QTest.mouseMove(canvas,handle+QPoint(0,15))
+        QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=handle+QPoint(0,15))
+        self.assertAlmostEqual(canvas._horizontal_handle_radius(free)*2,10.07)
+
+    def test_horizontal_grid_stops_before_fractional_diameter_limit(self):
+        p=self.panel
+        p.change_setting("maximum_diameter_mm",10.07)
+        p.move("base",11,8,diameter_snap=True)
+        self.assertAlmostEqual(p.draft.base_diameter_mm,10)
+        p.insert(20);free=p.selected
+        p.move(free,12,25,diameter_snap=True,layer_snap=True)
+        point=next(point.position for point in p.draft.points if point.identity==free)
+        self.assertAlmostEqual(point.diameter_mm,10)
+        self.assertAlmostEqual(point.z_mm,25)
+        self.reference.context.validate(p.draft)
+
+    def test_cached_surface_edges_and_nodes_keep_one_pixel_width_at_zoom(self):
+        import numpy as np
+        from PySide6.QtGui import QColor,QImage,QPainter,QPicture,QPolygonF
+        from cooling_tower.gui.manual_view_worker import draw_surface
+        picture=QPicture();painter=QPainter(picture)
+        draw_surface(painter,QPolygonF([QPointF(1,1),QPointF(9,1),QPointF(1,9)]),QColor("#429baa"),1)
+        painter.end()
+        for scale in (1,5,15):
+            with self.subTest(scale=scale):
+                image=QImage(160,160,QImage.Format.Format_ARGB32_Premultiplied)
+                image.fill(Qt.GlobalColor.transparent)
+                painter=QPainter(image);painter.scale(scale,scale);painter.drawPicture(0,0,picture);painter.end()
+                data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(160,160,4)
+                ys,xs=np.nonzero(data[:,:,3])
+                self.assertGreaterEqual(min(xs),scale-1)
+                self.assertLessEqual(max(xs),9*scale+1)
+                self.assertGreaterEqual(min(ys),scale-1)
+                self.assertLessEqual(max(ys),9*scale+1)
 
     def test_two_visible_decimals_retain_exact_profile_coordinates(self):
         p=self.panel
@@ -168,7 +1343,7 @@ class ManualGuiTests(unittest.TestCase):
         canvas.set_view("front")
         self.assertEqual(canvas.profile_to_screen(canvas._static_object_center,0).x(),canvas.profile_to_screen(0,0).x())
         canvas.grab()
-        self.assertEqual(canvas._interval_helper.yaw_deg,90)
+        self.assertEqual((canvas._spatial_render_frame().yaw,canvas._spatial_render_frame().pitch),(90,0))
         self.assertEqual(canvas.object_rotation,0)
         self.assertEqual(self.panel.draft,before)
 
@@ -180,9 +1355,13 @@ class ManualGuiTests(unittest.TestCase):
         p=self.panel
         p.canvas.set_view("three_quarter")
         settings=replace(p.settings,critical_layers_enabled=True)
-        image=render_spatial_object(self.reference,p.canvas._spatial_frame(),settings,Event())
-        pixels=np.frombuffer(image.constBits(),dtype=np.uint32)
-        self.assertIn(QColor(LayerRangeCanvas.OBJECT_COLOR).rgba(),pixels)
+        from cooling_tower.gui.manual_view_worker import draw_surface
+        with patch("cooling_tower.gui.manual_view_worker.draw_surface",wraps=draw_surface) as draw:
+            image=render_spatial_object(self.reference,p.canvas._spatial_frame(),settings,Event())
+        self.assertTrue(any(bytes(image.constBits())))
+        self.assertEqual(len(draw.call_args_list),len(self.reference.object_triangles))
+        self.assertTrue(all(call.args[2]==QColor(LayerRangeCanvas.OBJECT_COLOR) for call in draw.call_args_list))
+        self.assertGreater(len({round(call.args[3],3) for call in draw.call_args_list}),1)
 
     def test_free_points_selection_removal_curve_and_reset(self):
         self.panel.insert(20)
@@ -220,18 +1399,35 @@ class ManualGuiTests(unittest.TestCase):
             after=canvas.screen_to_profile(mouse)
             self.assertAlmostEqual(before[0],after[0]);self.assertAlmostEqual(before[1],after[1])
 
-    def test_views_disable_editing_and_do_not_change_height(self):
-        height=self.panel.draft.height_mm
-        for view in ("three_quarter","top","free"):
-            self.panel.canvas.set_view(view)
-            self.assertFalse(self.panel.canvas.editable)
-            self.assertFalse(self.panel.canvas.handles())
-            self.assertFalse(self.panel.rows["base_diameter_mm"].isEnabled())
-            self.assertFalse(self.panel.add_point_button.isEnabled())
-        self.panel.canvas.set_view("side")
-        self.assertTrue(self.panel.canvas.editable)
-        self.assertTrue(self.panel.rows["base_diameter_mm"].isEnabled())
-        self.assertEqual(self.panel.draft.height_mm,height)
+    def test_views_expose_only_their_allowed_handles_and_keep_geometry(self):
+        p=self.panel;before=p.draft
+        self.assertEqual([button.text() for button in p.view_buttons.values()],
+                         ["Nebeneinander","Voreinander","Draufsicht","Untersicht","Freie 3D-Ansicht"])
+        for view,identity,field in (("top","top_width","top_diameter_mm"),("bottom","foot","foot_diameter_mm")):
+            p.canvas.set_view(view)
+            limit="maximum_diameter_mm" if view=="top" else "maximum_foot_diameter_mm"
+            self.assertEqual([h[0] for h in p.canvas.handles()],[identity,limit])
+            self.assertTrue(p.rows[limit].isEnabled())
+            self.assertTrue(p.rows[field].isEnabled())
+            self.assertFalse(p.add_point_button.isEnabled())
+            pos=p.canvas.handles()[0][1].toPoint()
+            old=p.draft.points[-1 if view=="top" else 0].position
+            QTest.mousePress(p.canvas,Qt.MouseButton.LeftButton,pos=pos)
+            QTest.mouseMove(p.canvas,pos+QPoint(15,0))
+            QTest.mouseRelease(p.canvas,Qt.MouseButton.LeftButton,pos=pos+QPoint(15,0))
+            new=p.draft.points[-1 if view=="top" else 0].position
+            self.assertGreater(new.radius_mm,old.radius_mm)
+            self.assertEqual(new.z_mm,old.z_mm)
+            p.commit(before)
+        p.canvas.set_view("free")
+        self.assertFalse(p.canvas.editable)
+        self.assertFalse(p.canvas.handles())
+        self.assertEqual((p.canvas.yaw_deg,p.canvas.pitch_deg),(-35,25))
+        self.assertFalse(p.rows["base_diameter_mm"].isEnabled())
+        p.canvas.set_view("side")
+        self.assertTrue(p.canvas.editable)
+        self.assertTrue(p.rows["base_diameter_mm"].isEnabled())
+        self.assertEqual(p.draft,before)
 
     def test_canvas_gestures_edit_pan_and_free_rotation_are_separate(self):
         canvas=self.panel.canvas
@@ -308,7 +1504,7 @@ class ManualGuiTests(unittest.TestCase):
         p=self.panel
         before=p.draft.artifact_payload()
         p.change_setting("critical_layers_enabled",True)
-        p.change_setting("target_layer_time_s",15)
+        p.change_setting("color_reference_time_s",15)
         layer=self.reference.context.layers[7]
         self.assertEqual(p.canvas._object_color(layer),LayerRangeCanvas.layer_color(15,layer.total_time_s))
         p.change_setting("critical_layers_enabled",False)
@@ -337,7 +1533,7 @@ class ManualGuiTests(unittest.TestCase):
         deadline=time.monotonic()+1
         while self.panel.canvas.object_rotation != 147 and time.monotonic()<deadline:
             self.app.processEvents();time.sleep(.01)
-        self.panel.highlight_combo.setCurrentIndex(1)
+        self.panel.highlight_buttons["tower"].click()
         self.assertEqual(self.panel.canvas.object_rotation,147)
         self.assertEqual(self.panel.draft,before)
         self.assertEqual(self.request.source_artifact.original_sha256,source_hash)
@@ -348,9 +1544,160 @@ class ManualGuiTests(unittest.TestCase):
         self.assertTrue(self.panel.canvas.grab().save(str(self.f.root/"small_editor.png")))
 
 
+    def test_tip_width_is_independent_and_exposes_one_curve_anchor(self):
+        p=self.panel
+        p.select("top_width")
+        controls=[h for h in p.canvas.handles() if h[2]=="control"]
+        self.assertEqual([h[0] for h in controls],["control:1:2"])
+        height=p.draft.height_mm
+        p.move("top_width",14,999)
+        self.assertEqual(p.draft.points[-1].position.diameter_mm,14)
+        self.assertEqual(p.draft.height_mm,height)
+        p.move("base",10,999)
+        self.assertEqual(p.draft.points[-1].position.diameter_mm,14)
+        p.select("control:1:2")
+        p.move_control(1,2,12,30)
+        self.assertTrue(p.draft.curves[-1].curved)
+        self.assertEqual(p.draft.points[-1].position.diameter_mm,14)
+
+    def test_boundary_keeps_both_permitted_axes_moving(self):
+        p=self.panel
+        p.insert(20);identity=p.selected
+        p.move(identity,1,25)
+        point=next(point.position for point in p.draft.points if point.identity==identity)
+        self.assertAlmostEqual(point.diameter_mm,5,places=6)
+        self.assertAlmostEqual(point.z_mm,25,places=6)
+        p.move(identity,1,30)
+        point=next(point.position for point in p.draft.points if point.identity==identity)
+        self.assertAlmostEqual(point.z_mm,30,places=6)
+        p.move(identity,18,100)
+        point=next(point.position for point in p.draft.points if point.identity==identity)
+        self.assertAlmostEqual(point.diameter_mm,18,places=6)
+        self.assertLess(point.z_mm,p.draft.height_mm)
+        p.move_control(1,1,0,18)
+        self.assertAlmostEqual(p.draft.curves[1].control1.z_mm,18,places=6)
+
+    def test_scales_zoom_pan_and_exact_layer_feedback(self):
+        canvas=self.panel.canvas
+        coarse_h,coarse_l=canvas.scale_ticks()
+        self.assertTrue(coarse_h);self.assertTrue(coarse_l)
+        self.assertGreater(coarse_l[1][0]-coarse_l[0][0],1)
+        canvas.zoom=20
+        z=self.reference.context.layers[60].z_mm
+        canvas.pan+=QPointF(0,canvas.height()/2-canvas.profile_to_screen(0,z).y())
+        fine_h,fine_l=canvas.scale_ticks()
+        self.assertLess(fine_h[1][0]-fine_h[0][0],coarse_h[1][0]-coarse_h[0][0])
+        self.assertTrue(any(b[0]-a[0]==1 for a,b in zip(fine_l,fine_l[1:])))
+        for index,y,_ in fine_l:
+            self.assertAlmostEqual(y,canvas.profile_to_screen(0,self.reference.context.layers[index-1].z_mm).y())
+        canvas._drag_height_z=z
+        self.assertIn("Höhe:",canvas.drag_height_text())
+        self.assertIn("Layer: 61",canvas.drag_height_text())
+        self.assertNotIn("Greiferhöhe",canvas.drag_height_text())
+        canvas._drag_height_z=1000
+        self.assertIn("Layer: –",canvas.drag_height_text())
+
+    def test_spatial_surface_cache_survives_pan_zoom_resize_and_highlight(self):
+        p=self.panel;canvas=p.canvas
+        canvas.set_view("free");canvas.grab()
+        cache=canvas._object_cache;key=canvas._spatial_key();tower=canvas._tower_cache
+        start=QPoint(200,200)
+        with patch.object(canvas,"_render_object",wraps=canvas._render_object) as render:
+            QTest.mousePress(canvas,Qt.MouseButton.MiddleButton,pos=start)
+            QTest.mouseMove(canvas,start+QPoint(45,35))
+            QTest.mouseRelease(canvas,Qt.MouseButton.MiddleButton,pos=start+QPoint(45,35))
+            canvas.grab()
+            event=QWheelEvent(QPointF(310,200),QPointF(310,200),QPoint(),QPoint(0,120),
+                             Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.NoScrollPhase,False)
+            canvas.wheelEvent(event);canvas.grab()
+            p.resize(1300,950);self.app.processEvents();canvas.grab()
+            canvas.set_highlight("tower");canvas.grab()
+            canvas.fit_scene();canvas.grab()
+            render.assert_not_called()
+        self.assertIs(canvas._object_cache,cache)
+        self.assertIs(canvas._tower_cache,tower)
+        self.assertEqual(canvas._spatial_key(),key)
+        canvas.set_rotation(37);canvas.grab()
+        self.assertNotEqual(canvas._spatial_key(),key)
+
+    def test_gcode_only_reference_keeps_static_views_and_layer_scales(self):
+        canvas=self.panel.canvas
+        reference=replace(self.reference,object_triangles=None,silhouette=None)
+        canvas.set_reference(reference)
+        self.assertIsNone(reference.object_triangles)
+        for view in ("side","front"):
+            canvas.set_view(view)
+            self.assertFalse(canvas.grab().isNull())
+            self.assertTrue(canvas.scale_ticks()[1])
+
+    def test_fitting_rotated_gcode_never_changes_source_coordinates(self):
+        import numpy as np
+        canvas=self.panel.canvas
+        reference=replace(self.reference,object_triangles=None,silhouette=None)
+        canvas.set_reference(reference)
+        source=canvas._object_array.copy()
+        canvas.set_rotation(37)
+        for view in ("side","front","free","top","bottom","free"):
+            canvas.set_view(view)
+            canvas.fit_scene()
+            first=canvas.grab().toImage()
+            canvas.fit_scene()
+            self.assertEqual(canvas.grab().toImage(),first)
+            np.testing.assert_array_equal(canvas._object_array,source)
+
+    def test_proxy_and_completed_surfaces_keep_the_same_rotated_original(self):
+        import numpy as np
+        from cooling_tower.gui.manual_view_worker import render_spatial_object
+        p=self.panel;canvas=p.canvas
+        p.change_setting("object_resolution_percent",100)
+        triangles=self.reference.object_triangles.copy()
+        center=np.asarray(self.reference.silhouette.center_xy)
+        triangles[:,:,0]=center[0]+(triangles[:,:,0]-center[0])*1.8
+        triangles[:,:,1]=center[1]+(triangles[:,:,1]-center[1])*.4
+        reference=replace(self.reference,object_triangles=np.tile(triangles,(600,1,1)))
+        canvas.set_reference(reference)
+        canvas.set_view("free")
+        canvas._render_manager=object()
+        try:
+            with patch.object(canvas,"_queue_spatial_render"):
+                for view in ("side","front","free","top","bottom"):
+                    canvas.view=view
+                    if view=="top":canvas.yaw_deg,canvas.pitch_deg=0,90
+                    elif view=="bottom":canvas.yaw_deg,canvas.pitch_deg=0,-90
+                    for rotation in (0,37,90):
+                        canvas.set_rotation(rotation)
+                        proxy=canvas.grab().toImage()
+                        picture=render_spatial_object(reference,canvas._spatial_render_frame(),p.settings,None,vector=True)
+                        canvas._spatial_succeeded(canvas._view_request_id,(canvas._spatial_key(),picture))
+                        completed=canvas.grab().toImage()
+                        def bounds(image):
+                            data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(image.height(),image.bytesPerLine()//4,4)
+                            # BGRA: isolate the original object's teal surfaces/lines.
+                            rgb=data[:,:,:3].astype(int)
+                            mask=(rgb[:,:,0]>rgb[:,:,2]+35)&(rgb[:,:,1]>rgb[:,:,2]+35)&(rgb[:,:,2]<110)
+                            ys,xs=np.nonzero(mask)
+                            self.assertTrue(len(xs))
+                            return np.array((xs.min(),ys.min(),xs.max(),ys.max()))
+                        np.testing.assert_allclose(bounds(proxy),bounds(completed),atol=3)
+        finally:
+            canvas._render_manager=None
+
+    def test_manual_time_target_and_tolerance_have_no_controls_or_artifact_effect(self):
+        p=self.panel
+        self.assertNotIn("target_layer_time_s",p.rows)
+        self.assertNotIn("layer_time_tolerance_s",p.rows)
+        before=p.draft.artifact_payload()
+        p.change_setting("color_reference_time_s",15)
+        p.change_setting("gradient_full_deficit_s",2)
+        self.assertEqual(p.draft.artifact_payload(),before)
+
+
 class ManualControllerTests(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+    def setUpClass(cls):cls.app,cls._previous_font,cls._test_font_id=preview_test_application()
+
+    @classmethod
+    def tearDownClass(cls):restore_preview_test_application(cls.app,cls._previous_font,cls._test_font_id)
 
     def setUp(self):
         self.f,self.service,ref,request,self.adapter=create_fixture(self,joint=True,count=100)
@@ -389,6 +1736,93 @@ class ManualControllerTests(unittest.TestCase):
         w.resize(1450,1000);w.show()
         self.app.processEvents()
 
+    def test_empty_manual_footer_is_only_as_high_as_its_buttons(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        for label in (p.status_label,p.result_label,p.action_hint):label.clear()
+        p.progress.hide()
+        self.controller.refresh_footer();w._fit_footer_height();self.app.processEvents()
+        margins=w.footer_layout.contentsMargins()
+        reset=w.reset_button.sizeHint().height();actions=w.main_actions_layout.sizeHint().height()
+        expected=(reset+actions+w.footer_content_grid.verticalSpacing()*2+1 if w._footer_narrow_layout
+                  else max(reset,actions))+margins.top()+margins.bottom()
+        self.assertLessEqual(w.footer.height(),expected+2)
+        self.assertTrue(w.manual_footer_status_widget.isHidden())
+        p.status_label.setText("Eine längere Statusmeldung. "*20)
+        self.controller.refresh_footer();w._fit_footer_height();self.app.processEvents()
+        self.assertGreater(w.footer.height(),expected+20)
+        p.status_label.clear();self.controller.refresh_footer();w._fit_footer_height();self.app.processEvents()
+        self.assertLessEqual(w.footer.height(),expected+2)
+
+    def test_narrow_manual_navigation_shows_recommendation_and_wide_hides_it(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        w.resize(700,1000);self.app.processEvents()
+        self.assertTrue(w.generation_method_recommendation.isVisible())
+        self.assertIn("Zweispaltige Ansicht empfohlen - Fenster verbreitern",w.generation_method_recommendation.text())
+        self.assertIn("#b42318",w.generation_method_recommendation.styleSheet())
+        self.assertGreaterEqual(w.generation_method_recommendation.x(),w.generation_method_label.geometry().right())
+        self.assertEqual(w.generation_method_recommendation.alignment(),Qt.AlignmentFlag.AlignCenter)
+        w.resize(1450,1000);self.app.processEvents()
+        self.assertEqual(w.generation_method_label.text(),"Manuelle Turmerstellung")
+        self.assertTrue(w.generation_method_recommendation.isHidden())
+
+    def test_manual_outer_scrollbar_only_appears_for_actual_overflow_without_unused_pane_space(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        for width,height in ((1000,1394),(1450,1000),(720,800),(1000,1394)):
+            w.resize(width,height)
+            for _ in range(10):self.app.processEvents()
+            scrollbar=w.settings_scroll.verticalScrollBar()
+            self.assertEqual(scrollbar.isVisible(),scrollbar.maximum()>0)
+            if height>1000 or width>1000:
+                self.assertEqual(scrollbar.maximum(),0)
+            else:
+                self.assertGreater(scrollbar.maximum(),0)
+            if p.splitter.orientation()==Qt.Orientation.Vertical:
+                self.assertEqual(p.preview_container.y(),p.settings_scroll.height()+p.splitter.handleWidth())
+
+    def test_all_reset_is_available_for_rotation_and_resolution_in_every_view(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        automatic=w.collect_settings()
+        for view in ("side","front","top","bottom","free"):
+            p.reset_all();p.canvas.set_view(view)
+            p.rotation_slider.setValue(47);QTest.qWait(50)
+            self.assertTrue(w.reset_button.isEnabled())
+            self.assertEqual(w.reset_button.text(),"Alles zurücksetzen")
+            yes=object();box=Mock();box._reset_yes_button=yes;box.clickedButton.return_value=yes
+            with patch.object(w,"_create_reset_defaults_message_box",return_value=box):
+                w.reset_button.click()
+            self.assertEqual(p.canvas.view,view)
+            self.assertEqual(p.canvas.object_rotation,0)
+            self.assertEqual(p.rotation_slider.value(),0)
+            self.assertFalse(w.reset_button.isEnabled())
+            p.change_setting("object_resolution_percent",75)
+            self.assertTrue(w.reset_button.isEnabled())
+            with patch.object(w,"_create_reset_defaults_message_box",return_value=box):
+                w.reset_button.click()
+            self.assertEqual(p.settings.object_resolution_percent,10)
+            self.assertEqual(w.collect_settings(),automatic)
+
+    def test_manual_results_and_export_report_do_not_rate_target_times(self):
+        c,p,w=self.controller,self.panel,self.window
+        c.generate();self.wait_idle()
+        self.assertIn("kleinste Layerzeit",p.result_label.text())
+        self.assertNotIn("Ziel",p.result_label.text())
+        self.assertNotIn("Toleranz",p.result_label.text())
+        from cooling_tower.manual.service import ManualExportService
+        result=ManualExportService().export(c.session.preview,c.session.successful_request,self.f.root/"quantitative_export")
+        report=result.user_report_path.read_text(encoding="utf-8")
+        self.assertIn("Layerzeit",report)
+        self.assertNotIn("Ziel-Layerzeit",report)
+        self.assertNotIn("Toleranz",report)
+        self.assertFalse(any("Mindest-Layerzeit" in warning for warning in c.session.preview.warnings))
+        with patch.object(w,"_show_internal_dialog_without_flash"):
+            w._show_export_success_dialog(result)
+        self.assertEqual(w.export_success_deviation_label.text(),"")
+        self.assertTrue(w.export_success_deviation_label.isHidden())
+
     def test_main_footer_routes_manual_generation_update_export_and_reset(self):
         c,p,w=self.controller,self.panel,self.window
         self.show_manual_footer()
@@ -418,6 +1852,99 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.open_output_button.isVisible())
         self.assertTrue(w.open_stl_button.isVisible())
         self.assertTrue(w.open_run_button.isVisible())
+
+    def test_tower_reset_button_restores_form_and_limits_and_preserves_visual_settings_and_result(self):
+        c,p,w=self.controller,self.panel,self.window
+        self.show_manual_footer()
+        automatic=w.collect_settings()
+        p.change_setting("maximum_diameter_mm",35)
+        p.change_setting("maximum_foot_diameter_mm",50)
+        p.change_setting("object_resolution_percent",3)
+        p.change_setting("layer_snap_enabled",False)
+        p.move("foot",30,p.draft.first_layer_z_mm)
+        p.move("foot_height",5,7)
+        p.move("base",10,7)
+        p.insert(12);p.reset_point_curves(p.selected)
+        p.move("top",10,18)
+        settings=p.settings
+        c.generate();self.wait_idle()
+        result=c.session.preview
+        p.canvas.set_view("free");p.canvas.grab()
+        original_cache=p.canvas._object_cache
+        self.assertTrue(w.tower_reset_button.isEnabled())
+        w.tower_reset_button.click()
+        self.assertEqual(w.tower_reset_button.text(),"Turmform zurücksetzen")
+        self.assertEqual((p.settings.maximum_diameter_mm,p.settings.maximum_foot_diameter_mm),(40,80))
+        for name in ("object_resolution_percent","layer_snap_enabled","color_reference_time_s","overhang_angle_deg"):
+            self.assertEqual(getattr(p.settings,name),getattr(settings,name))
+        self.assertEqual([point.kind for point in p.draft.points],["foot","base","top"])
+        self.assertEqual(p.draft.base_diameter_mm,ManualSettings().minimum_diameter_mm)
+        self.assertEqual(p.draft.points[-1].position.diameter_mm,ManualSettings().minimum_diameter_mm)
+        self.assertEqual(p.draft.height_mm,c.reference.context.layers[-1].z_mm)
+        self.assertFalse(p.draft.curves[-1].curved)
+        self.assertEqual(p.selected,"base")
+        self.assertEqual(w.collect_settings(),automatic)
+        self.assertIs(c.session.preview,result)
+        self.assertEqual(c.session.preview_state,PreviewState.STALE)
+        self.assertFalse(w.tower_reset_button.isEnabled())
+        p.canvas.grab()
+        self.assertIs(p.canvas._object_cache,original_cache)
+
+    def test_tower_reset_button_stays_right_of_defaults_at_both_footer_widths(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        p.insert(12)
+        for width in (1450,700):
+            w.resize(width,1000)
+            for _ in range(4):self.app.processEvents()
+            a=w.reset_button.mapTo(w.footer_reset_host,QPoint())
+            b=w.tower_reset_button.mapTo(w.footer_reset_host,QPoint())
+            self.assertTrue(w.tower_reset_button.isVisible())
+            self.assertGreaterEqual(b.x(),a.x()+w.reset_button.width())
+            self.assertEqual(a.y(),b.y())
+            self.assertEqual(w.reset_button.height(),w.tower_reset_button.height())
+            self.assertLessEqual(b.x()+w.tower_reset_button.width(),w.footer_reset_host.width())
+            if not w._footer_narrow_layout:
+                reset_bottom=w.footer_reset_host.mapTo(w.footer,QPoint(0,w.footer_reset_host.height())).y()
+                action_bottom=w.footer_action_area.mapTo(w.footer,QPoint(0,w.footer_action_area.height())).y()
+                self.assertEqual(reset_bottom,action_bottom)
+        w.generation_mode=GenerationMode.AUTOMATIC
+        w._refresh_footer_auxiliary_visibility()
+        self.assertTrue(w.tower_reset_button.isHidden())
+
+    def test_both_footer_resets_restore_minimum_measure_and_default_form(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        default=ManualSettings().minimum_diameter_mm
+        for all_values in (False,True):
+            p.move("base",20,8);p.move_limit("minimum_diameter_mm",12.3)
+            p.select("minimum_diameter_mm")
+            self.assertTrue(w.reset_button.isEnabled())
+            self.assertTrue(w.tower_reset_button.isEnabled())
+            if all_values:
+                yes=object();box=Mock();box._reset_yes_button=yes;box.clickedButton.return_value=yes
+                with patch.object(w,"_create_reset_defaults_message_box",return_value=box):
+                    w.reset_button.click()
+            else:
+                w.tower_reset_button.click()
+            self.assertEqual(p.settings.minimum_diameter_mm,default)
+            self.assertEqual(p.editors["minimum_diameter_mm"].value(),default)
+            self.assertEqual(p.draft.base_diameter_mm,default)
+            self.assertEqual(p.draft.points[-1].position.diameter_mm,default)
+            left,right,_,_=p.canvas.minimum_measure_geometry()
+            self.assertAlmostEqual(right.x()-left.x(),default*p.canvas.transform()[0])
+            self.assertFalse(w.reset_button.isEnabled())
+            self.assertFalse(w.tower_reset_button.isEnabled())
+
+    def test_settings_scroll_position_survives_collapse_and_main_window_layout_callbacks(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer();w.resize(1050,1394)
+        for _ in range(8):self.app.processEvents()
+        bar=p.settings_scroll.verticalScrollBar();bar.setValue(bar.maximum())
+        original=bar.value()
+        p.set_settings_collapsed(True);QTest.qWait(330)
+        p.set_settings_collapsed(False);QTest.qWait(330)
+        self.assertEqual(bar.value(),original)
 
     def test_footer_uses_same_responsive_labels_and_wrapping_for_both_methods(self):
         c,p,w=self.controller,self.panel,self.window
@@ -462,6 +1989,10 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.preview_action_control.property("cancelAction"))
         self.assertEqual(w.preview_button.text(),"Abbrechen")
         self.assertFalse(w.reset_button.isEnabled())
+        self.assertFalse(w.tower_reset_button.isEnabled())
+        before=self.panel.draft
+        self.panel.reset_tower()
+        self.assertEqual(self.panel.draft,before)
         w.preview_button.click()
         self.assertEqual(w.preview_button.text(),"Abbruch wird ausgeführt …")
         self.assertFalse(w.preview_button.isEnabled())
@@ -541,7 +2072,7 @@ class ManualControllerTests(unittest.TestCase):
     def test_methods_settings_results_and_reset_independent(self):
         w,p=self.window,self.panel
         original=w.collect_settings()
-        p.change_setting("target_layer_time_s",20);p.move("base",30,8)
+        p.change_setting("color_reference_time_s",20);p.move("base",30,8)
         p.change_setting("circle_segments",48)
         self.assertEqual(w.collect_settings(),original)
         manual=p.draft
@@ -603,12 +2134,14 @@ class ManualControllerTests(unittest.TestCase):
         while not w.background_job_manager.has_active(JobKind.MANUAL_VIEW) and time.monotonic()<deadline:
             self.app.processEvents();time.sleep(.01)
         self.assertTrue(w.background_job_manager.has_active(JobKind.MANUAL_VIEW))
-        p.canvas.set_view("side")
-        while w.background_job_manager.has_active(JobKind.MANUAL_VIEW) and time.monotonic()<deadline:
+        old_key=p.canvas._spatial_key()
+        p.canvas.set_view("side");p.canvas.grab()
+        while (w.background_job_manager.has_active(JobKind.MANUAL_VIEW) or p.canvas._render_timer.isActive()) and time.monotonic()<deadline:
             self.app.processEvents();time.sleep(.01)
         self.assertFalse(w.background_job_manager.has_active(JobKind.MANUAL_VIEW))
         self.assertEqual(p.canvas.view,"side")
-        self.assertIsNone(p.canvas._spatial_key())
+        self.assertNotEqual(p.canvas._spatial_key(),old_key)
+        self.assertEqual(p.canvas._object_render_key,p.canvas._spatial_key())
 
     def test_manual_export_summary_keeps_evidence_kind_when_reopened(self):
         from cooling_tower.manual.service import ManualExportService
