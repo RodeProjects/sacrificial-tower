@@ -1788,7 +1788,9 @@ class ManualControllerTests(unittest.TestCase):
         automatic=w.collect_settings()
         for view in ("side","front","top","bottom","free"):
             p.reset_all();p.canvas.set_view(view)
-            p.rotation_slider.setValue(47);QTest.qWait(50)
+            with patch.object(p._rotation_timer,"start"):
+                p.rotation_slider.setValue(47)
+            self.assertEqual(p.canvas.object_rotation,0)
             self.assertTrue(w.reset_button.isEnabled())
             self.assertEqual(w.reset_button.text(),"Alles zurücksetzen")
             yes=object();box=Mock();box._reset_yes_button=yes;box.clickedButton.return_value=yes

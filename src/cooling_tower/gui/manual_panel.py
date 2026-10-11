@@ -809,6 +809,10 @@ class ManualGenerationPanel(QWidget):
         self.rotation_reset.style().unpolish(self.rotation_reset)
         self.rotation_reset.style().polish(self.rotation_reset)
         if not self._rotation_timer.isActive(): self._rotation_timer.start()
+        # Reset availability follows the slider immediately, even when a busy
+        # event loop delays the coalesced canvas rotation.
+        self.reset_button.setEnabled(self.can_reset_all())
+        self.status_changed.emit()
 
     def _view_changed(self,view):
         self.view_buttons[view].setChecked(True)
