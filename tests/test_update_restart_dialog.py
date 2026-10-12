@@ -14,7 +14,7 @@ if str(SRC_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPoint, QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
 from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
@@ -65,6 +65,29 @@ class UpdateRestartCountdownDialogTests(unittest.TestCase):
         self.assertEqual(result, QDialog.DialogCode.Accepted)
         self.assertGreaterEqual(elapsed, 0.8)
         self.assertLess(elapsed, 2.5)
+
+    def test_restart_button_accepts_immediately_and_stops_timer(self) -> None:
+        dialog = UpdateRestartCountdownDialog(seconds=10)
+        QTimer.singleShot(0, dialog.restart_button.click)
+        started = time.monotonic()
+        self.assertEqual(dialog.exec_countdown(), QDialog.DialogCode.Accepted)
+        self.assertLess(time.monotonic()-started, 0.8)
+        self.assertEqual(dialog.remaining_seconds, 10)
+        self.assertFalse(dialog._timer.isActive())
+
+    def test_restart_button_is_blue_and_to_the_right_of_cancel(self) -> None:
+        dialog = UpdateRestartCountdownDialog()
+        self.addCleanup(dialog.close)
+        dialog.setStyleSheet((SRC_ROOT/"cooling_tower/gui/styles.qss").read_text(encoding="utf-8"))
+        dialog.show()
+        self.app.processEvents()
+        cancel = dialog.cancel_button.mapTo(dialog, QPoint())
+        restart = dialog.restart_button.mapTo(dialog, QPoint())
+        self.assertEqual(dialog.restart_button.text(), "Jetzt neu starten")
+        self.assertEqual(dialog.restart_button.objectName(), "previewButton")
+        self.assertGreater(restart.x(), cancel.x()+dialog.cancel_button.width())
+        self.assertEqual(restart.y(), cancel.y())
+        self.assertLess(dialog.width()-restart.x()-dialog.restart_button.width(), 20)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from threading import Event
 from uuid import uuid4
 
 from cooling_tower.settings_defaults import GENERATION_DEFAULTS
+from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_radius, MINIMUM_AUTOMATIC_BASE_WIDTH_MM
 from cooling_tower.tower.mesh_generator import TriangleMesh
 
 MINIMUM_POINT_GAP_MM = 0.05
@@ -20,7 +21,11 @@ CURVE_RADIAL_ERROR_MM = 0.02
 MAXIMUM_CURVE_Z_STEP_MM = 1.0
 MAXIMUM_PROFILE_POINTS = 2048
 EPS = 1e-9
-OBJECT_RESOLUTION_STAGES = (1, 3, 5, 10, 15, 20, 25, 50, 75, 100)
+OBJECT_RESOLUTION_STAGES = (0, 1, 5, 10, 15, 25, 50, 75, 100)
+
+
+def object_resolution_default(view="side"):
+    return 0 if view in {"side", "front"} else 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +46,7 @@ class ManualSettings:
     overhang_user_set: bool = False
     critical_layers_enabled: bool = False
     layer_snap_enabled: bool = True
-    object_resolution_percent: int = 10
+    object_resolution_percent: int = object_resolution_default()
     gradient_start_deficit_s: float = 0.0
     gradient_full_deficit_s: float = 1.0
 
@@ -153,9 +158,10 @@ def roots(a, b, c):
 
 
 class GeometryError(ValueError):
-    def __init__(self, setting, message):
+    def __init__(self, setting, message, *, limits=()):
         super().__init__(message)
         self.setting = setting
+        self.limits = tuple(limits)
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +173,7 @@ class ManualDraft:
     maximum_height_mm: float
     context_key: str
     top_follows_base: bool = True
+    standalone: bool = False
 
     @property
     def height_mm(self):
@@ -211,7 +218,7 @@ def validate_settings(s):
                 raise GeometryError(name, "Die Kreissegmentzahl muss zwischen 12 und 720 liegen.")
         elif name == "object_resolution_percent":
             if type(value) is not int or value not in OBJECT_RESOLUTION_STAGES:
-                raise GeometryError(name, "Die Vorschauauflösung benötigt eine der zehn vorgegebenen Prozentstufen.")
+                raise GeometryError(name, "Die Vorschauauflösung benötigt eine der neun vorgegebenen Prozentstufen.")
         elif isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
             raise GeometryError(name, "Der Wert muss eine endliche Zahl sein.")
     for name in ("minimum_diameter_mm", "maximum_diameter_mm", "foot_diameter_mm",
@@ -231,6 +238,22 @@ def validate_settings(s):
         raise GeometryError("gradient_full_deficit_s", "Die Farbgrenzen müssen 0 ≤ Beginn < vollständig Rot ≤ 30 s erfüllen.")
 
 
+def violated_width_limits(draft):
+    """Collect complete-curve limits only for feedback on rejected edits."""
+    settings=draft.settings;limits=[]
+    for i,curve in enumerate(draft.curves):
+        if any(not math.isfinite(v) for p in (curve.start,curve.control1,curve.control2,curve.end)
+               for v in (p.radius_mm,p.z_mm)):
+            continue
+        radii=curve.radius_extrema()
+        if min(radii)<=0 or (i>0 and min(radii)<settings.minimum_diameter_mm/2-EPS):
+            limits.append("minimum_diameter_mm")
+        maximum=(settings.maximum_foot_diameter_mm if i==0 else settings.maximum_diameter_mm)/2
+        if max(radii)>maximum+EPS:
+            limits.append("maximum_foot_diameter_mm" if i==0 else "maximum_diameter_mm")
+    return tuple(dict.fromkeys(limits))
+
+
 def validate(draft):
     s = draft.settings
     validate_settings(s)
@@ -240,7 +263,8 @@ def validate(draft):
         raise GeometryError("points", "Profilpunkte benötigen eindeutige Kennungen.")
     if not math.isfinite(draft.maximum_height_mm) or draft.maximum_height_mm <= 0:
         raise GeometryError("height_mm", "Eine sichere Höhengrenze fehlt.")
-    if not math.isfinite(draft.first_layer_z_mm) or draft.first_layer_z_mm <= 0:
+    if (not math.isfinite(draft.first_layer_z_mm) or draft.first_layer_z_mm < 0 or
+            (draft.first_layer_z_mm == 0 and not draft.standalone)):
         raise GeometryError("foot_height_mm", "Die erste tatsächliche Layerhöhe fehlt.")
     if abs(draft.points[0].position.z_mm - draft.first_layer_z_mm) > EPS:
         raise GeometryError("foot_height_mm", "Der Fußrand muss auf der ersten Druckschicht liegen.")
@@ -259,18 +283,18 @@ def validate(draft):
         if c.end.z_mm-c.start.z_mm < MINIMUM_POINT_GAP_MM-EPS:
             raise GeometryError("foot_height_mm" if i == 0 else "point_height_mm", "Benachbarte Punkte benötigen mindestens 0,05 mm Höhenabstand.")
         if any(b.z_mm < a.z_mm for a, b in zip(controls, controls[1:])):
-            raise GeometryError("control_height_mm", "Kurvengriffe dürfen in Z nicht rückläufig sein.")
+            raise GeometryError("control_height_mm", "Kurvengriffe dürfen in Z nicht rückläufig sein.",limits=violated_width_limits(draft))
         _, a, b, cc = c.coefficients("z_mm")
         ts = (0.0, 1.0, *roots(0, 6*cc, 2*b))
         if min(c.derivative(t, "z_mm") for t in ts) <= 1e-8:
-            raise GeometryError("control_height_mm", "Die Kurve benötigt eine eindeutig steigende Höhe, auch an ihren Enden.")
+            raise GeometryError("control_height_mm", "Die Kurve benötigt eine eindeutig steigende Höhe, auch an ihren Enden.",limits=violated_width_limits(draft))
         radii = c.radius_extrema()
         minimum = 0 if i == 0 else s.minimum_diameter_mm / 2
         maximum = (s.maximum_foot_diameter_mm if i == 0 else s.maximum_diameter_mm) / 2
         if min(radii) <= 0 or min(radii) < minimum-EPS:
-            raise GeometryError("minimum_diameter_mm", "Die vollständige Kurve unterschreitet den Mindestdurchmesser.")
+            raise GeometryError("minimum_diameter_mm", "Die vollständige Kurve unterschreitet den Mindestdurchmesser.",limits=violated_width_limits(draft))
         if max(radii) > maximum+EPS:
-            raise GeometryError("maximum_foot_diameter_mm" if i == 0 else "maximum_diameter_mm", "Die vollständige Kurve überschreitet den Maximaldurchmesser.")
+            raise GeometryError("maximum_foot_diameter_mm" if i == 0 else "maximum_diameter_mm", "Die vollständige Kurve überschreitet den Maximaldurchmesser.",limits=violated_width_limits(draft))
         slopes = c.slope_extrema()
         if s.expansion_enabled and max(slopes) > math.tan(math.radians(s.expansion_angle_deg))+EPS:
             raise GeometryError("expansion_angle_deg", "Die lokale Aufweitung überschreitet den aktivierten Winkel zur Vertikalen.")
@@ -286,24 +310,34 @@ def validate(draft):
     return draft
 
 
-def initial_draft(settings, layers, maximum_height_mm, context_key):
+def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diameter_mm=None, standalone=False):
     validate_settings(settings)
-    height = min(float(layers[-1].z_mm), maximum_height_mm)
+    object_height = float(layers[-1].z_mm)
+    height = min(object_height, maximum_height_mm)
     first = float(layers[0].z_mm)
     if height-first < 2*MINIMUM_POINT_GAP_MM:
         raise GeometryError("height_mm", "Das Objekt ist für Fußkurve und Turmkörper zu niedrig.")
     body = settings.minimum_diameter_mm / 2
-    foot = min(settings.maximum_foot_diameter_mm, max(settings.foot_diameter_mm, 2*body+2)) / 2
+    calculated_foot = 2*calculate_phase10_base_outer_radius(
+        object_height_mm=object_height, automatic_base_width=True,
+        manual_base_width_mm=MINIMUM_AUTOMATIC_BASE_WIDTH_MM)
+    if foot_diameter_mm is not None:
+        if (isinstance(foot_diameter_mm,bool) or not isinstance(foot_diameter_mm,(int,float)) or
+                not math.isfinite(foot_diameter_mm) or not 0 < foot_diameter_mm <= 1000):
+            raise GeometryError("foot_diameter_mm", "Der Fußstandard muss eine gültige positive Millimeterbreite sein.")
+        calculated_foot = foot_diameter_mm
+    foot = min(1000, max(calculated_foot, 2*body+2)) / 2
     foot_z = max(first+MINIMUM_POINT_GAP_MM, min(settings.foot_height_mm, height-MINIMUM_POINT_GAP_MM))
     start, end = Coordinate(foot, first), Coordinate(body, foot_z)
     dz, dr = foot_z-first, foot-body
     curve = Cubic(start, Coordinate(body+dr*.2, first+dz*.3), Coordinate(body, first+dz*.7), end)
     top = Coordinate(body, height)
     s = replace(settings, foot_diameter_mm=foot*2, foot_height_mm=foot_z,
+                maximum_foot_diameter_mm=max(settings.maximum_foot_diameter_mm,foot*2),
                 circle_segments=settings.circle_segments or max(25, math.ceil(foot*2)))
     d = ManualDraft(s, (ProfilePoint("foot", start, "foot"), ProfilePoint("base", end, "base"),
                        ProfilePoint("top", top, "top")), (curve, Cubic.line(end, top)),
-                    first, maximum_height_mm, context_key)
+                    first, maximum_height_mm, context_key,standalone=standalone)
     return validate(d)
 
 
@@ -317,10 +351,8 @@ def move_point(draft, identity, *, diameter_mm=None, z_mm=None):
         z = draft.first_layer_z_mm
     positions[index] = Coordinate(radius, z)
     if index == 1:
-        if radius*2 > draft.settings.maximum_foot_diameter_mm:
-            raise GeometryError("maximum_foot_diameter_mm", "Die maximale Fußbreite begrenzt den Körperanschluss.")
         if radius >= positions[0].radius_mm:
-            positions[0] = Coordinate(min(draft.settings.maximum_foot_diameter_mm/2, radius+1), positions[0].z_mm)
+            positions[0] = Coordinate(min(500, radius+1), positions[0].z_mm)
         if draft.top_follows_base and len(positions) == 3:
             positions[-1] = Coordinate(radius, positions[-1].z_mm)
     points = tuple(replace(p, position=pos) for p, pos in zip(draft.points, positions))
@@ -335,7 +367,8 @@ def move_point(draft, identity, *, diameter_mm=None, z_mm=None):
             return Coordinate(new_foot.end.radius_mm+fraction*new_dr, moved.z_mm)
         curves = (replace(new_foot, control1=foot_control(old_foot.control1, new_foot.control1),
                           control2=foot_control(old_foot.control2, new_foot.control2)), *curves[1:])
-    s = replace(draft.settings, foot_diameter_mm=positions[0].diameter_mm, foot_height_mm=positions[1].z_mm)
+    s = replace(draft.settings, foot_diameter_mm=positions[0].diameter_mm, foot_height_mm=positions[1].z_mm,
+                maximum_foot_diameter_mm=max(draft.settings.maximum_foot_diameter_mm,positions[0].diameter_mm))
     updated = replace(draft, points=points, curves=curves, settings=s,
                       top_follows_base=draft.top_follows_base and not (
                           index == len(positions)-1 and abs(radius-old.radius_mm) > EPS))
@@ -506,8 +539,9 @@ def tessellate(draft, cancellation_event: Event | None = None, *, radial_error_m
     validate(draft)
     if not math.isfinite(radial_error_mm) or radial_error_mm <= 0:
         raise ValueError("The radial curve tolerance must be positive and finite.")
-    result = [MeshPoint(draft.foot_diameter_mm/2, 0.0),
-              MeshPoint(draft.foot_diameter_mm/2, draft.first_layer_z_mm)]
+    result = [MeshPoint(draft.foot_diameter_mm/2, 0.0)]
+    if draft.first_layer_z_mm > 0:
+        result.append(MeshPoint(draft.foot_diameter_mm/2, draft.first_layer_z_mm))
     def sample(c, depth=0):
         if cancellation_event is not None and cancellation_event.is_set():
             from cooling_tower.preview import PreviewCancelled

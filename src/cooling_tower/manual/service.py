@@ -17,6 +17,7 @@ from cooling_tower.preview import PreviewCancelled, PreviewExportService
 from cooling_tower.preview.models import PreviewRequest, PreviewResult, PreviewExportResult, PreviewScene, Point3D, LineSegment3D
 from cooling_tower.preview.service import PreviewService
 from cooling_tower.preview.layer_silhouette import load_layer_silhouette
+from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 from cooling_tower.slicers import SliceRequest, assert_profile_copies_are_isolated, protect_profile_sources
 from cooling_tower.tower.mesh_generator import write_binary_stl
 from cooling_tower.write_policy import ensure_writable_output
@@ -95,6 +96,7 @@ class ManualReference:
     silhouette: object | None
     profile_source_hashes: tuple[tuple[str, str], ...]
     object_triangles: object | None = field(default=None,compare=False,repr=False)
+    object_silhouette: object | None = field(default=None,compare=False,repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,12 +126,14 @@ class ManualEvaluation:
 class ManualResult(PreviewResult):
     manual_evaluation: ManualEvaluation | None = None
     diagnostics_directory: Path | None = None
+    standalone: bool = False
 
 
 @dataclass(frozen=True,slots=True)
 class ManualExportResult(PreviewExportResult):
     generation_method: str = "manual"
     joint_sliced: bool = False
+    standalone: bool = False
 
 
 class _CancelableAnalysis:
@@ -169,8 +173,12 @@ class ManualGenerationService:
         data = self.preview_service._source_data(request, cancellation_event=cancellation_event, notify=notify)
         check_cancel(cancellation_event)
         context = ManualContext.from_request(request, data, request.signature())
+        from cooling_tower.manual.placement import largest_tower_envelope
+        notify(20, "Maximal verfügbare Fußbreite und Druckbettplatzierung werden berechnet …")
+        largest_tower_envelope(context.bed_geometry,context.occupied_bounds,cancellation_event)
         hashes = tuple((str(p), sha256_file(p)) for p in request.effective_profile.source_paths)
         silhouette = None
+        mesh_silhouette = None
         triangles = None
         if request.source_artifact is not None and request.source_artifact.source_kind.value == "stl":
             notify(30, "Vollständige STL-Layerquerschnitte werden vorbereitet …")
@@ -182,12 +190,16 @@ class ManualGenerationService:
             triangles = np.asarray(mesh.triangles,dtype=float).copy()
             triangles[:,:,2] -= float(mesh.bounds[0,2])
             triangles.setflags(write=False)
+            mesh_silhouette = build_mesh_silhouette(triangles,cancellation_event)
             if not request.original_source_is_current():
                 raise ValueError("Die Original-STL wurde während der Vorschauaufbereitung verändert.")
         check_cancel(cancellation_event)
-        return ManualReference(context, data, silhouette, hashes,triangles)
+        return ManualReference(context, data, silhouette, hashes,triangles,mesh_silhouette)
 
     def prepare(self, request, *, cancellation_event=None, progress_callback=None):
+        from cooling_tower.manual.standalone import StandaloneRequest, prepare_standalone
+        if isinstance(request, StandaloneRequest):
+            return prepare_standalone(request, self.workspace_parent, cancellation_event, progress_callback)
         notify = progress_callback or (lambda *_: None)
         check_cancel(cancellation_event)
         if request.draft is None or request.context is None:
@@ -325,6 +337,9 @@ class ManualGenerationService:
 
 class ManualExportService(PreviewExportService):
     def export(self, preview, request, output_root):
+        from cooling_tower.manual.standalone import StandaloneRequest, export_standalone
+        if isinstance(request, StandaloneRequest):
+            return export_standalone(preview, request, output_root)
         if not request.profiles_are_current():
             raise ValueError("Die bestätigten Slicerprofile wurden nach der Prüfung verändert.")
         e = preview.manual_evaluation

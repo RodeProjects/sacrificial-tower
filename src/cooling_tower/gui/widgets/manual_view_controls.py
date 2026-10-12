@@ -43,6 +43,11 @@ class ManualViewControls(QWidget):
         self.button_height = height+6
         self.relayout()
 
+    def set_standalone(self,enabled):
+        self.view_buttons["side"].setText("Vorderansicht" if enabled else "Nebeneinander")
+        self.view_buttons["front"].setText("Seitenansicht" if enabled else "Voreinander")
+        self.relayout()
+
     def set_fitted(self,fitted):
         needs_fit = not fitted
         if self.fit_button.property("needsFit") == needs_fit:

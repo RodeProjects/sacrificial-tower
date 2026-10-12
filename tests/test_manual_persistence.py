@@ -9,7 +9,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 
 from cooling_tower.manual.geometry import ManualSettings
 from cooling_tower.manual.settings_store import ManualSettingsStore,MANUAL_SCHEMA_VERSION
-from cooling_tower.persistence.versioned_json import ConcurrentDocumentChangeError, VersionedDocumentWriteBlockedError
+from cooling_tower.persistence.versioned_json import (ConcurrentDocumentChangeError, VersionedDocumentWriteBlockedError,
+                                                    VersionedJsonStore, FutureSchemaVersionError)
 
 
 class ManualPersistenceTests(unittest.TestCase):
@@ -100,19 +101,19 @@ class ManualPersistenceTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("*.tmp")))
 
     def test_resolution_normalization_rejects_wrong_types_and_stages(self):
-        for value in (True,"50",None,0,2,55,110,50.0,{"unit":"ratio","value":.5}):
+        for value in (True,"50",None,-1,3,20,2,55,110,50.0,{"unit":"ratio","value":.5}):
             self.path.write_text(json.dumps({"manual_settings_schema_version":MANUAL_SCHEMA_VERSION,"manual":{"object_resolution_percent":value}}))
-            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,10)
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
 
-    def test_new_resolution_default_is_ten_percent_and_existing_choices_remain(self):
-        self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,10)
-        for value in (10,15,75):
+    def test_new_resolution_default_is_silhouette_and_existing_choices_remain(self):
+        self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
+        for value in (0,1,10,15,75):
             self.path.write_text(json.dumps({"manual_settings_schema_version":MANUAL_SCHEMA_VERSION,
                                             "manual":{"object_resolution_percent":value}}))
             self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,value)
 
     def test_v4_resolution_migration_maps_old_stages_and_preserves_source_backup(self):
-        for value,expected in ((10,10),(20,20),(30,25),(40,50),(50,50),(60,50),(70,75),(80,75),(90,100),(100,100)):
+        for value,expected in ((10,10),(20,25),(30,25),(40,50),(50,50),(60,50),(70,75),(80,75),(90,100),(100,100)):
             with self.subTest(value=value):
                 original=json.dumps({"manual_settings_schema_version":4,"manual":{
                     "object_resolution_percent":value,"layer_snap_enabled":False,"circle_segments":48}}).encode()
@@ -122,7 +123,7 @@ class ManualPersistenceTests(unittest.TestCase):
                 self.assertFalse(settings.layer_snap_enabled)
                 self.assertEqual(settings.circle_segments,48)
                 self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
-                self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],5)
+                self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],MANUAL_SCHEMA_VERSION)
                 self.assertFalse(list(self.root.glob("*.tmp")))
 
     def test_v4_resolution_migration_rejects_incompatible_types_units_and_old_ranges(self):
@@ -141,6 +142,102 @@ class ManualPersistenceTests(unittest.TestCase):
         self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
         with self.assertRaises(VersionedDocumentWriteBlockedError):store.save(s)
         self.assertFalse(list(self.root.glob("*.tmp")))
+
+    def test_v5_resolution_migration_preserves_values_and_maps_twenty_with_backup(self):
+        for value in (1,3,5,10,15,20,25,50,75,100):
+            original=json.dumps({"manual_settings_schema_version":5,"manual":{
+                "object_resolution_percent":value,"layer_snap_enabled":False,"circle_segments":48}}).encode()
+            self.path.write_bytes(original)
+            store=ManualSettingsStore(self.path);settings=store.load()
+            self.assertEqual(settings.object_resolution_percent,25 if value == 20 else 5 if value in (1,3) else value)
+            self.assertFalse(settings.layer_snap_enabled)
+            self.assertEqual(settings.circle_segments,48)
+            self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],MANUAL_SCHEMA_VERSION)
+            store.save(replace(settings,object_resolution_percent=0))
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
+            self.assertFalse(list(self.root.glob("*.tmp")))
+
+    def test_v6_direct_and_multistep_migrations_reject_invalid_old_resolution_values(self):
+        for value in (0,False,"20",20.,{"unit":"ratio","value":.2},-1,101):
+            self.path.write_text(json.dumps({"manual_settings_schema_version":5,"manual":{
+                "object_resolution_percent":value}}))
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,10)
+        for version in range(6):
+            original=json.dumps({"manual_settings_schema_version":version,"manual":{
+                "object_resolution_percent":20,"circle_segments":48}}).encode()
+            self.path.write_bytes(original)
+            settings=ManualSettingsStore(self.path).load()
+            self.assertEqual(settings.object_resolution_percent,50 if version < 4 else 25)
+            self.assertEqual(settings.circle_segments,48)
+            self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+        from cooling_tower.manual.settings_store import migrate_manual_v4
+        self.assertEqual(migrate_manual_v4({"manual":{"object_resolution_percent":20}})["manual"]["object_resolution_percent"],20)
+
+    def test_v6_downgrade_blocks_silhouette_types_units_and_changed_ranges(self):
+        for value in (0,False,"0",{"unit":"ratio","value":0},-1,20,100,101):
+            original=json.dumps({"manual_settings_schema_version":6,"manual":{
+                "object_resolution_percent":value}}).encode()
+            self.path.write_bytes(original)
+            older=VersionedJsonStore(self.path,schema_key="manual_settings_schema_version",current_version=5,
+                                     normalizer=lambda payload:dict(payload))
+            with self.assertRaises(FutureSchemaVersionError):older.load()
+            with self.assertRaises(VersionedDocumentWriteBlockedError):older.save({"manual":{}})
+            self.assertEqual(self.path.read_bytes(),original)
+
+    def test_v6_eight_stage_migration_keeps_silhouette_and_maps_one_and_three(self):
+        for value in (0,1,3,5,10,15,25,50,75,100):
+            original=json.dumps({"manual_settings_schema_version":6,"manual":{
+                "object_resolution_percent":value,"layer_snap_enabled":False}}).encode()
+            self.path.write_bytes(original)
+            store=ManualSettingsStore(self.path);settings=store.load()
+            self.assertEqual(settings.object_resolution_percent,5 if value in (1,3) else value)
+            self.assertFalse(settings.layer_snap_enabled)
+            self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],MANUAL_SCHEMA_VERSION)
+            self.assertFalse(list(self.root.glob("*.tmp")))
+        for value in (False,"3",3.,{"unit":"ratio","value":.03},-1,20,101):
+            self.path.write_text(json.dumps({"manual_settings_schema_version":6,"manual":{"object_resolution_percent":value}}))
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,10)
+
+    def test_v7_downgrade_blocks_removed_stages_types_units_and_changed_ranges(self):
+        for value in (0,1,3,False,"15",15.,{"unit":"ratio","value":.15},-1,101):
+            original=json.dumps({"manual_settings_schema_version":7,"manual":{
+                "object_resolution_percent":value}}).encode()
+            self.path.write_bytes(original)
+            older=VersionedJsonStore(self.path,schema_key="manual_settings_schema_version",current_version=6,
+                                     normalizer=lambda payload:dict(payload))
+            with self.assertRaises(FutureSchemaVersionError):older.load()
+            with self.assertRaises(VersionedDocumentWriteBlockedError):older.save({"manual":{}})
+            self.assertEqual(self.path.read_bytes(),original)
+
+    def test_v7_adds_one_percent_preserves_old_choices_and_backs_up(self):
+        for value in (0,5,10,15,25,50,75,100):
+            original=json.dumps({"manual_settings_schema_version":7,"manual":{
+                "object_resolution_percent":value,"circle_segments":48}}).encode()
+            self.path.write_bytes(original)
+            settings=ManualSettingsStore(self.path).load()
+            self.assertEqual(settings.object_resolution_percent,value)
+            self.assertEqual(settings.circle_segments,48)
+            self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],8)
+            self.assertFalse(list(self.root.glob("*.tmp")))
+        for value in (1,3,20,True,"1",1.,{"unit":"ratio","value":.01},-1,101):
+            self.path.write_text(json.dumps({"manual_settings_schema_version":7,"manual":{"object_resolution_percent":value}}))
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
+
+    def test_v8_downgrade_preserves_original_and_current_one_percent_roundtrips(self):
+        for value in (0,1,True,"1",1.,{"unit":"ratio","value":.01},-1,101):
+            original=json.dumps({"manual_settings_schema_version":8,"manual":{"object_resolution_percent":value}}).encode()
+            self.path.write_bytes(original)
+            older=VersionedJsonStore(self.path,schema_key="manual_settings_schema_version",current_version=7,
+                                     normalizer=lambda payload:dict(payload))
+            with self.assertRaises(FutureSchemaVersionError):older.load()
+            with self.assertRaises(VersionedDocumentWriteBlockedError):older.save({"manual":{}})
+            self.assertEqual(self.path.read_bytes(),original)
+        self.path.unlink()
+        store=ManualSettingsStore(self.path);store.save(replace(ManualSettings(),object_resolution_percent=1))
+        self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,1)
 
     def test_unknown_future_and_corrupt_original_never_overwritten(self):
         for original in (b"broken",b'{"manual_settings_schema_version":99,"manual":{"color_reference_time_s":18}}'):

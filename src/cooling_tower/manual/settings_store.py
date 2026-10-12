@@ -2,10 +2,10 @@
 from dataclasses import fields, replace
 from pathlib import Path
 
-from cooling_tower.manual.geometry import GeometryError, ManualSettings, OBJECT_RESOLUTION_STAGES, validate_settings
+from cooling_tower.manual.geometry import GeometryError, ManualSettings, validate_settings
 from cooling_tower.persistence.versioned_json import VersionedJsonStore, VersionedDocumentError
 
-MANUAL_SCHEMA_VERSION = 5
+MANUAL_SCHEMA_VERSION = 8
 
 
 def migrate_manual_v1(payload):
@@ -38,11 +38,22 @@ def migrate_manual_v4(payload):
     manual = dict(raw) if isinstance(raw,dict) else {}
     value = manual.get("object_resolution_percent")
     if type(value) is int and value in range(10,101,10):
-        manual["object_resolution_percent"] = min(OBJECT_RESOLUTION_STAGES,
+        manual["object_resolution_percent"] = min((1,3,5,10,15,20,25,50,75,100),
                                                    key=lambda stage:(abs(stage-value),-stage))
     else:
-        manual["object_resolution_percent"] = ManualSettings().object_resolution_percent
+        manual["object_resolution_percent"] = 10
     return {**payload, "manual_settings_schema_version": 5, "manual": manual}
+
+
+def migrate_manual_v5(payload):
+    """Preserve mesh percentages; replace the removed 20% stage with 25%."""
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw,dict) else {}
+    value = manual.get("object_resolution_percent")
+    previous_stages = (1,3,5,10,15,20,25,50,75,100)
+    manual["object_resolution_percent"] = (25 if value == 20 else value) if (
+        type(value) is int and value in previous_stages) else 10
+    return {**payload, "manual_settings_schema_version": 6, "manual": manual}
 
 
 def normalize_manual_settings(payload):
@@ -74,6 +85,28 @@ def normalize_manual_settings(payload):
     return {"manual_settings_schema_version": MANUAL_SCHEMA_VERSION, "manual": values}
 
 
+def migrate_manual_v6(payload):
+    """Keep silhouette mode and move removed mesh stages 1/3 to 5%."""
+    raw=payload.get("manual",{})
+    manual=dict(raw) if isinstance(raw,dict) else {}
+    value=manual.get("object_resolution_percent")
+    if type(value) is int and value in (0,1,3,5,10,15,25,50,75,100):
+        manual["object_resolution_percent"]=5 if value in (1,3) else value
+    else:
+        manual["object_resolution_percent"]=10
+    return {**payload,"manual_settings_schema_version":7,"manual":manual}
+
+
+def migrate_manual_v7(payload):
+    """Add 1% without changing any previously valid preview selection."""
+    raw=payload.get("manual",{})
+    manual=dict(raw) if isinstance(raw,dict) else {}
+    value=manual.get("object_resolution_percent")
+    if type(value) is not int or value not in (0,5,10,15,25,50,75,100):
+        manual["object_resolution_percent"]=0
+    return {**payload,"manual_settings_schema_version":8,"manual":manual}
+
+
 class ManualSettingsStore:
     def __init__(self, path: Path):
         self.store = VersionedJsonStore(path, schema_key="manual_settings_schema_version",
@@ -82,7 +115,10 @@ class ManualSettingsStore:
                                                     1: migrate_manual_v1,
                                                     2: migrate_manual_v2,
                                                     3: migrate_manual_v3,
-                                                    4: migrate_manual_v4},
+                                                    4: migrate_manual_v4,
+                                                    5: migrate_manual_v5,
+                                                    6: migrate_manual_v6,
+                                                    7: migrate_manual_v7},
                                         normalizer=normalize_manual_settings,
                                         document_name="Die manuellen Einstellungen")
         self.warning = None

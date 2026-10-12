@@ -19,6 +19,31 @@ def draft(height=100,settings=None):
 
 
 class ManualGeometryTests(unittest.TestCase):
+    def test_initial_foot_uses_automatic_rule_full_object_height_and_expands_its_limit(self):
+        from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_radius
+        for height in (1,100,120.08,200,380,381,1000):
+            settings=replace(ManualSettings(),foot_diameter_mm=30,maximum_foot_diameter_mm=30)
+            d=initial_draft(settings,(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=height)),150,"source")
+            expected=2*calculate_phase10_base_outer_radius(object_height_mm=height,
+                automatic_base_width=True,manual_base_width_mm=25)
+            self.assertAlmostEqual(d.foot_diameter_mm,expected)
+            self.assertEqual(d.settings.maximum_foot_diameter_mm,max(30,expected))
+            self.assertEqual(settings.foot_diameter_mm,30)
+            self.assertEqual(d.height_mm,min(height,150))
+        self.assertEqual(initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short").foot_diameter_mm,42)
+        for value in (False,"42",float("nan"),0,1001):
+            with self.assertRaises(GeometryError):
+                initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short",foot_diameter_mm=value)
+
+    def test_manual_foot_can_expand_its_limit_and_narrow_again_without_shrinking_the_limit(self):
+        d=draft()
+        wide=move_point(d,"foot",diameter_mm=95)
+        self.assertEqual((wide.foot_diameter_mm,wide.settings.maximum_foot_diameter_mm),(95,95))
+        self.assertEqual(wide.settings.foot_height_mm,d.settings.foot_height_mm)
+        narrow=move_point(wide,"foot",diameter_mm=30)
+        self.assertEqual((narrow.foot_diameter_mm,narrow.settings.maximum_foot_diameter_mm),(30,95))
+        self.assertEqual(d.foot_diameter_mm,25)
+
     def test_removing_a_point_resets_only_the_neighbor_controls_facing_it(self):
         original=draft()
         fixed,identity=insert_point(original,50)
@@ -114,15 +139,18 @@ class ManualGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(limited.base_diameter_mm,40,places=6)
         self.assertEqual(error.setting,"maximum_diameter_mm")
 
-    def test_foot_limit_prioritizes_valid_connection_and_reports_actual_limit(self):
+    def test_body_connection_expands_foot_and_limit_while_tower_limit_remains_binding(self):
         d = draft(settings=replace(ManualSettings(),maximum_diameter_mm=100,maximum_foot_diameter_mm=30))
         valid = move_point(d,"base",diameter_mm=30)
-        self.assertEqual(valid.foot_diameter_mm,30)
-        with self.assertRaises(GeometryError) as c: move_point(d,"base",diameter_mm=31)
-        self.assertEqual(c.exception.setting,"maximum_foot_diameter_mm")
+        self.assertEqual((valid.foot_diameter_mm,valid.settings.maximum_foot_diameter_mm),(32,32))
+        wide=move_point(d,"base",diameter_mm=31)
+        self.assertEqual((wide.foot_diameter_mm,wide.settings.maximum_foot_diameter_mm),(33,33))
         limited,error = bounded_edit(d,lambda t:move_point(d,"base",diameter_mm=5+45*t))
-        self.assertAlmostEqual(limited.base_diameter_mm,30,places=6)
-        self.assertEqual(error.setting,"maximum_foot_diameter_mm")
+        self.assertAlmostEqual(limited.base_diameter_mm,50,places=6)
+        self.assertEqual((limited.foot_diameter_mm,limited.settings.maximum_foot_diameter_mm),(52,52))
+        self.assertIsNone(error)
+        with self.assertRaises(GeometryError) as c: move_point(d,"base",diameter_mm=101)
+        self.assertEqual(c.exception.setting,"maximum_diameter_mm")
 
     def test_inserting_cubic_is_form_preserving_and_ids_are_stable(self):
         d = draft()

@@ -2,8 +2,9 @@
 import math
 from dataclasses import dataclass
 
-from cooling_tower.calibration.gcode_integration import GCodeIntegrationError, parse_bed_geometry, propose_tower_placement
+from cooling_tower.calibration.gcode_integration import parse_bed_geometry
 from cooling_tower.manual.geometry import GeometryError, validate
+from cooling_tower.manual.placement import maximum_foot_diameter, manual_placement
 
 
 def scalar(value):
@@ -34,6 +35,12 @@ class ManualContext:
     occupied_bounds: object
     brim_width_mm: float
 
+    standalone = False
+
+    @property
+    def maximum_foot_diameter_mm(self):
+        return maximum_foot_diameter(self.bed_geometry, self.occupied_bounds, self.brim_width_mm)
+
     @classmethod
     def from_request(cls, request, source_data, key):
         values = request.effective_profile.effective_values
@@ -62,14 +69,16 @@ class ManualContext:
 
     def validate(self, draft):
         validate(draft)
+        if draft.standalone:
+            raise GeometryError("context", "Ein freier Entwurf benötigt den freien Turmmodus.")
         if draft.context_key != self.key:
             raise GeometryError("context", "Der Entwurf gehört zu einem anderen Quellen-/Profilkontext.")
         if draft.height_mm > self.maximum_height_mm+1e-9:
             raise GeometryError("height_mm", "Die verifizierte Maschinenhöhe wurde erreicht.")
+        if draft.settings.maximum_foot_diameter_mm > self.maximum_foot_diameter_mm+1e-9:
+            raise GeometryError("maximum_foot_diameter_mm", "Die maximal verfügbare Fußbreite wurde erreicht.")
         try:
-            return propose_tower_placement(self.bed_geometry.bounds, self.occupied_bounds,
-                                           tower_radius_mm=draft.maximum_radius_mm+self.brim_width_mm,
-                                           object_clearance_mm=5.0, edge_clearance_mm=5.0,
-                                           bed_geometry=self.bed_geometry)
-        except (ValueError,GCodeIntegrationError) as error:
+            return manual_placement(self.bed_geometry, self.occupied_bounds,
+                                    draft.maximum_radius_mm, self.brim_width_mm)
+        except ValueError as error:
             raise GeometryError("technical_bed", str(error)) from error

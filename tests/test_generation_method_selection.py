@@ -54,6 +54,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
     def test_confirmation_reveals_only_method_selection(self) -> None:
         window = self.window
         self.assertTrue(window.generation_workspace.isHidden())
+        self.assertTrue(window.free_generation_card.isEnabled())
         window.automatic_generation_card.click()
         self.assertIsNone(window.generation_mode)
         self.finish_preparation()
@@ -147,7 +148,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.finish_preparation()
         window.automatic_generation_card.click()
         disposals = []
-        for session in window.generation_sessions.values():
+        for mode in (GenerationMode.AUTOMATIC,GenerationMode.MANUAL):
+            session=window.generation_sessions[mode]
             dispose = Mock()
             disposals.append(dispose)
             session.preview = SimpleNamespace(dispose=dispose)
@@ -157,7 +159,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNone(window.generation_mode)
         self.assertTrue(window.generation_workspace.isHidden())
-        for session, dispose in zip(window.generation_sessions.values(), disposals):
+        self.assertTrue(window.free_generation_card.isEnabled())
+        for session, dispose in zip((window.generation_sessions[GenerationMode.AUTOMATIC],window.generation_sessions[GenerationMode.MANUAL]), disposals):
             self.assertIsNone(session.preview)
             self.assertIs(session.preview_state, PreviewState.EMPTY)
             dispose.assert_called_once()
@@ -195,7 +198,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertLess(automatic_rect.right(), manual_rect.left())
             else:
                 self.assertLess(automatic_rect.bottom(), manual_rect.top())
-            for card in (window.automatic_generation_card, window.manual_generation_card):
+            for card in (window.automatic_generation_card, window.manual_generation_card, window.free_generation_card):
                 self.assertLessEqual(card.geometry().right(), grid.width())
                 self.assertLessEqual(card.action_label.geometry().bottom(), card.height())
         card = window.automatic_generation_card
@@ -213,7 +216,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         heading = window.generation_method_heading
         self.assertEqual(heading.text(), "Wie soll der Kühlturm erstellt werden?")
         self.assertTrue(heading.alignment() & Qt.AlignmentFlag.AlignHCenter)
-        for card in (window.automatic_generation_card, window.manual_generation_card):
+        for card in (window.automatic_generation_card, window.manual_generation_card, window.free_generation_card):
             self.assertTrue(card.title_label.alignment() & Qt.AlignmentFlag.AlignHCenter)
         for width in (1800, 1400, 1060, 1000, 860, 760, 1800):
             with self.subTest(width=width):
@@ -239,7 +242,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         for width in (1800,1060,860,760,950,1400,1800):
             window.resize(width,900)
             for _ in range(4):self.app.processEvents()
-            for card in (window.automatic_generation_card,window.manual_generation_card):
+            for card in (window.automatic_generation_card,window.manual_generation_card,window.free_generation_card):
                 for label in (card.title_label,card.description_label,card.action_label):
                     with self.subTest(width=width,text=label.text()):
                         required=label.fontMetrics().boundingRect(QRect(0,0,label.width(),100000),

@@ -5,12 +5,13 @@ import traceback
 from collections import defaultdict
 from bisect import bisect_left
 import numpy as np
-from PySide6.QtCore import QPointF,QLineF,Qt,Signal,Slot
-from PySide6.QtGui import QImage,QPicture,QPainter,QPolygonF,QPen,QColor
+from PySide6.QtCore import QPointF,QLineF,QRectF,Qt,Signal,Slot
+from PySide6.QtGui import QImage,QPicture,QPainter,QPainterPath,QPolygonF,QPen,QColor
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.manual.service import check_cancel
 from cooling_tower.preview import PreviewCancelled
+from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 
 
 @dataclass(frozen=True,slots=True)
@@ -26,6 +27,7 @@ class SpatialFrame:
     object_center: tuple[float,float]
     object_rotation: float
     highlight: str
+    exact_silhouette: bool = False
 
     def project(self,array):
         points=np.asarray(array,dtype=float).copy()
@@ -149,6 +151,22 @@ def simplify_display_mesh(triangles,percent,event=None):
     return best
 
 
+def silhouette_backing_color():
+    # Keep the full contour visible around reduced facets without flattening
+    # their shading. Object X-Ray still applies to the complete original.
+    return QColor(78,162,177,210)
+
+
+def render_silhouette_backing(reference,frame,event=None):
+    picture=QPicture();painter=QPainter(picture)
+    try:
+        path=original_silhouette_path(reference,frame,event)
+        painter.fillPath(path,silhouette_backing_color())
+        painter.strokePath(path,cosmetic_pen(QColor("#429baa").darker(125),1))
+    finally:painter.end()
+    return picture
+
+
 def render_spatial_object(reference,frame,settings,event,*,vector=False):
     check_cancel(event)
     image = QPicture() if vector else QImage(frame.width,frame.height,QImage.Format.Format_ARGB32_Premultiplied)
@@ -156,6 +174,8 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
         image.fill(Qt.GlobalColor.transparent)
     if reference.object_triangles is None:
         return render_spatial_toolpaths(reference,frame,settings,event,image)
+    if settings.object_resolution_percent == 0:
+        return render_silhouette_object(reference,frame,settings,event,image)
     center=np.asarray(reference.silhouette.center_xy)
     angle=math.radians(frame.object_rotation)
     display_triangles=simplify_display_mesh(reference.object_triangles,settings.object_resolution_percent,event)
@@ -166,8 +186,12 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
     painter=QPainter(image)
     try:
         if not vector:
-            painter.setOpacity(.28 if frame.highlight=="object" else 1)
+            painter.setOpacity(.28 if frame.highlight in {"object","all"} else 1)
         base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa")
+        silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
+        if silhouette is not None and not silhouette.isEmpty():
+            painter.fillPath(silhouette,silhouette_backing_color())
+            painter.setClipPath(silhouette)
         styles,style_indices=surface_styles(base_color,brightness)
         for i,index in enumerate(order):
             if i%512==0:check_cancel(event)
@@ -190,8 +214,106 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
             for color,lines in groups.items():
                 check_cancel(event)
                 painter.setPen(cosmetic_pen(QColor.fromRgb(color),1.5));painter.drawLines(lines)
+        if silhouette is not None and not silhouette.isEmpty():
+            painter.setClipping(False)
+            painter.strokePath(silhouette,cosmetic_pen(base_color.darker(125),1))
         check_cancel(event)
     finally:painter.end()
+    return image
+
+
+def original_silhouette_path(reference,frame,event=None):
+    """Project exact contour edges using the same object rotation as the mesh."""
+    mesh=getattr(reference,"object_silhouette",None)
+    if mesh is None or mesh.source is not reference.object_triangles:
+        mesh=build_mesh_silhouette(reference.object_triangles,event)
+    yaw,pitch,angle=map(math.radians,(frame.yaw,frame.pitch,frame.object_rotation))
+    direction=(math.sin(yaw+angle)*math.cos(pitch),math.cos(yaw+angle)*math.cos(pitch),math.sin(pitch))
+    edges=mesh.contour_edges(direction,event)
+    indices=np.unique(edges)
+    projected,_=frame.project(rotate_object(mesh.vertices[indices],reference.silhouette.center_xy,
+                                           frame.object_center,frame.object_rotation))
+    points=dict(zip(map(int,indices),projected))
+    following=defaultdict(list)
+    for start,end in edges:following[int(start)].append(int(end))
+    path=QPainterPath()
+    path.setFillRule(Qt.FillRule.WindingFill)
+    count=0
+    while following:
+        start=next(iter(following));current=start
+        path.moveTo(QPointF(*points[start]))
+        while current in following:
+            if count%512 == 0:check_cancel(event)
+            destinations=following[current]
+            destination=destinations.pop()
+            if not destinations:del following[current]
+            path.lineTo(QPointF(*points[destination]))
+            count+=1;current=destination
+            if current == start:
+                path.closeSubpath()
+                break
+    return path
+
+
+def render_silhouette_object(reference,frame,settings,event,image):
+    """Draw complete original contours without a reduced mesh or triangle details."""
+    painter=QPainter(image)
+    try:
+        if not isinstance(image,QPicture):
+            painter.setOpacity(.28 if frame.highlight in {"object","all"} else 1)
+        # In profile views, retain the former complete layer silhouettes and
+        # their solid layer colors, including separate projected islands.
+        if frame.pitch == 0 and settings.critical_layers_enabled and reference.silhouette is not None:
+            paths=defaultdict(QPainterPath)
+            bottom=0.
+            for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
+                check_cancel(event)
+                if len(section):
+                    coordinates=np.empty((*section.shape[:-1],3))
+                    coordinates[...,:2]=section
+                    coordinates[...,2]=layer.z_mm
+                    coordinates=rotate_object(coordinates,reference.silhouette.center_xy,
+                                              frame.object_center,frame.object_rotation)
+                    screens,_=frame.project(coordinates)
+                    lower=screens[...,0].min(axis=1)
+                    upper=screens[...,0].max(axis=1)
+                    order=np.argsort(lower)
+                    lower,upper=lower[order],np.maximum.accumulate(upper[order])
+                    starts=np.r_[0,np.flatnonzero(lower[1:] > upper[:-1]+1e-9)+1]
+                    ends=np.r_[starts[1:]-1,len(lower)-1]
+                    heights,_=frame.project(np.array([(frame.object_center[0],frame.object_center[1],z)
+                                                       for z in (bottom,layer.z_mm)]))
+                    y1,y2=heights[:,1]
+                    color=(LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
+                        settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+                        if settings.critical_layers_enabled else QColor("#429baa"))
+                    for left,right in zip(lower[starts],upper[ends]):
+                        paths[color.rgb()].addRect(QRectF(float(left),min(y1,y2),float(right-left),abs(y2-y1)))
+                bottom=layer.z_mm
+            for color,path in paths.items():
+                path.setFillRule(Qt.FillRule.WindingFill)
+                painter.fillPath(path,QColor.fromRgb(color))
+        else:
+            # Reuse adjacency from preparation. Only silhouette vertices are
+            # projected and recorded, rather than thousands of filled faces.
+            path=original_silhouette_path(reference,frame,event)
+            painter.fillPath(path,QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa"))
+            if settings.critical_layers_enabled:
+                for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
+                    check_cancel(event)
+                    color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
+                        settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+                    if color == QColor(LayerRangeCanvas.OBJECT_COLOR) or not len(section):continue
+                    coordinates=np.empty((*section.shape[:-1],3))
+                    coordinates[...,:2]=section
+                    coordinates[...,2]=layer.z_mm
+                    screens,_=frame.project(rotate_object(coordinates,reference.silhouette.center_xy,
+                                                          frame.object_center,frame.object_rotation))
+                    painter.setPen(cosmetic_pen(color,1.5))
+                    painter.drawLines([QLineF(QPointF(*a),QPointF(*b)) for a,b in screens])
+        check_cancel(event)
+    finally:
+        painter.end()
     return image
 
 
@@ -220,7 +342,7 @@ def render_spatial_toolpaths(reference, frame, settings, event, image):
     painter = QPainter(image)
     try:
         if not isinstance(image,QPicture):
-            painter.setOpacity(.28 if frame.highlight == "object" else 1)
+            painter.setOpacity(.28 if frame.highlight in {"object","all"} else 1)
         for color, lines in groups.items():
             check_cancel(event)
             painter.setPen(cosmetic_pen(QColor.fromRgb(color), 1.2))

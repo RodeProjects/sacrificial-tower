@@ -10,15 +10,16 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLayout, QLabel, QPushButton, QSizePolicy,
                               QCheckBox, QScrollArea, QSplitter, QSlider, QProgressBar)
 
-from cooling_tower.gui.widgets import SectionCard, NumericSettingWidget, WheelSafeComboBox
+from cooling_tower.gui.widgets import SectionCard, WheelSafeComboBox
 from cooling_tower.gui.widgets.manual_canvas import ManualCanvas
-from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox
+from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox,ManualNumericSettingWidget
 from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
-from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider
+from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider,ResolutionEndLabels
 from cooling_tower.gui.widgets.manual_xray_controls import XRayControls,PreviewToolsRow
 from cooling_tower.gui.widgets.manual_settings_pane import ManualSettingsPane
+from cooling_tower.gui.widgets.manual_point_editor import ManualPointEditor,PointField
 from cooling_tower.gui.design_tokens import COLORS,METRICS
-from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, OBJECT_RESOLUTION_STAGES, bounded_edit, bounded_coordinate_edit, initial_draft,
+from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, OBJECT_RESOLUTION_STAGES, object_resolution_default, bounded_edit, bounded_coordinate_edit, initial_draft,
                                           insert_point, move_point, remove_point, set_curve, reset_point_curves, couple_point, validate, validate_settings)
 from cooling_tower.manual.layer_snap import snap_layer_height
 
@@ -62,8 +63,10 @@ class ManualGenerationPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("manualGenerationPanel")
         self.settings = settings or ManualSettings()
+        self._resolution_default_percent = object_resolution_default()
         self.draft = self.reference = self.initial = None
-        self.selected = "base"
+        self.standalone = False
+        self.selected = ""
         self._busy = False
         self._interaction_feedback = set()
         self._syncing = False
@@ -184,19 +187,31 @@ class ManualGenerationPanel(QWidget):
         resolution_header.addWidget(self.resolution_heading,1)
         resolution_group.addLayout(resolution_header)
         resolution = QHBoxLayout()
+        resolution.setContentsMargins(0,0,0,0)
         resolution.setSpacing(3)
+        slider_host=QWidget()
+        slider_column=QVBoxLayout(slider_host)
+        slider_column.setContentsMargins(0,0,0,0)
+        slider_column.setSpacing(0)
+        self.resolution_end_labels=ResolutionEndLabels()
+        slider_column.addWidget(self.resolution_end_labels)
         self.resolution_slider = ResolutionSlider()
+        self.resolution_slider.setFixedHeight(20)
         self.resolution_slider.setMinimumWidth(65)
-        self.resolution_slider.setToolTip("performance → optik: 1, 3, 5, 10, 15, 20, 25, 50, 75, 100 %. Analyse und Druckdaten bleiben gleich.")
-        self.resolution_slider.setRange(1,10)
+        self.resolution_slider.setToolTip("Performance → Optik:\n"+", ".join(map(str,OBJECT_RESOLUTION_STAGES))+" %.\n"
+            "0 %: hochauflösende Silhouette. Analyse und Druckdaten bleiben gleich.")
+        self.resolution_slider.setRange(1,len(OBJECT_RESOLUTION_STAGES))
         self.resolution_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.resolution_slider.setTickInterval(1)
         self.resolution_slider.setSingleStep(1)
-        # Stop positions follow the ten slider stages; colors follow their real
+        # Stop positions follow the slider stages; colors follow their real
         # percentages, keeping the many low-resolution stages predominantly green.
         colors = (QColor("#41a878"),QColor("#e5bf48"),QColor("#e5484d"))
         stops = []
         for index,percent in enumerate(OBJECT_RESOLUTION_STAGES):
+            if percent == 0:
+                stops.append("stop:0 #8dc9f4")
+                continue
             first,last = colors[:2] if percent <= 50 else colors[1:]
             fraction = percent/50 if percent <= 50 else (percent-50)/50
             rgb = [round(a+(b-a)*fraction) for a,b in zip(first.getRgb()[:3],last.getRgb()[:3])]
@@ -208,12 +223,19 @@ class ManualGenerationPanel(QWidget):
             "QSlider::handle:horizontal { width: 10px; margin: -4px 0; border: 2px solid #536980; "
             "border-radius: 6px; background: #f8fbfd; }")
         self.resolution_slider.valueChanged.connect(lambda value:self.change_setting("object_resolution_percent",OBJECT_RESOLUTION_STAGES[value-1]))
-        resolution.addWidget(self.resolution_slider,1)
+        slider_column.addWidget(self.resolution_slider)
+        resolution.addWidget(slider_host,1)
         self.resolution_label = QLabel()
         self.resolution_label.setStyleSheet("font-size: 8pt; padding: 0;")
         self.resolution_label.setMinimumWidth(self.resolution_label.fontMetrics().horizontalAdvance("100 %"))
         resolution_group.addLayout(resolution)
-        resolution.addWidget(self.resolution_label)
+        value_host=QWidget()
+        value_column=QVBoxLayout(value_host)
+        value_column.setContentsMargins(0,0,0,0)
+        value_column.setSpacing(0)
+        value_column.addSpacing(self.resolution_end_labels.height())
+        value_column.addWidget(self.resolution_label,1)
+        resolution.addWidget(value_host)
         self.resolution_reset = QPushButton("↺")
         self.resolution_reset.setObjectName("settingResetButton")
         self.resolution_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
@@ -235,10 +257,10 @@ class ManualGenerationPanel(QWidget):
         rotation.setSpacing(3)
         self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
         self.rotation_slider.setMinimumWidth(50)
-        self.rotation_slider.setRange(0,360)
+        self.rotation_slider.setRange(-180,180)
         self.rotation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.rotation_slider.setTickInterval(45)
-        self.rotation_slider.setToolTip("Originalobjekt drehen · Rastpunkte alle 45°")
+        self.rotation_slider.setToolTip("Originalobjekt drehen: −180° bis +180° · 0° in der Mitte · Rastpunkte alle 45°")
         self.rotation_slider.valueChanged.connect(self._queue_rotation)
         rotation.addWidget(self.rotation_slider,1)
         self.rotation_label = QLabel("0,00°")
@@ -257,13 +279,17 @@ class ManualGenerationPanel(QWidget):
         self.preview_tools = PreviewToolsRow(self.highlight_host,self.resolution_host,self.rotation_host)
         preview_layout.addWidget(self.preview_tools)
         self.canvas = ManualCanvas()
+        self.point_editor = ManualPointEditor(self.canvas,self._validate_point_value,self._apply_point_value)
+        self.canvas.point_editor = self.point_editor
         self.canvas.view_state_changed.connect(lambda:self.reset_button.setEnabled(self.can_reset_all()))
+        self.canvas.view_state_changed.connect(lambda:self.highlight_host.set_choice(self.canvas.highlight))
         self.view_buttons = self.canvas.view_controls.view_buttons
         self.fit_button = self.canvas.view_controls.fit_button
         self.canvas.move_requested.connect(self._move_from_canvas)
         self.canvas.control_requested.connect(self._control_from_canvas)
         self.canvas.selection_changed.connect(self.select)
         self.canvas.insert_requested.connect(self.insert)
+        self.canvas.validate_insertion = self._validate_insertion
         self.canvas.remove_requested.connect(self.remove)
         self.canvas.curve_reset_requested.connect(self.reset_point_curves)
         self.canvas.interaction_started.connect(self._begin_interaction)
@@ -331,12 +357,13 @@ class ManualGenerationPanel(QWidget):
             spin.setDecimals(6)
             spin.set_display_decimals(2)
             spin.setSingleStep(.1 if unit in {"mm","s"} else 1)
-        row = NumericSettingWidget(setting_name=name,label=label,editor=spin,unit=unit,
+        row = ManualNumericSettingWidget(setting_name=name,label=label,editor=spin,unit=unit,
                                    default_provider=lambda:self.default_value(name),
                                    info_text="Alle Breiten sind Außendurchmesser. Fußhöhe und Turmhöhe sind absolute Z-Höhen über dem Druckbett." if unit == "mm" else
                                    "Winkel zur Vertikalen; lokale Radiussteigung. Die visuelle Prüfung verändert keine Geometrie." if unit == "°" else
                                    "Gleiche Kreissegmentzahl für alle STL-Ringe; unabhängig von Drucklayern und Kurvenunterteilungen." if name == "circle_segments" else "")
         row.set_feedback_enabled(True)
+        row.error_feedback_finished.connect(lambda:self._interaction_feedback.discard(name))
         row.reset_button.clicked.disconnect()
         row.reset_button.clicked.connect(lambda:self.reset_value(name))
         spin.setKeyboardTracking(False)
@@ -347,8 +374,13 @@ class ManualGenerationPanel(QWidget):
         return row
 
     def default_value(self,name):
+        if name == "object_resolution_percent":
+            return object_resolution_default(self.canvas.view)
         if name.startswith("point_"):
-            identity = "base" if self.selected == "foot_height" else "top" if self.selected == "top_width" else self.selected
+            selected = self.canvas.information_identity() if hasattr(self,"canvas") else self.selected
+            identity = "base" if selected == "foot_height" else "top" if selected == "top_width" else selected
+            if self.draft is not None and any(p.identity == identity and p.kind == "free" for p in self.draft.points):
+                return None
             p = self._point_defaults.get(identity)
             if p: return p.diameter_mm if name == "point_diameter_mm" else p.z_mm
         if name.startswith("control_") and self.draft is not None:
@@ -367,19 +399,63 @@ class ManualGenerationPanel(QWidget):
 
     def initialize(self,reference,settings=None):
         self.reference = reference
-        self.selected = self.canvas.selected = "base"
+        self.selected = self.canvas.selected = ""
         s = settings or self.settings
-        self.initial = initial_draft(replace(ManualSettings(),overhang_angle_deg=s.overhang_angle_deg),reference.context.layers,reference.context.maximum_height_mm,reference.context.key)
-        draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key)
+        limit = reference.context.maximum_foot_diameter_mm
+        if limit < s.minimum_diameter_mm+2-1e-9:
+            raise GeometryError("maximum_foot_diameter_mm", "Für den Standfuß ist neben dem Originalobjekt nicht genügend freie Druckbettfläche vorhanden.")
+        s = replace(s,maximum_foot_diameter_mm=limit,foot_diameter_mm=min(s.foot_diameter_mm,limit))
+        draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,standalone=self.standalone)
+        if draft.foot_diameter_mm > limit:
+            draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,foot_diameter_mm=limit,standalone=self.standalone)
+        default_foot_limit = limit
+        self.initial = initial_draft(replace(ManualSettings(),overhang_angle_deg=s.overhang_angle_deg,
+                                           minimum_diameter_mm=min(ManualSettings().minimum_diameter_mm,limit-2),
+                                           maximum_foot_diameter_mm=default_foot_limit,
+                                           foot_diameter_mm=draft.foot_diameter_mm,
+                                           object_resolution_percent=self.default_value("object_resolution_percent")),
+                                     reference.context.layers,reference.context.maximum_height_mm,reference.context.key,
+                                     foot_diameter_mm=draft.foot_diameter_mm,standalone=self.standalone)
+        if self.standalone:
+            self.initial = replace(self.initial,settings=replace(self.initial.settings,layer_snap_enabled=False,critical_layers_enabled=False))
         reference.context.validate(draft)
         self.canvas.set_reference(reference)
         self.height_note.setText(reference.context.height_note)
         self.retry_button.hide()
-        self._point_defaults = {p.identity:p.position for p in draft.points}
+        self._point_defaults = {p.identity:p.position for p in draft.points if p.kind != "free"}
         self._control_defaults = {(draft.points[i].identity,n):getattr(c,f"control{n}") for i,c in enumerate(draft.curves) for n in (1,2)}
         self.commit(draft)
 
+    def set_standalone_display(self,enabled):
+        self.standalone = enabled
+        self.preview_tools.setVisible(not enabled)
+        self.resolution_host.setVisible(not enabled)
+        self.rotation_host.setVisible(not enabled)
+        self.highlight_buttons["object"].setVisible(not enabled)
+        self.highlight_host.set_standalone(enabled)
+        self.checks["layer_snap_enabled"].setVisible(not enabled)
+        self.checks["critical_layers_enabled"].setVisible(not enabled)
+        self.critical_note.setVisible(not enabled)
+        for name in ("foot_height_mm","height_mm"):
+            self.rows[name].label.setText(self.LABELS[name][0].replace("Druckbett","Boden") if enabled else self.LABELS[name][0])
+        for name in ("color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"):
+            self.rows[name].setVisible(not enabled)
+        for name,editor in self.editors.items():
+            if self.LABELS[name][1] == "mm":
+                with QSignalBlocker(editor):
+                    editor.setMaximum((500 if "height" in name else 250) if enabled else self.LABELS[name][3])
+        self.preview_information.legend_rows[1].setVisible(not enabled)
+        self.canvas.view_controls.set_standalone(enabled)
+        self.overhang_note.setText("Überhangwinkel ist eine rein geometrische Markierung." if enabled else "")
+        self.preview_tools.updateGeometry()
+
     def commit(self,draft):
+        if (self.initial is not None and self.draft is not None and
+                self.draft.context_key == draft.context_key and
+                draft.foot_diameter_mm > self.draft.settings.maximum_foot_diameter_mm and
+                draft.settings.maximum_foot_diameter_mm == draft.foot_diameter_mm):
+            self.initial = replace(self.initial,settings=replace(self.initial.settings,
+                                   maximum_foot_diameter_mm=draft.settings.maximum_foot_diameter_mm))
         self.draft,self.settings = draft,draft.settings
         self.canvas.set_draft(draft)
         self._sync()
@@ -394,6 +470,7 @@ class ManualGenerationPanel(QWidget):
             values.update(base_diameter_mm=self.draft.base_diameter_mm,height_mm=self.draft.height_mm,
                           top_diameter_mm=self.draft.points[-1].position.diameter_mm)
             point = next((p for p in self.draft.points if p.identity == ("top" if self.selected == "top_width" else self.selected)),None)
+            if not self.selected:self.selection_label.setText("Kein Profilpunkt ausgewählt")
             if point:
                 values.update(point_diameter_mm=point.position.diameter_mm,point_height_mm=point.position.z_mm)
                 self.selection_label.setText(f"{'Freier Profilpunkt' if point.kind == 'free' else {'foot':'Fußrand','base':'Körperbeginn','top':'Oberer Abschluss'}[point.kind]} · {point.position.z_mm:.2f} mm")
@@ -437,6 +514,67 @@ class ManualGenerationPanel(QWidget):
         self.preview_information.set_state(self.canvas.view,s.critical_layers_enabled)
         self._syncing = False
         self._apply_view_editability()
+        self.point_editor.sync_fields(self.canvas.information_identity(),self._point_fields(),self.canvas.selected_handle_text(),not self._busy)
+
+    def _point_fields(self):
+        if self.draft is None:return ()
+        selected = self.canvas.information_identity()
+        names={"foot":("foot_diameter_mm",),"base":("base_diameter_mm",),
+               "foot_height":("foot_height_mm",),"top":("height_mm",),
+               "top_width":("top_diameter_mm",)}.get(selected)
+        values={**self.settings.to_dict(),"base_diameter_mm":self.draft.base_diameter_mm,
+                "height_mm":self.draft.height_mm,"top_diameter_mm":self.draft.points[-1].position.diameter_mm}
+        if selected in self.canvas.LIMITS:names=(selected,)
+        elif names is None:
+            point=next((p for p in self.draft.points if p.identity==selected and p.kind=="free"),None)
+            if point:
+                names=("point_diameter_mm","point_height_mm")
+                values.update(point_diameter_mm=point.position.diameter_mm,point_height_mm=point.position.z_mm)
+        short={"minimum_diameter_mm":"Min. Turm-Ø","maximum_diameter_mm":"Max. Turm-Ø",
+               "maximum_foot_diameter_mm":"Max. Fuß-Ø","base_diameter_mm":"Grund-Ø",
+               "foot_diameter_mm":"Fuß-Ø","foot_height_mm":"Fußhöhe","height_mm":"Turmhöhe",
+               "top_diameter_mm":"Spitzen-Ø","point_diameter_mm":"Durchmesser","point_height_mm":"Höhe",
+               "control_diameter_mm":"Ø-Position","control_height_mm":"Höhe"}
+        return tuple(PointField(name,short[name],values[name],self.default_value(name),self.LABELS[name][0])
+                     for name in names or ())
+
+    def _point_value_candidate(self,name,value):
+        if self.draft is None or name not in {field.name for field in self._point_fields()}:
+            raise GeometryError(name,"Dieser Greifer kann derzeit nicht bearbeitet werden.")
+        _,_,low,high=self.LABELS[name]
+        if self.standalone:high=500 if "height" in name else 250
+        if not math.isfinite(value) or not low<=value<=high:
+            raise GeometryError(name,f"Der Wert muss zwischen {low:g} und {high:g} mm liegen.")
+        if name in self.canvas.LIMITS:
+            return self._checked(validate(replace(self.draft,settings=replace(self.settings,**{name:value}))))
+        if name.startswith("control_"):
+            i,n=self._selected_control();position=getattr(self.draft.curves[i],f"control{n}")
+            position=Coordinate(value/2,position.z_mm) if name=="control_diameter_mm" else Coordinate(position.radius_mm,value)
+            return self._checked(set_curve(self.draft,i,control=n,position=position))
+        identity={"base_diameter_mm":"base","foot_diameter_mm":"foot","foot_height_mm":"base",
+                  "height_mm":"top","top_diameter_mm":"top"}.get(name,self.canvas.information_identity())
+        position=next(p.position for p in self.draft.points if p.identity==identity)
+        diameter=value if name.endswith("diameter_mm") else position.diameter_mm
+        height=value if name.endswith("height_mm") else position.z_mm
+        return self._checked(move_point(self.draft,identity,diameter_mm=diameter,z_mm=height))
+
+    def _validate_point_value(self,name,value):
+        # A dry run uses the complete geometry and placement validators.
+        # Accepted values alone are committed; typing never moves a handle.
+        try:self._point_value_candidate(name,value)
+        except (GeometryError,ValueError) as error:return str(error)
+        return None
+
+    def _apply_point_value(self,name,value):
+        current=next((field.value for field in self._point_fields() if field.name==name),None)
+        if self._busy or current is None:return False
+        if value==current:return True
+        try:candidate=self._point_value_candidate(name,value)
+        except (GeometryError,ValueError) as error:
+            self.feedback(error,name)
+            return False
+        self.status_label.clear();self.commit(candidate)
+        return True
 
     def _checked(self,draft):
         self.reference.context.validate(draft)
@@ -526,9 +664,14 @@ class ManualGenerationPanel(QWidget):
             boundary = getattr(candidate.settings,name)*10
             snapped = (math.floor(boundary+1e-8) if target > start else math.ceil(boundary-1e-8))/10
             candidate = old
-            if min(start,target)-1e-8 <= snapped <= max(start,target)+1e-8:
+            # Try the adjacent grid value too: the bounded search returns a
+            # safe approximation just before an exactly reachable boundary.
+            adjacent = (math.ceil(boundary-1e-8) if target > start else math.floor(boundary+1e-8))/10
+            for value in dict.fromkeys((adjacent,snapped)):
+                if not min(start,target)-1e-8 <= value <= max(start,target)+1e-8:continue
                 try:
-                    candidate = operation(snapped)
+                    candidate = operation(value)
+                    break
                 except GeometryError:
                     pass
             self.feedback(error,name)
@@ -537,8 +680,14 @@ class ManualGenerationPanel(QWidget):
         self.commit(candidate)
 
     def _control_from_canvas(self,index,n,diameter,z):
-        self.move_control(index,n,diameter,z,layer_snap=self.canvas.vertical_drag_snaps(),
+        if self._busy or self.draft is None:return
+        attempted_error=None
+        origin=self.canvas.constrained_drag_origin() or self.draft
+        try:self._checked(set_curve(origin,index,control=n,position=Coordinate(diameter/2,z)))
+        except GeometryError as error:attempted_error=error
+        error=self.move_control(index,n,diameter,z,layer_snap=self.canvas.vertical_drag_snaps(),
                           diameter_snap=self.canvas.horizontal_drag_snaps())
+        self.canvas.set_control_limit_feedback(attempted_error or error,index,n,diameter,z)
 
     def _edit_coordinate(self,old,coordinate_for,destination,operation,layer_snap,diameter_snap):
         if not layer_snap and not diameter_snap:
@@ -568,14 +717,20 @@ class ManualGenerationPanel(QWidget):
         if not layer_snap:
             return vertical,limiting
         boundary = coordinate_for(vertical).z_mm
+        lower,upper=min(start.z_mm,destination.z_mm),max(start.z_mm,destination.z_mm)
+        direction=-1 if destination.z_mm > start.z_mm else 1
         z = snap_layer_height(boundary,self.canvas._layer_tops,
-            lower=min(start.z_mm,destination.z_mm),upper=max(start.z_mm,destination.z_mm),
-            direction=-1 if destination.z_mm > start.z_mm else 1)
-        if z is not None:
+            lower=lower,upper=upper,direction=direction)
+        while z is not None:
             try:
                 return operation(horizontal,Coordinate(start.radius_mm,z)),limiting
             except GeometryError:
-                pass
+                # Endpoint derivatives impose open bounds. A layer numerically
+                # on that boundary can fail; try the next layer toward the
+                # original valid height instead of abandoning all motion.
+                if direction>0:lower=z+1e-7
+                else:upper=z-1e-7
+                z=snap_layer_height(boundary,self.canvas._layer_tops,lower=lower,upper=upper,direction=direction)
         return horizontal,limiting
 
     def move(self,identity,diameter,z,*,layer_snap=False,diameter_snap=False):
@@ -587,7 +742,7 @@ class ManualGenerationPanel(QWidget):
         if identity in {"foot_height","top"}: diameter = p.position.diameter_mm
         if diameter_snap:
             diameter = round(diameter*10)/10
-        old = self.draft
+        old = self.canvas.constrained_drag_origin() or self.draft
         candidate,error = self._edit_coordinate(
             old, lambda d: next(point.position for point in d.points if point.identity == actual),
             Coordinate(diameter/2,z),
@@ -601,7 +756,7 @@ class ManualGenerationPanel(QWidget):
         if self._busy or self.draft is None: return
         if diameter_snap:
             diameter = round(diameter*10)/10
-        old = self.draft
+        old = self.canvas.constrained_drag_origin() or self.draft
         candidate,error = self._edit_coordinate(
             old, lambda d: getattr(d.curves[index],f"control{n}"), Coordinate(diameter/2,z),
             lambda d,pos: self._checked(set_curve(d,index,control=n,position=pos)),layer_snap,diameter_snap)
@@ -609,8 +764,13 @@ class ManualGenerationPanel(QWidget):
         else: self.status_label.clear()
         self.commit(candidate)
 
+        return error
+
     def select(self,identity):
         self.selected = self.canvas.selected = identity
+        if not identity:
+            self.canvas._revealed_control_anchor=None
+            self.canvas.hovered=None
         self._sync()
         self.canvas.update()
 
@@ -661,10 +821,15 @@ class ManualGenerationPanel(QWidget):
             return
         self.selected = self.canvas.selected = identity
         self.canvas._revealed_control_anchor = identity
-        self._point_defaults[identity] = next(p.position for p in draft.points if p.identity == identity)
         for i,c in enumerate(draft.curves):
             for n in (1,2): self._control_defaults.setdefault((draft.points[i].identity,n),getattr(c,f"control{n}"))
         self.commit(draft)
+
+    def _validate_insertion(self,z):
+        if self._busy or self.draft is None:return False
+        try:self._checked(insert_point(self.draft,z)[0])
+        except (GeometryError,ValueError):return False
+        return True
 
     def add_point(self):
         if self.draft is None: return
@@ -715,10 +880,15 @@ class ManualGenerationPanel(QWidget):
     def reset_all(self):
         if self._busy or self.reference is None: return
         try:
-            s = ManualSettings()
+            s = replace(ManualSettings(),object_resolution_percent=self.default_value("object_resolution_percent"),
+                        maximum_foot_diameter_mm=self.default_value("maximum_foot_diameter_mm"),
+                        foot_diameter_mm=self.default_value("foot_diameter_mm"))
+            if self.standalone:s=replace(s,layer_snap_enabled=False,critical_layers_enabled=False)
             if self.initial is not None:
-                s = replace(s,overhang_angle_deg=self.initial.settings.overhang_angle_deg)
-            draft = initial_draft(s,self.reference.context.layers,self.reference.context.maximum_height_mm,self.reference.context.key)
+                s = replace(s,overhang_angle_deg=self.initial.settings.overhang_angle_deg,
+                            minimum_diameter_mm=self.initial.settings.minimum_diameter_mm)
+            draft = initial_draft(s,self.reference.context.layers,self.reference.context.maximum_height_mm,self.reference.context.key,
+                                  foot_diameter_mm=self.default_value("foot_diameter_mm"),standalone=self.standalone)
             self._checked(draft)
         except GeometryError as e:
             self.feedback(e,"points")
@@ -726,13 +896,15 @@ class ManualGenerationPanel(QWidget):
         self.initial = draft
         self._restore_form(draft)
         self.reset_rotation()
-        self.highlight_buttons["both"].setChecked(True)
         self.canvas.set_highlight("both")
         self.canvas.set_view(self.canvas.view)
 
     def can_reset_all(self):
+        initial = (replace(self.initial,settings=replace(self.initial.settings,
+                   object_resolution_percent=self.default_value("object_resolution_percent")))
+                   if self.initial is not None else None)
         return (not self._busy and self.draft is not None and self.initial is not None and
-                (self.draft != self.initial or self.canvas.object_rotation%360 != 0 or
+                (self.draft != initial or self.canvas.object_rotation%360 != 0 or
                  self.rotation_slider.value() != 0 or self.canvas.highlight != "both" or
                  self.canvas.zoom != 1 or self.canvas.pan != QPointF() or
                  (self.canvas.view == "free" and (self.canvas.yaw_deg,self.canvas.pitch_deg) != (-35,25))))
@@ -740,17 +912,19 @@ class ManualGenerationPanel(QWidget):
     def _restore_form(self,draft):
         self.selected = self.canvas.selected = "base"
         self.canvas._revealed_control_anchor = None
-        self._point_defaults = {p.identity:p.position for p in draft.points}
+        self._point_defaults = {p.identity:p.position for p in draft.points if p.kind != "free"}
         self._control_defaults = {(draft.points[i].identity,n):getattr(c,f"control{n}")
                                   for i,c in enumerate(draft.curves) for n in (1,2)}
         self.status_label.clear()
         self.commit(draft)
 
     def tower_reset_draft(self):
-        defaults = ManualSettings()
+        defaults = self.initial.settings if self.initial is not None else ManualSettings()
         settings = replace(self.settings,**{name:getattr(defaults,name) for name in self.FORM_SETTINGS})
+        settings = replace(settings,maximum_foot_diameter_mm=self.default_value("maximum_foot_diameter_mm"))
         return self._checked(initial_draft(settings,self.reference.context.layers,
-                                          self.reference.context.maximum_height_mm,self.reference.context.key))
+                                          self.reference.context.maximum_height_mm,self.reference.context.key,
+                                          foot_diameter_mm=self.default_value("foot_diameter_mm"),standalone=self.standalone))
 
     def can_reset_tower(self):
         if self._busy or self.draft is None or self.reference is None:
@@ -792,7 +966,6 @@ class ManualGenerationPanel(QWidget):
         if row is not None and name not in self._interaction_feedback:
             self._interaction_feedback.add(name)
             row.set_error(str(error))
-            QTimer.singleShot(700,row,lambda:row.set_error(None))
 
     def _begin_interaction(self): self._interaction_feedback.clear()
     def _end_interaction(self): self._interaction_feedback.clear(); self._sync()
@@ -815,12 +988,22 @@ class ManualGenerationPanel(QWidget):
         self.status_changed.emit()
 
     def _view_changed(self,view):
+        previous_default = self._resolution_default_percent
+        self._resolution_default_percent = object_resolution_default(view)
+        # Follow the view's default while keeping an individually chosen stage.
+        if (self._resolution_default_percent != previous_default and
+                self.settings.object_resolution_percent == previous_default):
+            settings = replace(self.settings,object_resolution_percent=self._resolution_default_percent)
+            if self.draft is not None:
+                self.commit(replace(self.draft,settings=settings))
+            else:
+                self.settings = settings
         self.view_buttons[view].setChecked(True)
-        self.resolution_host.show()
+        self.resolution_host.setVisible(not self.standalone)
         self.preview_information.set_state(view,self.settings.critical_layers_enabled)
         if view in {"top","bottom"}:
             self.selected = self.canvas.selected = "top_width" if view == "top" else "foot"
-        if self.draft is not None: self._sync()
+        self._sync()
         self._apply_view_editability()
 
     def _apply_view_editability(self):
@@ -849,6 +1032,7 @@ class ManualGenerationPanel(QWidget):
         self._refresh_resolution_reset()
         self.settings_content.setEnabled(not busy and self.reference is not None)
         self.canvas.editing_enabled = not busy
+        self.point_editor.setEnabled(not busy)
         self.canvas.update()
         self.progress.setVisible(busy)
         self.cancel_button.setVisible(busy and not exporting)
@@ -976,8 +1160,10 @@ class ManualGenerationPanel(QWidget):
             button.setFixedHeight(max(14,height-self.highlight_title.height()-1))
         for title,widgets in ((self.resolution_title,(self.resolution_slider,self.resolution_label)),
                               (self.rotation_title,(self.rotation_slider,self.rotation_label))):
+            row_height=height-title.height()-1
+            if title is self.resolution_title:row_height-=self.resolution_end_labels.height()
             for widget in widgets:
-                widget.setFixedHeight(max(14,height-title.height()-1))
+                widget.setFixedHeight(max(14,row_height))
         if not self._settings_transitioning:
             self._configure_settings_layout()
             if self._settings_collapsed:

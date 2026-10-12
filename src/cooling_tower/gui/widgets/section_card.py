@@ -521,16 +521,17 @@ class SectionCard(QFrame):
         )
         self._sync_split_summary_priority()
         if visible:
-            self.header.setMinimumHeight(METRICS.card_header_height_px)
-            self.header.setMaximumHeight(16777215)
             self.header_layout.invalidate()
-            self.header_layout.activate()
-            self.header.setMinimumHeight(
+            # A completed fact header has a content-defined, stable height.
+            # Do not temporarily lower its minimum while the footer or page
+            # is relaid out: that compresses the whole page for one frame.
+            self.header.setFixedHeight(
                 max(
                     METRICS.card_header_height_px,
                     self.header_layout.sizeHint().height(),
                 )
             )
+            self.header_layout.activate()
         elif not hasattr(self, "summary_key_label"):
             self.header.setFixedHeight(METRICS.card_header_height_px)
         self.header.updateGeometry()

@@ -849,6 +849,7 @@ class MainWindow(QMainWindow):
             mode: GenerationSession() for mode in GenerationMode
         }
         self.generation_mode: GenerationMode | None = None
+        self._generation_method_picker_requested = False
         self.current_preview: PreviewResult | None = None
         self.preview_state = PreviewState.EMPTY
         self._slicer_prediction_request_id = 0
@@ -3107,9 +3108,20 @@ class MainWindow(QMainWindow):
         self.manual_generation_card.clicked.connect(
             lambda: self.select_generation_mode(GenerationMode.MANUAL)
         )
+        self.free_generation_card = GenerationModeCard(
+            "Frei",
+            "Einen Turm ohne Vergleichsobjekt, Drucker oder Druckbett gestalten. "
+            "Bis 250 mm Durchmesser und 500 mm Höhe; Export als reine STL.",
+            "Freie Erstellung öffnen →",
+        )
+        self.free_generation_card.setProperty("generationMode", "free")
+        self.free_generation_card.clicked.connect(
+            lambda: self.select_generation_mode(GenerationMode.FREE)
+        )
         self.generation_method_grid.add_pair(
             self.automatic_generation_card, self.manual_generation_card
         )
+        self.generation_method_grid.add_full_width(self.free_generation_card)
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
         )
@@ -3117,8 +3129,16 @@ class MainWindow(QMainWindow):
         generation_layout.addWidget(self.ready_grid)
         self.manual_generation_panel = ManualGenerationPanel()
         self.manual_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.manual_controller = ManualGenerationController(self, self.manual_generation_panel)
+        self.normal_manual_controller = ManualGenerationController(self, self.manual_generation_panel)
+        self.free_generation_panel = ManualGenerationPanel()
+        self.free_generation_panel.setObjectName("freeGenerationPanel")
+        self.free_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.free_generation_panel.set_standalone_display(True)
+        self.free_manual_controller = ManualGenerationController(self, self.free_generation_panel, GenerationMode.FREE)
+        self.free_tower_action = self.options_menu.addAction(QIcon(str(GUI_ASSET_ROOT / "free_tower.svg")),"Freie Turmerstellung (nur STL)")
+        self.free_tower_action.triggered.connect(self.start_free_tower)
         generation_layout.addWidget(self.manual_generation_panel)
+        generation_layout.addWidget(self.free_generation_panel)
         self.content_layout.addWidget(self.generation_workspace)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
@@ -3510,7 +3530,7 @@ class MainWindow(QMainWindow):
         self.tower_reset_button.setToolTip("Manuelle Turmform mit den aktuellen Einstellungen zurücksetzen")
         self.tower_reset_button.setFixedHeight(METRICS.info_button_diameter_px)
         self.tower_reset_button.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed)
-        self.tower_reset_button.clicked.connect(self.manual_generation_panel.reset_tower)
+        self.tower_reset_button.clicked.connect(lambda: self.manual_controller.panel.reset_tower())
         self.tower_reset_button.hide()
         resets.addWidget(self.tower_reset_button)
         resets.addStretch(1)
@@ -3552,8 +3572,10 @@ class MainWindow(QMainWindow):
             self._fit_footer_height
         )
         self._footer_height_timer.start(0)
-        self.manual_controller.attach_footer()
+        self.normal_manual_controller.attach_footer()
+        self.free_manual_controller.attach_footer()
         self.manual_generation_panel.layout_changed.connect(self._refresh_generation_method_label)
+        self.free_generation_panel.layout_changed.connect(self._refresh_generation_method_label)
 
         self.automatic_base_checkbox.stateChanged.connect(
             self._on_base_mode_changed
@@ -3602,11 +3624,12 @@ class MainWindow(QMainWindow):
             stage_value == WorkflowStage.READY.value
             and getattr(self.workflow, "preparation_acknowledged", True)
         )
+        preparation_ready = preparation_ready or self.generation_mode is GenerationMode.FREE
         if not preparation_ready:
             self.generation_mode = None
         self._refresh_generation_workspace(preparation_ready)
-        actions_visible = preparation_ready and self.generation_mode in {GenerationMode.AUTOMATIC, GenerationMode.MANUAL}
-        self._set_preparation_viewport_fill(not preparation_ready)
+        actions_visible = preparation_ready and self.generation_mode in {GenerationMode.AUTOMATIC, GenerationMode.MANUAL, GenerationMode.FREE}
+        self._set_preparation_viewport_fill(not preparation_ready and not self._generation_method_picker_requested)
         if hasattr(self, "footer"):
             self.footer.setVisible(actions_visible)
         self._set_setting_feedback_enabled(actions_visible and self.generation_mode is GenerationMode.AUTOMATIC)
@@ -3644,7 +3667,7 @@ class MainWindow(QMainWindow):
                 self._refresh_issue_panels()
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.refresh()
             QTimer.singleShot(0,self.manual_controller.fit_editor_to_window)
 
@@ -3655,46 +3678,62 @@ class MainWindow(QMainWindow):
         )
 
     def select_generation_mode(self, mode: GenerationMode) -> None:
-        if (
+        mode = GenerationMode(mode)
+        if not self._generation_method_change_available():
+            return
+        if mode is not GenerationMode.FREE and (
             self.workflow.stage is not WorkflowStage.READY
             or not self.workflow.preparation_acknowledged
-            or not self._generation_method_change_available()
         ):
             return
-        self.generation_mode = GenerationMode(mode)
+        self.generation_mode = mode
+        self._generation_method_picker_requested = False
         self._on_workflow_stage_changed(self.workflow.stage.value)
-        if self.generation_mode is GenerationMode.MANUAL:
+        if mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.ensure_context()
+            self.manual_controller.panel.select("")
         self._refresh_phase17_actions()
+
+    def start_free_tower(self):
+        self.select_generation_mode(GenerationMode.FREE)
 
     def show_generation_method_selection(self) -> None:
         if not self._generation_method_change_available():
             return
         self.generation_mode = None
+        self._generation_method_picker_requested = True
         self._on_workflow_stage_changed(self.workflow.stage.value)
 
     def _refresh_generation_workspace(self, preparation_ready: bool) -> None:
         selecting = self.generation_mode is None
-        self.generation_method_picker.setVisible(preparation_ready and selecting)
-        self.generation_method_navigation.setVisible(preparation_ready and not selecting)
-        self.ready_grid.setVisible(
-            preparation_ready and self.generation_mode is GenerationMode.AUTOMATIC
-        )
-        self.manual_generation_panel.setVisible(
-            preparation_ready and self.generation_mode is GenerationMode.MANUAL
-        )
+        workspace_visible = preparation_ready or self._generation_method_picker_requested
+        source_ready = (self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged)
+        self.generation_workspace.setVisible(workspace_visible)
+        self.workflow_group.setVisible(self.generation_mode is not GenerationMode.FREE)
+        self.generation_method_picker.setVisible(workspace_visible and selecting)
+        self.generation_method_navigation.setVisible(workspace_visible and not selecting)
+        for card in (self.automatic_generation_card,self.manual_generation_card):
+            card.setEnabled(source_ready)
+            card.setToolTip("" if source_ready else "Zuerst Datei, Slicer und Druckprofile vorbereiten.")
+        self.ready_grid.setVisible(source_ready and self.generation_mode is GenerationMode.AUTOMATIC)
+        self.manual_generation_panel.setVisible(source_ready and self.generation_mode is GenerationMode.MANUAL)
+        self.free_generation_panel.setVisible(self.generation_mode is GenerationMode.FREE)
         self._refresh_generation_method_label()
-        self.generation_method_back_button.setEnabled(
-            self._generation_method_change_available()
-        )
+        self.generation_method_back_button.setEnabled(self._generation_method_change_available())
 
     def _refresh_generation_method_label(self,*_):
-        manual = self.generation_mode is GenerationMode.MANUAL
-        text = "Manuelle Turmerstellung" if manual else "Automatische Turmerstellung"
+        manual = self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}
+        text = {GenerationMode.MANUAL:"Manuelle Turmerstellung",GenerationMode.FREE:"Freie Turmerstellung"}.get(
+            self.generation_mode,"Automatische Turmerstellung")
         self.generation_method_label.setText(text)
-        narrow = manual and getattr(self.manual_generation_panel,"_narrow_layout",False)
+        narrow = manual and getattr(self.manual_controller.panel,"_narrow_layout",False)
         self.generation_method_recommendation.setVisible(narrow)
         self.generation_method_navigation.layout().setStretch(3,0 if narrow else 1)
+
+    @property
+    def manual_controller(self):
+        """Shared footer actions always target the active, independent editor."""
+        return self.free_manual_controller if self.generation_mode is GenerationMode.FREE else self.normal_manual_controller
 
     # The existing generator owns the automatic session even while its view
     # is hidden. Manual generation can use its own session and controls without
@@ -4712,7 +4751,7 @@ class MainWindow(QMainWindow):
         self.generation_method_back_button.setEnabled(
             self._generation_method_change_available()
         )
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.refresh()
             return
         self._refresh_layer_range_tool()
@@ -7421,7 +7460,7 @@ class MainWindow(QMainWindow):
         self.preview_state = PreviewState.EMPTY
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
-        self.manual_controller.invalidate_context()
+        self.normal_manual_controller.invalidate_context()
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -8211,7 +8250,7 @@ class MainWindow(QMainWindow):
                 for panel in active_panels:
                     panel.set_expanded(False)
             self._last_footer_notice_signature = signature
-        self.footer_notice_host.setVisible(bool(active_panels) and self.generation_mode is not GenerationMode.MANUAL)
+        self.footer_notice_host.setVisible(bool(active_panels) and self.generation_mode not in {GenerationMode.MANUAL, GenerationMode.FREE})
         if hasattr(self, "footer_status_layout"):
             self.footer_status_layout.setContentsMargins(0, 0, 0, 0)
         self.footer_notice_layout.invalidate()
@@ -8223,12 +8262,14 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "footer_action_area"):
             return
         if hasattr(self,"manual_footer_status_widget"):
-            manual = self.generation_mode is GenerationMode.MANUAL
+            manual = self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}
+            self.footer_message_layout.setSpacing(5 if manual else 8)
             self.footer_content_grid.setAlignment(self.footer_message_area,
                                                   Qt.AlignmentFlag.AlignBottom if manual else Qt.AlignmentFlag.AlignTop)
             self.tower_reset_button.setVisible(manual)
-            self.manual_controller.update_scrollbar_policy(manual)
-            self.manual_controller.sync_footer_content_visibility()
+            self.normal_manual_controller.update_scrollbar_policy(manual)
+            self.normal_manual_controller.sync_footer_content_visibility()
+            self.free_manual_controller.sync_footer_content_visibility()
             saved = getattr(self,"_automatic_footer_status_hidden_before_manual",None)
             if manual:
                 if saved is None:
@@ -11681,7 +11722,7 @@ class MainWindow(QMainWindow):
         self._refresh_widget_style(self.automatic_base_reset_button)
         self._refresh_widget_style(self.output_root_reset_button)
         if hasattr(self, "reset_button"):
-            if self.generation_mode is GenerationMode.MANUAL:
+            if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
                 self.manual_controller.refresh_footer()
             else:
                 self.reset_button.setEnabled(self._has_non_default_settings())
@@ -12812,7 +12853,7 @@ class MainWindow(QMainWindow):
         self._refresh_phase17_actions()
 
     def _on_generation_button_clicked(self) -> None:
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.primary_action()
             return
         if self.background_job_manager.has_active(JobKind.PREVIEW):
@@ -13100,7 +13141,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_main_export_clicked(self) -> None:
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.export()
             return
         self.start_export()
@@ -13266,7 +13307,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             QTimer.singleShot(0,self.manual_controller.fit_editor_to_window)
         self._update_responsive_action_labels()
         self._update_slicer_combo_widths()
@@ -13328,7 +13369,7 @@ class MainWindow(QMainWindow):
     def _update_responsive_action_labels(self) -> None:
         if not hasattr(self, "open_stl_button"):
             return
-        manual = self.generation_mode is GenerationMode.MANUAL
+        manual = self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}
         self.reset_button.setText("Alles zurücksetzen" if manual else "Standardwerte wiederherstellen")
         controller = self.manual_controller
         if not manual:
@@ -13572,7 +13613,7 @@ class MainWindow(QMainWindow):
         )
 
     def request_reset_defaults(self) -> None:
-        if self.generation_mode is GenerationMode.MANUAL:
+        if self.generation_mode in {GenerationMode.MANUAL, GenerationMode.FREE}:
             self.manual_controller.request_reset_defaults()
             return
         if not self._has_non_default_settings():
@@ -13629,7 +13670,7 @@ class MainWindow(QMainWindow):
         self._schedule_feasibility_validation()
 
     def _save_user_settings(self) -> None:
-        self.manual_controller.save_settings()
+        self.normal_manual_controller.save_settings()
         try:
             window_geometry = self.normalGeometry()
             window_position = self.pos()

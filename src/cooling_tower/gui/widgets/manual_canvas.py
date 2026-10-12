@@ -16,15 +16,19 @@ from cooling_tower.gui.widgets.manual_view_controls import ManualViewControls
 from cooling_tower.manual.geometry import tessellate, roots
 from cooling_tower.manual.layer_snap import snap_layer_height
 from cooling_tower.gui.background_jobs import JobKind
+from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS
 from cooling_tower.gui.manual_view_worker import (SpatialFrame,ManualViewWorker,render_spatial_object,rotate_object,
-                                                cosmetic_pen,surface_brightness,draw_surface)
+                                                cosmetic_pen,surface_brightness,draw_surface,render_silhouette_backing)
 
 
 class ManualCanvas(QWidget):
+    HEIGHT_HANDLE_OFFSET_PX = 33
+    HEIGHT_HANDLES = {"top", "foot_height"}
+    INSERTION_HOVER_DISTANCE_PX = HEIGHT_HANDLE_OFFSET_PX
     HEIGHT_SNAP_DISTANCE_PX = 14.0
     HEIGHT_SNAP_GUIDE_DURATION_MS = 850
-    WIDTH_LIMIT_GUIDE_HOLD_MS = 350
-    WIDTH_LIMIT_GUIDE_FADE_MS = 200
+    WIDTH_LIMIT_GUIDE_HOLD_MS = BOUNDARY_FEEDBACK_HOLD_MS
+    WIDTH_LIMIT_GUIDE_FADE_MS = BOUNDARY_FEEDBACK_FADE_MS
     WIDTH_LIMIT_GUIDE_DURATION_MS = WIDTH_LIMIT_GUIDE_HOLD_MS+WIDTH_LIMIT_GUIDE_FADE_MS
     selection_changed = Signal(str)
     move_requested = Signal(str, float, float)
@@ -53,7 +57,11 @@ class ManualCanvas(QWidget):
         self.setMouseTracking(True)
         self.setAccessibleName("Manuelles Turmprofil: Greifer ziehen, Profil doppelklicken, Mausrad zoomt")
         self.draft = self.reference = None
-        self.selected = "base"
+        self.selected = ""
+        self.point_editor = None
+        self._empty_click_position = None
+        self._insertion_preview = None
+        self.validate_insertion = None
         self._revealed_control_anchor = None
         self._layer_tops = ()
         self.hovered = None
@@ -67,6 +75,9 @@ class ManualCanvas(QWidget):
         self._drag = None
         self._drag_moved = False
         self._drag_radius = None
+        self._drag_origin_draft = None
+        self._drag_origin_height = None
+        self._drag_axis = None
         self._drag_width_active = False
         self._drag_height_z = None
         self._height_snap_active = False
@@ -76,6 +87,8 @@ class ManualCanvas(QWidget):
         self._height_snap_timer.setInterval(self.HEIGHT_SNAP_GUIDE_DURATION_MS)
         self._height_snap_timer.timeout.connect(self._hide_height_snap_guide)
         self._width_limit_setting = None
+        self._width_limit_settings = ()
+        self._control_height_limits = ()
         self._width_limit_last_request = None
         self._width_limit_opacity = 0.
         self._width_limit_animation = QVariantAnimation(self)
@@ -138,12 +151,12 @@ class ManualCanvas(QWidget):
             return SpatialFrame(self.width(),self.height(),scale,
                                 (x+self._static_object_center*scale-self.width()/2,y-self.height()/2),
                                 90 if self.view == "front" else 0,0,self._object_center,(0,0),self._object_center,
-                                self.object_rotation,self.highlight)
+                                self.object_rotation,self.highlight,True)
         center=self.plot_rect().center()
         return SpatialFrame(self.width(),self.height(),self.transform()[0],
                             (self.pan.x()+center.x()-self.width()/2,self.pan.y()+center.y()-self.height()/2),
                             self.yaw_deg,self.pitch_deg,self._world_origin,self._spatial_center,self._object_center,
-                            self.object_rotation,self.highlight)
+                            self.object_rotation,self.highlight,self.view in {"top","bottom"})
 
     def _spatial_render_frame(self):
         # Build projected surfaces once. Viewport translation/scale are applied
@@ -214,12 +227,16 @@ class ManualCanvas(QWidget):
     def editable(self):
         return self.editing_enabled and self.view in {"side", "front", "top", "bottom"} and self.draft is not None
 
+    @property
+    def standalone(self):
+        return self.reference is not None and getattr(self.reference.context,"standalone",False)
+
     def set_reference(self, reference):
         self.invalidate_reference()
         self.reference = reference
-        self._layer_tops = tuple(layer.z_mm for layer in reference.context.layers)
+        self._layer_tops = () if self.standalone else tuple(layer.z_mm for layer in reference.context.layers)
         self._object_array = np.array([[(s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)]
-                                       for s in reference.source_data.object_segments], dtype=float)
+                                       for s in (() if self.standalone else reference.source_data.object_segments)], dtype=float).reshape(-1,2,3)
         bounds = reference.context.occupied_bounds
         self._object_center = ((bounds.minimum_x_mm+bounds.maximum_x_mm)/2,
                                (bounds.minimum_y_mm+bounds.maximum_y_mm)/2)
@@ -236,8 +253,9 @@ class ManualCanvas(QWidget):
     def set_draft(self, draft):
         old = self.draft
         self.draft = draft
-        if (self._width_limit_setting is not None and old is not None and
-                getattr(old.settings,self._width_limit_setting) != getattr(draft.settings,self._width_limit_setting)):
+        self._insertion_preview = None
+        if (old is not None and any(getattr(old.settings,name)!=getattr(draft.settings,name)
+                                    for name in self._width_limit_settings)):
             self._hide_width_limit_guide()
         if self._height_snap_z is not None and not math.isclose(draft.height_mm,self._height_snap_z,rel_tol=0,abs_tol=1e-8):
             self._set_height_snap_feedback(None)
@@ -253,6 +271,7 @@ class ManualCanvas(QWidget):
         self.update()
 
     def set_view(self, view):
+        self._insertion_preview = None
         self._drag_height_z = None
         self._set_height_snap_feedback(None)
         self._hide_width_limit_guide()
@@ -301,13 +320,14 @@ class ManualCanvas(QWidget):
         camera = () if self.view in {"side","front"} else (self.yaw_deg,self.pitch_deg)
         return (id(self.reference),self.view,round(self.zoom,9),round(self.pan.x(),9),round(self.pan.y(),9),
                 self.object_rotation%360,camera,self._fitting_radius(),
-                max(self.reference.context.layers[-1].z_mm,self.draft.height_mm))
+                self.draft.height_mm if self.standalone else max(self.reference.context.layers[-1].z_mm,self.draft.height_mm))
 
     def _update_fit_button(self):
         framing = self._framing_state()
         self.view_controls.set_fitted(framing is None or framing == self._fitted_framing)
 
     def fit_scene(self):
+        self._insertion_preview=None
         self.zoom, self.pan = 1.0, QPointF()
         if self.draft is not None and self.reference is not None:
             b = self.reference.context.occupied_bounds
@@ -325,6 +345,11 @@ class ManualCanvas(QWidget):
             self._placement = placement
             self._world_origin = ((b.minimum_x_mm+b.maximum_x_mm+2*placement.center_x_mm)/4,
                                   (b.minimum_y_mm+b.maximum_y_mm+2*placement.center_y_mm)/4)
+            if self.standalone:
+                self._static_object_center = 0
+                self._fit_width = max(20,2*radius)+30
+                self._fit_height = self.draft.height_mm
+                self._world_origin = (0,0)
             if self.view not in {"side", "front"}:
                 # Fit the actual polygon rings, rather than an oversized box
                 # around the whole tower. Four projected ring extrema suffice.
@@ -341,6 +366,8 @@ class ManualCanvas(QWidget):
                     name="maximum_diameter_mm" if self.view == "top" else "maximum_foot_diameter_mm"
                     tower_points=np.concatenate((tower_points,[(placement.center_x_mm+getattr(self.draft.settings,name)/2,
                                                                  placement.center_y_mm,point.z_mm)]))
+                    if self.standalone:
+                        tower_points=np.concatenate((tower_points,[(-getattr(self.draft.settings,name)/2,0,point.z_mm)]))
                 native = self.reference.object_triangles
                 source_points = native.reshape(-1,3) if native is not None else self._object_array.reshape(-1,3)
                 source_center = self.reference.silhouette.center_xy if native is not None else self._object_center
@@ -355,7 +382,7 @@ class ManualCanvas(QWidget):
         self.update()
 
     def plot_rect(self):
-        top=max(44,self.view_controls.geometry().bottom()+14)
+        top=max(50,self.view_controls.geometry().bottom()+20)
         bottom=max(52,34+self.fontMetrics().height()) if self.view in {"side","front"} else 24
         return QRectF(60,top,max(1,self.width()-120),max(1,self.height()-top-bottom))
 
@@ -406,10 +433,10 @@ class ManualCanvas(QWidget):
             # Foot-height and base-width anchors share geometry but get distinct
             # screen offsets and explicit restricted axes.
             if p.kind == "base":
-                handles.append(("foot_height", QPointF(pos.x()+22, pos.y()), "foot"))
+                handles.append(("foot_height", QPointF(pos.x()+self.HEIGHT_HANDLE_OFFSET_PX, pos.y()), "foot"))
             if p.kind == "top":
                 handles.append(("top_width",pos,"top_width"))
-                handles.append((p.identity,QPointF(pos.x()+22,pos.y()),p.kind))
+                handles.append((p.identity,QPointF(pos.x()+self.HEIGHT_HANDLE_OFFSET_PX,pos.y()),p.kind))
             else:
                 handles.append((p.identity, pos, p.kind))
         selected_index = next((i for i,p in enumerate(self.draft.points) if p.identity == self.selected), 1)
@@ -421,7 +448,7 @@ class ManualCanvas(QWidget):
             controls = ((len(self.draft.curves)-1,2),)
         elif self.selected in {"foot","foot_height"}:
             controls = ((0,1 if self.selected == "foot" else 2),)
-        elif self.selected in self.LIMITS:
+        elif not self.selected or self.selected in self.LIMITS:
             controls = ()
         else:
             controls = ((selected_index-1,2),(selected_index,1))
@@ -453,21 +480,38 @@ class ManualCanvas(QWidget):
             return QPointF(*screen[0]),QPointF(*screen[1])
         return self.profile_to_screen(radius,z),self.profile_to_screen(limit,z)
 
+    def height_handle_geometry(self,identity):
+        point = self.draft.points[-1 if identity == "top" else 1].position
+        start = self.profile_to_screen(point.radius_mm,point.z_mm)
+        return start,start+QPointF(self.HEIGHT_HANDLE_OFFSET_PX,0)
+
+    def information_identity(self):
+        """Control handles edit a curve while its endpoint owns the info box."""
+        if self.selected.startswith("control:") and self.draft is not None:
+            _,index,number = self.selected.split(":")
+            point = self.draft.points[int(index)+(number == "2")]
+            return "top_width" if point.kind == "top" else point.identity
+        return self.selected
+
     def minimum_measure_geometry(self):
         radius=self.draft.settings.minimum_diameter_mm/2
         left=self.profile_to_screen(-radius,0)
         right=self.profile_to_screen(radius,0)
         return left,right,left+QPointF(0,26),right+QPointF(0,26)
 
-    def width_limit_guide_geometry(self,left=False):
-        radius=getattr(self.draft.settings,self._width_limit_setting)/2
+    def width_limit_guide_geometry(self,left=False,setting=None):
+        radius=getattr(self.draft.settings,setting or self._width_limit_setting)/2
         if left:radius=-radius
         start=self.profile_to_screen(radius,0)
         return start,QPointF(start.x(),self._scale_line_top())
 
     def _minimum_measure_pen(self):
         left,_,end,_=self.minimum_measure_geometry()
-        gradient=QLinearGradient(left,end)
+        return self._limit_guide_pen(left,end)
+
+    @staticmethod
+    def _limit_guide_pen(start,end):
+        gradient=QLinearGradient(start,end)
         gradient.setColorAt(0,QColor("#a3b1c0").darker(150))
         gradient.setColorAt(1,QColor("#bec5ce"))
         return QPen(QBrush(gradient),1,Qt.PenStyle.DashLine)
@@ -498,8 +542,10 @@ class ManualCanvas(QWidget):
 
     def _render_object(self):
         native = self.reference.object_triangles
+        silhouette = self.draft.settings.object_resolution_percent == 0
         asynchronous = self._render_manager is not None and (
-            (native is not None and len(native)>4000) or (native is None and len(self._object_array)>4000))
+            (native is not None and len(native)>4000 and (not silhouette or self.draft.settings.critical_layers_enabled))
+            or (native is None and len(self._object_array)>4000))
         if not asynchronous:
             self._object_cache = render_spatial_object(self.reference,self._spatial_render_frame(),
                                                      self.draft.settings,None,vector=True)
@@ -507,6 +553,17 @@ class ManualCanvas(QWidget):
             self._render_proxy = False
             return
         self._queue_spatial_render()
+        if silhouette and native is not None:
+            # Show the exact light contour immediately while colored layer
+            # bands are prepared; the 0% stage never shows a mesh-wire proxy.
+            self._object_cache=render_spatial_object(self.reference,self._spatial_render_frame(),
+                replace(self.draft.settings,critical_layers_enabled=False),None,vector=True)
+            self._object_render_key=self._spatial_key()
+            return
+        if self.reference.object_triangles is not None and self.view in {"side","front","top","bottom"}:
+            self._object_cache=render_silhouette_backing(self.reference,self._spatial_render_frame())
+            self._object_render_key=self._spatial_key()
+            return
         picture = QPicture()
         painter = QPainter(picture)
         # The proxy and final surfaces use the same oriented original mesh.
@@ -584,7 +641,8 @@ class ManualCanvas(QWidget):
             _,polygon,color,_,_,_ = surfaces[index]
             draw_surface(painter,polygon,color,brightness[index])
         cap = -1 if self.pitch_deg >= 0 else 0
-        painter.setPen(cosmetic_pen(QColor(self.PROFILE_COLOR),2) if self.view in {"top","bottom"}
+        contour_color = self.COLORS["foot"] if self.view == "bottom" else self.PROFILE_COLOR
+        painter.setPen(cosmetic_pen(QColor(contour_color),2) if self.view in {"top","bottom"}
                        else cosmetic_pen(self._surface_color(rings[cap].z_mm),.5))
         painter.setBrush(self._surface_color(rings[cap].z_mm))
         painter.drawPolygon(QPolygonF([QPointF(*p) for p in projected[cap][0]]))
@@ -606,7 +664,7 @@ class ManualCanvas(QWidget):
     def _original_image(self):
         """Cache exact device pixels, including per-patch X-ray composition."""
         frame=replace(self._spatial_frame(),highlight="both")
-        opacity=.28 if self.highlight == "object" else 1
+        opacity=.28 if self.highlight in {"object","all"} else 1
         ratio=self.devicePixelRatioF()
         key=(frame,opacity,ratio)
         if (self._object_image_cache is None or self._object_image_picture is not self._object_cache or
@@ -634,11 +692,12 @@ class ManualCanvas(QWidget):
             painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"Manueller Entwurf wird vorbereitet …")
             painter.end()
             return
-        if self._object_cache is None or self._object_render_key != self._spatial_key():
-            self._render_object()
-        painter.drawImage(QPointF(),self._original_image())
+        if not self.standalone:
+            if self._object_cache is None or self._object_render_key != self._spatial_key():
+                self._render_object()
+            painter.drawImage(QPointF(),self._original_image())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setOpacity(.35 if self.highlight == "tower" else 1)
+        painter.setOpacity(.35 if self.highlight in {"tower","all"} else 1)
         rings = self._display_rings()
         if self.view in {"side","front"}:
             painter.setPen(Qt.PenStyle.NoPen)
@@ -650,17 +709,28 @@ class ManualCanvas(QWidget):
             for color,path in paths.items():
                 path.setFillRule(Qt.FillRule.WindingFill)
                 painter.fillPath(path,QColor.fromRgb(color))
-            path = QPainterPath()
-            path.moveTo(self.profile_to_screen(rings[0].radius_mm,0))
-            for p in rings[1:]:
-                path.lineTo(self.profile_to_screen(p.radius_mm,p.z_mm))
-            painter.setPen(QPen(QColor(self.PROFILE_COLOR),3))
-            painter.drawPath(path)
+            foot_path,body_path = QPainterPath(),QPainterPath()
+            foot_path.moveTo(self.profile_to_screen(rings[0].radius_mm,0))
+            body_started = False
+            for a,b in zip(rings,rings[1:]):
+                if b.z_mm <= self.draft.settings.foot_height_mm+1e-8:
+                    foot_path.lineTo(self.profile_to_screen(b.radius_mm,b.z_mm))
+                else:
+                    if not body_started:
+                        body_path.moveTo(self.profile_to_screen(a.radius_mm,a.z_mm));body_started=True
+                    body_path.lineTo(self.profile_to_screen(b.radius_mm,b.z_mm))
+            painter.setPen(QPen(QColor(self.COLORS["foot"]),3));painter.drawPath(foot_path)
+            painter.setPen(QPen(QColor(self.PROFILE_COLOR),3));painter.drawPath(body_path)
             painter.setPen(QPen(QColor("#a3b1c0"),1))
             painter.drawLine(self.profile_to_screen(-self._fit_width,0),self.profile_to_screen(self._fit_width,0))
         else:
-            self._draw_spatial_picture(painter,self._tower_picture(rings),.35 if self.highlight == "tower" else 1)
+            self._draw_spatial_picture(painter,self._tower_picture(rings),.35 if self.highlight in {"tower","all"} else 1)
         painter.setOpacity(1)
+        if self._insertion_preview is not None and self.editable:
+            position,_ = self._insertion_preview
+            painter.setPen(QPen(QColor(181,232,201,180),1))
+            painter.setBrush(QColor(127,207,159,145))
+            painter.drawEllipse(position,6,6)
         self._draw_scales(painter)
         if self._drag_height_z is not None and self.editable:
             y = self.profile_to_screen(0,self._drag_height_z).y()
@@ -673,13 +743,17 @@ class ManualCanvas(QWidget):
             painter.setPen(QPen(QColor(self.COLORS["top"]),1.5,Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(12,y),QPointF(self.width()-12,y))
             painter.drawText(self._height_snap_label_rect(y),Qt.AlignmentFlag.AlignRight,"Objektoberkante")
-        if self._width_limit_setting is not None and self.view in {"side","front"}:
+        if (self._width_limit_settings or self._control_height_limits) and self.view in {"side","front"}:
             painter.save()
             painter.setOpacity(self._width_limit_opacity)
             painter.setPen(QPen(QColor("#146fd1"),1,Qt.PenStyle.DashLine))
-            painter.drawLine(*self.width_limit_guide_geometry())
-            if self._width_limit_setting == "minimum_diameter_mm":
-                painter.drawLine(*self.width_limit_guide_geometry(left=True))
+            for setting in self._width_limit_settings:
+                painter.drawLine(*self.width_limit_guide_geometry(setting=setting))
+                if setting == "minimum_diameter_mm":
+                    painter.drawLine(*self.width_limit_guide_geometry(left=True,setting=setting))
+            for height in self._control_height_limits:
+                y=self.profile_to_screen(0,height).y()
+                painter.drawLine(QPointF(12,y),QPointF(self.width()-12,y))
             painter.restore()
         if self.editable:
             if self.view in {"side","front"}:
@@ -696,8 +770,12 @@ class ManualCanvas(QWidget):
             for identity,pos,kind in handles:
                 if identity in self.LIMITS and identity != "minimum_diameter_mm":
                     start,_ = self.limit_geometry(identity)
-                    painter.setPen(QPen(QColor("#bec5ce"),1,Qt.PenStyle.DashLine))
+                    painter.setPen(self._limit_guide_pen(start,pos))
                     painter.drawLine(start,pos)
+                elif identity in self.HEIGHT_HANDLES:
+                    start,end = self.height_handle_geometry(identity)
+                    painter.setPen(self._limit_guide_pen(start,end))
+                    painter.drawLine(start,end)
                 if kind == "control":
                     _,i,n = identity.split(":")
                     curve = self.draft.curves[int(i)]
@@ -705,11 +783,12 @@ class ManualCanvas(QWidget):
                     painter.setPen(QPen(QColor(self.COLORS[kind]),1,Qt.PenStyle.DashLine))
                     painter.drawLine(pos,self.profile_to_screen(anchor.radius_mm,anchor.z_mm))
             for identity,pos,kind in handles:
-                active = identity == self.selected or identity == self.hovered
+                active = identity in {self.selected,self.information_identity(),self.hovered}
                 painter.setPen(QPen(QColor("#ffffff"),3 if active else 1.5))
                 painter.setBrush(QColor(self.COLORS[kind]))
-                if identity in self.LIMITS and identity != "minimum_diameter_mm":
-                    stroke = QLineF(pos+QPointF(0,-7),pos+QPointF(0,7))
+                if (identity in self.LIMITS and identity != "minimum_diameter_mm") or identity in self.HEIGHT_HANDLES:
+                    delta = QPointF(7,0) if identity in self.HEIGHT_HANDLES else QPointF(0,7)
+                    stroke = QLineF(pos-delta,pos+delta)
                     painter.setPen(QPen(QColor("#ffffff"),6 if active else 4))
                     painter.drawLine(stroke)
                     painter.setPen(QPen(QColor(self.COLORS[kind]),4 if active else 2.5))
@@ -720,7 +799,7 @@ class ManualCanvas(QWidget):
                     painter.drawEllipse(pos,8 if active else 6,8 if active else 6)
             selected_handle = next((pos for identity,pos,_ in handles if identity == self.selected),None)
             text = self.selected_handle_text()
-            if selected_handle is not None and text:
+            if self.point_editor is None and selected_handle is not None and text:
                 # Keep the label to the right of nearby companion grips as well.
                 right = max(pos.x() for _,pos,_ in handles if abs(pos.y()-selected_handle.y()) <= 11)
                 if self.selected == "minimum_diameter_mm":
@@ -742,8 +821,11 @@ class ManualCanvas(QWidget):
         if self.caption_visible():
             painter.drawText(QRectF(12,8,self.width()-24,36),Qt.TextFlag.TextWordWrap,caption)
         painter.end()
+        if self.point_editor is not None:self.point_editor.reposition()
 
     def caption_text(self):
+        if self.standalone:
+            return "Freie Turmerstellung · nur Turm-STL"
         caption = ("Nebeneinander · Turm links, Original rechts · gleicher Maßstab" if self.view == "side" else
                    "Voreinander · Turm und Original hintereinander · gleicher Maßstab" if self.view == "front" else
                    "Räumliche Prüfung · tatsächliche Druckbettanordnung")
@@ -786,6 +868,8 @@ class ManualCanvas(QWidget):
         while z <= upper+1e-9:
             heights.append((z,origin-z*scale))
             z += step
+        if self.standalone:
+            return tuple(heights),()
         tops = [layer.z_mm for layer in self.reference.context.layers]
         start,end = bisect_left(tops,lower),bisect_left(tops,upper+1e-9)
         visible = tops[start:end]
@@ -806,6 +890,8 @@ class ManualCanvas(QWidget):
         z = self._drag_height_z
         if z is None:
             return ""
+        if self.standalone:
+            return f"Höhe: {z:.2f} mm".replace(".",",")
         tops = [layer.z_mm for layer in self.reference.context.layers]
         layer = str(bisect_left(tops,z-1e-8)+1) if 0 <= z <= tops[-1]+1e-8 else "–"
         return f"Höhe: {z:.2f} mm · Layer: {layer}".replace(".",",")
@@ -820,10 +906,12 @@ class ManualCanvas(QWidget):
         painter.setPen(QPen(QColor("#8195aa"),1))
         if self._axis_projection() is not None:
             painter.drawLine(QPointF(left,line_top),QPointF(left,self.height()-24))
-            painter.drawLine(QPointF(right,line_top),QPointF(right,self.height()-24))
+            if not self.standalone:
+                painter.drawLine(QPointF(right,line_top),QPointF(right,self.height()-24))
         painter.setPen(QColor("#526274"))
         painter.drawText(QRectF(3,top,left-6,20),Qt.AlignmentFlag.AlignRight,"mm")
-        painter.drawText(self._layer_scale_heading_rect(),Qt.AlignmentFlag.AlignRight,"Layer")
+        if not self.standalone:
+            painter.drawText(self._layer_scale_heading_rect(),Qt.AlignmentFlag.AlignRight,"Layer")
         for z,y in heights:
             painter.drawLine(QPointF(left-4,y),QPointF(left,y))
             if y >= top+30:
@@ -837,7 +925,8 @@ class ManualCanvas(QWidget):
             tops = [layer.z_mm for layer in self.reference.context.layers]
             layer = str(bisect_left(tops,z-1e-8)+1) if z <= tops[-1]+1e-8 else "–"
             painter.drawText(QRectF(2,top+24,left-8,20),Qt.AlignmentFlag.AlignRight,f"{z:g}".replace(".",","))
-            painter.drawText(QRectF(right+6,top+24,36,20),Qt.AlignmentFlag.AlignLeft,layer)
+            if not self.standalone:
+                painter.drawText(QRectF(right+6,top+24,36,20),Qt.AlignmentFlag.AlignLeft,layer)
 
     def _scale_line_top(self):
         return max(46,self.view_controls.geometry().bottom()+4)+2
@@ -853,6 +942,7 @@ class ManualCanvas(QWidget):
         return rectangle
 
     def resizeEvent(self,event):
+        self._insertion_preview=None
         self.view_controls.relayout()
         super().resizeEvent(event)
 
@@ -877,6 +967,8 @@ class ManualCanvas(QWidget):
         self._width_limit_animation.stop()
         self._width_limit_opacity = 0.
         self._width_limit_setting = None
+        self._width_limit_settings = ()
+        self._control_height_limits = ()
         self.update()
 
     def _set_width_limit_opacity(self,value):
@@ -895,10 +987,30 @@ class ManualCanvas(QWidget):
             # A brief pulse is not extended by continued movement. After it
             # expires, another outward attempt can show the boundary again.
             self._width_limit_setting = setting
+            self._width_limit_settings = (setting,)
+            self._control_height_limits = ()
             self._width_limit_animation.stop()
             self._width_limit_opacity=1.
             self._width_limit_animation.start()
             self.update()
+
+    def set_control_limit_feedback(self,error,index,n,diameter,z):
+        if error is None:return
+        widths=getattr(error,"limits",())
+        if not widths and error.setting in self.LIMITS:widths=(error.setting,)
+        heights=()
+        if error.setting=="control_height_mm":
+            curve=self.draft.curves[index]
+            lower=curve.start.z_mm if n==1 else curve.control1.z_mm
+            upper=curve.control2.z_mm if n==1 else curve.end.z_mm
+            heights=tuple(value for value,violated in ((lower,z<=lower),(upper,z>=upper)) if violated)
+        if not widths and not heights:return
+        if ((widths,heights)!=(self._width_limit_settings,self._control_height_limits) or
+                self._width_limit_animation.state()!=QVariantAnimation.State.Running):
+            self._width_limit_setting=next(iter(widths),None)
+            self._width_limit_settings=tuple(widths);self._control_height_limits=heights
+            self._width_limit_animation.stop();self._width_limit_opacity=1.
+            self._width_limit_animation.start();self.update()
 
     def _vertical_handle_height(self,identity):
         if identity.startswith("control:"):
@@ -923,22 +1035,26 @@ class ManualCanvas(QWidget):
     def selected_handle_text(self):
         if self.draft is None:
             return ""
+        identity = self.information_identity()
         name = {"top_width":"Spitze", "base":"Grund", "foot":"Fuß",
                 "maximum_diameter_mm":"Turmgrenze", "maximum_foot_diameter_mm":"Fußgrenze",
-                "minimum_diameter_mm":"Minimum"}.get(self.selected)
+                "minimum_diameter_mm":"Minimum"}.get(identity)
         if name is not None:
-            radius = self._horizontal_handle_radius(self.selected)
+            radius = self._horizontal_handle_radius(identity)
             return f"{name}: Ø {radius*2:.2f} mm".replace(".",",") if radius is not None else ""
-        height = self._vertical_handle_height(self.selected)
+        height = self._vertical_handle_height(identity)
         if height is None:
             return ""
-        if self.draft.settings.layer_snap_enabled:
+        if self.draft.settings.layer_snap_enabled and not self.standalone:
             layer = str(bisect_left(self._layer_tops,height-1e-8)+1) if self._layer_tops and height <= self._layer_tops[-1]+1e-8 else "–"
             return f"Layer: {layer}"
         return f"Höhe: {height:.2f} mm".replace(".",",")
 
     def horizontal_drag_snaps(self):
         return self._drag_width_active and self._drag is not None and self._drag[0] == "edit"
+
+    def constrained_drag_origin(self):
+        return self._drag_origin_draft if self._drag_axis is not None and self._drag is not None else None
 
     def vertical_drag_snaps(self):
         return (self.draft is not None and self.draft.settings.layer_snap_enabled and
@@ -947,15 +1063,24 @@ class ManualCanvas(QWidget):
                 self._drag_height_z is not None)
 
     def mousePressEvent(self,event):
+        self._insertion_preview=None
         self.setFocus()
         self._drag_moved = False
         self._drag_width_active = False
         self._drag_radius = None
+        self._drag_origin_draft = None
+        self._drag_origin_height = None
+        self._drag_axis = None
         self._drag_height_z = None
         self._set_height_snap_feedback(None)
         self._width_limit_last_request = None
         point = event.position()
+        if self.view == "free":point=QPointF(point.toPoint())
         hit = self.hit_test(point) if event.button() in {Qt.MouseButton.LeftButton,Qt.MouseButton.RightButton} else None
+        self._empty_click_position=None
+        if event.button()==Qt.MouseButton.LeftButton and hit is None:
+            interactive=self.insertion_at(point) is not None
+            if not interactive:self._empty_click_position=QPointF(point)
         if event.button() == Qt.MouseButton.RightButton and hit is not None:
             if any(p.identity == hit and p.kind == "free" for p in self.draft.points):
                 self.remove_requested.emit(hit)
@@ -963,25 +1088,30 @@ class ManualCanvas(QWidget):
             return
         if hit:
             self.selected = hit
+            self._drag_origin_draft = self.draft
+            self._drag_origin_height = self._vertical_handle_height(hit)
             self._drag_radius = self._horizontal_handle_radius(hit)
             if self._drag_radius is not None:
                 self._width_limit_last_request = self._drag_radius*2
             self.selection_changed.emit(hit)
             self.interaction_started.emit()
             self._drag = ("edit", hit, point)
-        elif event.button() in {Qt.MouseButton.MiddleButton,Qt.MouseButton.LeftButton}:
+        elif self.view == "free" and event.button() == Qt.MouseButton.LeftButton:
+            self._drag = ("rotate",QPointF(point.toPoint()),None)
+        elif event.button() in {Qt.MouseButton.MiddleButton,Qt.MouseButton.LeftButton} or (
+                self.view == "free" and event.button() == Qt.MouseButton.RightButton):
             self._drag = ("pan",point,QPointF(self.pan))
-        elif event.button() == Qt.MouseButton.RightButton and self.view == "free":
-            self._drag = ("rotate",point,(self.yaw_deg,self.pitch_deg))
-            self.view = "free"
-            self.view_changed.emit("free")
         self.update()
         event.accept()
 
     def mouseMoveEvent(self,event):
         point = event.position()
+        if self.view == "free":point=QPointF(point.toPoint())
+        if self._empty_click_position is not None and (point-self._empty_click_position).manhattanLength()>3:
+            self._empty_click_position=None
         if self._drag is None:
             self.hovered = self.hit_test(point)
+            self._insertion_preview = self.insertion_at(point) if self.hovered is None else None
             self.setCursor(Qt.CursorShape.PointingHandCursor if self.hovered else Qt.CursorShape.ArrowCursor)
             self.update()
             return
@@ -989,8 +1119,11 @@ class ManualCanvas(QWidget):
         if action == "pan":
             self.pan = b+point-a
         elif action == "rotate":
-            self.yaw_deg = b[0]+(point.x()-a.x())*.5
-            self.pitch_deg = max(-85,min(85,b[1]+(point.y()-a.y())*.5))
+            current=QPointF(point.toPoint())
+            delta=current-a
+            self._drag=("rotate",current,None)
+            self.yaw_deg -= delta.x()*.45
+            self.pitch_deg = max(-89,min(89,self.pitch_deg+delta.y()*.35))
             self._object_cache = None
         elif self.editable:
             self._drag_moved = self._drag_moved or (point-b).manhattanLength()>1e-6
@@ -1000,6 +1133,10 @@ class ManualCanvas(QWidget):
                 z = position.z_mm
             else:
                 radius,z = self.screen_to_profile(point)
+                shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                unrestricted = a.startswith("control:") or any(p.identity == a and p.kind == "free" for p in self.draft.points)
+                delta = point-b
+                self._drag_axis = ("horizontal" if abs(delta.x()) >= abs(delta.y()) else "vertical") if shift and unrestricted else None
                 requested_z = z
                 height = self._vertical_handle_height(a)
                 if height is not None:
@@ -1016,6 +1153,17 @@ class ManualCanvas(QWidget):
                 self._drag_width_active = self._drag_width_active or abs(point.x()-b.x())>1e-6
                 if self._drag_width_active:
                     radius = round(radius*20)/20
+            if self._drag_axis == "horizontal":
+                z = self._drag_origin_height
+                self._drag_height_z = None
+            elif self._drag_axis == "vertical":
+                radius = self._drag_radius
+                self._drag_width_active = False
+                z = self._drag_origin_height+(b.y()-point.y())/self.transform()[0]
+                self._drag_height_z = self._drag_origin_height if abs(delta.y())>1e-6 else None
+                if self.draft.settings.layer_snap_enabled:
+                    snapped = snap_layer_height(z,self._layer_tops,upper=self.draft.maximum_height_mm)
+                    if snapped is not None:z = snapped
             snap_height = None
             if a == "top" and self.reference is not None and self.draft.settings.layer_snap_enabled:
                 object_top = self.reference.context.layers[-1].z_mm
@@ -1034,7 +1182,7 @@ class ManualCanvas(QWidget):
             height = self._vertical_handle_height(a)
             if height is None:
                 self._drag_height_z = None
-            elif self._drag_height_z is not None or abs(point.y()-b.y())>1e-6:
+            elif self._drag_axis != "horizontal" and (self._drag_height_z is not None or abs(point.y()-b.y())>1e-6):
                 # Use the accepted model height, including geometry limits and
                 # snapping, rather than the potentially rejected mouse height.
                 self._drag_height_z = height
@@ -1044,7 +1192,26 @@ class ManualCanvas(QWidget):
         self.update()
         event.accept()
 
+    def insertion_at(self,point):
+        """Detect either contour, but offer the node on the editable right edge."""
+        if not self.editable or self.view not in {"side","front"}:return None
+        radius,z=self.screen_to_profile(point)
+        if not self.draft.settings.foot_height_mm<z<self.draft.height_mm:return None
+        actual=self.draft.radius_at_z(z)
+        contour=self.profile_to_screen(-actual if radius<0 else actual,z)
+        if (point-contour).manhattanLength()>self.INSERTION_HOVER_DISTANCE_PX:return None
+        position=self.profile_to_screen(actual,z)
+        if any(math.hypot(position.x()-p.x(),position.y()-p.y())<=11 for _,p,_ in self.handles()):return None
+        if self.validate_insertion is None or not self.validate_insertion(z):return None
+        return position,z
+
+    def leaveEvent(self,event):
+        self.hovered=None;self._insertion_preview=None;self.update()
+        super().leaveEvent(event)
+
     def mouseReleaseEvent(self,event):
+        deselect=(event.button()==Qt.MouseButton.LeftButton and self._empty_click_position is not None and
+                  (event.position()-self._empty_click_position).manhattanLength()<=3)
         if self._drag is not None:
             editing = self._drag[0] == "edit"
             moved = editing and (self._drag_moved or (event.position()-self._drag[2]).manhattanLength()>1e-6)
@@ -1055,13 +1222,21 @@ class ManualCanvas(QWidget):
             if not editing or moved:
                 self.mouseMoveEvent(event)
             self._drag = None
+            self._drag_origin_draft = None
+            self._drag_origin_height = None
+            self._drag_axis = None
             self._drag_height_z = None
             self.update()
             if editing:
                 self.interaction_finished.emit()
+        self._empty_click_position=None
+        if deselect:
+            self.selected="";self.hovered=None;self._revealed_control_anchor=None
+            self.selection_changed.emit("");self.update()
         event.accept()
 
     def mouseDoubleClickEvent(self,event):
+        self._empty_click_position=None
         if self.editable and self.view in {"side","front"} and event.button() == Qt.MouseButton.LeftButton:
             hit = self.hit_test(event.position())
             if hit is not None:
@@ -1080,17 +1255,25 @@ class ManualCanvas(QWidget):
             if self.view not in {"side","front"}:
                 event.accept()
                 return
-            radius,z = self.screen_to_profile(event.position())
-            if self.draft.points[1].position.z_mm < z < self.draft.height_mm:
-                actual = self.draft.radius_at_z(z)
-                if abs(abs(radius)-actual)*self.transform()[0] <= 16:
-                    self._drag = None
-                    self._drag_height_z = None
-                    self.insert_requested.emit(z)
+            insertion=self.insertion_at(event.position())
+            if insertion is not None:
+                self._drag = None
+                self._drag_height_z = None
+                self._insertion_preview = None
+                self.insert_requested.emit(insertion[1])
         event.accept()
 
     def wheelEvent(self,event):
-        if self._drag is not None:
+        self._insertion_preview=None
+        if self._drag is not None and self.view != "free":
+            event.accept()
+            return
+        if self.view == "free":
+            factor=1.15 if event.angleDelta().y() > 0 else 1/1.15
+            self.zoom=max(.05,min(50,self.zoom*factor))
+            self._update_fit_button()
+            self.view_state_changed.emit()
+            self.update()
             event.accept()
             return
         old = self.zoom

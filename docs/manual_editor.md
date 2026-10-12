@@ -4,16 +4,93 @@ Die Methode **Manuelle Generierung** gestaltet einen rotationssymmetrischen
 Kühlturm direkt in der eingebetteten Vorschau. Sie verwendet die vorhandene
 bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und automatische
 Formberechnung bleiben eigenständige bestehende Abläufe. Ein Methodenwechsel
-erhält beide Entwürfe und ihre getrennten Ergebnis- und Exportstände.
+erhält die Entwürfe und ihre getrennten Ergebnis- und Exportstände.
+
+## Freie Turmerstellung ohne Originalobjekt
+
+Die eigene Methodenkarte **Frei** ergänzt die Methodenauswahl. Der Menüeintrag
+**Freie Turmerstellung (nur STL)** öffnet diese Methode auch ohne
+Dateivorbereitung; zurück zur Methodenauswahl sind dann ebenfalls alle Karten
+sichtbar, wobei die quellenabhängigen Methoden bis zur Vorbereitung gesperrt
+bleiben. Die anfängliche Dateivorbereitung behält ihren bisherigen Aufbau.
+Dieser Modus verwendet weder Originalobjekt noch Slicerprofile,
+Druckbett oder Maschinenhöhe. Die geometrischen Regeln für geschlossene,
+monotone Kurven bleiben erhalten; Durchmesser sind auf **250 mm**, Höhen auf
+**500 mm** begrenzt. Der Fuß beginnt direkt bei Z = 0. Es gibt keine
+Drucklayer, Layer-Rastung oder kritischen Original-Layer. Die Vorschau zeigt
+den Turm zentriert; die gesamte Werkzeugzeile für X-Ray, Objektauflösung und
+Objektrotation entfällt. Ihre Höhe steht der Vorschau zur Verfügung.
+Ein dauerhafter Hinweis links im Footer erläutert den aktiven Modus.
+
+Generieren erzeugt und prüft ausschließlich das unveränderte Turm-STL aus
+dem gezeichneten Profil. Export kopiert dieses STL und schreibt einen
+technischen JSON-Bericht und eine Textzusammenfassung. Es werden **kein Slice,
+kein G-Code, kein 3MF und keine Layerzeitbewertung** erzeugt. Der technische
+Bericht kennzeichnet ausdrücklich, dass Original- und Druckerprüfungen nicht
+stattgefunden haben. Der eigene `StandaloneRequest` enthält keine Quelle,
+Profile oder Adapter und durchläuft keine entsprechenden Aufbereitungsschritte.
+
+Normale und freie manuelle Erstellung besitzen jeweils einen eigenen Editor,
+Controller und `GenerationSession`. Entwürfe, Einstellungen, Objektstandardwerte,
+Kameras sowie Ergebnis- und Exportstände bleiben bis zum Sitzungsende unabhängig
+erhalten; die Turmform wird zwischen diesen Methoden nicht übertragen. Beim
+Betreten beider manuellen Methoden ist kein Punkt ausgewählt. Beide verwenden
+dieselbe Hauptfenster-Fußleiste; alle Resetaktionen betreffen ausschließlich die
+aktive Methode. Freie Werte werden nicht als normale Benutzereinstellungen
+gespeichert. Änderungen der Dateivorbereitung machen den normalen Kontext
+ungültig; der freie Entwurf und dessen Ergebnis bleiben erhalten. Laufende
+Generierungen/Exporte sperren den Methodenwechsel. Beim Schließen werden die
+Ergebnisdateien aller drei Sitzungen freigegeben.
 
 ## Bedienung und eigene Einstellungen
 
 **Nebeneinander** und **Voreinander** ermöglichen alle Greiferaktionen. Fußrand,
 Körperanschluss, oberer Abschluss und freie Profilpunkte besitzen unterschiedliche Greifer.
-Der Fußhöhen-Greifer ist neben dem Körperanschluss versetzt; die tatsächliche
-Geometrie bleibt an dessen Position. Zahlenfelder und Greifer synchronisieren
+Fußhöhe und Turmhöhe besitzen horizontale Strichgreifer, jeweils 33 px rechts
+neben dem Körperanschluss beziehungsweise der Turmspitze. Gestrichelte
+Verlaufslinien verbinden die Geometrie mit den Greifern, dunkel am Turm und
+hellgrau am Griff. Die tatsächliche Geometrie bleibt an ihrer Position.
+Fußbreite und Fußhöhe bleiben getrennte Greifer. Die Konturlinie der Fußkurve
+verwendet denselben lila Farbton wie die Fußgreifer; die Körperkontur bleibt
+im bisherigen Profilfarbton.
+Zahlenfelder und Greifer synchronisieren
 sich in beiden Richtungen. Durchmesser werden in Millimetern angezeigt, intern
 werden Radien gespeichert.
+Bei frei beweglichen Profilpunkten und Béziergriffen begrenzt **Shift + Ziehen**
+die Bewegung auf eine Achse: die größere Mausverschiebung seit Ziehbeginn
+bestimmt waagerecht oder senkrecht. Die andere Koordinate bleibt exakt auf
+ihrem Wert zu Ziehbeginn, einschließlich nicht gerundeter oder nicht auf einem
+Layer liegender Werte. Die feste Ursprungskopie des Entwurfs erhält diese
+Sperre auch beim Achsenwechsel oder Erreichen einer Geometriegrenze. Die
+bewegliche Achse verwendet weiterhin ihre normalen Raster- und Grenzregeln.
+Die Funktion gilt in beiden manuellen Methoden; die bereits auf eine Achse
+begrenzten Breiten-/Höhengreifer behalten ihr Verhalten.
+Beim Laden eines Originalobjekts berechnet die gemeinsame Funktion
+`tower/base_calculator.py` den anfänglichen Fuß-Außendurchmesser aus dessen
+vollständiger analysierter Höhe: 0,21 mm je Millimeter Objekthöhe, begrenzt auf
+25–80 mm. Reicht die tatsächlich freie Druckbettfläche nicht dafür, wird der
+anfängliche Fuß auf die verfügbare Breite begrenzt. Eine niedrigere Maschinen- oder später geänderte Turmhöhe verkleinert
+diesen Referenzwert nicht. Die bestehende Anschlussregel hält den Fuß bei Bedarf
+mindestens 2 mm breiter als den Körperbeginn; die allgemeine 1000-mm-Grenze und
+die geprüfte Druckbettplatzierung bleiben verbindlich.
+Der resultierende Startwert ist der Fuß-Resetstandard des aktuellen Objekts.
+Ein gespeicherter Fußwert vom vorherigen Objekt ersetzt diese Berechnung nicht.
+Manuelle Eingaben und Greiferänderungen dürfen vom berechneten Startwert abweichen.
+Die anfängliche maximale Fußbreite und ihr Objektstandard ergeben sich aus der
+größten sicheren Kreisfläche neben dem belegten Objektbereich auf dem Druckbett
+(siehe Platzierungsprüfung unten), statt aus einem pauschalen 80-mm-Wert.
+Benötigt eine manuelle Fuß-/Körperverbreiterung mehr als die zwischenzeitlich
+verringerte Fußgrenze, wächst diese genau auf die benötigte Fußbreite, sofern
+die geprüfte Platzierung dies zulässt.
+Die erweiterte Grenze wird zum neuen Standard für dieses Objekt; späteres
+Verkleinern des Fußes senkt sie nicht automatisch. Einzel-Reset, Formreset und
+Gesamtreset behalten diesen Objektstandard. Eine unabhängig eingegebene größere
+Fußgrenze verändert den Standard nicht. Beim Laden eines anderen Objekts werden
+die objektbezogenen Standards neu bestimmt.
+Bei sehr schmaler freier Bettfläche wird auch der rücksetzbare minimale
+Körperdurchmesser so begrenzt, dass sein Fußstandard mit der Anschlussregel
+weiterhin platzierbar bleibt. Formreset und Gesamtreset verwenden diese
+kontextbezogenen Standards.
 Eine schmale, über die gesamte Einstellungshöhe reichende Pfeilleiste liegt
 rechts neben dem Einstellungs-Scrollbalken und vor der Trennlinie. Sie klappt
 die Einstellungen in 250 ms ein oder aus. Eingeklappt bleibt die Leiste ganz
@@ -114,26 +191,83 @@ Nachbarpunkte zeigen keine zusätzlichen Griffe. Fußrand und Fußhöhe besitzen
 jeweils nur ihren eigenen Fußkurvengriff. Der reine Auswahlklick ändert keine
 Geometrie. Beim Auswählen eines Kontrollgriffs bleiben die Griffe seines
 zugehörigen Profilpunkts sichtbar.
+Ein Klick auf eine leere, nicht interaktive Fläche hebt die Auswahl auf;
+Navigationsbewegungen und Profildoppelklick bleiben davon getrennt.
 Innenpunkte können ihre Tangenten
 koppeln; beide Seiten erhalten dann dieselbe lokale Steigung.
 
-Jede numerische Einstellung besitzt Einheit, Info und Reset. Wiederverwendbare
+Numerische Einstellungen besitzen Einheit, Info und bei vorhandenem Standardwert
+einen Reset. Wiederverwendbare
 manuelle Werte werden separat gespeichert, einschließlich Farbreferenz für das
 Original, Durchmessergrenzen, Fußwerte und Kreissegmentzahl. Im manuellen Modus
 gibt es weder eine gewünschte Mindest-Layerzeit noch eine Layerzeit-Toleranz.
 Die Farbreferenz in „Visuelle Prüfung“ färbt ausschließlich Originalschichten;
 sie bewertet weder den gestalteten Turm noch das geprüfte Ergebnis. Der Gesamtreset
-erzeugt einen neuen gültigen Anfangsentwurf. Punkt-/Kontrollpunktresets verwenden
-den Ausgangswert des jeweiligen stabil identifizierten Greifers. Die
+erzeugt einen neuen gültigen Anfangsentwurf. Manuell hinzugefügte Profilpunkte
+haben keinen Positionsstandard und keine Positions-Resetbuttons, weder links
+noch in der Vorschau. Ihre Kurven lassen sich weiterhin zurücksetzen.
+Feste Punkt-/Kontrollpunktresets verwenden den Ausgangswert des jeweiligen
+stabil identifizierten Greifers. Die
 Automatikeinstellungen werden dabei nicht verändert.
+
+Der ausgewählte Greifer besitzt zusätzlich einen kompakten Werteeditor in einer
+gemeinsamen, abgerundeten Box mit leicht transparentem Hintergrund. Er steht
+rechts neben den nahen Punkten und verwendet kleine Bezeichner (7,5 pt) sowie
+Eingaben (8 pt). Doppelte numerische Grundinformationen entfallen; eine vorhandene
+Layernummer steht als reine Information oberhalb der zugehörigen Eingabefelder.
+Übernommene Zahlen werden immer mit zwei Nachkommastellen angezeigt. Die interne
+Genauigkeit bleibt erhalten; unverändertes oder leeres Bestätigen übernimmt den
+präzisen bisherigen Modellwert und validiert nicht den gerundeten Anzeigetext.
+Alle Felder verwenden dieselbe, am längsten angezeigten Inhalt gemessene Breite;
+beim Tippen, Übernehmen, Zurücksetzen und externen Ändern wächst oder schrumpft
+die ganze Feldspalte gemeinsam. Die feste Einheit `mm` steht innerhalb jedes
+Feldes und zählt zur Breite, bleibt jedoch vom editierbaren Zahlentext getrennt.
+Reset-Buttons schließen direkt rechts an. Zusätzliche Werte wie die Layernummer
+stehen ebenfalls in der Feldspalte, ihr Bezeichner in der Bezeichnerspalte.
+Breiten- und Höhengreifer bekommen jeweils ihr eigenes Feld, freie Profilpunkte
+beide Koordinaten. Béziergriffe zeigen die Felder des zugehörigen Profilpunkts;
+die Box bleibt auf dessen Höhe. Während des Ziehens bleibt ihre Position
+erhalten und ändert sich nur bei einem kollidierenden Greifer oder geänderten
+Anker-/Vorschaumaßen. Werte mit Standard besitzen einen eigenen Reset auf
+denselben Objektstandard wie links. Die kleinen Reset-Buttons verwenden
+einen selbst gezeichneten Rücksetzpfeil, unabhängig von Schriftglyphen.
+Die gesamte Box bleibt außerhalb der Ansichtsleiste und innerhalb der Vorschau;
+bei fehlendem Platz rechts wechselt sie neben die linken Greifergrenzen.
+Die linken Felder bleiben vorerst erhalten und synchronisieren sich mit dem Editor.
+
+In den beiden Profilansichten erscheint beim Hover innerhalb von 33 px links
+oder rechts einer der beiden Körperkonturen ein heller, leicht transparenter
+grüner Einfügepunkt stets auf der rechten Konturkante, auch bei Annäherung
+an die linke Turmseite. Eine unverbindliche Einfügeoperation
+prüft dieselben Kurven-, Nachbarabstands- und Kontextgrenzen wie die tatsächliche
+Aktion. Fußkurven, Stellen nahe vorhandener Greifer oder ungültige Kandidaten
+werden nicht angeboten. Ein Doppelklick in diesem Bereich fügt den angebotenen
+Punkt ein; Hover allein verändert den Entwurf nicht. Bei Ziehen, Zoom,
+Ansichtswechsel und Verlassen der Vorschau verschwindet die Markierung.
+
+Während der Eingabe prüft ein unverbindlicher Entwurf die vollständige Geometrie
+und Druckbettplatzierung. Ungültiger Text bleibt rot, bis die Eingabe gültig ist.
+Enter übernimmt ausschließlich einen vollständig gültigen Kandidaten; es gibt
+keine teilweise akzeptierte Zahlenänderung. Leeres oder unverändertes Bestätigen
+erhält den bisherigen internen Wert und den Kurvenmodus. Erfolgreiche Bestätigung
+färbt Text und Rahmen 350 ms grün, abgelehnte Bestätigung rot; anschließend läuft
+ein 200-ms-Fade. Die Felder und der Eingabefokus bleiben bestehen. Noch nicht
+bestätigte Texte überstehen andere Einstellungsänderungen. Hintergrundaufträge
+sperren auch diese Eingaben; Enter löst keine Generierung aus.
 
 Ungültige Bewegungen gelangen nur bis zur ersten gültigen Grenze. Bei einer
 diagonalen Bewegung werden anschließend beide Achsen einzeln gegen das gesamte
 Profil und die Druckbettplatzierung geprüft. So bleibt beispielsweise die Höhe
 eines freien Punkts beweglich, wenn sein Durchmesser bereits das Minimum erreicht.
 Die tatsächlich
-begrenzende Einstellung wird kurz rot markiert; weitere Ereignisse derselben
-Interaktion verlängern das Blinken nicht ständig. Auch Werte, die Qt bereits
+begrenzende Einstellung wird ausschließlich an Bezeichnung und Eingaberahmen
+kurz rot markiert; zusätzliche rote Meldungstexte unter den manuellen Feldern
+entfallen. Hintergrund und eingegebener Zahlenwert behalten ihre normale Farbe.
+Die Farbänderung hält 850 ms und blendet in 200 ms linear zur normalen Farbe zurück;
+die Haltephase ist 500 ms länger als die der Grenzlinie. Weitere Ereignisse während
+der Animation verlängern sie nicht; nach ihrem Ende kann ein neuer Grenzversuch
+die Markierung erneut auslösen. Der Grund bleibt im Footer und für assistive
+Technik verfügbar. Auch Werte, die Qt bereits
 an seinen Eingabegrenzen abfangen würde, gelangen zur fachlichen Grenzprüfung.
 Unmögliche Optionswechsel werden zurückgewiesen. Der letzte gültige Entwurf
 bleibt erhalten. Bei einer für die Quelle ungültigen gespeicherten Konfiguration
@@ -141,8 +275,12 @@ können Einstellungen korrigiert und die Initialisierung erneut versucht werden.
 
 Die **Draufsicht** erlaubt die Spitzenbreite und die Turm-Durchmessergrenze,
 die **Untersicht** die Fußbreite und die Fuß-Durchmessergrenze. Die **Freie 3D-Ansicht** beginnt in der 3/4-Ansicht
-und besitzt keine Greiferaktionen. Mausrad zoomt um die Mausposition; mittlere
-Maustaste verschiebt, rechte Maustaste dreht nur die freie räumliche Kamera.
+und besitzt keine Greiferaktionen. Ihre Navigation entspricht der aktivierten
+Navigation der automatischen 3D-Vorschau: linke Maustaste dreht, rechte oder
+mittlere Maustaste verschiebt, Mausrad zoomt zur Ansichtsmitte. Drehgeschwindigkeit,
+Neigungsgrenzen und Zoomschritte/-grenzen stimmen ebenfalls überein. In den
+übrigen Ansichten zoomt das Mausrad weiterhin um die Mausposition und die
+mittlere Maustaste verschiebt.
 „Einpassen“ stellt beide
 Objekte vollständig und mit demselben physikalischen Maßstab dar. Der Button ist
 dezent grün, solange Zoom, Verschiebung, Orientierung oder relevante äußere
@@ -152,27 +290,32 @@ aktivieren sie nicht. Objektrotation,
 Transparenz, Auswahl, Hover und Kamera verändern keine Druckdatei.
 Die Einpassung nutzt die tatsächlichen projizierten Objektgrenzen und Turmsegmente
 ohne pauschale Reserve in Millimetern oder Prozent. Über den Objekten bleiben
-mindestens 14 Pixel Abstand zu den Ansichtsbuttons. In den Profilansichten ist
+mindestens 20 Pixel Abstand zu den Ansichtsbuttons. In den Profilansichten ist
 unterhalb der Druckbettebene Platz für die Mindestdurchmesser-Maßlinie reserviert;
 die räumlichen Ansichten behalten einen kleinen unteren Abstand von 24 Pixeln.
 Die Einheiten stehen jeweils links neben ihrer Skalenleiste, einschließlich
 **Layer** an der rechten Leiste. Zahlen und Einheiten überlappen auch bei enger
 Einpassung nicht.
 
-Über der Vorschau stehen in einer gemeinsamen Zeile **X-Ray (Transparenz)** mit den drei
-gleich breiten farbigen Buttons **Turm**, **Keine** und **STL**,
+Über der Vorschau stehen in einer gemeinsamen Zeile **X-Ray (Transparenz)** mit den zwei
+gleich breiten Buttons **Turm** und **STL**,
 **Auflösung (STL)** und
 **Originalobjekt drehen** mit Slider, Winkelwert und Reset. Diese drei Bereiche
-sind zweizeilig und haben zentrierte Überschriften; ihre Höhe entspricht
+sind kompakt und haben zentrierte Überschriften; ihre Höhe entspricht
 einem regulären Aktionsbutton. **Turm** stellt ausschließlich den Turm mit der
 bisherigen Deckkraft 35 % dar, **STL** ausschließlich das Original mit 28 %.
-**Keine** ist der Standard und zeigt beide normal. Der aktive Button besitzt
-einen kräftigeren Farbverlauf, farbigen Rahmen und fetten Text; die Rahmenbreite
-bleibt bei allen Zuständen identisch (1 px). Die Buttons sind zunächst etwa ein
-Drittel breiter als zuvor. Bei Platzmangel verkleinern sich zuerst Auflösung und
+Beide Buttons sind unabhängig schaltbar; erneuter Klick deaktiviert die jeweilige
+Transparenz. Standardmäßig sind beide ausgeschaltet und dezent orange bzw. hellblau.
+Helle obere/linke und dunklere untere/rechte Kanten lassen sie leicht erhaben wirken.
+Aktiviert erscheinen sie im kräftigeren umgekehrten Farbverlauf, mit dunkleren
+oberen/linken Kanten und fettem, leicht versetztem Text; dadurch wirken sie eingedrückt.
+Beide Objekte können gleichzeitig transparent sein. Die Rahmenbreite
+bleibt bei allen Zuständen identisch (1 px). Die bevorzugte Buttonbreite wächst
+gegenüber der bisherigen Leiste um etwa ein Fünftel. Bei Platzmangel verkleinern
+sich zuerst Auflösung und
 Drehung; erst danach wird die X-Ray-Gruppe kompakter. Die Überschrift kürzt sich
-auf **X-Ray**, die Buttons bleiben gleich breit und schrumpfen bis zur für alle
-drei Texte erforderlichen Mindestbreite. Sie brechen nicht um.
+auf **X-Ray**, die Buttons bleiben gleich breit und schrumpfen bis zur für
+beide Texte erforderlichen Mindestbreite. Sie brechen nicht um.
 Die Ansichtsbuttons liegen rechtsbündig oben
 innerhalb der Zeichenfläche, von links nach rechts: **Nebeneinander**,
 **Voreinander**, **Draufsicht**, **Untersicht**, **Freie 3D-Ansicht**, **Einpassen**.
@@ -190,7 +333,8 @@ Legendeneinträge stehen bei genügend Platz in zwei Spalten mit je vier Einträ
 Umgebrochene Legendeneinträge bleiben oben an ihrem Farbquadrat ausgerichtet;
 der danebenliegende Eintrag wird nicht vertikal verschoben. Die
 Bedienungsstichpunkte beginnen bündig unter ihrer Überschrift, ohne Satzendpunkt;
-Zoom steht zuletzt. Der Drehslider besitzt sichtbare Teilstriche alle 45° und
+Zoom steht zuletzt. Der Drehslider reicht von −180° bis +180°; der Standard 0°
+steht genau in der Mitte und wird vom Reset wiederhergestellt. Er besitzt sichtbare Teilstriche alle 45° und
 rastet beim Ziehen innerhalb von ±3° an diesen Winkeln ein. Andere Winkel bleiben
 einstellbar; Tastaturänderungen erfolgen weiterhin gradweise.
 Farbquadrate passen sich der Schriftgröße an; bei kritischer
@@ -200,7 +344,9 @@ rechts oben geteilt, links oben rot und rechts unten grün.
 Die Maximaldurchmesser werden zusätzlich als verschiebbare vertikale Grenzstriche
 angezeigt: violett für den Fuß, blau für den Körper. Ihre Position entspricht dem
 halben Durchmesser von der Turmachse aus (Ø 50 mm entspricht 25 mm Abstand).
-Eine hellgraue gestrichelte horizontale Linie verbindet sie mit der Profilkante.
+Eine gestrichelte horizontale Linie verbindet sie mit der Profilkante. Sie
+verwendet wie die Mindestdurchmesser-Maßlinie einen Farbverlauf von Dunkelgrau
+am Turm bis zum bisherigen Hellgrau am Greifer, auch in Drauf- und Untersicht.
 Ziehen ändert ausschließlich die jeweilige Grenze in 0,1-mm-Durchmesserschritten;
 der aktuelle Maximaldurchmesser steht rechts daneben. Die vollständige Validierung
 stoppt das Verkleinern an der bestehenden Form. Grenze und Zahlenfeld bleiben
@@ -229,20 +375,51 @@ symmetrisch links und rechts der Turmachse mit demselben Zeitverlauf.
 Weitere Mausbewegungen verlängern diesen Impuls nicht; nach dessen Ende
 blendet ein erneuter Versuch in Richtung der Grenze ihn wieder sofort ein.
 Die Markierung erneuert keine Originalflächen und verwendet das fertige Originalbild weiter.
+Auch Grenzversuche mit Béziergriffen blenden die betroffenen Linien ein.
+Bei gekoppelten Tangenten werden alle verletzten Durchmessergrenzen der
+versuchten vollständigen Form angezeigt. Unzulässige Kontrollgriffhöhen zeigen
+die erreichte Grenze als horizontale Linie. Zeitverlauf und gültiges Abfangen
+der Geometrie bleiben unverändert.
 
-Der Regler **Auflösung (STL)** besitzt die zehn Stufen **1 %, 3 %, 5 %, 10 %,
-15 %, 20 %, 25 %, 50 %, 75 %, 100 %**, von Performance zu Optik.
+Der Regler **Auflösung (STL)** besitzt die neun Stufen **0 %, 1 %, 5 %, 10 %,
+15 %, 25 %, 50 %, 75 %, 100 %**, von Performance zu Optik.
 Der Bereich erscheint in allen fünf Ansichten. Sein
-Farbverlauf von Grün über Gelb zu Rot richtet sich nach den tatsächlichen
+schriftgroßes Info-Icon links neben der Überschrift erklärt beim Überfahren,
+dass ausschließlich die Vorschau des Originals reduziert wird und der Export
+immer die volle Originalqualität erhält.
+Die 0-%-Stufe ist hellblau und zeigt eine vollständige Silhouette ohne Netzlinien,
+Flächenbeleuchtung oder Netzreduktion. Ihre Konturen verwenden die exakten
+Originalkoordinaten und erhalten Löcher sowie getrennte Objektinseln.
+Die Kanten-/Flächennachbarschaft wird einmal im Vorbereitungsjob in eigenem
+Speicher aufgebaut. Bei Kameraänderungen werden nur die sichtbaren Konturkanten
+ausgewählt und deren Endpunkte projiziert. Bei Pan/Zoom bleibt das vorhandene
+Vektorbild wiederverwendbar. Diese Variante hat den geringsten Zeichenaufwand;
+sie startet ohne verzögerte Netz-Drahtvorschau. Kritische Layerfarben bleiben
+verfügbar: in den Profilansichten als vollständige farbige Silhouettenbänder,
+in räumlichen Ansichten als Konturen. Umfangreiche Farbdaten werden weiterhin
+im Hintergrund vorbereitet; bis dahin bleibt die vollständige einfache
+Silhouette sichtbar. Bei reinen G-Code-Quellen ohne Original-STL bleibt die
+vorhandene Druckbahndarstellung erhalten.
+Der anschließende Farbverlauf von Grün über Gelb zu Rot richtet sich nach den tatsächlichen
 Prozentwerten der Stufen; die vielen niedrigen Stufen bleiben überwiegend grün.
-Jede Stufe besitzt einen Teilstrich. Über dem Regler stehen links „performance“ und
-rechts „optik“ in Grau, mit zentrierter Überschrift. Bevor diese Texte sich
-überlappen, werden beide seitlichen Hinweise ausgeblendet. Der Reset rechts
+Jede Stufe besitzt einen Teilstrich; der erste ist ebenfalls hellblau.
+Die zentrierte Überschrift mit Info-Icon steht in der ersten Zeile.
+Darunter stehen links **Performance** und rechts **Optik** in Grau (7,5 pt,
+mit beibehaltener Zeilenhöhe), in der dritten Zeile der Slider.
+Die beiden Endtexte richten sich ausschließlich nach der Sliderbreite und
+verschwinden gemeinsam, bevor ihr Abstand unter 12 Pixel fallen würde.
+Die äußere Höhe der gemeinsamen Bedienleiste bleibt erhalten. Beide
+Hoverhinweise enthalten ausdrückliche Zeilenumbrüche. Der Reset rechts
 stellt die Standardauflösung wieder her und verwendet die üblichen
 Resetzustände; während eines Auftrags ist er ebenfalls gesperrt.
-Neue Einstellungen und der Reset verwenden **10 %** (Stufe 4).
-Er wird als manuelle Präferenz
-gespeichert. Niedrigere Stufen reduzieren ausschließlich die räumlichen
+Der Standard für **Nebeneinander** und **Voreinander** ist **0 %** (Stufe 1),
+für **Draufsicht**, **Untersicht** und **Freie 3D-Ansicht** **15 %** (Stufe 5).
+Beim Ansichtswechsel folgt die Auflösung dem neuen Standard, solange der bisherige
+Standard eingestellt war. Individuell gewählte andere Stufen bleiben erhalten.
+Einzel-Reset und **Alles zurücksetzen** verwenden den Standard der aktuellen Ansicht;
+der reine Ansichtswechsel aktiviert bei sonst unverändertem Zustand keinen Reset.
+Der gewählte Prozentwert wird weiterhin als manuelle Präferenz gespeichert.
+Niedrigere Netzstufen reduzieren ausschließlich die räumlichen
 Originalflächen durch Zusammenfassen naher Meshknoten. Die Stufe beschreibt
 ein ungefähres Flächenbudget; es werden keine einzelnen Dreiecke ausgelassen,
 die sichtbare Löcher verursachen würden. 100 % verwendet die vollständige
@@ -251,7 +428,20 @@ Reduktion keinen sinnvollen Vorteil bietet. Farbliche Original-Layerkonturen,
 Originaldaten, Analyse, Turm und Druckexport bleiben
 in ihrer bisherigen Genauigkeit. Die Regleränderung erneuert nur den
 Original-Flächencache; Pan, Zoom, Einpassen und Transparenz bauen keine neuen
-Flächen. Während eines Vorbereitungs-/Generierungs-/Exportauftrags ist der
+Flächen. Für alle Netzstufen über 0 % zeigen **Nebeneinander**, **Voreinander**,
+**Draufsicht** und **Untersicht** zusätzlich die exakte Silhouette aus dem
+vollständigen Originalnetz. Sie füllt die Außenform unter dem schattierten Netz
+mit einem dezent helleren Objektblau (`#4ea2b1`, 82 % Deckkraft);
+Original-X-Ray wirkt weiterhin auf die gesamte Originaldarstellung.
+das Netz wird an dieser Kontur einschließlich innerer Öffnungen beschnitten.
+Eine schmale Konturlinie macht die tatsächlichen Grenzen sichtbar. Die Netzstufe
+bestimmt weiterhin Flächendetails und Tiefe. Die freie 3D-Ansicht verwendet
+weiter die jeweilige Netzstufe ohne diese zusätzliche Kontur.
+Die Silhouette und das Netz verwenden dieselbe Objektdrehung und Projektion;
+ein neuer Winkel erneuert beides. Pan/Zoom verwenden das fertige Vektorbild erneut.
+Bei Hintergrundberechnung zeigt die feste Ansicht bereits die vollständige
+Silhouette, bis das Polygonnetz fertig ist.
+Während eines Vorbereitungs-/Generierungs-/Exportauftrags ist der
 Auflösungsregler gesperrt.
 
 Bei kleinen Fensterbreiten wechseln Einstellungen und Vorschau von einer
@@ -366,11 +556,26 @@ verschärfte Grenze wird nur angenommen, wenn das unveränderte Profil sie erfü
 Gekoppelte Tangenten werden bei Punkt-/Greiferänderungen atomar mitgeführt und
 ebenfalls geprüft.
 
-`ManualContext.validate()` ergänzt Kontextbindung, Höhe und die bestehende
-Druckbettplatzierung. Sie verwendet den größten Radius des **gesamten** Profils,
-den wirksamen Brim sowie die vorhandenen Bettpolygone und Ausschlussflächen;
-Objekt- und Randabstand betragen jeweils 5 mm. Fehlende verlässliche Bettdaten
-oder eine nicht passende Form erlauben keine Generierung.
+`ManualContext.validate()` ergänzt Kontextbindung, Höhe und die manuelle
+Druckbettplatzierung. `manual/placement.py` sucht den größten sicheren Kreis
+innerhalb des Bettpolygons, außerhalb aller Sperrflächen und mit mindestens
+**0,3 mm** zum belegten Objektbereich. Dieser Bereich ist das konservative
+XY-Rechteck der vorbereiteten Quelle einschließlich Stützen; freie Löcher oder
+Einbuchtungen innerhalb dieses Rechtecks werden nicht als Stellfläche angenommen.
+Der wirksame Turm-Brim wird vom Radius abgezogen. Die zweistellige maximale
+Fußbreite wird nach unten gerundet und ist ebenso wie das **gesamte** Profil
+bei jeder Änderung verbindlich. Vorschau und Slice verwenden denselben
+sicheren Kreismittelpunkt; die automatische Methode behält ihre vorhandene
+Platzierung mit größeren Sicherheitsabständen.
+
+Für rechteckige Betten ohne Sperrflächen wird die maximale Kreisbreite über
+eine Radius-Bisektion und die Ecken des eingerückten Bettrechtecks berechnet.
+Andere Bettpolygone verwenden eine räumliche Suche mit konservativen
+Distanzobergrenzen und höchstens 0,002 mm Radiusabweichung. Die Berechnung läuft
+bei der Referenzaufbereitung im abbrechbaren Hintergrundjob; bis zu 32
+unveränderte Geometriekontexte werden zwischengespeichert, damit Ziehen und
+Zahlenvalidierung keine erneute Suche auslösen. Fehlende verlässliche Bettdaten
+oder eine nicht passende Form erlauben keine normale Generierung.
 
 ## Tessellierung und STL
 
@@ -620,12 +825,12 @@ Bei einem fehlgeschlagenen Slice bleiben nur diese Diagnoseverzeichnisse in
 einem separaten `manual_failed_*`-Ordner erhalten; der Fehlermeldung ist dessen
 Pfad beigefügt. Unvollständige Druckartefakte werden weiterhin freigegeben.
 
-`manual_settings.json` hat ein eigenes Schema 5 und läuft über
+`manual_settings.json` hat ein eigenes Schema 8 und läuft über
 `VersionedJsonStore`. Geometriepunkte, Quellenbindung und Artefakte werden nicht
 persistiert. Unbekannte neuere, beschädigte oder extern geänderte Dateien
 werden nicht überschrieben. 1→2 übernimmt die alte Zielzeit ausschließlich als
 Farbreferenz für Originalschichten und entfernt die Toleranz. Details zur
-direkten und mehrstufigen 0→1→2→3→4→5-Migration, zum Layer-Snapping,
+direkten und mehrstufigen 0→1→2→3→4→5→6→7→8-Migration, zum Layer-Snapping,
 zur Vorschauauflösung und den
 Sicherungen stehen in [Persistenz](settings_migrations.md).
 
@@ -642,7 +847,9 @@ oberhalb eines verkürzten Turms,
 Quellen-/Profilschutz und unveränderte exportierte Artefakte.
 `test_manual_view_resolution.py` prüft alle Auflösungsstufen, geschlossene
 reduzierte Testoberflächen, erhaltene Quelldaten, exakte 100-%-Darstellung und
-Abbruch. Die GUI-Tests prüfen zusätzlich Punktmodi, Rechtsklick-Löschen,
+Abbruch. Zusätzliche 0-%-Prüfungen decken vollständige Konturen, Löcher,
+getrennte Inseln, erhaltene Layerfarben und die Wiederverwendung der
+vorbereiteten Topologie ab. Die GUI-Tests prüfen zusätzlich Punktmodi, Rechtsklick-Löschen,
 eigene Kontrollgriffe, großzügiges Objekt-Endhöhen-Snapping, Toolbarreihenfolge,
 zweispaltige Hinweise und das diagonal geteilte Farbsymbol.
 Die Stil-Wiederverwendung wird gegen die vorherige Zeichenroutine auf identische
@@ -671,6 +878,17 @@ Zusätzliche Tests prüfen Höhen-Snapping, zwei sichtbare Nachkommastellen bei
 erhaltener Modellpräzision, die überlagerte Vorderansicht, stabile Vorschaugeometrie
 bei Meldungen sowie den echten Hauptfenster-Footer einschließlich gleicher
 Kürzungs-/Umbruchregeln und ausschließlich manuellem Reset.
+Der abgeschlossene Vorbereitungskopf behält seine aus den angezeigten Fakten
+berechnete Höhe auch beim Ein-/Ausblenden von Grenzmeldungen und Footertexten.
+Die GUI-Regression prüft dabei auch Zwischenframes bei mehreren Fensterbreiten.
+
+Eine lokale Messung mit 20.480 Dreiecken, ausgeschalteter kritischer
+Layeranzeige und drei Wiederholungen ergab für den Aufbau des Vektorbilds
+etwa 0,8 ms bei 0 %, 45 ms bei 5 %, 63 ms bei 10 % und 289 ms bei 100 %.
+Die einmalige Konturvorbereitung dauerte etwa 44 ms. Dies beschreibt diesen
+synthetischen Messfall und keine allgemeine Bildratenzusage.
+Eine Bewertung möglicher Vereinfachungen der linken Bedienfelder steht in
+[Bedienelemente und Vorschau](manual_controls_analysis.md).
 
 Die abschließende Regressionsprüfung verwendet die vollständige vorhandene
 Suite mit `.\.venv\Scripts\python.exe -m unittest discover -s tests -q` und

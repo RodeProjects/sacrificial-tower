@@ -343,7 +343,7 @@ und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
 
-## Getrennte manuelle Einstellungen (eigenes Schema 5)
+## Getrennte manuelle Einstellungen (eigenes Schema 8)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
@@ -371,14 +371,47 @@ angezeigt; Druckdaten und Artefaktsignaturen hängen nicht von dieser Präferenz
 Vorhandene gültige Prozentwerte werden auf die nächste unterstützte Stufe abgebildet;
 bei gleichem Abstand gewinnt die präzisere Stufe. Bereits unterstützte Werte bleiben
 erhalten, etwa 50 oder 100. Alte ungültige Typen, Einheiten und Werte außerhalb
-der damaligen Zehnerschritte fallen auf den aktuellen Standard 10 zurück. Im aktuellen
-Schema werden ausschließlich die zehn strikten Integer-Stufen akzeptiert; der
-Standard entspricht Sliderposition 4 (10 %). Neue Dateien starten
+der damaligen Zehnerschritte fallen auf den damaligen Standard 10 zurück. In Schema 5
+werden ausschließlich diese zehn strikten Integer-Stufen akzeptiert; der
+Standard entspricht dort Sliderposition 4 (10 %). Neue Dateien starten
 mit diesem Standard, bestehende gültige Präferenzen behalten ihren Prozentwert
 bzw. dessen nächstgelegene Stufe. Die Änderung des Standardwerts von 15 auf 10 %
 ändert weder Format noch Bedeutung gespeicherter Prozentwerte und benötigt
 deshalb keine zusätzliche Schemamigration.
-Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5 wird das Original gesichert,
+5→6 ersetzt die 20-%-Netzstufe durch die neue 0-%-Silhouette. Die Folge in Schema 6
+lautet `0, 1, 3, 5, 10, 15, 25, 50, 75, 100`; 0 ist eine exakte flache
+Konturdarstellung und keine Netzreduktion auf null Dreiecke.
+Gültige alte 20-%-Werte werden zu 25 % migriert; alle anderen gültigen Stufen
+bleiben erhalten. In Schema 5 ungültige Werte, insbesondere 0, boolesche Werte,
+Fließkommazahlen und abweichende Einheiten, werden auf den Standard 10
+normalisiert. In Schema 6 ist der strikte Integer 0 gültig, 20 dagegen
+ungültig. Der damalige Standard 10 % liegt dort auf Sliderposition 5.
+Die historische 4→5-Migration verwendet weiterhin ihre damalige Stufenfolge,
+bevor 5→6 ausgeführt wird. Eine alte Programmversion mit Schema 5 darf die neue
+Datei einschließlich 0-%-Werten weder übernehmen noch überschreiben.
+Die manuellen Downgrade-Prüfungen blockieren auch inkompatible Typen, andere
+Einheiten und Werte außerhalb der jeweiligen Stufengrenzen vollständig.
+6→7 reduziert die Skala auf `0, 5, 10, 15, 25, 50, 75, 100`.
+Vorher gültige 1-%- und 3-%-Werte werden zu 5 %; 0 % und alle übrigen gültigen
+Werte bleiben erhalten. In Schema 6 ungültige Typen, Einheiten oder Werte
+fallen beim Migrationsschritt weiterhin auf den damaligen Standard 10 zurück.
+Neue Dateien und ungültige Werte in Schema 7 verwenden 0 %.
+Die Oberfläche verwendet je Ansicht unterschiedliche Standards: 0 % für
+Nebeneinander/Voreinander, 15 % für die anderen Ansichten. Bestehende gültige
+individuelle Prozentwerte bleiben erhalten; die Ansichtsstandards verändern
+weder die Bedeutung noch die Einheit der gespeicherten Werte. Einzel- und
+Gesamt-Reset beachten die aktuelle Ansicht. Die Ansicht selbst wird nicht gespeichert.
+Auch ältere Programmversionen mit Schema 6 dürfen Dateien mit Schema 7 nicht
+übernehmen oder überschreiben. Der historische Rückfallwert 10 bleibt in allen
+früheren Auflösungsmigrationen festgeschrieben.
+7→8 ergänzt die 1-%-Stufe zwischen 0 und 5. Alle in Schema 7 gültigen strikten
+Integer-Stufen bleiben erhalten; dort ungültige Werte (auch 1 und 3), Typen oder
+Einheiten fallen auf 0 % zurück. Erst Schema 8 akzeptiert den strikten Integer 1.
+Die historischen 6→7-Regeln bleiben erhalten: Eine ursprünglich dort gespeicherte
+1-%- oder 3-%-Wahl wird bei einem mehrstufigen Sprung weiterhin zuerst zu 5 %.
+Schema 8 verwendet dieselben ansichtsabhängigen Standards. Ältere Versionen mit
+Schema 7 dürfen neue Dateien einschließlich 1-%-Werten nicht lesen oder überschreiben.
+Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8 wird das Original gesichert,
 anschließend atomar gespeichert. Alle früheren Migrationsschritte bleiben erhalten.
 
 Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
@@ -392,3 +425,10 @@ Migration und die bestehenden Sicherungs-/Fehler-/Downgrade-Prüfungen.
 Gespeichert werden wiederverwendbare manuelle Werte einschließlich der eigenen
 Kreissegmentzahl. Profilpunkte, Turmhöhe, Quellidentität, laufende Aufträge,
 Artefakte und Exportidentitäten bleiben ausschließlich sitzungsgebunden.
+Beim Initialisieren eines neuen Quellenkontexts wird der aktuelle Fußdurchmesser
+aus der vollständigen Originalhöhe neu berechnet. Der numerische gespeicherte
+Fußwert und seine Einheit bleiben unverändert; er liefert keinen quellenunabhängigen
+Startwert mehr. Automatisch erweiterte Fußgrenzen bleiben gültige Millimeterwerte;
+deren Resetstandard ist an das aktuelle Objekt gebunden und wird nicht separat
+persistiert. Diese Initialisierungs-/Resetregeln verändern das gespeicherte Format
+und dessen Wertebereiche nicht.

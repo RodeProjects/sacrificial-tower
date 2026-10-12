@@ -10,7 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY","1")
 
-from PySide6.QtCore import QEvent,QPointF,Qt,QPoint
+from PySide6.QtCore import QEvent,QPointF,Qt,QPoint,QObject
 from PySide6.QtGui import QWheelEvent,QFont,QFontDatabase,QColor,QImage,QPainter
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
@@ -74,6 +74,127 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.draft.height_mm,35)
         self.assertEqual(self.panel.draft.points[-1].position.diameter_mm,20)
 
+    def test_object_height_defines_foot_default_and_required_limit_growth_becomes_object_default(self):
+        p=self.panel
+        context=replace(self.reference.context,key="height-200",maximum_height_mm=300,
+            layers=(replace(self.reference.context.layers[0],z_mm=.2),replace(self.reference.context.layers[-1],z_mm=200)))
+        reference=replace(self.reference,context=context)
+        preferences=replace(ManualSettings(),foot_diameter_mm=25,maximum_foot_diameter_mm=30)
+        p.initialize(reference,preferences)
+        physical_limit=context.maximum_foot_diameter_mm
+        self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,physical_limit))
+        self.assertEqual(p.default_value("foot_diameter_mm"),42)
+        self.assertEqual(p.default_value("maximum_foot_diameter_mm"),physical_limit)
+        self.assertFalse(p.rows["foot_diameter_mm"].reset_button.isEnabled())
+        self.assertFalse(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
+        p.move("top",5,40)
+        self.assertEqual(p.default_value("foot_diameter_mm"),42)
+        p.editors["foot_diameter_mm"].setValue(30)
+        self.assertEqual(p.settings.foot_diameter_mm,30)
+        p.rows["foot_diameter_mm"].reset_button.click()
+        self.assertEqual(p.settings.foot_diameter_mm,42)
+        for view in ("side","bottom"):
+            p.change_setting("maximum_foot_diameter_mm",42)
+            p.canvas.set_view(view)
+            p._move_from_canvas("foot",95,p.draft.first_layer_z_mm)
+            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(95,95))
+            self.assertEqual(p.default_value("maximum_foot_diameter_mm"),95)
+            self.assertFalse(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
+            p.move("foot",90,p.draft.first_layer_z_mm)
+            self.assertEqual(p.settings.maximum_foot_diameter_mm,95)
+            p.change_setting("maximum_foot_diameter_mm",100)
+            self.assertEqual(p.default_value("maximum_foot_diameter_mm"),95)
+            self.assertTrue(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
+            p.rows["maximum_foot_diameter_mm"].reset_button.click()
+            self.assertEqual(p.settings.maximum_foot_diameter_mm,95)
+            p.reset_tower()
+            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,95))
+            p.move("foot",90,p.draft.first_layer_z_mm);p.reset_all()
+            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,95))
+            self.assertFalse(p.can_reset_all())
+        context=replace(context,key="height-100",layers=(*context.layers[:-1],replace(context.layers[-1],z_mm=100)))
+        p.initialize(replace(reference,context=context),ManualSettings())
+        self.assertEqual((p.default_value("foot_diameter_mm"),p.default_value("maximum_foot_diameter_mm")),(25,context.maximum_foot_diameter_mm))
+        p.initialize(reference,replace(ManualSettings(),minimum_diameter_mm=50,maximum_diameter_mm=60))
+        self.assertEqual((p.settings.foot_diameter_mm,p.default_value("foot_diameter_mm")),(52,52))
+        p.editors["foot_diameter_mm"].setValue(60)
+        p.rows["foot_diameter_mm"].reset_button.click()
+        self.assertEqual(p.settings.foot_diameter_mm,52)
+        p.reset_tower()
+        self.assertEqual(p.settings.foot_diameter_mm,52)
+        self.assertFalse(p.can_reset_tower())
+
+    def test_manual_field_feedback_only_colors_label_and_frame_with_boundary_timing(self):
+        from cooling_tower.gui.design_tokens import COLORS
+        p=self.panel;row=p.rows["maximum_diameter_mm"]
+        normal_label=row.label.styleSheet();normal_editor=row.editor.styleSheet()
+        geometry=row.geometry();canvas=p.canvas.geometry()
+        p.feedback(GeometryError("maximum_diameter_mm","Grenze überschritten"),"points")
+        self.assertFalse(row.message_container.isVisible())
+        self.assertFalse(row.message_label.isVisible())
+        self.assertIn(COLORS["error"],row.label.styleSheet())
+        self.assertIn(f"border-color: {COLORS['error']}",row.editor.styleSheet())
+        self.assertNotIn("background",row.editor.styleSheet())
+        self.assertFalse(row.editor.property("invalid"))
+        self.assertEqual(row.editor.accessibleDescription(),"Grenze überschritten")
+        animation=row._feedback_animation
+        self.assertEqual(animation.duration(),p.canvas._width_limit_animation.duration()+500)
+        animation.setCurrentTime(850)
+        self.assertEqual(row._feedback_amount,1)
+        animation.setCurrentTime(950)
+        self.assertAlmostEqual(row._feedback_amount,.5)
+        p.feedback(GeometryError("maximum_diameter_mm","Grenze weiter überschritten"),"points")
+        self.assertEqual(animation.currentTime(),950)
+        self.assertEqual(row.geometry(),geometry)
+        self.assertEqual(p.canvas.geometry(),canvas)
+        animation.setCurrentTime(1050)
+        self.assertEqual(row._feedback_amount,0)
+        self.assertEqual(row.label.styleSheet(),normal_label)
+        self.assertEqual(row.editor.styleSheet(),normal_editor)
+        p.feedback(GeometryError("maximum_diameter_mm","Erneuter Versuch"),"points")
+        self.assertEqual(row._feedback_amount,1)
+        for candidate in p.rows.values():
+            candidate.set_error("Grenze")
+            self.assertFalse(candidate.message_container.isVisible())
+            self.assertIn(COLORS["error"],candidate.label.styleSheet())
+            candidate.set_error(None)
+
+    def test_rotation_zero_is_centered_and_negative_angles_and_reset_work(self):
+        from PySide6.QtWidgets import QStyle,QStyleOptionSlider
+        p=self.panel;slider=p.rotation_slider
+        option=QStyleOptionSlider();slider.initStyleOption(option)
+        handle=slider.style().subControlRect(QStyle.ComplexControl.CC_Slider,option,QStyle.SubControl.SC_SliderHandle,slider)
+        self.assertLessEqual(abs(handle.center().x()-slider.width()/2),2)
+        slider.setValue(-47)
+        deadline=time.monotonic()+1
+        while p.canvas.object_rotation != -47 and time.monotonic()<deadline:QTest.qWait(20)
+        self.assertEqual(p.canvas.object_rotation,-47)
+        self.assertEqual(p.rotation_label.text(),"-47,00°")
+        self.assertTrue(p.rotation_reset.isEnabled())
+        QTest.keyClick(slider,Qt.Key.Key_Home);self.assertEqual(slider.value(),-180)
+        QTest.keyClick(slider,Qt.Key.Key_End);self.assertEqual(slider.value(),180)
+        p.rotation_reset.click()
+        self.assertEqual((slider.value(),p.canvas.object_rotation),(0,0))
+        self.assertFalse(p.rotation_reset.isEnabled())
+
+    def test_exact_silhouette_follows_fixed_views_and_rotation_and_reuses_picture_for_navigation(self):
+        from cooling_tower.gui import manual_view_worker
+        p=self.panel;c=p.canvas
+        for view in ("side","front","top","bottom","free"):
+            c.set_view(view);p.change_setting("object_resolution_percent",5)
+            self.assertEqual(c._spatial_render_frame().exact_silhouette,view!="free")
+            c._object_cache=None
+            with patch.object(manual_view_worker,"original_silhouette_path",wraps=manual_view_worker.original_silhouette_path) as contours:
+                c.grab()
+                self.assertEqual(contours.call_count,0 if view=="free" else 1)
+                picture=c._object_cache
+                c.pan+=QPointF(12,7);c.zoom*=1.2;c.grab()
+                self.assertIs(c._object_cache,picture)
+                contours.reset_mock()
+                c.set_rotation(37 if c.object_rotation!=37 else -37);c.grab()
+                self.assertIsNot(c._object_cache,picture)
+                self.assertEqual(contours.call_count,0 if view=="free" else 1)
+
     def test_height_grip_snaps_to_object_top_and_layers_with_optional_continuous_drag(self):
         p=self.panel;canvas=p.canvas
         object_top=self.reference.context.layers[-1].z_mm
@@ -134,7 +255,7 @@ class ManualGuiTests(unittest.TestCase):
                     p.select("foot_height" if identity=="control:0:2" else "foot" if identity.startswith("control:") else identity)
                     canvas.fit_scene();canvas.zoom=2
                     handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
-                    canvas.pan+=QPointF(0,canvas.height()/2-handle.y())
+                    canvas.pan+=QPointF(canvas.width()/2-handle.x(),canvas.height()/2-handle.y())
                     handle=next(pos for name,pos,_ in canvas.handles() if name==identity)
                     target=(handle+QPointF(0,-24)).toPoint()
                     QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=handle.toPoint())
@@ -260,8 +381,7 @@ class ManualGuiTests(unittest.TestCase):
                     ("base",15,12,"maximum_diameter_mm"),
                     ("base",2,5,"minimum_diameter_mm"),
                     ("top_width",15,12,"maximum_diameter_mm"),
-                    ("top_width",2,5,"minimum_diameter_mm"),
-                    ("foot",35,30,"maximum_foot_diameter_mm")):
+                    ("top_width",2,5,"minimum_diameter_mm")):
                     with self.subTest(view=view,identity=identity,setting=setting):
                         c._hide_width_limit_guide();c._width_limit_last_request=None
                         actual="top" if identity=="top_width" else identity
@@ -460,6 +580,7 @@ class ManualGuiTests(unittest.TestCase):
         source=self.reference.object_triangles.copy()
         for view,yaw in (("side",0),("front",90)):
             c.set_view(view)
+            p.change_setting("object_resolution_percent",15)
             c._object_cache=None
             with patch.object(c,"_tower_picture",wraps=c._tower_picture) as tower,\
                  patch.object(manual_view_worker,"draw_surface",wraps=manual_view_worker.draw_surface) as surfaces:
@@ -474,7 +595,7 @@ class ManualGuiTests(unittest.TestCase):
             self.assertTrue(p.resolution_host.isVisible())
             original=c._object_cache
             with patch.object(manual_canvas,"render_spatial_object",wraps=manual_canvas.render_spatial_object) as render:
-                p.resolution_slider.setValue(10 if view=="side" else 1);c.grab()
+                p.resolution_slider.setValue(8 if view=="side" else 1);c.grab()
                 self.assertEqual(render.call_count,1)
             self.assertIsNot(c._object_cache,original)
             np.testing.assert_array_equal(self.reference.object_triangles,source)
@@ -602,14 +723,14 @@ class ManualGuiTests(unittest.TestCase):
             self.assertEqual(canvas._height_snap_z,object_top)
             QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=target)
 
-    def test_resolution_changes_only_original_view_and_has_ten_stages(self):
+    def test_resolution_changes_only_original_view_and_has_nine_stages(self):
         p=self.panel;canvas=p.canvas
-        self.assertEqual((p.resolution_slider.minimum(),p.resolution_slider.maximum(),p.resolution_slider.value()),(1,10,4))
-        self.assertEqual(p.settings.object_resolution_percent,10)
+        self.assertEqual((p.resolution_slider.minimum(),p.resolution_slider.maximum(),p.resolution_slider.value()),(1,9,1))
+        self.assertEqual(p.settings.object_resolution_percent,0)
         canvas.set_view("free");canvas.grab()
         original=canvas._object_cache;tower=canvas._tower_cache;key=canvas._spatial_key()
         artifact=p.draft.artifact_payload();source=self.reference.object_triangles.copy()
-        p.resolution_slider.setValue(10);canvas.grab()
+        p.resolution_slider.setValue(9);canvas.grab()
         self.assertEqual(p.settings.object_resolution_percent,100)
         self.assertNotEqual(canvas._spatial_key(),key)
         self.assertIsNot(canvas._object_cache,original)
@@ -622,7 +743,7 @@ class ManualGuiTests(unittest.TestCase):
             p.highlight_buttons["object"].click();canvas.grab()
             self.assertEqual(canvas.highlight,"object")
             self.assertTrue(p.highlight_buttons["object"].isChecked())
-            self.assertFalse(p.highlight_buttons["both"].isChecked())
+            self.assertFalse(p.highlight_buttons["tower"].isChecked())
             render.assert_not_called()
         self.assertIs(canvas._object_cache,cache)
         p.set_busy(True)
@@ -631,10 +752,58 @@ class ManualGuiTests(unittest.TestCase):
         self.assertTrue(p.resolution_slider.isEnabled())
 
     def test_resolution_slider_uses_requested_percentages(self):
-        for stage,percent in enumerate((1,3,5,10,15,20,25,50,75,100),1):
+        for stage,percent in enumerate((0,1,5,10,15,25,50,75,100),1):
             self.panel.resolution_slider.setValue(stage)
             self.assertEqual(self.panel.settings.object_resolution_percent,percent)
             self.assertEqual(self.panel.resolution_label.text(),f"{percent} %")
+
+    def test_resolution_defaults_follow_views_and_both_resets_keep_custom_choices(self):
+        p=self.panel
+        for view in ("side","top","bottom","free","front","top","side"):
+            with self.subTest(view=view):
+                p.canvas.set_view(view)
+                expected=0 if view in {"side","front"} else 15
+                self.assertEqual(p.settings.object_resolution_percent,expected)
+                self.assertEqual(p.default_value("object_resolution_percent"),expected)
+                self.assertFalse(p.resolution_reset.isEnabled())
+                self.assertFalse(p.can_reset_all())
+                p.change_setting("object_resolution_percent",75)
+                self.assertTrue(p.can_reset_all())
+                p.resolution_reset.click()
+                self.assertEqual(p.settings.object_resolution_percent,expected)
+                p.change_setting("object_resolution_percent",50)
+                p.reset_all()
+                self.assertEqual(p.settings.object_resolution_percent,expected)
+                self.assertFalse(p.can_reset_all())
+        p.change_setting("object_resolution_percent",75)
+        for view in ("top","free","front"):
+            p.canvas.set_view(view)
+            self.assertEqual(p.settings.object_resolution_percent,75)
+            self.assertTrue(p.resolution_reset.isEnabled())
+        p.initialize(self.reference,replace(p.settings,object_resolution_percent=25))
+        self.assertEqual(p.settings.object_resolution_percent,25)
+
+    def test_zero_uses_exact_fast_silhouette_without_mesh_proxy_or_artifact_changes(self):
+        import trimesh
+        from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
+        p=self.panel;c=p.canvas
+        triangles=trimesh.creation.icosphere(subdivisions=5).triangles.copy()
+        triangles.setflags(write=False)
+        reference=replace(self.reference,object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles))
+        p.initialize(reference)
+        before=p.draft.artifact_payload()
+        c.set_view("free")
+        c._render_manager=Mock()
+        try:
+            with patch.object(c,"_queue_spatial_render",side_effect=AssertionError("unnecessary delayed proxy")):
+                p.resolution_slider.setValue(1);c.grab()
+            self.assertEqual(p.settings.object_resolution_percent,0)
+            self.assertEqual(p.draft.artifact_payload(),before)
+            self.assertFalse(c._render_proxy)
+            picture=c._object_cache
+            c.pan+=QPointF(12,10);c.zoom*=1.2;c.grab()
+            self.assertIs(c._object_cache,picture)
+        finally:c._render_manager=None
 
     def test_limit_grips_use_diameter_scale_and_drag_in_tenth_millimetres(self):
         p=self.panel;c=p.canvas
@@ -722,6 +891,61 @@ class ManualGuiTests(unittest.TestCase):
         self.assertLess(rectangle.bottom(),c.height())
         self.assertAlmostEqual(rectangle.center().x(),c.profile_to_screen(0,0).x())
 
+    def test_straight_limit_guides_fade_from_tower_to_grip_in_each_view(self):
+        c=self.panel.canvas
+        for view in ("side","front","top","bottom"):
+            c.set_view(view)
+            c.grab()
+            with patch("cooling_tower.gui.widgets.manual_canvas.QPainter") as painter:
+                painter.return_value.font.return_value=QFont(c.font())
+                painter.return_value.fontMetrics.return_value=c.fontMetrics()
+                c.paintEvent(None)
+            gradients=[call.args[0].brush().gradient() for call in painter.return_value.setPen.call_args_list
+                       if hasattr(call.args[0],"brush") and call.args[0].brush().gradient() is not None]
+            for identity,end,kind in c.limit_handles():
+                if identity == "minimum_diameter_mm":continue
+                start,_=c.limit_geometry(identity)
+                gradient=next(g for g in gradients if g.start() == start and g.finalStop() == end)
+                self.assertEqual(gradient.start(),start)
+                self.assertEqual(gradient.finalStop(),end)
+                self.assertEqual(gradient.stops(),[(0.,QColor("#a3b1c0").darker(150)),(1.,QColor("#bec5ce"))])
+
+    def test_free_navigation_matches_automatic_preview_camera_gestures(self):
+        from cooling_tower.gui.widgets.preview_canvas import PreviewCanvas
+        c=self.panel.canvas;c.set_view("free")
+        auto=PreviewCanvas();self.addCleanup(auto.close)
+        auto.resize(c.size());auto.show();auto.set_navigation_enabled(True)
+        self.app.processEvents()
+        c.yaw_deg=auto.yaw_deg=-35
+        c.pitch_deg=auto.pitch_deg=25
+        c.pan=QPointF();auto.pan_x=auto.pan_y=0
+        before=self.panel.draft
+        origin=QPoint(130,150)
+        destination=origin+QPoint(80,60)
+        for button in (Qt.MouseButton.LeftButton,Qt.MouseButton.RightButton,Qt.MouseButton.MiddleButton):
+            for widget in (c,auto):
+                QTest.mousePress(widget,button,pos=origin)
+                event=QWheelEvent(QPointF(25,30),QPointF(widget.mapToGlobal(QPoint(25,30))),QPoint(),
+                                  QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,
+                                  Qt.ScrollPhase.NoScrollPhase,False)
+                widget.wheelEvent(event)
+                QTest.mouseMove(widget,destination)
+                QTest.mouseRelease(widget,button,pos=destination)
+            self.assertEqual(c.yaw_deg,auto.yaw_deg)
+            self.assertEqual(c.pitch_deg,auto.pitch_deg)
+            self.assertEqual((c.pan.x(),c.pan.y()),(auto.pan_x,auto.pan_y))
+            self.assertEqual(c.zoom,auto.zoom)
+        for zoom,delta in ((1,120),(1,-120),(49,120),(.051,-120)):
+            c.zoom=auto.zoom=zoom
+            for widget in (c,auto):
+                event=QWheelEvent(QPointF(25,30),QPointF(widget.mapToGlobal(QPoint(25,30))),QPoint(),
+                                  QPoint(0,delta),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,
+                                  Qt.ScrollPhase.NoScrollPhase,False)
+                widget.wheelEvent(event)
+            self.assertEqual(c.zoom,auto.zoom)
+            self.assertEqual((c.pan.x(),c.pan.y()),(auto.pan_x,auto.pan_y))
+        self.assertEqual(self.panel.draft,before)
+
     def test_settings_rail_animates_without_changing_form_and_survives_reversal_and_resize(self):
         p=self.panel;rail=p.settings_collapse_button
         p.move("base",10,8);before=p.draft
@@ -807,9 +1031,11 @@ class ManualGuiTests(unittest.TestCase):
             rectangle=c.plot_rect()
             top=c.profile_to_screen(0,120)
             bottom=c.profile_to_screen(0,0)
-            self.assertAlmostEqual(top.y(),rectangle.top())
+            self.assertGreaterEqual(top.y(),rectangle.top())
+            self.assertTrue(abs(top.y()-rectangle.top())<1e-7 or
+                            abs(c.transform()[0]*c._fit_width-rectangle.width())<1e-7)
             self.assertAlmostEqual(bottom.y(),rectangle.bottom())
-            self.assertGreaterEqual(top.y(),c.view_controls.geometry().bottom()+13)
+            self.assertGreaterEqual(top.y(),c.view_controls.geometry().bottom()+19)
             self.assertEqual(c.height()-bottom.y(),52)
             self.assertLess(c.minimum_measure_geometry()[-1].y()+23,c.height())
 
@@ -874,7 +1100,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(p.settings.maximum_foot_diameter_mm,25)
         self.assertEqual(p.draft.artifact_payload(),artifact)
         p.move_limit("maximum_foot_diameter_mm",1200)
-        self.assertEqual(p.settings.maximum_foot_diameter_mm,1000)
+        self.assertEqual(p.settings.maximum_foot_diameter_mm,p.reference.context.maximum_foot_diameter_mm)
         p.set_busy(True);before=p.draft
         p.move_limit("maximum_diameter_mm",50)
         self.assertEqual(p.draft,before)
@@ -904,7 +1130,7 @@ class ManualGuiTests(unittest.TestCase):
             c.grab()
             self.assertEqual(surface.call_count,120*(len(c._display_rings())-1))
         tower=c._tower_cache
-        p.change_setting("object_resolution_percent",1);c.grab()
+        p.change_setting("object_resolution_percent",5);c.grab()
         self.assertIs(c._tower_cache,tower)
         p.change_setting("object_resolution_percent",100);c.grab()
         self.assertIs(c._tower_cache,tower)
@@ -956,7 +1182,12 @@ class ManualGuiTests(unittest.TestCase):
         for view in ("side","front","top","bottom","free"):
             info.set_state(view,False)
             lines=info.instructions.text().splitlines()
-            self.assertEqual(lines[-2:],["• Mittlere Maustaste: Ansicht verschieben","• Mausrad: Zoom"])
+            if view in {"side","front"}:
+                self.assertTrue(any("Shift + Ziehen" in line for line in lines))
+                lines=[line for line in lines if "Shift + Ziehen" not in line]
+            self.assertEqual(lines[-2:],["• Rechte oder mittlere Maustaste: Ansicht verschieben" if view == "free" else
+                                        "• Mittlere Maustaste: Ansicht verschieben","• Mausrad: Zoom"])
+            if view == "free":self.assertEqual(lines[0],"• Linke Maustaste: Ansicht drehen")
             self.assertTrue(all(not line.endswith(".") for line in lines))
             if view in {"side","front"}:
                 self.assertEqual(lines[:4],["• Punkt ziehen: Form ändern",
@@ -1011,7 +1242,7 @@ class ManualGuiTests(unittest.TestCase):
             button.click()
             self.assertEqual(c.view,view)
             self.assertTrue(button.isChecked())
-            self.assertEqual(p.draft,before)
+            self.assertEqual(p.draft.artifact_payload(),before.artifact_payload())
         c.set_view("side")
         for width,rows in ((1200,1),(360,2),(1200,1)):
             c.resize(width,500);controls.relayout()
@@ -1075,11 +1306,11 @@ class ManualGuiTests(unittest.TestCase):
             self.assertTrue(p.resolution_host.isVisible())
         p.canvas.set_view("free");self.app.processEvents()
         slider=p.resolution_slider
-        slider.resize(420,36);slider.setValue(10)
+        slider.resize(420,36);slider.setValue(8)
         image=slider.grab().toImage()
         # Sample the actual groove, away from the thumb. Most stage positions
         # must still be green, while the high-resolution end is red.
-        for fraction in (.1,.45,.65):
+        for fraction in (.1,.3,.5):
             column=round((image.width()-1)*fraction)
             self.assertTrue(any(image.pixelColor(column,y).green()>image.pixelColor(column,y).red()
                                 for y in range(image.height())))
@@ -1087,30 +1318,45 @@ class ManualGuiTests(unittest.TestCase):
         self.assertTrue(any(image.pixelColor(column,y).red()>image.pixelColor(column,y).green()+60
                             for y in range(image.height())))
 
-    def test_resolution_heading_hides_side_hints_before_overlap_and_marks_all_stages(self):
+    def test_resolution_end_labels_have_a_separate_line_and_hide_before_touching(self):
         p=self.panel;p.canvas.set_view("free");self.app.processEvents()
         heading=p.resolution_heading
-        threshold=heading.title.sizeHint().width()+2*max(heading.faster.sizeHint().width(),heading.precise.sizeHint().width())+16
-        for width,visible in ((420,True),(threshold-1,False),(threshold,True),
-                              (heading.minimumWidth(),False),(420,True)):
-            heading.resize(width,heading.height());self.app.processEvents()
-            self.assertEqual(heading.faster.isVisible(),visible)
-            self.assertEqual(heading.precise.isVisible(),visible)
+        labels=p.resolution_end_labels
+        threshold=labels.sizeHint().width()
+        for width,visible in ((420,True),(threshold-1,False),(threshold,True),(65,False),(420,True)):
+            labels.resize(width,labels.height());self.app.processEvents()
+            self.assertEqual(labels.faster.isVisible(),visible)
+            self.assertEqual(labels.precise.isVisible(),visible)
             self.assertEqual(heading.title.text(),"Auflösung (STL)")
-            self.assertEqual((heading.faster.text(),heading.precise.text()),("performance","optik"))
-            self.assertFalse(any(label.wordWrap() for label in (heading.title,heading.faster,heading.precise)))
+            self.assertEqual((labels.faster.text(),labels.precise.text()),("Performance","Optik"))
+            self.assertFalse(any(label.wordWrap() for label in (heading.title,labels.faster,labels.precise)))
             if visible:
-                title_left=(width-heading.title.sizeHint().width())/2
-                self.assertLess(heading.faster.geometry().right(),title_left)
-                self.assertGreater(heading.precise.x(),width-title_left)
+                self.assertGreaterEqual(labels.precise.x()-labels.faster.geometry().right(),12)
+            self.assertEqual(heading.info_button.height(),heading.title.fontMetrics().height())
+            self.assertLess(heading.info_button.geometry().right(),heading.title.x())
+            self.assertLessEqual(abs(heading.info_button.geometry().center().y()-heading.title.geometry().center().y()),1)
+            self.assertIn("nur die Darstellung",heading.info_button.toolTip())
+            self.assertIn("voller Originalqualität",heading.info_button.toolTip())
+        heading_top=heading.mapTo(p.resolution_host,QPoint()).y()
+        labels_top=labels.mapTo(p.resolution_host,QPoint()).y()
+        slider_top=p.resolution_slider.mapTo(p.resolution_host,QPoint()).y()
+        self.assertLess(heading_top,labels_top)
+        self.assertLess(labels_top,slider_top)
+        self.assertLessEqual(slider_top+p.resolution_slider.height(),p.resolution_host.height())
+        self.assertLess(labels.faster.font().pointSizeF(),heading.title.font().pointSizeF())
+        self.assertEqual(heading.info_button.toolTip().splitlines(),[
+            "Diese Einstellung betrifft nur die Darstellung des Originalobjekts in der Vorschau.",
+            "Beim Export wird das Originalobjekt immer in voller Originalqualität exportiert."])
+        self.assertEqual(p.resolution_slider.toolTip().splitlines()[:2],[
+            "Performance → Optik:","0, 1, 5, 10, 15, 25, 50, 75, 100 %."])
         slider=p.resolution_slider
         slider.resize(420,36)
         with patch("cooling_tower.gui.widgets.manual_resolution_control.QPainter") as painter:
             slider.grab()
             marks=painter.return_value.drawLine.call_args_list
-        self.assertEqual(len(marks),10)
+        self.assertEqual(len(marks),9)
         positions=[call.args[0] for call in marks]
-        self.assertEqual(len(set(positions)),10)
+        self.assertEqual(len(set(positions)),9)
         self.assertTrue(all(0 <= x < slider.width() for x in positions))
         p.change_setting("object_resolution_percent",75)
         self.assertTrue(p.resolution_reset.isEnabled())
@@ -1119,7 +1365,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertFalse(p.resolution_reset.isEnabled())
         p.set_busy(False)
         p.resolution_reset.click()
-        self.assertEqual(p.settings.object_resolution_percent,10)
+        self.assertEqual(p.settings.object_resolution_percent,15)
         self.assertFalse(p.resolution_reset.isEnabled())
         self.assertEqual(p.resolution_reset.size(),p.rotation_reset.size())
 
@@ -1136,9 +1382,15 @@ class ManualGuiTests(unittest.TestCase):
         row.setParent(None);row.show()
         self.addCleanup(lambda:p.preview_container.layout().insertWidget(0,row))
         other_minimum=row._other_minimum_width()
-        self.assertEqual([p.highlight_buttons[key].text() for key in ("tower","both","object")],
-                         ["Turm","Keine","STL"])
-        self.assertTrue(p.highlight_buttons["both"].isChecked())
+        self.assertEqual([p.highlight_buttons[key].text() for key in ("tower","object")],
+                         ["Turm","STL"])
+        self.assertFalse(any(button.isChecked() for button in p.highlight_buttons.values()))
+        self.assertFalse(p.highlight_group.exclusive())
+        import math
+        from PySide6.QtGui import QFontMetrics
+        font=QFont(p.highlight_buttons["tower"].font());font.setBold(True)
+        former_width=math.ceil((max(QFontMetrics(font).horizontalAdvance(text) for text in ("Turm","Beide","Objekt"))+12)*4/3)
+        self.assertEqual(xray.preferred_button_width,math.ceil(former_width*6/5))
         for width,expected in ((other_minimum+xray.preferred_width+100,xray.preferred_width),
                                (other_minimum+xray.preferred_width,xray.preferred_width),
                                (other_minimum+xray.preferred_width-9,xray.preferred_width-9),
@@ -1154,7 +1406,7 @@ class ManualGuiTests(unittest.TestCase):
             self.assertEqual(p.highlight_title.text(),"X-Ray (Transparenz)" if expected==xray.preferred_width else "X-Ray")
         for button in p.highlight_buttons.values():
             style=button.styleSheet()
-            checked=style.split("QPushButton:checked {",1)[1].split("}",1)[0]
+            checked=style.rsplit("QPushButton:checked {",1)[1].split("}",1)[0]
             self.assertIn("background: qlineargradient",checked)
             self.assertIn("font-weight: bold",checked)
             self.assertNotIn("border:",checked)
@@ -1163,12 +1415,13 @@ class ManualGuiTests(unittest.TestCase):
     def test_xray_buttons_make_only_the_named_surface_transparent_in_every_view(self):
         p=self.panel;c=p.canvas
         for view in ("side","front","top","bottom","free"):
-            c.set_view(view);p.highlight_buttons["both"].click();c.grab()
+            c.set_view(view);c.set_highlight("both");c.grab()
             original=c._object_cache
             tower=c._tower_cache
-            for choice,object_opacity,tower_opacity in (("tower",1,.35),("object",.28,1),("both",1,1)):
+            for button,choice,object_opacity,tower_opacity in (("tower","tower",1,.35),("object","all",.28,.35),
+                    ("tower","object",.28,1),("object","both",1,1)):
                 with self.subTest(view=view,choice=choice):
-                    p.highlight_buttons[choice].click()
+                    p.highlight_buttons[button].click()
                     c._object_image_cache=None
                     with patch.object(c,"_draw_spatial_picture",wraps=c._draw_spatial_picture) as draw:
                         image=c.grab().toImage()
@@ -1185,14 +1438,28 @@ class ManualGuiTests(unittest.TestCase):
                             self.assertGreater(color.blue(),QColor(c.TOWER_COLOR).blue()+60)
                     self.assertIs(c._object_cache,original)
                     self.assertEqual(c.highlight,choice)
-                    self.assertTrue(p.highlight_buttons[choice].isChecked())
+                    self.assertEqual(p.highlight_buttons["tower"].isChecked(),choice in {"tower","all"})
+                    self.assertEqual(p.highlight_buttons["object"].isChecked(),choice in {"object","all"})
+                    for name,control in p.highlight_buttons.items():
+                        inactive=control.styleSheet().split("QPushButton {",1)[1].split("}",1)[0]
+                        self.assertIn("#fff6eb" if name=="tower" else "#f0f8fb",inactive)
+                        self.assertIn("border-top-color",control.styleSheet())
+                        self.assertIn("border-bottom-color",control.styleSheet())
+                        inset=control.styleSheet().split("QPushButton:pressed, QPushButton:checked {",1)[1].split("}",1)[0]
+                        self.assertIn("padding: 1px 4px 0 6px",inset)
+                        self.assertIn("stop:0 #efbc75" if name=="tower" else "stop:0 #93cee0",inset)
+            p.highlight_buttons["tower"].click();p.highlight_buttons["object"].click()
+            p.reset_all()
+            self.assertEqual(c.highlight,"both")
+            self.assertFalse(any(button.isChecked() for button in p.highlight_buttons.values()))
 
     def test_rotation_slider_magnetically_snaps_every_45_degrees_only_while_dragged(self):
         p=self.panel;slider=p.rotation_slider
         self.assertEqual(slider.tickInterval(),45)
+        self.assertEqual((slider.minimum(),slider.maximum(),slider.value()),(-180,180,0))
         slider.setSliderDown(True)
-        for stop in range(0,361,45):
-            slider.setValue(stop+2 if stop<360 else stop-2)
+        for stop in range(-180,181,45):
+            slider.setValue(stop+2 if stop<180 else stop-2)
             self.assertEqual(slider.value(),stop)
             self.assertEqual(p.rotation_label.text(),f"{stop},00°")
         slider.setValue(17)
@@ -1236,7 +1503,8 @@ class ManualGuiTests(unittest.TestCase):
         p.select("foot_height")
         self.assertEqual(canvas.selected_handle_text(),"Höhe: 8,00 mm")
         p.select("control:0:1")
-        self.assertIn("Höhe:",canvas.selected_handle_text())
+        self.assertEqual(canvas.information_identity(),"foot")
+        self.assertIn("25,00 mm",canvas.selected_handle_text())
         p.move("base",10.3,8);p.select("base")
         self.assertEqual(canvas.selected_handle_text(),"Grund: Ø 10,30 mm")
 
@@ -1369,7 +1637,7 @@ class ManualGuiTests(unittest.TestCase):
         self.panel.editors["point_diameter_mm"].setValue(30)
         self.assertEqual(self.panel.draft.points[2].position.diameter_mm,30)
         self.panel.reset_value("point_diameter_mm")
-        self.assertAlmostEqual(self.panel.draft.points[2].position.diameter_mm,5)
+        self.assertAlmostEqual(self.panel.draft.points[2].position.diameter_mm,30)
         self.panel.segment_combo.setCurrentIndex(1)
         self.assertTrue(self.panel.draft.curves[2].curved)
         self.assertTrue(any(h[0].startswith("control:") for h in self.panel.canvas.handles()))
@@ -1447,22 +1715,22 @@ class ManualGuiTests(unittest.TestCase):
         QTest.mousePress(canvas,Qt.MouseButton.RightButton,pos=QPoint(100,100))
         QTest.mouseMove(canvas,QPoint(130,115));QTest.mouseRelease(canvas,Qt.MouseButton.RightButton,pos=QPoint(130,115))
         self.assertEqual(canvas.view,"free")
-        self.assertEqual(self.panel.draft,before)
+        self.assertEqual(self.panel.draft.artifact_payload(),before.artifact_payload())
 
     def test_boundary_feedback_debounced_and_correct_field(self):
         self.panel.change_setting("maximum_foot_diameter_mm",30)
-        row=self.panel.rows["maximum_foot_diameter_mm"]
+        row=self.panel.rows["maximum_diameter_mm"]
         with patch.object(row,"set_error",wraps=row.set_error) as feedback:
             self.panel._begin_interaction()
             for width in (40,45,50):self.panel.move("base",width,8)
             self.assertEqual(feedback.call_count,1)
-            self.assertAlmostEqual(self.panel.draft.base_diameter_mm,30,places=6)
-            self.assertEqual(self.panel.settings.maximum_foot_diameter_mm,30)
+            self.assertAlmostEqual(self.panel.draft.base_diameter_mm,40,places=6)
+            self.assertEqual(self.panel.settings.maximum_foot_diameter_mm,42)
             self.panel._end_interaction()
-            QTest.qWait(750)
+            QTest.qWait(1150)
             self.assertEqual(feedback.call_count,2)
-        self.panel.editors["base_diameter_mm"].setValue(35)
-        self.assertIn("Fuß",self.panel.status_label.text())
+        self.panel.editors["base_diameter_mm"].setValue(45)
+        self.assertIn("Maximaldurchmesser",self.panel.status_label.text())
 
     def test_angle_activation_rejected_atomically(self):
         old=self.panel.draft
@@ -1816,7 +2084,7 @@ class ManualControllerTests(unittest.TestCase):
             self.assertTrue(w.reset_button.isEnabled())
             with patch.object(w,"_create_reset_defaults_message_box",return_value=box):
                 w.reset_button.click()
-            self.assertEqual(p.settings.object_resolution_percent,10)
+            self.assertEqual(p.settings.object_resolution_percent,0 if view in {"side","front"} else 15)
             self.assertEqual(w.collect_settings(),automatic)
 
     def test_manual_results_and_export_report_do_not_rate_target_times(self):
@@ -1873,7 +2141,7 @@ class ManualControllerTests(unittest.TestCase):
         automatic=w.collect_settings()
         p.change_setting("maximum_diameter_mm",35)
         p.change_setting("maximum_foot_diameter_mm",50)
-        p.change_setting("object_resolution_percent",3)
+        p.change_setting("object_resolution_percent",5)
         p.change_setting("layer_snap_enabled",False)
         p.move("foot",30,p.draft.first_layer_z_mm)
         p.move("foot_height",5,7)
@@ -1888,7 +2156,7 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.tower_reset_button.isEnabled())
         w.tower_reset_button.click()
         self.assertEqual(w.tower_reset_button.text(),"Turmform zurücksetzen")
-        self.assertEqual((p.settings.maximum_diameter_mm,p.settings.maximum_foot_diameter_mm),(40,80))
+        self.assertEqual((p.settings.maximum_diameter_mm,p.settings.maximum_foot_diameter_mm),(40,c.reference.context.maximum_foot_diameter_mm))
         for name in ("object_resolution_percent","layer_snap_enabled","color_reference_time_s","overhang_angle_deg"):
             self.assertEqual(getattr(p.settings,name),getattr(settings,name))
         self.assertEqual([point.kind for point in p.draft.points],["foot","base","top"])
@@ -2025,6 +2293,40 @@ class ManualControllerTests(unittest.TestCase):
         for _ in range(5):self.app.processEvents()
         self.assertEqual(p.canvas.geometry(),rectangle)
         self.assertEqual(p.canvas.mapToGlobal(QPoint()),position)
+
+    def test_preparation_header_and_preview_do_not_jump_during_feedback_frames(self):
+        p,w=self.panel,self.window
+        self.show_manual_footer()
+        rows=(("Dateiname","vasenform_wie_vorlage_120mm.stl"),
+              ("Slicer","Anycubic Slicer Next 2.0.0.3"),
+              ("Maschinenprofil","Anycubic Kobra 3 V2 0.4 nozzle - (Settings v2)"),
+              ("Filamentprofil","PLA - Tecbears - Schwarz (matt)"),
+              ("Prozessprofil","PLA - Tecbears - Schwarz (matt)"))
+        w.workflow_group.set_split_summary_columns((),rows)
+        class Recorder(QObject):
+            def eventFilter(inner,widget,event):
+                if event.type() in {QEvent.Type.Resize,QEvent.Type.Move,QEvent.Type.Paint}:
+                    inner.frames.append((w.workflow_group.header.height(),p.canvas.mapToGlobal(QPoint()).y()))
+                return False
+        recorder=Recorder(w);recorder.frames=[]
+        for widget in (w.workflow_group.header,p.canvas):widget.installEventFilter(recorder)
+        for width,height in ((1429,1362),(1429,1394),(1400,1362),(1450,1000),(1250,1394)):
+            w.resize(width,height);QTest.qWait(50)
+            for label in (p.status_label,p.result_label,p.action_hint):label.clear()
+            self.controller.refresh_footer();QTest.qWait(50)
+            header=w.workflow_group.header
+            self.assertEqual(header.minimumHeight(),header.maximumHeight())
+            baseline=(header.height(),p.canvas.mapToGlobal(QPoint()).y())
+            recorder.frames=[]
+            p.feedback(GeometryError("maximum_diameter_mm",
+                "Die vollständige Kurve überschreitet den Maximaldurchmesser."),"points")
+            w.workflow_group.set_split_summary_columns((),rows)
+            # A stable layout can require no paint at all; request one real
+            # frame while still recording every move/resize during feedback.
+            p.canvas.update()
+            QTest.qWait(750)
+            self.assertTrue(recorder.frames)
+            self.assertEqual(set(recorder.frames),{baseline})
 
     def test_main_preview_controls_fit_without_overlap_after_resizing(self):
         p,w=self.panel,self.window

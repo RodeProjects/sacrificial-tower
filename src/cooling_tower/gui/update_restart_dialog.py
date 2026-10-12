@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QWidget
 
 
 class UpdateRestartCountdownDialog(QMessageBox):
@@ -22,6 +22,18 @@ class UpdateRestartCountdownDialog(QMessageBox):
             "Abbrechen", QMessageBox.ButtonRole.RejectRole
         )
         self.cancel_button.setObjectName("updateRestartCancelButton")
+        self.restart_button = self.addButton(
+            "Jetzt neu starten", QMessageBox.ButtonRole.AcceptRole
+        )
+        self.restart_button.setObjectName("previewButton")
+        self.restart_button.clicked.connect(self._restart_now)
+        self.setDefaultButton(self.restart_button)
+        # Keep the requested order on Windows regardless of the platform's
+        # usual accept/reject ordering, with both actions at the bottom right.
+        button_box = self.findChild(QDialogButtonBox)
+        button_box.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        button_box.setStyleSheet("QDialogButtonBox { button-layout: 1; }")
+        button_box.setCenterButtons(False)
 
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
@@ -35,6 +47,8 @@ class UpdateRestartCountdownDialog(QMessageBox):
             return (
                 QDialog.DialogCode.Rejected
                 if self.clickedButton() is self.cancel_button
+                else QDialog.DialogCode.Accepted
+                if self.clickedButton() is self.restart_button
                 else result
             )
         finally:
@@ -52,7 +66,10 @@ class UpdateRestartCountdownDialog(QMessageBox):
     def _advance_countdown(self) -> None:
         self.remaining_seconds -= 1
         if self.remaining_seconds <= 0:
-            self._timer.stop()
-            self.accept()
+            self._restart_now()
             return
         self._refresh_message()
+
+    def _restart_now(self) -> None:
+        self._timer.stop()
+        self.accept()

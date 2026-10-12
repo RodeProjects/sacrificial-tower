@@ -171,7 +171,9 @@ Store-spezifische Variante der Distributionsdatei.
 - Während des Downloads kann der Vorgang abgebrochen werden; die unvollständige
   Datei und ihr temporärer Ordner werden entfernt. Nach erfolgreicher Prüfung
   läuft ein zehnsekündiger Neustart-Countdown, der ebenfalls abgebrochen werden
-  kann. In diesem Fall wird der bereits geladene Installer entfernt.
+  kann. Der blaue Button `Jetzt neu starten` rechts unten beendet den Countdown
+  sofort und startet denselben Installations-/Neustartablauf. `Abbrechen` steht
+  links daneben; beim Abbrechen wird der bereits geladene Installer entfernt.
 - HTTPS-Zertifikate werden über den nativen Windows-Zertifikatsspeicher
   geprüft.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung

@@ -375,6 +375,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 "Allgemeine Einstellungen …",
                 "Support & Diagnose …",
                 "Über Kühlturm-Generator",
+                "Freie Turmerstellung (nur STL)",
             ],
         )
         self.assertTrue(

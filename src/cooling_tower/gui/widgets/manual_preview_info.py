@@ -104,8 +104,11 @@ class ManualPreviewInformation(QWidget):
                  if view in {"side","front"} else
                  ["Punkt ziehen: Spitzenbreite ändern"] if view == "top" else
                  ["Punkt ziehen: Fußbreite ändern"] if view == "bottom" else
-                 ["Rechte Maustaste: Ansicht drehen"])
-        items += ["Mittlere Maustaste: Ansicht verschieben","Mausrad: Zoom"]
+                 ["Linke Maustaste: Ansicht drehen"])
+        if view in {"side","front"}:
+            items.insert(1,"Shift + Ziehen: nur waagerecht oder senkrecht")
+        items += ["Rechte oder mittlere Maustaste: Ansicht verschieben" if view == "free" else
+                  "Mittlere Maustaste: Ansicht verschieben","Mausrad: Zoom"]
         self.instructions.setText('\n'.join(f"• {item}" for item in items))
 
     def _set_legend_columns(self,width):
