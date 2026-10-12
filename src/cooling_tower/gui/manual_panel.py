@@ -792,7 +792,7 @@ class ManualGenerationPanel(QWidget):
         if row is not None and name not in self._interaction_feedback:
             self._interaction_feedback.add(name)
             row.set_error(str(error))
-            QTimer.singleShot(700,lambda:row.set_error(None))
+            QTimer.singleShot(700,row,lambda:row.set_error(None))
 
     def _begin_interaction(self): self._interaction_feedback.clear()
     def _end_interaction(self): self._interaction_feedback.clear(); self._sync()
@@ -939,7 +939,7 @@ class ManualGenerationPanel(QWidget):
             self.settings_pane._position_children()
         self.settings_visibility_changed.emit()
         if not self._settings_collapsed:
-            QTimer.singleShot(0,self._restore_settings_scroll_position)
+            QTimer.singleShot(0,self,self._restore_settings_scroll_position)
 
     def _restore_settings_scroll_position(self):
         if not self._settings_collapsed and not self._settings_transitioning:

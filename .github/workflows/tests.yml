@@ -54,7 +54,7 @@ jobs:
     needs: classify
     if: ${{ always() && !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.full-tests-required != 'false') }}
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
@@ -76,4 +76,4 @@ jobs:
         run: python setup_native.py build_ext --inplace
 
       - name: Run tests
-        run: python -m unittest discover -s tests -q
+        run: python scripts/run_isolated_tests.py

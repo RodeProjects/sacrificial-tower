@@ -10,7 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY","1")
 
-from PySide6.QtCore import QPointF,Qt,QPoint
+from PySide6.QtCore import QEvent,QPointF,Qt,QPoint
 from PySide6.QtGui import QWheelEvent,QFont,QFontDatabase,QColor,QImage,QPainter
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
@@ -1480,6 +1480,18 @@ class ManualGuiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertLessEqual(self.panel.draft.base_diameter_mm,self.panel.settings.maximum_diameter_mm+1e-6)
         self.assertIn("Maximaldurchmesser",self.panel.status_label.text())
+
+    def test_pending_feedback_is_cancelled_when_its_editor_is_deleted(self):
+        panel=ManualGenerationPanel()
+        panel.initialize(self.reference)
+        panel.feedback(GeometryError("maximum_diameter_mm","Test limit"),"points")
+        with patch("sys.excepthook") as unhandled:
+            panel.close()
+            self.app.processEvents()
+            panel.deleteLater()
+            self.app.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            QTest.qWait(750)
+            unhandled.assert_not_called()
 
     def test_numeric_step_beyond_hard_segment_range_is_reported(self):
         spin=self.panel.editors["circle_segments"]

@@ -57,6 +57,15 @@ stehen in `AGENTS.md`. Externe Slicer und Installer-Tests besitzen eigene Voraus
 ein übersprungener Test ersetzt keine echte Integrationsabnahme. Vorhandene
 Windows-Stressskripte und CI separat für Thread-/Prozessänderungen verwenden.
 
+GitHub Actions führt die vollständige Testauswahl mit
+`python scripts/run_isolated_tests.py` pro Testdateimuster in einem eigenen
+Python-Prozess aus. Jeder Prozess verwendet die normale `unittest`-Discovery
+einschließlich Unterpaketen; gleiche Dateinamen werden als gemeinsames Muster
+geprüft. Dadurch sammeln sich Qt-Objekte verschiedener GUI-Testmodule nicht
+bis zum gemeinsamen Interpreterende an. Fehler, Abstürze und ein Zeitlimit
+von zehn Minuten pro Muster lassen den Gesamtlauf fehlschlagen; der CI-Job
+ist einschließlich Prozessstarts auf 30 Minuten begrenzt.
+
 ## Native Erweiterung und Windows-Paket
 
 Eine für den eigenen Anwendungscode gültig lizenzierte Visual-Studio-/Build-Tools-

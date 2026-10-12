@@ -220,7 +220,7 @@ class WorkflowDefinitionTests(unittest.TestCase):
         self.assertIn('python-version: "3.13"', workflow)
         self.assertIn("python -m pip install --require-hashes -r requirements-windows.lock", workflow)
         self.assertIn("python setup_native.py build_ext --inplace", workflow)
-        self.assertIn("python -m unittest discover -s tests -q", workflow)
+        self.assertIn("python scripts/run_isolated_tests.py", workflow)
 
 
 if __name__ == "__main__":
