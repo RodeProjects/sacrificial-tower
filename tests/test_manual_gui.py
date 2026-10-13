@@ -213,23 +213,23 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual((slider.value(),p.canvas.object_rotation),(0,0))
         self.assertFalse(p.rotation_reset.isEnabled())
 
-    def test_exact_silhouette_follows_fixed_views_and_rotation_and_reuses_picture_for_navigation(self):
+    def test_exact_silhouette_follows_all_views_and_rotation_and_reuses_picture_for_navigation(self):
         from cooling_tower.gui import manual_view_worker
         p=self.panel;c=p.canvas
         for view in ("side","front","top","bottom","free"):
             c.set_view(view);p.change_setting("object_resolution_percent",5)
-            self.assertEqual(c._spatial_render_frame().exact_silhouette,view!="free")
+            self.assertTrue(c._spatial_render_frame().exact_silhouette)
             c._object_cache=None
             with patch.object(manual_view_worker,"original_silhouette_path",wraps=manual_view_worker.original_silhouette_path) as contours:
                 c.grab()
-                self.assertEqual(contours.call_count,0 if view=="free" else 1)
+                self.assertEqual(contours.call_count,1)
                 picture=c._object_cache
                 c.pan+=QPointF(12,7);c.zoom*=1.2;c.grab()
                 self.assertIs(c._object_cache,picture)
                 contours.reset_mock()
                 c.set_rotation(37 if c.object_rotation!=37 else -37);c.grab()
                 self.assertIsNot(c._object_cache,picture)
-                self.assertEqual(contours.call_count,0 if view=="free" else 1)
+                self.assertEqual(contours.call_count,1)
 
     def test_height_grip_snaps_to_object_top_and_layers_with_optional_continuous_drag(self):
         p=self.panel;canvas=p.canvas
@@ -765,6 +765,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual((p.resolution_slider.minimum(),p.resolution_slider.maximum(),p.resolution_slider.value()),(1,9,1))
         self.assertEqual(p.settings.object_resolution_percent,0)
         canvas.set_view("free");canvas.grab()
+        self.assertTrue(canvas._spatial_render_frame().exact_silhouette)
         original=canvas._object_cache;tower=canvas._tower_cache;key=canvas._spatial_key()
         artifact=p.draft.artifact_payload();source=self.reference.object_triangles.copy()
         p.resolution_slider.setValue(9);canvas.grab()
@@ -1470,6 +1471,10 @@ class ManualGuiTests(unittest.TestCase):
         self.assertLess(labels.faster.font().pointSizeF(),heading.title.font().pointSizeF())
         self.assertEqual(heading.info_button.toolTip().splitlines(),[
             "Diese Einstellung betrifft nur die Darstellung des Originalobjekts in der Vorschau.",
+            "0 % zeigt die Originalsilhouette. Alle Stufen darüber wählen die Netzqualität automatisch.",
+            "Der Prozentwert gewichtet Performance und Optik; er ist kein Anteil der Originalflächen.",
+            "Kleine Objekte behalten ihr Originalnetz. Unklare Bereiche bleiben geschützt.",
+            "Bei großen Objekten zeigen niedrige Stufen glatte Flächen, hohe Stufen mehr Netzdetails.",
             "Beim Export wird das Originalobjekt immer in voller Originalqualität exportiert."])
         self.assertEqual(p.resolution_slider.toolTip().splitlines()[:2],[
             "Performance → Optik:","0, 1, 5, 10, 15, 25, 50, 75, 100 %."])
@@ -2065,20 +2070,22 @@ class ManualGuiTests(unittest.TestCase):
         try:
             with patch.object(canvas,"_queue_spatial_render"):
                 for view in ("side","front","free","top","bottom"):
-                    canvas.view=view
-                    if view=="top":canvas.yaw_deg,canvas.pitch_deg=0,90
-                    elif view=="bottom":canvas.yaw_deg,canvas.pitch_deg=0,-90
+                    canvas.set_view(view)
                     for rotation in (0,37,90):
                         canvas.set_rotation(rotation)
-                        proxy=canvas.grab().toImage()
+                        canvas.fit_scene()
+                        canvas.grab()
+                        proxy=canvas._original_image().copy()
                         picture=render_spatial_object(reference,canvas._spatial_render_frame(),p.settings,None,vector=True)
                         canvas._spatial_succeeded(canvas._view_request_id,(canvas._spatial_key(),picture))
-                        completed=canvas.grab().toImage()
+                        canvas.grab()
+                        completed=canvas._original_image().copy()
                         def bounds(image):
                             data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(image.height(),image.bytesPerLine()//4,4)
-                            # BGRA: isolate the original object's teal surfaces/lines.
-                            rgb=data[:,:,:3].astype(int)
-                            mask=(rgb[:,:,0]>rgb[:,:,2]+35)&(rgb[:,:,1]>rgb[:,:,2]+35)&(rgb[:,:,2]<110)
+                            # Compare only the original image, including its new
+                            # blue backing. Toolbar/handles and tower occlusion
+                            # cannot be used to measure original-object bounds.
+                            mask=np.any(data[:,:,:3]!=np.array((242,236,230)),axis=2)
                             ys,xs=np.nonzero(mask)
                             self.assertTrue(len(xs))
                             return np.array((xs.min(),ys.min(),xs.max(),ys.max()))
@@ -2626,9 +2633,16 @@ class ManualControllerTests(unittest.TestCase):
         self._large_resolution_reference()
         p=self.panel;c=p.canvas
         before=p.draft.artifact_payload()
+        seen={}
         for stage in (0,5,0,5,0,1,0,1,0,75,0,75):
-            p.change_setting("object_resolution_percent",stage);c.grab()
+            if stage in seen:
+                with patch.object(c,"_queue_spatial_render",side_effect=AssertionError("cached resolution queued again")):
+                    p.change_setting("object_resolution_percent",stage);c.grab()
+                self.assertIs(c._object_cache,seen[stage])
+            else:
+                p.change_setting("object_resolution_percent",stage);c.grab()
             self._wait_resolution_render(timeout=2)
+            seen[stage]=c._object_cache
             self.assertEqual(p.draft.artifact_payload(),before)
 
     def test_resolution_render_cancels_active_job_and_ignores_stale_result(self):

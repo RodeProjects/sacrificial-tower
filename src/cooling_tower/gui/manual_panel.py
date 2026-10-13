@@ -198,7 +198,10 @@ class ManualGenerationPanel(QWidget):
         self.resolution_slider.setFixedHeight(20)
         self.resolution_slider.setMinimumWidth(65)
         self.resolution_slider.setToolTip("Performance → Optik:\n"+", ".join(map(str,OBJECT_RESOLUTION_STAGES))+" %.\n"
-            "0 %: hochauflösende Silhouette. Analyse und Druckdaten bleiben gleich.")
+            "0 %: hochauflösende Silhouette.\n"
+            "Über 0 %: automatische Netzqualität mit geschützter Mindestqualität.\n"
+            "Der Wert gewichtet Performance und Optik, nicht den Anteil der Flächen.\n"
+            "Analyse und Druckdaten bleiben gleich.")
         self.resolution_slider.setRange(1,len(OBJECT_RESOLUTION_STAGES))
         self.resolution_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.resolution_slider.setTickInterval(1)

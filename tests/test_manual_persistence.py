@@ -220,7 +220,7 @@ class ManualPersistenceTests(unittest.TestCase):
             self.assertEqual(settings.object_resolution_percent,value)
             self.assertEqual(settings.circle_segments,48)
             self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
-            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],8)
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],MANUAL_SCHEMA_VERSION)
             self.assertFalse(list(self.root.glob("*.tmp")))
         for value in (1,3,20,True,"1",1.,{"unit":"ratio","value":.01},-1,101):
             self.path.write_text(json.dumps({"manual_settings_schema_version":7,"manual":{"object_resolution_percent":value}}))
@@ -266,6 +266,45 @@ class ManualPersistenceTests(unittest.TestCase):
             self.assertEqual(s,ManualSettings())
             with self.assertRaises(VersionedDocumentWriteBlockedError): store.save(s)
             self.assertEqual(self.path.read_bytes(),original)
+
+    def test_v8_automatic_quality_migration_keeps_choices_and_backs_up_original(self):
+        for stage in (0,1,5,10,15,25,50,75,100):
+            original=json.dumps({"manual_settings_schema_version":8,"manual":{
+                "object_resolution_percent":stage,"circle_segments":48}}).encode()
+            self.path.write_bytes(original)
+            store=ManualSettingsStore(self.path);settings=store.load()
+            self.assertEqual(settings.object_resolution_percent,stage)
+            self.assertEqual(settings.circle_segments,48)
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],9)
+            self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+            store.save(settings)
+            self.assertFalse(list(self.root.glob("*.tmp")))
+
+    def test_v9_downgrade_does_not_reinterpret_quality_preferences_as_face_percentages(self):
+        for value in (1,100,False,"15",{"unit":"ratio","value":.15},-1,101):
+            original=json.dumps({"manual_settings_schema_version":9,"manual":{
+                "object_resolution_percent":value}}).encode()
+            self.path.write_bytes(original)
+            older=VersionedJsonStore(self.path,schema_key="manual_settings_schema_version",current_version=8)
+            with self.assertRaises(FutureSchemaVersionError):older.load()
+            with self.assertRaises(VersionedDocumentWriteBlockedError):older.save({"manual":{}})
+            self.assertEqual(self.path.read_bytes(),original)
+
+    def test_v8_migration_write_failure_concurrent_change_and_recovery_preserve_source(self):
+        original=b'{"manual_settings_schema_version":8,"manual":{"object_resolution_percent":15}}'
+        self.path.write_bytes(original);store=ManualSettingsStore(self.path)
+        with patch("cooling_tower.persistence.versioned_json.atomic_write_json",side_effect=OSError("disk unavailable")):
+            settings=store.load()
+        self.assertEqual(self.path.read_bytes(),original)
+        with self.assertRaises(VersionedDocumentWriteBlockedError):store.save(settings)
+        self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+        store=ManualSettingsStore(self.path);settings=store.load()
+        changed=self.path.read_bytes()+b" "
+        self.path.write_bytes(changed)
+        with self.assertRaises(ConcurrentDocumentChangeError):store.save(settings)
+        self.assertEqual(self.path.read_bytes(),changed)
+        store.recover()
+        self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
 
     def test_invalid_groups_do_not_leak_partially_and_bools_are_strict(self):
         self.path.write_text(json.dumps({"manual_settings_schema_version":1,"manual":{

@@ -1,7 +1,10 @@
 """Read-only mesh topology for fast, complete orthographic silhouettes."""
 from dataclasses import dataclass,field
+from collections import OrderedDict
+from threading import Lock
 import numpy as np
 from cooling_tower.preview.toolpath import PreviewCancelled
+from cooling_tower.preview.display_mesh import MeshTopology,build_mesh_topology
 
 
 def _check_cancel(event):
@@ -17,6 +20,9 @@ class MeshSilhouette:
     second_edges: np.ndarray
     first_faces: np.ndarray
     second_faces: np.ndarray
+    topology: MeshTopology=field(compare=False,repr=False)
+    contour_cache: OrderedDict=field(default_factory=OrderedDict,compare=False,repr=False)
+    contour_lock: Lock=field(default_factory=Lock,compare=False,repr=False)
 
     def contour_edges(self,direction,event=None):
         """Select only front/back transitions; internal mesh edges disappear."""
@@ -33,18 +39,11 @@ class MeshSilhouette:
 def build_mesh_silhouette(triangles,event=None):
     """Build adjacency once from exact source coordinates in owned memory."""
     _check_cancel(event)
-    vertices,inverse=np.unique(np.asarray(triangles).reshape(-1,3),axis=0,return_inverse=True)
-    _check_cancel(event)
-    faces=inverse.reshape(-1,3)
-    normals=np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0])
+    topology=build_mesh_topology(triangles,event)
+    vertices,faces,normals=topology.vertices,topology.faces,topology.normals
     directed=faces[:,(0,1,1,2,2,0)].reshape(-1,2)
-    _,groups,counts=np.unique(np.sort(directed,axis=1),axis=0,return_inverse=True,return_counts=True)
-    _check_cancel(event)
-    order=np.argsort(groups,kind="stable")
-    starts=np.cumsum(counts)-counts
-    first=order[starts]
-    second=order[starts+counts-1]
+    counts,first,second=topology.counts,topology.first,topology.last
     arrays=(vertices,normals,directed[first].copy(),directed[second].copy(),
             first//3,np.where(counts > 1,second//3,-1))
     for array in arrays:array.setflags(write=False)
-    return MeshSilhouette(triangles,*arrays)
+    return MeshSilhouette(triangles,*arrays,topology)

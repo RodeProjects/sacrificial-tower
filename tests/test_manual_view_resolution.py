@@ -43,7 +43,7 @@ class ManualViewResolutionTests(unittest.TestCase):
             data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(image.height(),image.bytesPerLine()//4,4)
             ys,xs=np.nonzero(data[:,:,3])
             return np.array((xs.min(),ys.min(),xs.max(),ys.max()))
-        for yaw,pitch in ((0,0),(90,0),(0,90),(0,-90)):
+        for yaw,pitch in ((0,0),(90,0),(0,90),(0,-90),(-35,25),(72,-18)):
             previous=None
             for rotation in (0,37,90):
                 frame=SpatialFrame(300,300,90,(0,0),yaw,pitch,(0,0),(0,0),(0,0),rotation,"both",True)
@@ -57,7 +57,7 @@ class ManualViewResolutionTests(unittest.TestCase):
                     self.assertNotEqual(image.pixelColor(150,150),QColor("#429baa"))
         self.assertFalse(triangles.flags.writeable)
 
-    def test_silhouette_clips_coarse_surfaces_out_of_holes_and_free_view_has_no_overlay(self):
+    def test_silhouette_clips_coarse_surfaces_out_of_holes_including_free_view(self):
         triangles=trimesh.creation.annulus(r_min=.4,r_max=1,height=1,sections=96).triangles
         reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
             silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=()),context=SimpleNamespace(layers=()))
@@ -67,8 +67,10 @@ class ManualViewResolutionTests(unittest.TestCase):
             image=rendering.render_spatial_object(reference,frame,settings,None)
         self.assertEqual(image.pixelColor(120,120).alpha(),0)
         self.assertGreater(image.pixelColor(180,120).alpha(),0)
-        with patch.object(rendering,"original_silhouette_path",side_effect=AssertionError("free-view overlay")):
-            rendering.render_spatial_object(reference,replace(frame,exact_silhouette=False,pitch=25,yaw=-35),settings,None)
+        free=replace(frame,pitch=25,yaw=-35)
+        with patch.object(rendering,"original_silhouette_path",wraps=rendering.original_silhouette_path) as contour:
+            rendering.render_spatial_object(reference,free,settings,None)
+        contour.assert_called_once()
 
     def test_reused_styles_keep_identical_colors_edges_and_transparent_pixels(self):
         brightness=np.linspace(.86,1.14,5120)
@@ -99,7 +101,7 @@ class ManualViewResolutionTests(unittest.TestCase):
                 self.assertEqual(actual,expected)
 
     def test_all_stages_reduce_complete_surfaces_without_mutating_source(self):
-        source=trimesh.creation.icosphere(subdivisions=4).triangles.copy()
+        source=trimesh.creation.icosphere(subdivisions=5).triangles.copy()
         original=source.copy();source.setflags(write=False)
         counts=[]
         for percent in OBJECT_RESOLUTION_STAGES[1:]:
@@ -109,13 +111,11 @@ class ManualViewResolutionTests(unittest.TestCase):
                 faces=np.arange(len(reduced)*3).reshape(-1,3),process=True)
             self.assertTrue(mesh.is_watertight)
             self.assertTrue(np.isfinite(reduced).all())
-            tolerance=.3 if percent < 5 else .15
-            np.testing.assert_allclose(reduced.min(axis=(0,1)),source.min(axis=(0,1)),atol=tolerance)
-            np.testing.assert_allclose(reduced.max(axis=(0,1)),source.max(axis=(0,1)),atol=tolerance)
+            np.testing.assert_allclose(reduced.min(axis=(0,1)),source.min(axis=(0,1)),atol=.042)
+            np.testing.assert_allclose(reduced.max(axis=(0,1)),source.max(axis=(0,1)),atol=.042)
         self.assertEqual(counts,sorted(counts))
-        self.assertLess(counts[list(OBJECT_RESOLUTION_STAGES[1:]).index(50)],len(source)*.6)
-        self.assertLess(counts[0],len(source)*.15)
-        self.assertIs(simplify_display_mesh(source,100),source)
+        self.assertLessEqual(counts[0],len(source)*.8)
+        self.assertGreater(counts[0],len(source)*.25)
         np.testing.assert_array_equal(source,original)
 
     def test_small_or_degenerate_sources_and_cancelled_reduction(self):
@@ -173,3 +173,28 @@ class ManualViewResolutionTests(unittest.TestCase):
         self.assertEqual(image.pixelColor(165,105),QColor(rendering.LayerRangeCanvas.OBJECT_COLOR))
         self.assertEqual(image.pixelColor(165,75),QColor(rendering.LayerRangeCanvas.CRITICAL_COLOR))
         self.assertEqual(image.pixelColor(120,105).alpha(),0)
+
+    def test_non_manifold_silhouette_matches_union_without_inventing_connections_or_clipping_faces(self):
+        # Open, irregularly wound shells, with one overused edge. The source
+        # triangle projection is the reference even when closed contours fail.
+        pieces=[]
+        for x in (-1,1):
+            mesh=trimesh.creation.box(extents=(.6,.6,1))
+            mesh.apply_translation((x,0,0))
+            triangles=mesh.triangles.copy()[1:]
+            triangles[::2]=triangles[::2,::-1]
+            pieces.extend((triangles,triangles[:1]))
+        triangles=np.concatenate(pieces)
+        topology=build_mesh_silhouette(triangles)
+        self.assertFalse(topology.topology.reliable_contours)
+        reference=SimpleNamespace(object_triangles=triangles,object_silhouette=topology,
+            silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=()),context=SimpleNamespace(layers=()))
+        for yaw,pitch in ((0,0),(-35,25),(0,90)):
+            frame=SpatialFrame(300,240,65,(0,0),yaw,pitch,(0,0),(0,0),(0,0),0,"both",True)
+            silhouette=rendering.render_spatial_object(reference,frame,replace(ManualSettings(),object_resolution_percent=0),None)
+            image=rendering.render_spatial_object(reference,frame,replace(ManualSettings(),object_resolution_percent=1),None)
+            for original,result in zip(np.frombuffer(silhouette.constBits(),dtype=np.uint8).reshape(-1,4),
+                                       np.frombuffer(image.constBits(),dtype=np.uint8).reshape(-1,4)):
+                if original[3]:self.assertGreater(result[3],0)
+            self.assertEqual(image.pixelColor(150,120).alpha(),0)
+        np.testing.assert_array_equal(triangles,np.concatenate(pieces))

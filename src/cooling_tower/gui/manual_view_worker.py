@@ -12,6 +12,7 @@ from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.manual.service import check_cancel
 from cooling_tower.preview import PreviewCancelled
 from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
+from cooling_tower.preview.display_mesh import SMALL_MESH_FACES,simplify_display_mesh
 
 
 @dataclass(frozen=True,slots=True)
@@ -109,52 +110,69 @@ def draw_surface(painter,polygon,color,brightness,style=None):
     painter.drawLines([QLineF(point,point+QPointF(1e-6,0)) for point in polygon])
 
 
-def simplify_display_mesh(triangles,percent,event=None):
-    """Cluster vertices for a complete coarse surface, never discard isolated faces.
+def draw_display_surface(painter,polygon,style,*,edges=False):
+    """Dense previews omit per-vertex dots and optional mesh-edge commands."""
+    fill,edge,_=style
+    painter.setBrush(fill)
+    painter.setPen(edge if edges else Qt.PenStyle.NoPen)
+    painter.drawPolygon(polygon)
 
-    Only preview coordinates are reduced. At 100% return the exact original.
-    The percentage is a face-count target, not a topology/print-accuracy claim.
+
+class RasterObjectPicture(QPicture):
+    """Immutable worker result with normal and per-surface X-ray rasters."""
+    def __init__(self):
+        super().__init__()
+        self.xray_picture=None
+        self.raster_size=(0,0)
+
+
+def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact_contour):
+    """Bound GUI replay cost to one image, independent of source face count.
+
+    Rasterization stays in the worker. Original contours remain vector paths
+    at viewport precision; the image only carries the shaded interior.
     """
-    if percent == 100 or len(triangles) <= 24:
-        return triangles
-    check_cancel(event)
-    vertices,inverse = np.unique(np.asarray(triangles).reshape(-1,3),axis=0,return_inverse=True)
-    faces = inverse.reshape(-1,3)
-    area = np.linalg.norm(np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0]),axis=1).sum()/2
-    target = max(12,round(len(triangles)*percent/100))
-    if area <= 1e-12:
-        return triangles
-    size = math.sqrt(area/target)
-    origin = vertices.min(axis=0)
-    best = triangles
-    for _ in range(4):
+    bounds=silhouette.boundingRect() if silhouette is not None and not silhouette.isEmpty() else QRectF()
+    if bounds.isEmpty():
+        low,high=projected.min(axis=(0,1)),projected.max(axis=(0,1))
+        bounds=QRectF(float(low[0]),float(low[1]),max(float(high[0]-low[0]),1e-6),max(float(high[1]-low[1]),1e-6))
+    pixels=round(512+768*settings.object_resolution_percent/100)
+    scale=pixels/max(bounds.width(),bounds.height(),1e-6)
+    bounds=bounds.adjusted(-2/scale,-2/scale,2/scale,2/scale)
+    width,height=math.ceil(bounds.width()*scale),math.ceil(bounds.height()*scale)
+    result=RasterObjectPicture()
+    result.raster_size=(width,height)
+    for opacity in (1,.28):
         check_cancel(event)
-        cells = np.floor((vertices-origin)/size).astype(np.int64)
-        _,groups = np.unique(cells,axis=0,return_inverse=True)
-        counts = np.bincount(groups)
-        reduced = np.column_stack([np.bincount(groups,weights=vertices[:,axis])/counts for axis in range(3)])
-        clustered = groups[faces]
-        valid = (clustered[:,0]!=clustered[:,1])&(clustered[:,1]!=clustered[:,2])&(clustered[:,2]!=clustered[:,0])
-        clustered = clustered[valid]
-        if not len(clustered):
-            size /= 2
-            continue
-        # Keep original winding while removing duplicate surface patches.
-        _,indices = np.unique(np.sort(clustered,axis=1),axis=0,return_index=True)
-        candidate = reduced[clustered[indices]]
-        if len(candidate) >= 4 and abs(len(candidate)-target) < abs(len(best)-target):
-            best = candidate
-        if len(candidate) <= target*1.1:
-            break
-        size *= max(1.15,math.sqrt(len(candidate)/target))
+        raster=QImage(width,height,QImage.Format.Format_ARGB32_Premultiplied)
+        raster.fill(Qt.GlobalColor.transparent)
+        painter=QPainter(raster)
+        try:
+            painter.scale(scale,scale)
+            painter.translate(-bounds.left(),-bounds.top())
+            paint(painter,opacity,False)
+        finally:painter.end()
+        picture=result if opacity==1 else QPicture()
+        painter=QPainter(picture)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            if exact_contour and silhouette is not None and not silhouette.isEmpty():
+                painter.setClipPath(silhouette)
+            painter.drawImage(bounds,raster)
+            painter.setClipping(False)
+            if exact_contour and silhouette is not None and not silhouette.isEmpty():
+                painter.setOpacity(opacity)
+                painter.strokePath(silhouette,cosmetic_pen(QColor("#429baa").darker(125),1))
+        finally:painter.end()
+        if opacity!=1:result.xray_picture=picture
     check_cancel(event)
-    return best
+    return result
 
 
 def silhouette_backing_color():
     # Keep the full contour visible around reduced facets without flattening
     # their shading. Object X-Ray still applies to the complete original.
-    return QColor(83,167,182,210)
+    return QColor(173,211,238,210)
 
 
 def render_silhouette_backing(reference,frame,event=None):
@@ -162,7 +180,8 @@ def render_silhouette_backing(reference,frame,event=None):
     try:
         path=original_silhouette_path(reference,frame,event)
         painter.fillPath(path,silhouette_backing_color())
-        painter.strokePath(path,cosmetic_pen(QColor("#429baa").darker(125),1))
+        if reliable_original_contours(reference):
+            painter.strokePath(path,cosmetic_pen(QColor("#429baa").darker(125),1))
     finally:painter.end()
     return picture
 
@@ -178,55 +197,109 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
         return render_silhouette_object(reference,frame,settings,event,image)
     center=np.asarray(reference.silhouette.center_xy)
     angle=math.radians(frame.object_rotation)
-    display_triangles=simplify_display_mesh(reference.object_triangles,settings.object_resolution_percent,event)
+    mesh=getattr(reference,"object_silhouette",None)
+    display_triangles=simplify_display_mesh(reference.object_triangles,settings.object_resolution_percent,event,
+        topology=mesh.topology if mesh is not None and mesh.source is reference.object_triangles else None)
     triangles=rotate_object(display_triangles,center,frame.object_center,frame.object_rotation)
     projected,depth=frame.project(triangles)
     brightness=surface_brightness(triangles,frame)
     order=np.argsort(depth.mean(axis=1))
-    painter=QPainter(image)
-    try:
-        if not vector:
-            painter.setOpacity(.28 if frame.highlight in {"object","all"} else 1)
-        base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa")
-        silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
+    base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa")
+    silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
+    styles,style_indices=surface_styles(base_color,brightness)
+    dense=len(reference.object_triangles)>SMALL_MESH_FACES
+    show_edges=settings.object_resolution_percent>=75
+    groups=defaultdict(list)
+    if settings.critical_layers_enabled:
+        for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
+            check_cancel(event)
+            color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
+                                               settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+            if color==QColor(LayerRangeCanvas.OBJECT_COLOR) or not len(section):continue
+            coordinates=np.empty((*section.shape[:-1],3))
+            sx,sy=section[...,0]-center[0],section[...,1]-center[1]
+            coordinates[...,0]=frame.object_center[0]+sx*math.cos(angle)-sy*math.sin(angle)
+            coordinates[...,1]=frame.object_center[1]+sx*math.sin(angle)+sy*math.cos(angle)
+            coordinates[...,2]=layer.z_mm
+            screens,_=frame.project(coordinates)
+            groups[color.rgb()].extend(QLineF(QPointF(*a),QPointF(*b)) for a,b in screens)
+
+    def paint(painter,opacity=1,outline=True):
+        painter.setOpacity(opacity)
         if silhouette is not None and not silhouette.isEmpty():
             painter.fillPath(silhouette,silhouette_backing_color())
             painter.setClipPath(silhouette)
-        styles,style_indices=surface_styles(base_color,brightness)
         for i,index in enumerate(order):
             if i%512==0:check_cancel(event)
-            draw_surface(painter,QPolygonF([QPointF(*p) for p in projected[index]]),base_color,brightness[index],
-                         styles[style_indices[index]])
-        if settings.critical_layers_enabled:
-            groups=defaultdict(list)
-            for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
-                check_cancel(event)
-                color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
-                                                   settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
-                if color==QColor(LayerRangeCanvas.OBJECT_COLOR) or not len(section):continue
-                coordinates=np.empty((*section.shape[:-1],3))
-                sx,sy=section[...,0]-center[0],section[...,1]-center[1]
-                coordinates[...,0]=frame.object_center[0]+sx*math.cos(angle)-sy*math.sin(angle)
-                coordinates[...,1]=frame.object_center[1]+sx*math.sin(angle)+sy*math.cos(angle)
-                coordinates[...,2]=layer.z_mm
-                screens,_=frame.project(coordinates)
-                groups[color.rgb()].extend(QLineF(QPointF(*a),QPointF(*b)) for a,b in screens)
-            for color,lines in groups.items():
-                check_cancel(event)
-                painter.setPen(cosmetic_pen(QColor.fromRgb(color),1.5));painter.drawLines(lines)
+            polygon=QPolygonF([QPointF(*p) for p in projected[index]])
+            style=styles[style_indices[index]]
+            if dense:draw_display_surface(painter,polygon,style,edges=show_edges)
+            else:draw_surface(painter,polygon,base_color,brightness[index],style)
+        for color,lines in groups.items():
+            check_cancel(event)
+            painter.setPen(cosmetic_pen(QColor.fromRgb(color),1.5));painter.drawLines(lines)
         if silhouette is not None and not silhouette.isEmpty():
             painter.setClipping(False)
-            painter.strokePath(silhouette,cosmetic_pen(base_color.darker(125),1))
+            if outline and reliable_original_contours(reference):
+                painter.strokePath(silhouette,cosmetic_pen(base_color.darker(125),1))
         check_cancel(event)
+
+    if dense and vector and len(projected):
+        return _raster_object_picture(projected,silhouette,frame,settings,paint,event,reliable_original_contours(reference))
+    painter=QPainter(image)
+    try:
+        paint(painter,.28 if not vector and frame.highlight in {"object","all"} else 1)
     finally:painter.end()
     return image
 
 
+def reliable_original_contours(reference):
+    mesh=getattr(reference,"object_silhouette",None)
+    return mesh is not None and mesh.source is reference.object_triangles and mesh.topology.reliable_contours
+
+
 def original_silhouette_path(reference,frame,event=None):
-    """Project exact contour edges using the same object rotation as the mesh."""
+    """Reuse the original contour across resolution changes and proxy/final views."""
+    check_cancel(event)
     mesh=getattr(reference,"object_silhouette",None)
     if mesh is None or mesh.source is not reference.object_triangles:
         mesh=build_mesh_silhouette(reference.object_triangles,event)
+    key=(frame.width,frame.height,frame.scale,frame.pan,frame.yaw,frame.pitch,
+         frame.world_origin,frame.projected_center,frame.object_center,frame.object_rotation)
+    with mesh.contour_lock:
+        cached=mesh.contour_cache.get(key)
+        if cached is not None:
+            mesh.contour_cache.move_to_end(key)
+            return QPainterPath(cached)
+    path=_build_original_silhouette_path(reference,frame,mesh,event)
+    check_cancel(event)
+    with mesh.contour_lock:
+        mesh.contour_cache[key]=QPainterPath(path)
+        while len(mesh.contour_cache)>8 or sum(item.elementCount()*32 for item in mesh.contour_cache.values())>16*1024*1024:
+            mesh.contour_cache.popitem(last=False)
+    return path
+
+
+def _build_original_silhouette_path(reference,frame,mesh,event=None):
+    """Project exact contour edges using the same object rotation as the mesh."""
+    if not mesh.topology.reliable_contours:
+        # Triangle projection works for open and non-manifold edge input.
+        # Equal screen winding produces a union without inventing a solid
+        # enclosure, closing existing holes or joining separated components.
+        projected,_=frame.project(rotate_object(reference.object_triangles,reference.silhouette.center_xy,
+                                                frame.object_center,frame.object_rotation))
+        path=QPainterPath();path.setFillRule(Qt.FillRule.WindingFill)
+        for index,triangle in enumerate(projected):
+            if index%512 == 0:check_cancel(event)
+            if not np.isfinite(triangle).all():continue
+            a,b=triangle[1]-triangle[0],triangle[2]-triangle[0]
+            cross=a[0]*b[1]-a[1]*b[0]
+            if cross == 0:continue
+            if cross < 0:triangle=triangle[::-1]
+            path.addPolygon(QPolygonF([QPointF(*point) for point in triangle]))
+            path.closeSubpath()
+        check_cancel(event)
+        return path
     yaw,pitch,angle=map(math.radians,(frame.yaw,frame.pitch,frame.object_rotation))
     direction=(math.sin(yaw+angle)*math.cos(pitch),math.cos(yaw+angle)*math.cos(pitch),math.sin(pitch))
     edges=mesh.contour_edges(direction,event)

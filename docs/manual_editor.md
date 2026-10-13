@@ -382,7 +382,9 @@ Der Regler **Auflösung (STL)** besitzt die neun Stufen **0 %, 1 %, 5 %, 10 %,
 Der Bereich erscheint in allen fünf Ansichten. Sein
 schriftgroßes Info-Icon links neben der Überschrift erklärt beim Überfahren,
 dass ausschließlich die Vorschau des Originals reduziert wird und der Export
-immer die volle Originalqualität erhält.
+immer die volle Originalqualität erhält. Alle Stufen über 0 % verwenden eine
+automatische Netzqualität; der Wert gewichtet Performance und Optik und ist
+kein prozentualer Anteil der Originalflächen.
 Die 0-%-Stufe ist hellblau und zeigt eine vollständige Silhouette ohne Netzlinien,
 Flächenbeleuchtung oder Netzreduktion. Ihre Konturen verwenden die exakten
 Originalkoordinaten und erhalten Löcher sowie getrennte Objektinseln.
@@ -390,7 +392,13 @@ Die Kanten-/Flächennachbarschaft wird einmal im Vorbereitungsjob in eigenem
 Speicher aufgebaut. Bei Kameraänderungen werden nur die sichtbaren Konturkanten
 ausgewählt und deren Endpunkte projiziert. Bei Pan/Zoom bleibt das vorhandene
 Vektorbild wiederverwendbar. Diese Variante hat den geringsten Zeichenaufwand;
-sie startet ohne verzögerte Netz-Drahtvorschau. Kritische Layerfarben bleiben
+geschlossene, eindeutig orientierte Netze starten ohne verzögerte Netz-Drahtvorschau.
+Gemeinsam genutzte non-manifold Knoten verhindern diesen schnellen Konturweg
+nicht, solange alle Kanten geschlossen und konsistent orientiert sind.
+Bei offenen, mehrfach belegten oder uneinheitlich orientierten Kanten wird stattdessen
+die Vereinigung der projizierten Originaldreiecke gefüllt; dadurch werden keine
+geschlossene Hülle, zusätzlichen Verbindungen oder geschlossenen Öffnungen
+angenommen. Umfangreiche Fälle werden im Hintergrund gezeichnet. Kritische Layerfarben bleiben
 verfügbar: in den Profilansichten als vollständige farbige Silhouettenbänder,
 in räumlichen Ansichten als Konturen. Umfangreiche Farbdaten werden weiterhin
 im Hintergrund vorbereitet; bis dahin bleibt die vollständige einfache
@@ -414,29 +422,86 @@ Beim Ansichtswechsel folgt die Auflösung dem neuen Standard, solange der bisher
 Standard eingestellt war. Individuell gewählte andere Stufen bleiben erhalten.
 Einzel-Reset und **Alles zurücksetzen** verwenden den Standard der aktuellen Ansicht;
 der reine Ansichtswechsel aktiviert bei sonst unverändertem Zustand keinen Reset.
-Der gewählte Prozentwert wird weiterhin als manuelle Präferenz gespeichert.
-Niedrigere Netzstufen reduzieren ausschließlich die räumlichen
-Originalflächen durch Zusammenfassen naher Meshknoten. Die Stufe beschreibt
-ein ungefähres Flächenbudget; es werden keine einzelnen Dreiecke ausgelassen,
-die sichtbare Löcher verursachen würden. 100 % verwendet die vollständige
-bisherige Originalauflösung. Kleine Meshes bleiben vollständig, wenn eine
-Reduktion keinen sinnvollen Vorteil bietet. Farbliche Original-Layerkonturen,
-Originaldaten, Analyse, Turm und Druckexport bleiben
+Der gewählte Prozentwert wird als manuelle Qualitätspräferenz in Schema 9
+gespeichert. Kleine Teilnetze mit höchstens 6.000 Dreiecken bleiben vollständig.
+Auch größere Teilnetze bleiben unverändert, wenn weniger als 20 % ihrer Flächen
+eingespart werden oder die Qualitätsprüfungen fehlschlagen. Niedrige positive
+Stufen bevorzugen Performance, hohe Stufen strengere geometrische Genauigkeit;
+auch 100 % verwendet diese automatische Entscheidung.
+
+`preview/display_mesh.py` verwendet eine begrenzte, vektorisierte Rasterreduktion
+ohne zusätzliche Bibliotheken. Nur über Originalkanten verbundene Punkte
+innerhalb desselben Teilobjekts dürfen zusammengefasst werden. Scharfe
+Kantenpunkte bleiben exakt. Das ungefähre Zielbudget steigt von etwa 4.000 auf
+16.000 Flächen; es hängt nicht proportional an der Originalpolygonzahl.
+Der maximale Punktversatz beträgt je nach Präferenz höchstens 2,0 bis 0,7 % der
+Teilobjektdiagonale, zusätzlich begrenzt auf 6 % seiner kleinsten räumlichen
+Ausdehnung. Größere Facetten dürfen ihre Normale um höchstens 35 Grad ändern;
+Facetten unterhalb des geometrischen Fehlermaßstabs dürfen stärker geglättet
+werden, aber keine Flächennormale darf umklappen. Die Oberflächenfläche darf um
+höchstens 5 % abweichen. Problematische Cluster werden lokal geschützt, statt das
+gesamte Teilobjekt beim ersten Fehlversuch auf Originalauflösung zurückzusetzen.
+Bei erforderlicher Verfeinerung werden überholte lokale Sperren zurückgesetzt.
+Es gibt höchstens 16 begrenzte Verfeinerungsdurchgänge im Hintergrund.
+Kandidaten müssen an ihren Kanten geschlossen und konsistent orientiert bleiben;
+Komponentenanzahl, Euler-Charakteristik und vorhandene singuläre Knotenpositionen
+bleiben erhalten. Das komplette direkte Nachbarschaftsnetz solcher Knoten bleibt
+unverändert. Neue singuläre Knoten sind nicht erlaubt.
+
+Offene, degenerierte, doppelte oder uneinheitlich orientierte Teilobjekte werden
+nicht reduziert oder repariert. Non-manifold Punktstellen allein führen nicht mehr
+zum pauschalen Rückfall: Ihre direkten Nachbarschaften bleiben geschützt, während
+sich der restliche sichere Bereich reduzieren lässt. Andere klar getrennte,
+sichere Teilobjekte können unabhängig reduziert werden. Exakte Koordinaten und vorhandene Kanten
+bestimmen die Komponenten; es gibt kein toleranzbasiertes Verschweißen.
+Die Punktverschiebung wird zusätzlich auf 20 % des konservativen Mindestabstands
+zwischen den Teilobjekt-Boundingboxen begrenzt. Bei überlappenden Boundingboxen
+(auch ineinanderliegenden Hüllen) bleiben die betroffenen Teilobjekte vollständig;
+bei mehr als 256 Komponenten entfällt die gesamte Reduktion. Diese Prüfungen ersetzen keine allgemeine
+Selbstschnittprüfung oder Reparatur der Original-STL. Eine aufwendige QEM-Optimierung,
+kamera-/zoomabhängige Netzneuberechnung und dauernde Laufzeitregelung werden nicht
+eingeführt. Die Topologie wird einmal vorbereitet, bis zu acht zuletzt verwendete
+Auflösungsvarianten bleiben im begrenzten Sitzungscache; Kameraänderungen verwenden
+sie erneut. Farbliche Original-Layerkonturen verwenden weiterhin ihre
+unreduzierten Quellkoordinaten; ihre Bildschirmzeichnung folgt bei großen Quellen
+der gewählten Rasterqualität. Originaldaten, Analyse, Turm und Druckexport bleiben
 in ihrer bisherigen Genauigkeit. Die Regleränderung erneuert nur den
 Original-Flächencache; Pan, Zoom, Einpassen und Transparenz bauen keine neuen
-Flächen. Für alle Netzstufen über 0 % zeigen **Nebeneinander**, **Voreinander**,
-**Draufsicht** und **Untersicht** zusätzlich die exakte Silhouette aus dem
+Flächen. Fertige Ansichten werden zusätzlich wiederverwendet: höchstens zehn
+Zeichenfolgen mit zusammen maximal 32 MiB einschließlich ihrer X-Ray-Varianten.
+Quellenwechsel löschen diesen Cache. Konturen werden unabhängig von der Netzstufe
+zwischengespeichert (höchstens acht Varianten, konservatives Speicherbudget 16 MiB).
+Das Zurückschalten auf eine bereits aufgebaute Stufe startet keinen neuen Worker.
+Für alle Netzstufen über 0 % zeigen alle fünf Ansichten einschließlich
+der **freien 3D-Ansicht** zusätzlich die exakte Silhouette aus dem
 vollständigen Originalnetz. Sie füllt die Außenform unter dem schattierten Netz
-mit einem dezent helleren Objektblau (`#4ea2b1`, 82 % Deckkraft);
+mit einem einfarbigen hellen Button-Blau (`#add3ee`, 82 % Deckkraft);
 Original-X-Ray wirkt weiterhin auf die gesamte Originaldarstellung.
-das Netz wird an dieser Kontur einschließlich innerer Öffnungen beschnitten.
+Das Netz wird an dieser Kontur einschließlich innerer Öffnungen beschnitten.
 Eine schmale Konturlinie macht die tatsächlichen Grenzen sichtbar. Die Netzstufe
-bestimmt weiterhin Flächendetails und Tiefe. Die freie 3D-Ansicht verwendet
-weiter die jeweilige Netzstufe ohne diese zusätzliche Kontur.
+bestimmt weiterhin Flächendetails und Tiefe. Für die Dreiecksvereinigung unsicherer
+Netze entfällt die Konturlinie, damit keine internen Dreieckskanten als Außenkontur
+erscheinen.
 Die Silhouette und das Netz verwenden dieselbe Objektdrehung und Projektion;
 ein neuer Winkel erneuert beides. Pan/Zoom verwenden das fertige Vektorbild erneut.
-Bei Hintergrundberechnung zeigt die feste Ansicht bereits die vollständige
-Silhouette, bis das Polygonnetz fertig ist.
+Bei Hintergrundberechnung zeigen auch freie Ansichten bereits die vollständige
+Silhouette geschlossener sicherer Netze, bis das Polygonnetz fertig ist. Bei
+unsicheren umfangreichen Netzen bleibt eine begrenzte Drahtvorschau sichtbar,
+bis die Originaldarstellung bereitsteht.
+
+Bei insgesamt mehr als 6.000 Originaldreiecken zeichnet der Worker die
+Flächenschattierung in ein eigenes begrenztes `QImage` und zeichnet dieses einmal
+in die fertige `QPicture`-Zeichenfolge. Die lange Bildkante steigt mit der
+Qualitätspräferenz von rund 512 auf 1.280 Pixel (plus kleiner Rand). Der GUI-Thread
+spielt beim Pan/Zoom dadurch ein Bild statt zehntausender Flächen-/Knotenbefehle
+ab. Originalkonturen bleiben Vektoren in tatsächlicher Bildschirmpräzision;
+innere Schattierung darf bei niedrigen Stufen bzw. starkem Zoom weicher sein.
+Alle großen Netzstufen verzichten auf Einzelpunkte; Kanten erscheinen erst ab
+75 %. Kleine Quellen behalten die volle vektorielle Detaildarstellung. Normal-
+und X-Ray-Bilder werden separat mit ihrer bisherigen Deckkraft pro Fläche
+berechnet; X-Ray wird nicht nachträglich als pauschale Bildtransparenz angenähert.
+Widget- oder `QPixmap`-Zugriffe erfolgen dabei nicht im Worker.
+
 Während eines Vorbereitungs-/Generierungs-/Exportauftrags ist der
 Auflösungsregler gesperrt.
 
@@ -628,11 +693,11 @@ Fenstergrößenänderung, Transparenz und Einpassen spielen die vorhandenen
 Flächen mit neuer Bildschirmtransformation ab. Änderungen an Quelle, Kamera,
 Originalrotation oder Flächenfarben erneuern nur die betroffene Darstellung.
 Die räumlichen Flächen besitzen eine kamerabezogene Facettenschattierung,
-kontrastierende Netzkanten und sichtbare Knoten. Details werden zusammen mit
+bei kleinen Netzen kontrastierende Netzkanten und sichtbare Knoten. Details werden zusammen mit
 jeder Fläche nach Tiefe gezeichnet, damit verdeckte Rückseiten verdeckt bleiben.
 Die Normalen werden erst nach der Originalrotation berechnet; 0° behält die
 ursprüngliche Orientierung. In Drauf-, Unter- und freier Ansicht verwenden Original
-und Turm dieselbe Darstellungsart; in den Referenzansichten bleibt der Turm ein Profil.
+und Turm dieselbe Beleuchtung; in den Referenzansichten bleibt der Turm ein Profil.
 Kosmetische Stifte halten Kanten- und Knotengrößen beim Zoom konstant.
 Identische gerundete Flächenfarben und ihre kosmetischen Kanten-/Knotenstifte
 werden pro Original-Renderjob nur einmal erzeugt und wiederverwendet. Die
@@ -649,29 +714,64 @@ Fenstergröße, Kamera oder Original-X-Ray erzeugen neue Bildpixel aus den vorha
 Flächen. Neue Quellen, Originalrotation, Auflösung, Farben und eintreffende
 Worker-Ergebnisse ersetzen zusätzlich die zugrunde liegende Original-Zeichenfolge
 und machen das Bild ungültig. Turm-X-Ray betrifft ausschließlich die danach
-gezeichnete Turmfläche. Das Bild wird nicht nachträglich skaliert oder nochmals
-transparent zusammengesetzt: Auch überlappende X-Ray-Netzkanten bleiben unverändert.
+gezeichnete Turmfläche. Der Bildschirmcache selbst wird nicht nachträglich
+transparent zusammengesetzt: Große Quellen verwenden die eigene, bereits mit
+Deckkraft pro Fläche aufgebaute X-Ray-Rastervariante. Ihre innere Schattierung
+wird bei geändertem Ausschnitt skaliert; die Originalkonturen bleiben Vektoren.
 Der zusätzliche Bildspeicher beträgt ungefähr `4 × Breite × Höhe × Pixeldichte²`
 Bytes (3,2 MB bei 1.000 × 800 Pixeln und einfacher Pixeldichte).
 Teure räumliche Originalflächen bzw. große Druckbahndarstellungen werden als
 `JobKind.MANUAL_VIEW` durch den bestehenden `BackgroundJobManager` vorbereitet.
 Ein kurzer Timer bündelt Kameradrehungen. Solange die Flächen fehlen, zeigt die
-Vorschau reduzierte Kanten desselben Original-STL, andernfalls echte Druckbahnen.
+Vorschau möglichst bereits die Originalsilhouette, bei unklaren Konturen reduzierte
+Kanten desselben Original-STL, andernfalls echte Druckbahnen.
 Proxy und vollständige Flächen verwenden dieselbe Originalrotation und denselben
 Mittelpunkt; 0° am Slider entspricht der Originalausrichtung. Auch die statischen
 Ansichten verwenden diese Rotation. Die Quellkoordinaten bleiben unverändert.
-Der Worker zeichnet ausschließlich in sein eigenes `QPicture`; `QPixmap` und
+Der Worker zeichnet ausschließlich in eigene `QPicture`-/`QImage`-Objekte; `QPixmap` und
 Widgets bleiben im GUI-Thread. Request-ID und vollständige Kamera-/Farbidentität
 verwerfen verspätete Ergebnisse. Ein Quellen-/Ansichtswechsel bricht ersetzte Jobs ab. Das
 Schließen des Hauptfensters verhindert neue Renderjobs und nutzt den zentralen
 kontrollierten Shutdown.
 Der Wechsel zu einer direkt gezeichneten Auflösungsstufe beendet ausstehende
 Renderaufträge und verwirft ihre verspäteten Ergebnisse. Beim erneuten Wählen
-derselben höheren Stufe wird ein neuer Auftrag eingeplant; eine gespeicherte
-Kennung allein gilt nicht als laufende Arbeit. Wird während des Abbruchs erneut
+derselben höheren Stufe wird eine fertige Cache-Zeichenfolge wiederverwendet oder
+ein neuer Auftrag eingeplant; eine gespeicherte Kennung allein gilt nicht als
+laufende Arbeit. Wird während des Abbruchs erneut
 gewechselt, startet der neueste Auftrag nach der Freigabe des alten Threads.
 
-Eine lokale Stichprobe am 11.10.2026 verwendete ein selbst erzeugtes Ellipsoid
+### Performance-Regressionsprüfung vom 13.10.2026
+
+Die erste automatische Umsetzung ließ das große Testmodell wegen 102 singulärer
+Punktstellen vollständig auf 88.924 Dreiecken und baute auch für 0 % eine
+aufwendige Vereinigung aller projizierten Dreiecke. Der gekürzte Körper enthält
+15 solche Punktstellen. Die ursprüngliche Einstufung koppelte unnötig die
+Reduktionsfreigabe an den schnellen Konturweg. Die Dreieck-/Punkt-Zeichenfolge des
+großen Körpers belegte rund 57,7 MB und brauchte etwa 628 ms für eine Wiedergabe.
+
+Lokale Stichprobe mit `700 × 1.000` Bildpixeln, Originalhöhe auf 750 Pixel
+eingepasst, Profilansicht ohne kritische Layerfarben, auf demselben Windows-Host:
+
+| Testmodell | Originaldreiecke | Dreiecke bei 1 % | Dreiecke bei 100 % | Aufbau 1 %, kalt | Wiedergabe 1 % | 0 % erster Aufbau / wiederholt |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `Test-STL (manifold).stl` | 88.924 | 40.714 | 47.024 | 945 ms | 4,2 ms | 17 / 0,9 ms |
+| `Test-STL (manifold) gekürzt.stl` | 40.598 | 17.062 | 25.996 | 381 ms | 2,3 ms | 6,7 / 0,6 ms |
+| `Test-STL Vase (manifold).stl` | 46.336 | 9.292 | 27.560 | 162 ms | 1,3 ms | 1,7 / 0,4 ms |
+
+Der kalte Aufbau umfasst Reduktion und beide Rasterbilder im Worker; beim
+erneuten Wählen einer bereits aufgebauten Stufe wird ihre gesamte Zeichenfolge
+wiederverwendet. Diese Werte sind modell-/geräteabhängig und messen nicht die
+komplette Anwendung. `test_manual_view_performance.py` sichert alle positiven
+Stufen der drei Modelle, den schnellen 0-%-Konturweg, erhaltene Topologie,
+begrenzte Zeichenfolgen-/Rastergrößen, erhaltene Öffnungen und Objektabstände in
+freier Projektion (auch mit offenen Kanten) und separate X-Ray-Deckkraft ab. Die
+zwei zusätzlich lokal bereitgestellten Modelle sind bei fehlenden Dateien optional.
+
+### Historische Performance-Messungen vom 11.10.2026
+
+Die folgenden Stichproben dokumentieren die historische Zeichenroutine vom
+11.10.2026, nicht die aktuelle automatische Qualitätswahl und begrenzte
+Rasterwiedergabe. Eine lokale Stichprobe verwendete ein selbst erzeugtes Ellipsoid
 aus einer Icosphere mit 5.120 Dreiecken, ohne kritische Layerkonturen. Median
 aus drei `QPicture`-Aufbauten pro Stufe auf demselben Windows-Host:
 
@@ -692,9 +792,9 @@ Durchläufen, etwa 28 % weniger Zeit). Die Wiedergabe des fertigen `QPicture`
 benötigte etwa 57 ms; das Kopieren eines bereits in genau diesem Bildausschnitt
 fertig gezeichneten Bildes etwa 0,52 ms. Beide Prototypen erzeugten in dieser
 Stichprobe pixelidentische Ergebnisse, normal und mit Original-X-Ray.
-Beide Optimierungen sind inzwischen in der Anwendung umgesetzt. Der zusätzliche
-Bildcache beschleunigt Wiederholungen desselben Bildausschnitts; geänderte
-Bildtransformationen werden weiterhin exakt aus den Flächen gezeichnet. Der Faktor
+Beide Optimierungen wurden damals in der Anwendung umgesetzt. Der zusätzliche
+Bildcache beschleunigte Wiederholungen desselben Bildausschnitts; geänderte
+Bildtransformationen wurden weiterhin exakt aus den Flächen gezeichnet. Der Faktor
 über 100 aus dieser vorangegangenen Prototypmessung gilt ausschließlich für die isolierte
 Original-Wiedergabe dieser Stichprobe, nicht für die komplette Vorschau oder
 Anwendung. Andere Modelle, kritische Konturen und Geräte benötigen eigene Prüfungen.
@@ -707,8 +807,9 @@ isolierte Originalwiedergabe von **63,2 auf 0,53 ms**, mit Original-X-Ray von
 der vorherigen Zeichenroutine in beiden Fällen pixelidentisch. Diese lokale
 Stichprobe betrifft ausschließlich Originalaufbau und -wiedergabe; vollständige
 Vorschauzeiten enthalten zusätzlich Turm und Bedienelemente. Zoomen und Verschieben
-benötigen weiterhin eine neue Rasterisierung und erhalten nur den schnelleren
-Flächenaufbau sowie dessen vorhandene Zeichenfolge.
+benötigten damals weiterhin eine neue Rasterisierung aller Flächen. Für große
+Quellen ersetzt die Umsetzung vom 13.10.2026 diese Arbeit nun durch die
+Wiedergabe der begrenzten Worker-Rasterbilder und der Originalkonturen.
 
 ## Ein unveränderter Prüfslice
 

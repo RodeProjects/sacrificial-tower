@@ -46,7 +46,7 @@ class ManualSettings:
     overhang_user_set: bool = False
     critical_layers_enabled: bool = False
     layer_snap_enabled: bool = True
-    object_resolution_percent: int = object_resolution_default()
+    object_resolution_percent: int = object_resolution_default()  # 0: silhouette; >0: automatic quality preference
     gradient_start_deficit_s: float = 0.0
     gradient_full_deficit_s: float = 1.0
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from cooling_tower.manual.geometry import GeometryError, ManualSettings, validate_settings
 from cooling_tower.persistence.versioned_json import VersionedJsonStore, VersionedDocumentError
 
-MANUAL_SCHEMA_VERSION = 8
+MANUAL_SCHEMA_VERSION = 9
 
 
 def migrate_manual_v1(payload):
@@ -107,6 +107,16 @@ def migrate_manual_v7(payload):
     return {**payload,"manual_settings_schema_version":8,"manual":manual}
 
 
+def migrate_manual_v8(payload):
+    """Interpret existing preview selections as automatic quality preferences."""
+    raw=payload.get("manual",{})
+    manual=dict(raw) if isinstance(raw,dict) else {}
+    value=manual.get("object_resolution_percent")
+    if type(value) is not int or value not in (0,1,5,10,15,25,50,75,100):
+        manual["object_resolution_percent"]=0
+    return {**payload,"manual_settings_schema_version":9,"manual":manual}
+
+
 class ManualSettingsStore:
     def __init__(self, path: Path):
         self.store = VersionedJsonStore(path, schema_key="manual_settings_schema_version",
@@ -118,7 +128,8 @@ class ManualSettingsStore:
                                                     4: migrate_manual_v4,
                                                     5: migrate_manual_v5,
                                                     6: migrate_manual_v6,
-                                                    7: migrate_manual_v7},
+                                                    7: migrate_manual_v7,
+                                                    8: migrate_manual_v8},
                                         normalizer=normalize_manual_settings,
                                         document_name="Die manuellen Einstellungen")
         self.warning = None

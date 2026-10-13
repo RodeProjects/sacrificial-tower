@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from collections import defaultdict
+from collections import defaultdict,OrderedDict
 from bisect import bisect_left
 
 import numpy as np
@@ -104,6 +104,7 @@ class ManualCanvas(QWidget):
         self._object_image_key = None
         self._object_image_picture = None
         self._object_render_key = None
+        self._object_pictures=OrderedDict()
         self._object_array = np.empty((0, 2, 3))
         self._rings = ()
         self._tower_cache = None
@@ -150,6 +151,7 @@ class ManualCanvas(QWidget):
         self.reference = None
         self._object_cache = None
         self._object_image_cache = self._object_image_key = self._object_image_picture = None
+        self._object_pictures.clear()
 
     def _spatial_frame(self):
         if self.view in {"side","front"}:
@@ -162,7 +164,7 @@ class ManualCanvas(QWidget):
         return SpatialFrame(self.width(),self.height(),self.transform()[0],
                             (self.pan.x()+center.x()-self.width()/2,self.pan.y()+center.y()-self.height()/2),
                             self.yaw_deg,self.pitch_deg,self._world_origin,self._spatial_center,self._object_center,
-                            self.object_rotation,self.highlight,self.view in {"top","bottom"})
+                            self.object_rotation,self.highlight,True)
 
     def _spatial_render_frame(self):
         # Build projected surfaces once. Viewport translation/scale are applied
@@ -210,6 +212,7 @@ class ManualCanvas(QWidget):
         if request_id == self._view_request_id and key == self._spatial_key():
             self._object_cache = img
             self._object_render_key = key
+            self._remember_object_picture(key,img)
             self._render_proxy = False
             self.update()
 
@@ -579,8 +582,24 @@ class ManualCanvas(QWidget):
     def _render_object(self):
         native = self.reference.object_triangles
         silhouette = self.draft.settings.object_resolution_percent == 0
+        mesh=getattr(self.reference,"object_silhouette",None)
+        fast_contour=mesh is not None and mesh.source is native and mesh.topology.reliable_contours
+        key=self._spatial_key()
+        cached=self._object_pictures.get(key)
+        if cached is not None:
+            self._object_pictures.move_to_end(key)
+            self._render_timer.stop()
+            if self._render_job and self._render_manager is not None:
+                self._view_request_id+=1
+                self._render_manager.cancel_job(self._render_job,reason="manual_view_cached")
+            self._object_cache=cached
+            self._object_render_key=key
+            self._render_proxy=False
+            self._render_desired=self._render_failure_key=None
+            self.setAccessibleDescription("")
+            return
         asynchronous = self._render_manager is not None and (
-            (native is not None and len(native)>4000 and (not silhouette or self.draft.settings.critical_layers_enabled))
+            (native is not None and len(native)>4000 and (not silhouette or not fast_contour or self.draft.settings.critical_layers_enabled))
             or (native is None and len(self._object_array)>4000))
         if not asynchronous:
             self._render_timer.stop()
@@ -592,17 +611,18 @@ class ManualCanvas(QWidget):
             self._object_cache = render_spatial_object(self.reference,self._spatial_render_frame(),
                                                      self.draft.settings,None,vector=True)
             self._object_render_key = self._spatial_key()
+            self._remember_object_picture(self._object_render_key,self._object_cache)
             self._render_proxy = False
             return
         self._queue_spatial_render()
-        if silhouette and native is not None:
+        if silhouette and native is not None and fast_contour:
             # Show the exact light contour immediately while colored layer
             # bands are prepared; the 0% stage never shows a mesh-wire proxy.
             self._object_cache=render_spatial_object(self.reference,self._spatial_render_frame(),
                 replace(self.draft.settings,critical_layers_enabled=False),None,vector=True)
             self._object_render_key=self._spatial_key()
             return
-        if self.reference.object_triangles is not None and self.view in {"side","front","top","bottom"}:
+        if self.reference.object_triangles is not None and fast_contour:
             self._object_cache=render_silhouette_backing(self.reference,self._spatial_render_frame())
             self._object_render_key=self._spatial_key()
             return
@@ -625,6 +645,14 @@ class ManualCanvas(QWidget):
         painter.end()
         self._object_cache = picture
         self._object_render_key = self._spatial_key()
+
+    def _remember_object_picture(self,key,picture):
+        self._object_pictures[key]=picture
+        self._object_pictures.move_to_end(key)
+        def size(item):
+            return item.size()+(item.xray_picture.size() if getattr(item,"xray_picture",None) is not None else 0)
+        while len(self._object_pictures)>10 or sum(size(item) for item in self._object_pictures.values())>32*1024*1024:
+            self._object_pictures.popitem(last=False)
 
     def _surface_color(self, z):
         s = self.draft.settings
@@ -700,7 +728,11 @@ class ManualCanvas(QWidget):
                           frame.height/2+frame.pan[1]+frame.projected_center[1]*scale)
         painter.scale(scale,scale)
         painter.setOpacity(opacity)
-        painter.drawPicture(0,0,picture)
+        xray=getattr(picture,"xray_picture",None)
+        if xray is not None and opacity==.28:
+            painter.setOpacity(1)
+            painter.drawPicture(0,0,xray)
+        else:painter.drawPicture(0,0,picture)
         painter.restore()
 
     def _original_image(self):

@@ -411,7 +411,15 @@ Die historischen 6→7-Regeln bleiben erhalten: Eine ursprünglich dort gespeich
 1-%- oder 3-%-Wahl wird bei einem mehrstufigen Sprung weiterhin zuerst zu 5 %.
 Schema 8 verwendet dieselben ansichtsabhängigen Standards. Ältere Versionen mit
 Schema 7 dürfen neue Dateien einschließlich 1-%-Werten nicht lesen oder überschreiben.
-Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8 wird das Original gesichert,
+8→9 ändert die Bedeutung positiver `object_resolution_percent`-Werte: Sie sind
+nun Gewichtungen der automatischen Vorschauqualität zwischen Performance und
+Optik, keine gewünschten Flächenprozente. 0 bleibt die Originalsilhouette.
+Alle in Schema 8 gültigen strikten Integer-Stufen bleiben als entsprechende
+Präferenz erhalten; ungültige Werte/Typen/Einheiten fallen auf 0 zurück.
+Ansichtsstandards und Druck-/Artefaktdaten bleiben unverändert. Ältere Versionen
+mit Schema 8 dürfen Schema 9 nicht lesen oder überschreiben, damit eine
+Qualitätspräferenz nicht als früheres Flächenbudget interpretiert wird.
+Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8→9 wird das Original gesichert,
 anschließend atomar gespeichert. Alle früheren Migrationsschritte bleiben erhalten.
 
 Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
