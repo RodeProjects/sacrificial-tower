@@ -46,6 +46,13 @@ QWidget#mainHeader[scrolled="true"] {
     border-bottom: 1px solid #cbd6e1;
 }
 
+QPushButton#preparationViewButton:checked,
+QPushButton#preparationMethodButton:checked {
+    background: #e7f1fa;
+    border-color: #84abc8;
+    color: #17486d;
+}
+
 QWidget#mainFooter {
     background: #f3f6f9;
     border-top: 1px solid #cbd6e1;
@@ -272,6 +279,10 @@ QFrame#sectionCard[outerDropdown="true"][state="error"] {
    einfärben. */
 QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="false"] {
     border-left-color: #d6dee8;
+}
+
+QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="false"][state="success"] {
+    border-left-color: #238a5b;
 }
 
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] {

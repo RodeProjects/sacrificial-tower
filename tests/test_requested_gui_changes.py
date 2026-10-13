@@ -1213,10 +1213,11 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window.settings_content, QPoint(0, 0)
             ).y(),
         )
-        self.assertGreater(
-            grid.mapTo(window.settings_content, QPoint(0, 0)).y(),
-            window.workflow_group.geometry().bottom(),
+        self.assertIs(window.window_pages.currentWidget(), window.main_surface)
+        self.assertTrue(
+            window.preparation_workspace_layout.indexOf(window.workflow_group) >= 0
         )
+        self.assertTrue(window.workflow_group.isHidden())
 
         window.geometry_settings_group.setChecked(False)
         window.prediction_frame.setChecked(False)

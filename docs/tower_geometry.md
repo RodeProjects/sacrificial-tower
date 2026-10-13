@@ -426,8 +426,8 @@ Wird die Canvas nach dem Einblenden neu positioniert,
 folgen ihr die Navigationselemente. Die vier Ansichtsbuttons über der Canvas
 sind 32 px hoch.
 
-Nach Abschluss der Datei-/Slicer-Vorbereitung schließt sich deren Bereich und
-die zentrierte Auswahlüberschrift „Wie soll der Kühlturm erstellt werden?“ erscheint. Die Karten
+Nach Abschluss der Datei-/Slicer-Vorbereitung erscheint die fensterfüllende
+Methodenauswahl mit der zentrierten Überschrift „Wie soll der Kühlturm erstellt werden?“. Die Karten
 „Automatisch“ und „Manuell“ stehen bei ausreichend Platz nebeneinander,
 ansonsten untereinander. Die gemeinsame Kartenbreite ist auf 980 px begrenzt;
 die Gruppe steht zentriert. Beim Verkleinern schrumpfen zunächst die seitlichen
@@ -435,7 +435,10 @@ Freiräume bis zum regulären Seitenrand, bevor die Karten unter 800 px
 verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
 „Automatisch“ öffnet den bestehenden Arbeitsbereich;
 „Manuell“ öffnet den eingebetteten [Profil- und Béziereditor](manual_editor.md).
-Über „Zur Methodenauswahl“ ist die Rückkehr möglich. Einstellungen, Vorschau,
+Über den Header-Button „Methode auswählen“ ist die Rückkehr möglich.
+„Datei und Slicer vorbereiten“ öffnet die gemeinsame Vorbereitung ebenfalls
+über das gesamte Fenster. Die Header-Buttons umbrechen bei Platzmangel als
+ganze Elemente. Einstellungen, Vorschau,
 Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
 Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
 

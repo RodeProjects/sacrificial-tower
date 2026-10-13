@@ -84,6 +84,7 @@ from cooling_tower.gui.generation_session import GenerationMode, GenerationSessi
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.manual_controller import ManualGenerationController
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
+from cooling_tower.gui.widgets.wrapping_layout import WrappingLayout
 from cooling_tower.gui.widgets.stl_validation_feedback import StlValidationFeedback
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
@@ -1172,6 +1173,23 @@ class MainWindow(QMainWindow):
         subtitle_row.addWidget(self.update_cancel_button)
         header_layout.addLayout(title_row)
         header_layout.addLayout(subtitle_row)
+        self.header_workflow_actions = QWidget()
+        self.header_workflow_actions.setObjectName("headerWorkflowActions")
+        self.header_workflow_actions_layout = WrappingLayout(
+            self.header_workflow_actions, spacing=8
+        )
+        self.preparation_open_button = QPushButton("Datei und Slicer vorbereiten")
+        self.preparation_open_button.setObjectName("preparationOpenButton")
+        self.preparation_open_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self.preparation_open_button.setToolTip(
+            "Datei, Slicer und Druckprofile in der fensterfüllenden Ansicht bearbeiten"
+        )
+        self.preparation_open_button.clicked.connect(self.show_preparation_workspace)
+        self.header_workflow_actions_layout.addWidget(self.preparation_open_button)
+        self.header_workflow_actions.hide()
+        header_layout.addWidget(self.header_workflow_actions)
         root_layout.addWidget(header)
 
         self.settings_scroll = QScrollArea()
@@ -1217,9 +1235,7 @@ class MainWindow(QMainWindow):
         self.preparation_group = workflow_group
         workflow_group.setProperty("role", "preparation")
         workflow_group.setProperty("outerDropdown", True)
-        # Only the header is interactive.  A hover colour across the complete
-        # expanded preparation surface makes the whole card look clickable and
-        # causes distracting repaints while the user works inside a step.
+        # Keep the preparation surface visually stable while editing its steps.
         workflow_group.setProperty("bodyHover", False)
         workflow_group.status_icon.setProperty("headerLead", True)
         workflow_group.status_icon.setFixedWidth(45)
@@ -3055,7 +3071,7 @@ class MainWindow(QMainWindow):
         self.generation_method_navigation = QWidget()
         navigation_layout = QHBoxLayout(self.generation_method_navigation)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
-        self.generation_method_back_button = QPushButton("← Zur Methodenauswahl")
+        self.generation_method_back_button = QPushButton("Methode auswählen")
         self.generation_method_back_button.setObjectName("generationMethodBackButton")
         self.generation_method_back_button.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed)
         self.generation_method_back_button.setToolTip(
@@ -3064,7 +3080,7 @@ class MainWindow(QMainWindow):
         self.generation_method_back_button.clicked.connect(
             self.show_generation_method_selection
         )
-        navigation_layout.addWidget(self.generation_method_back_button)
+        self.header_workflow_actions_layout.addWidget(self.generation_method_back_button)
         self.generation_method_label = QLabel()
         self.generation_method_label.setObjectName("generationMethodLabel")
         self.generation_method_label.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Preferred)
@@ -3113,7 +3129,6 @@ class MainWindow(QMainWindow):
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
         )
-        generation_layout.addWidget(self.generation_method_picker)
         generation_layout.addWidget(self.ready_grid)
         self.manual_generation_panel = ManualGenerationPanel()
         self.manual_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -3129,6 +3144,8 @@ class MainWindow(QMainWindow):
         # The trailing stretch is enabled only after preparation. Before that,
         # the workflow card itself consumes the available viewport height.
         self.content_layout.addStretch(1)
+
+        self._build_preparation_workspace(central)
 
         workflow_group.toggled.connect(
             self._refresh_preparation_section_layout
@@ -3545,7 +3562,7 @@ class MainWindow(QMainWindow):
         self._footer_narrow_layout: bool | None = None
         self._refresh_footer_responsive_layout(force=True)
         root_layout.addWidget(footer)
-        self.setCentralWidget(central)
+        self.setCentralWidget(self.window_pages)
         self._footer_height_timer = QTimer(self)
         self._footer_height_timer.setSingleShot(True)
         self._footer_height_timer.timeout.connect(
@@ -3595,6 +3612,131 @@ class MainWindow(QMainWindow):
             self.confirm_profile_selection
         )
 
+    def _build_preparation_workspace(self, main_surface: QWidget) -> None:
+        """Use the entire client area for preparation and method selection."""
+
+        self.main_surface = main_surface
+        self.window_pages = QStackedWidget()
+        self.window_pages.setObjectName("windowPages")
+        self.window_pages.addWidget(main_surface)
+        self.preparation_workspace = QWidget()
+        self.preparation_workspace.setObjectName("preparationWorkspace")
+        workspace_layout = QVBoxLayout(self.preparation_workspace)
+        workspace_layout.setContentsMargins(22, 18, 22, 22)
+        workspace_layout.setSpacing(12)
+        workspace_navigation = QWidget()
+        workspace_navigation_layout = WrappingLayout(workspace_navigation, spacing=8)
+        self.preparation_close_button = QPushButton("← Zur Turmerstellung")
+        self.preparation_close_button.clicked.connect(self.close_preparation_workspace)
+        self.preparation_view_button = QPushButton("Datei und Slicer vorbereiten")
+        self.preparation_view_button.setObjectName("preparationViewButton")
+        self.preparation_method_button = QPushButton("Methodenauswahl")
+        self.preparation_method_button.setObjectName("preparationMethodButton")
+        for button in (self.preparation_view_button, self.preparation_method_button):
+            button.setCheckable(True)
+        self.preparation_view_button.clicked.connect(self.show_preparation_workspace)
+        self.preparation_method_button.clicked.connect(self.show_generation_method_selection)
+        for button in (
+            self.preparation_close_button,
+            self.preparation_view_button,
+            self.preparation_method_button,
+        ):
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            workspace_navigation_layout.addWidget(button)
+        workspace_layout.addWidget(workspace_navigation)
+        self.preparation_workspace_scroll = QScrollArea()
+        self.preparation_workspace_scroll.setWidgetResizable(True)
+        self.preparation_workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.preparation_workspace_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.preparation_workspace_content = QWidget()
+        self.preparation_workspace_layout = QVBoxLayout(self.preparation_workspace_content)
+        self.preparation_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.preparation_workspace_layout.setSpacing(16)
+        self.preparation_workspace_layout.addWidget(self.generation_method_picker)
+        self.preparation_workspace_layout.addStretch(1)
+        self.preparation_workspace_scroll.setWidget(self.preparation_workspace_content)
+        workspace_layout.addWidget(self.preparation_workspace_scroll, 1)
+        self.window_pages.addWidget(self.preparation_workspace)
+        self._preparation_in_workspace = False
+        self._preparation_workspace_view = "methods"
+        self._preparation_workspace_ready = False
+
+    def _refresh_preparation_workspace(self, preparation_ready: bool) -> None:
+        """Move the accepted preparation once and keep incomplete edits visible."""
+
+        became_ready = preparation_ready and not self._preparation_workspace_ready
+        self._preparation_workspace_ready = preparation_ready
+        if preparation_ready and not self._preparation_in_workspace:
+            self.content_layout.removeWidget(self.workflow_group)
+            self.preparation_workspace_layout.insertWidget(0, self.workflow_group, 1)
+            self._preparation_in_workspace = True
+        self.workflow_group.setCheckable(False)
+        self.header_workflow_actions.setVisible(self._preparation_in_workspace)
+        self._refresh_workflow_navigation_actions()
+        self.preparation_close_button.setVisible(
+            preparation_ready and self.generation_mode is not None
+        )
+        if self._preparation_in_workspace:
+            if not preparation_ready:
+                self._preparation_workspace_view = "preparation"
+            elif became_ready:
+                self._preparation_workspace_view = "methods"
+            preparation_visible = self._preparation_workspace_view == "preparation"
+            workspace_open = (
+                not preparation_ready
+                or self.generation_mode is None
+                or self.window_pages.currentWidget() is self.preparation_workspace
+            )
+            self.workflow_group.setVisible(workspace_open and preparation_visible)
+            self.generation_method_picker.setVisible(workspace_open and not preparation_visible)
+            self.preparation_view_button.setChecked(preparation_visible)
+            self.preparation_method_button.setChecked(not preparation_visible)
+            if not preparation_ready or self.generation_mode is None:
+                self.window_pages.setCurrentWidget(self.preparation_workspace)
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
+
+    def _refresh_workflow_navigation_actions(self) -> None:
+        available = self._generation_method_change_available()
+        ready = (
+            self.workflow.stage is WorkflowStage.READY
+            and self.workflow.preparation_acknowledged
+        )
+        self.preparation_open_button.setEnabled(available)
+        self.preparation_view_button.setEnabled(available)
+        self.generation_method_back_button.setEnabled(available and ready)
+        self.preparation_method_button.setEnabled(available and ready)
+
+    def _show_preparation_workspace(self, view: str) -> None:
+        if not self._preparation_in_workspace or not self._generation_method_change_available():
+            return
+        if view == "methods" and (
+            self.workflow.stage is not WorkflowStage.READY
+            or not self.workflow.preparation_acknowledged
+        ):
+            return
+        self._preparation_workspace_view = view
+        self.workflow_group.setVisible(view == "preparation")
+        self.generation_method_picker.setVisible(view == "methods")
+        self.preparation_view_button.setChecked(view == "preparation")
+        self.preparation_method_button.setChecked(view == "methods")
+        self.window_pages.setCurrentWidget(self.preparation_workspace)
+        self.preparation_workspace_scroll.verticalScrollBar().setValue(0)
+        QTimer.singleShot(0, self._refresh_preparation_section_layout)
+
+    def show_preparation_workspace(self) -> None:
+        self._show_preparation_workspace("preparation")
+
+    def close_preparation_workspace(self) -> None:
+        if (
+            self.workflow.stage is WorkflowStage.READY
+            and self.workflow.preparation_acknowledged
+            and self.generation_mode is not None
+        ):
+            self.window_pages.setCurrentWidget(self.main_surface)
+            self._on_workflow_stage_changed(self.workflow.stage.value)
+
     def _on_workflow_stage_changed(self, stage_value: str) -> None:
         """Show fixed footer actions only after both prerequisites succeeded."""
 
@@ -3605,6 +3747,7 @@ class MainWindow(QMainWindow):
         if not preparation_ready:
             self.generation_mode = None
         self._refresh_generation_workspace(preparation_ready)
+        self._refresh_preparation_workspace(preparation_ready)
         actions_visible = preparation_ready and self.generation_mode in {GenerationMode.AUTOMATIC, GenerationMode.MANUAL}
         self._set_preparation_viewport_fill(not preparation_ready)
         if hasattr(self, "footer"):
@@ -3664,6 +3807,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self.generation_mode = mode
+        self.window_pages.setCurrentWidget(self.main_surface)
         self._on_workflow_stage_changed(self.workflow.stage.value)
         if mode is GenerationMode.MANUAL:
             self.manual_controller.ensure_context()
@@ -3673,15 +3817,13 @@ class MainWindow(QMainWindow):
     def show_generation_method_selection(self) -> None:
         if not self._generation_method_change_available():
             return
-        self.generation_mode = None
-        self._on_workflow_stage_changed(self.workflow.stage.value)
+        self._show_preparation_workspace("methods")
 
     def _refresh_generation_workspace(self, preparation_ready: bool) -> None:
         selecting = self.generation_mode is None
         workspace_visible = preparation_ready
         source_ready = (self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged)
         self.generation_workspace.setVisible(workspace_visible)
-        self.generation_method_picker.setVisible(workspace_visible and selecting)
         self.generation_method_navigation.setVisible(workspace_visible and not selecting)
         for card in (self.automatic_generation_card,self.manual_generation_card):
             card.setEnabled(source_ready)
@@ -3697,7 +3839,7 @@ class MainWindow(QMainWindow):
         self.generation_method_label.setText(text)
         narrow = manual and getattr(self.manual_controller.panel,"_narrow_layout",False)
         self.generation_method_recommendation.setVisible(narrow)
-        self.generation_method_navigation.layout().setStretch(3,0 if narrow else 1)
+        self.generation_method_navigation.layout().setStretch(2,0 if narrow else 1)
 
     # The existing generator owns the automatic session even while its view
     # is hidden. Manual generation can use its own session and controls without
@@ -3882,10 +4024,13 @@ class MainWindow(QMainWindow):
             return
         if not self.workflow.complete_preparation():
             return
-        self.workflow_group.setChecked(False)
         self.generation_workspace.show()
         self._on_workflow_stage_changed(self.workflow.stage.value)
         self._refresh_preparation_section_layout()
+        if self.generation_mode is None:
+            self.show_generation_method_selection()
+        else:
+            self.close_preparation_workspace()
 
     def _set_preparation_step_hovered(
         self,
@@ -4712,9 +4857,7 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
-        self.generation_method_back_button.setEnabled(
-            self._generation_method_change_available()
-        )
+        self._refresh_workflow_navigation_actions()
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.refresh()
             return
@@ -8608,12 +8751,7 @@ class MainWindow(QMainWindow):
             self._refresh_widget_style(icon_label)
             self._refresh_widget_style(text_label)
         preparation_complete = preparation_state.preparation_completed
-        preparation_acknowledged = bool(
-            getattr(self.workflow, "preparation_acknowledged", False)
-        )
-        self.workflow_group.setCheckable(
-            preparation_complete and preparation_acknowledged
-        )
+        self.workflow_group.setCheckable(False)
         step_requirement_keys = (
             ("source_selected", "source_validated"),
             (

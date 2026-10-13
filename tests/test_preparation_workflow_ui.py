@@ -1897,9 +1897,11 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 )
                 window.preparation_finish_button.click()
                 self.app.processEvents()
-                self.assertTrue(window.workflow_group.isCheckable())
-                self.assertFalse(window.workflow_group.isChecked())
-                self.assertFalse(window.workflow_group.toggle_button.isHidden())
+                self.assertFalse(window.workflow_group.isCheckable())
+                self.assertTrue(window.workflow_group.isChecked())
+                self.assertTrue(window.workflow_group.toggle_button.isHidden())
+                self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
+                self.assertTrue(window.generation_method_picker.isVisibleTo(window.preparation_workspace))
                 self.assertIs(
                     window.workflow_group.state(),
                     SectionState.SUCCESS,
@@ -2134,9 +2136,11 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(window.workflow.complete_preparation())
             self.app.processEvents()
             self.assertIs(window.workflow_group.state(), SectionState.SUCCESS)
-            self.assertTrue(window.workflow_group.isCheckable())
+            self.assertFalse(window.workflow_group.isCheckable())
             self.assertEqual(window.workflow_group.status_icon.text(), "✓")
-            self.assertFalse(window.workflow_group.isChecked())
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.workflow_group.isHidden())
+            self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
             self.assertTrue(window.ready_grid.isHidden())
             self.assertFalse(window.generation_method_picker.isHidden())
             window.automatic_generation_card.click()

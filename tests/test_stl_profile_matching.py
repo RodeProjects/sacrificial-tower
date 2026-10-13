@@ -787,8 +787,9 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertFalse(window.generation_method_picker.isHidden())
             window.automatic_generation_card.click()
             self.assertFalse(window.ready_grid.isHidden())
-            self.assertTrue(window.workflow_group.isCheckable())
-            self.assertFalse(window.workflow_group.isChecked())
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.workflow_group.toggle_button.isHidden())
             self.assertEqual(window.workflow_group.status_icon.text(), "✓")
             self.assertIsNotNone(window.analysis_snapshot)
             self.assertEqual(window.analysis_snapshot.layer_count, 2)
@@ -864,8 +865,9 @@ class StlProfileMatchingTests(unittest.TestCase):
             self.assertFalse(window.generation_method_picker.isHidden())
             window.automatic_generation_card.click()
             self.assertFalse(window.ready_grid.isHidden())
-            self.assertTrue(window.workflow_group.isCheckable())
-            self.assertFalse(window.workflow_group.isChecked())
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.isChecked())
+            self.assertTrue(window.workflow_group.toggle_button.isHidden())
             self.assertIn(
                 "Höhe des automatisch geslicten Modells",
                 window.automatic_base_width_label.text(),

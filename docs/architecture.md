@@ -318,17 +318,28 @@ steht als Badge direkt neben „3D-Vorschau“.
 
 ### Auswahl der Generierungsmethode und Sitzungszustände
 
-Nach bestätigter Datei-/Slicer-Vorbereitung zeigt `generation_workspace`
-zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
+Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt eine fensterfüllende
+Ansicht zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
 „Automatisch“ und einem dunkleren Blauton für „Manuell“. `GenerationMode` kennzeichnet die
-ausgewählte Methode; `None` bedeutet Methodenauswahl. Die Vorbereitung und
+ausgewählte Methode; `None` bedeutet, dass noch keine Methode gewählt wurde. Die Vorbereitung und
 deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
+`window_pages` wechselt zwischen dem Hauptbereich und `preparation_workspace`,
+das den gesamten Fensterinhalt einschließlich des sonst sichtbaren Headers und
+Footers ersetzt. Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
+Vorbereitungskarte dauerhaft in dieser Ansicht und ist kein Dropdown mehr.
+Die Header-Buttons „Datei und Slicer vorbereiten“ und „Methode auswählen“ öffnen
+die jeweilige Ansicht; `WrappingLayout` bricht sie bei Platzmangel als ganze
+Bedienelemente um. Innerhalb der Ansicht kann zwischen Vorbereitung und
+Methodenauswahl gewechselt werden. „Zur Turmerstellung“ kehrt zur gewählten
+Methode zurück, solange die Vorbereitung weiterhin bestätigt ist.
 Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
 er wird lediglich ausgeblendet. `ManualGenerationPanel` besitzt einen eigenen
 eingebetteten Editor mit links angeordneten Einstellungen und rechts der Vorschau.
 Ein Methodenwechsel startet keinen Slice und invalidiert kein Ergebnis.
-Bei erneut erforderlicher Vorbereitung kehrt die Navigation zur Auswahl zurück.
-Laufende Generierung und Export sperren die Rücknavigation.
+Bei erneut erforderlicher Vorbereitung öffnet sich die Vorbereitung wieder;
+nach „Fertig“ folgt erneut die Methodenauswahl.
+Das Öffnen der Methodenauswahl erhält die aktuelle Methode bis zur Auswahl
+einer anderen Methode. Laufende Generierung und Export sperren beide Header-Zugänge.
 
 `generation_sessions` enthält pro Methode einen eigenen `GenerationSession`
 mit Vorschauergebnis/-status, Exportergebnis und Identität des exportierten

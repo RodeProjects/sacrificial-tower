@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -80,7 +80,9 @@ class GenerationMethodSelectionTests(unittest.TestCase):
             with self.subTest(mode=mode), patch.object(window.manual_controller, "ensure_context"):
                 window.select_generation_mode(mode)
                 self.assertIs(window.generation_mode, mode)
-                self.assertTrue(window.workflow_group.isVisible())
+                self.assertFalse(window.workflow_group.isVisible())
+                self.assertTrue(window.preparation_open_button.isVisible())
+                self.assertIs(window.window_pages.currentWidget(), window.main_surface)
                 self.assertTrue(window.footer.isVisible())
                 window.show_generation_method_selection()
 
@@ -92,7 +94,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         window.automatic_generation_card.click()
         self.assertIsNone(window.generation_mode)
         self.finish_preparation()
-        self.assertFalse(window.workflow_group.isChecked())
+        self.assertTrue(window.workflow_group.isChecked())
+        self.assertFalse(window.workflow_group.isCheckable())
         self.assertTrue(window.generation_method_picker.isVisible())
         self.assertTrue(window.ready_grid.isHidden())
         self.assertTrue(window.manual_generation_panel.isHidden())
@@ -142,6 +145,70 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.export_button.isEnabled())
         self.assertTrue(artifact.exists())
         dispose.assert_not_called()
+
+    def test_header_preparation_covers_entire_window_and_returns_to_current_method(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        window.target_time_spin.setValue(window.target_time_spin.value() + 2)
+        original_value = window.target_time_spin.value()
+        for width, height in ((1450, 1000), (700, 700), (1450, 1000)):
+            window.resize(width, height)
+            window.preparation_open_button.click()
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
+            self.assertEqual(window.preparation_workspace.size(), window.centralWidget().size())
+            self.assertTrue(window.workflow_group.isVisible())
+            self.assertTrue(window.main_header.isVisibleTo(window.main_surface))
+            self.assertFalse(window.main_header.isVisible())
+            self.assertFalse(window.footer.isVisible())
+            self.assertFalse(window.workflow_group.isCheckable())
+            self.assertTrue(window.workflow_group.toggle_button.isHidden())
+            self.assertEqual(window.preparation_workspace_scroll.horizontalScrollBar().maximum(), 0)
+            window.preparation_close_button.click()
+            self.app.processEvents()
+            self.assertIs(window.window_pages.currentWidget(), window.main_surface)
+            self.assertTrue(window.ready_grid.isVisible())
+            self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
+            self.assertEqual(window.target_time_spin.value(), original_value)
+
+    def test_method_picker_can_be_closed_without_changing_current_method(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        window.generation_method_back_button.click()
+        self.assertTrue(window.generation_method_picker.isVisible())
+        self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
+        window.preparation_view_button.click()
+        self.assertTrue(window.workflow_group.isVisible())
+        window._on_workflow_stage_changed(window.workflow.stage.value)
+        self.assertTrue(window.workflow_group.isVisible())
+        self.assertTrue(window.generation_method_picker.isHidden())
+        window.preparation_method_button.click()
+        self.assertTrue(window.generation_method_picker.isVisible())
+        window.preparation_close_button.click()
+        self.assertTrue(window.ready_grid.isVisible())
+        self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
+
+    def test_header_buttons_wrap_as_whole_controls_without_overlap(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        layout = window.header_workflow_actions_layout
+        buttons = (window.preparation_open_button, window.generation_method_back_button)
+        row_width = sum(button.sizeHint().width() for button in buttons) + layout.spacing()
+        for width, wraps in ((row_width + 20, False), (row_width - 20, True), (row_width + 20, False)):
+            with self.subTest(width=width):
+                layout.setGeometry(QRect(0, 0, width, layout.heightForWidth(width)))
+                first, second = (button.geometry() for button in buttons)
+                self.assertFalse(first.intersects(second))
+                self.assertLessEqual(first.right(), width - 1)
+                self.assertLessEqual(second.right(), width - 1)
+                if wraps:
+                    self.assertLess(first.bottom(), second.top())
+                else:
+                    self.assertEqual(first.top(), second.top())
 
     def test_session_results_and_export_status_remain_independent(self) -> None:
         window = self.window
@@ -195,6 +262,11 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.generation_workspace.isHidden())
         self.assertFalse(window.automatic_generation_card.isEnabled())
         self.assertFalse(window.manual_generation_card.isEnabled())
+        self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
+        self.assertTrue(window.workflow_group.isVisible())
+        self.assertFalse(window.preparation_method_button.isEnabled())
+        window.close_preparation_workspace()
+        self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
         for session, dispose in zip((window.generation_sessions[GenerationMode.AUTOMATIC],window.generation_sessions[GenerationMode.MANUAL]), disposals):
             self.assertIsNone(session.preview)
             self.assertIs(session.preview_state, PreviewState.EMPTY)
@@ -212,6 +284,9 @@ class GenerationMethodSelectionTests(unittest.TestCase):
             ):
                 window._refresh_phase17_actions()
                 self.assertFalse(window.generation_method_back_button.isEnabled())
+                self.assertFalse(window.preparation_open_button.isEnabled())
+                window.show_preparation_workspace()
+                self.assertIs(window.window_pages.currentWidget(), window.main_surface)
                 window.show_generation_method_selection()
                 window.select_generation_mode(GenerationMode.MANUAL)
                 self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
