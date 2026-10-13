@@ -17,6 +17,7 @@ Triangle = tuple[int, int, int]
 
 GEOMETRY_EPSILON = 1e-12
 Z_EPSILON_MM = 1e-9
+MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS = 30
 
 
 class MeshGenerationError(ValueError):
@@ -29,7 +30,7 @@ class TowerMeshConfig:
 
 
 def automatic_mesh_segments(profile: object) -> int:
-    """Use at least 25 segments, then one per millimetre of diameter."""
+    """Use at least 30 segments, then one per millimetre of diameter."""
     radii = [
         float(
             getattr(point, "outer_radius_mm", getattr(point, "radius_mm", math.nan))
@@ -38,7 +39,7 @@ def automatic_mesh_segments(profile: object) -> int:
     ]
     if not radii or any(not math.isfinite(radius) or radius <= 0 for radius in radii):
         raise MeshGenerationError("The tower profile needs finite positive radii.")
-    return max(25, math.ceil(2.0 * max(radii)))
+    return max(MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS, math.ceil(2.0 * max(radii)))
 
 
 @dataclass(frozen=True, slots=True)

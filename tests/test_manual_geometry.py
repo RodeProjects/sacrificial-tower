@@ -19,6 +19,12 @@ def draft(height=100,settings=None):
 
 
 class ManualGeometryTests(unittest.TestCase):
+    def test_draft_requires_a_positive_actual_first_layer_height(self):
+        for height in (0, -0.2, float("nan"), float("inf")):
+            with self.subTest(height=height), self.assertRaises(GeometryError):
+                initial_draft(ManualSettings(), (SimpleNamespace(z_mm=height), SimpleNamespace(z_mm=100)), 150, "source")
+        self.assertEqual(draft().first_layer_z_mm, 0.3)
+
     def test_initial_foot_uses_automatic_rule_full_object_height_and_expands_its_limit(self):
         from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_radius
         for height in (1,100,120.08,200,380,381,1000):
@@ -114,7 +120,16 @@ class ManualGeometryTests(unittest.TestCase):
         self.assertTrue(result.is_valid)
         self.assertEqual(result.minimum_z_mm,0)
         self.assertEqual(result.maximum_z_mm,100)
-        self.assertEqual(mesh.segment_count,max(25,math.ceil(d.foot_diameter_mm)))
+        self.assertEqual(mesh.segment_count,max(30,math.ceil(d.foot_diameter_mm)))
+
+    def test_initial_segment_default_has_floor_30_and_still_follows_foot_diameter(self):
+        for foot_diameter,expected in ((25,30),(30,30),(30.01,31),(42,42),(95,95)):
+            with self.subTest(foot_diameter=foot_diameter):
+                d=initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=100)),150,"segments",
+                                foot_diameter_mm=foot_diameter)
+                self.assertEqual(d.settings.circle_segments,expected)
+                self.assertEqual(create_mesh(d).segment_count,expected)
+        self.assertEqual(draft(settings=replace(ManualSettings(),circle_segments=48)).settings.circle_segments,48)
 
     def test_machine_height_and_short_object(self):
         d = initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short")
@@ -256,6 +271,20 @@ class ManualGeometryTests(unittest.TestCase):
         self.assertEqual(c.exception.setting,"maximum_diameter_mm")
         with self.assertRaises(GeometryError): set_curve(d,1,control=1,position=Coordinate(3,101))
         with self.assertRaises(GeometryError): set_curve(d,1,control=1,position=d.curves[1].start)
+
+    def test_foot_controls_and_complete_curve_obey_minimum_diameter(self):
+        for base_diameter in (5,20):
+            d=move_point(draft(),"base",diameter_mm=base_diameter)
+            for n in (1,2):
+                with self.subTest(base=base_diameter,control=n):
+                    control=getattr(d.curves[0],f"control{n}")
+                    boundary=Coordinate(d.settings.minimum_diameter_mm/2,control.z_mm)
+                    valid=set_curve(d,0,control=n,position=boundary)
+                    self.assertGreaterEqual(min(valid.curves[0].radius_extrema()),boundary.radius_mm-1e-9)
+                    with self.assertRaises(GeometryError) as caught:
+                        set_curve(d,0,control=n,position=Coordinate(boundary.radius_mm-.1,control.z_mm))
+                    self.assertEqual(caught.exception.setting,"minimum_diameter_mm")
+                    self.assertIn("minimum_diameter_mm",caught.exception.limits)
 
     def test_exact_slope_extrema_not_endpoint_chords(self):
         curve = Cubic(Coordinate(2,0),Coordinate(2,1),Coordinate(20,2),Coordinate(20,3))

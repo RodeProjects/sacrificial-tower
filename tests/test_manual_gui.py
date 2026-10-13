@@ -61,6 +61,42 @@ class ManualGuiTests(unittest.TestCase):
         self.panel.show();self.app.processEvents()
         self.addCleanup(self.panel.close)
 
+    def test_normal_foot_default_is_limited_by_actual_bed_object_and_brim(self):
+        from cooling_tower.models.calibration import BedBounds, BedGeometry, OccupiedBounds
+        bed=BedGeometry(BedBounds(0,50,0,50),((0,0),(50,0),(50,50),(0,50)))
+        context=replace(self.reference.context,key="small-physical-bed",bed_geometry=bed,
+                        occupied_bounds=OccupiedBounds(20,30,20,30),brim_width_mm=1)
+        reference=replace(self.reference,context=context)
+        p=self.panel;p.initialize(reference,ManualSettings())
+        limit=context.maximum_foot_diameter_mm
+        self.assertLess(limit,25)
+        self.assertEqual(p.settings.maximum_foot_diameter_mm,limit)
+        self.assertEqual(p.settings.foot_diameter_mm,limit)
+        self.assertEqual(p.default_value("foot_diameter_mm"),limit)
+        self.assertEqual(p.default_value("maximum_foot_diameter_mm"),limit)
+        placement=context.validate(p.draft)
+        self.assertAlmostEqual(placement.radius_mm,limit/2+1)
+        p.move("foot",10,p.draft.first_layer_z_mm)
+        self.assertEqual(p.draft.foot_diameter_mm,10)
+        p.reset_all();self.assertEqual(p.settings.maximum_foot_diameter_mm,limit)
+        self.assertEqual(p.settings.foot_diameter_mm,limit)
+
+    def test_tiny_free_space_has_valid_context_specific_form_reset_defaults(self):
+        from cooling_tower.models.calibration import BedBounds, BedGeometry, OccupiedBounds
+        bed=BedGeometry(BedBounds(0,20,0,20),((0,0),(20,0),(20,20),(0,20)))
+        context=replace(self.reference.context,key="tiny-physical-bed",bed_geometry=bed,
+                        occupied_bounds=OccupiedBounds(8,12,8,12),brim_width_mm=1.3)
+        p=self.panel
+        p.initialize(replace(self.reference,context=context),replace(ManualSettings(),minimum_diameter_mm=1))
+        limit=context.maximum_foot_diameter_mm
+        self.assertLess(limit,7)
+        p.reset_all();context.validate(p.draft)
+        self.assertAlmostEqual(p.settings.minimum_diameter_mm,limit-2)
+        self.assertEqual(p.settings.foot_diameter_mm,limit)
+        p.move("base",1,p.settings.foot_height_mm)
+        p.reset_tower();context.validate(p.draft)
+        self.assertFalse(p.can_reset_tower())
+
     def test_bidirectional_diameter_handles_and_numeric_values(self):
         self.panel.editors["base_diameter_mm"].setValue(10)
         self.assertEqual(self.panel.draft.base_diameter_mm,10)
@@ -381,7 +417,8 @@ class ManualGuiTests(unittest.TestCase):
                     ("base",15,12,"maximum_diameter_mm"),
                     ("base",2,5,"minimum_diameter_mm"),
                     ("top_width",15,12,"maximum_diameter_mm"),
-                    ("top_width",2,5,"minimum_diameter_mm")):
+                    ("top_width",2,5,"minimum_diameter_mm"),
+                    ("foot",2,5,"minimum_diameter_mm")):
                     with self.subTest(view=view,identity=identity,setting=setting):
                         c._hide_width_limit_guide();c._width_limit_last_request=None
                         actual="top" if identity=="top_width" else identity
@@ -1033,11 +1070,98 @@ class ManualGuiTests(unittest.TestCase):
             bottom=c.profile_to_screen(0,0)
             self.assertGreaterEqual(top.y(),rectangle.top())
             self.assertTrue(abs(top.y()-rectangle.top())<1e-7 or
-                            abs(c.transform()[0]*c._fit_width-rectangle.width())<1e-7)
+                            abs(c.transform()[0]*c._fit_width+c._profile_gap_px-rectangle.width())<1e-7)
             self.assertAlmostEqual(bottom.y(),rectangle.bottom())
             self.assertGreaterEqual(top.y(),c.view_controls.geometry().bottom()+19)
             self.assertEqual(c.height()-bottom.y(),52)
             self.assertLess(c.minimum_measure_geometry()[-1].y()+23,c.height())
+
+    def test_initial_fit_of_short_profile_uses_height_and_centers_actual_bounds(self):
+        from cooling_tower.models.calibration import OccupiedBounds
+        p=self.panel;c=p.canvas
+        _,_,reference,_,_=create_fixture(self,joint=True,count=490)
+        triangles=reference.object_triangles.copy()
+        triangles[:,:,:2]=5+(triangles[:,:,:2]-5)*4
+        reference=replace(reference,object_triangles=triangles,
+                          context=replace(reference.context,occupied_bounds=OccupiedBounds(105,145,105,145)))
+        # Replacing a previously fitted reference must also fit the new draft.
+        c.zoom=2;c.pan=QPointF(60,-40)
+        p.initialize(reference);c.resize(976,790)
+        self.assertEqual(c.zoom,1);self.assertEqual(c.pan,QPointF())
+        self.assertEqual(c.view,"side")
+        for view in ("side","front"):
+            for rotation in (0,37,90):
+                with self.subTest(view=view,rotation=rotation):
+                    if view!="side" or rotation:c.set_view(view);c.set_rotation(rotation);c.fit_scene()
+                    rect=c.plot_rect();scale=c.transform()[0]
+                    from cooling_tower.gui.manual_view_worker import rotate_object
+                    points=rotate_object(triangles.reshape(-1,3),reference.silhouette.center_xy,
+                                         c._object_center,c.object_rotation)
+                    projected,_=c._spatial_frame().project(points)
+                    left=min(c.profile_to_screen(-p.draft.maximum_radius_mm,0).x(),projected[:,0].min())
+                    right=max(*(position.x() for _,position,_ in c.limit_handles()),projected[:,0].max())
+                    self.assertGreaterEqual(left,rect.left()-1e-7)
+                    self.assertLessEqual(right,rect.right()+1e-7)
+                    self.assertAlmostEqual((left+right)/2,rect.center().x())
+                    if view=="front" or rotation in (0,90):
+                        self.assertAlmostEqual(c.profile_to_screen(0,98).y(),rect.top())
+                    else:
+                        # A rotated square genuinely needs more horizontal room.
+                        self.assertAlmostEqual(left,rect.left())
+                        self.assertAlmostEqual(right,rect.right())
+                    self.assertGreaterEqual(projected[:,1].min(),rect.top()-1e-7)
+                    self.assertLessEqual(projected[:,1].max(),rect.bottom()+1e-7)
+                    if view=="side":
+                        self.assertAlmostEqual(projected[:,0].min()-max(point.x() for _,point,_ in c.handles()),15)
+                    self.assertGreater(scale,0)
+
+    def test_wide_original_limits_profile_fit_by_width_at_common_scale(self):
+        from cooling_tower.models.calibration import BedBounds,BedGeometry,OccupiedBounds
+        from cooling_tower.gui.manual_view_worker import rotate_object
+        p=self.panel;c=p.canvas
+        triangles=self.reference.object_triangles.copy()
+        triangles[:,:,0]=5+(triangles[:,:,0]-5)*30
+        bed=BedGeometry(BedBounds(0,1000,0,1000),((0,0),(1000,0),(1000,1000),(0,1000)))
+        context=replace(self.reference.context,key="wide-original",bed_geometry=bed,
+                        occupied_bounds=OccupiedBounds(350,650,495,505))
+        reference=replace(self.reference,context=context,object_triangles=triangles)
+        p.initialize(reference);c.resize(976,790)
+        for view in ("side","front"):
+            c.set_view(view);rect=c.plot_rect();scale=c.transform()[0]
+            self.assertGreater(c.profile_to_screen(0,p.draft.height_mm).y(),rect.top()+50)
+            self.assertAlmostEqual(scale*c._fit_width+c._profile_gap_px,rect.width())
+            points=rotate_object(triangles.reshape(-1,3),reference.silhouette.center_xy,c._object_center,0)
+            projected,_=c._spatial_frame().project(points)
+            self.assertAlmostEqual(projected[:,1].max()-projected[:,1].min(),p.draft.height_mm*scale)
+            self.assertGreaterEqual(projected[:,0].min(),rect.left()-1e-7)
+            self.assertLessEqual(projected[:,0].max(),rect.right()+1e-7)
+
+    def test_profile_fit_keeps_protruding_height_grips_visible_after_resize_and_zoom(self):
+        from cooling_tower.gui.manual_view_worker import rotate_object
+        p=self.panel;c=p.canvas
+        p.change_setting("maximum_diameter_mm",25)
+        p.change_setting("maximum_foot_diameter_mm",25)
+        p.move("base",24,8)
+        for view in ("side","front"):
+            c.set_view(view)
+            for width in (350,650,976):
+                with self.subTest(view=view,width=width):
+                    c.resize(width,790)
+                    rectangle=c.plot_rect()
+                    rightmost=max(point.x() for identity,point,_ in c.handles()
+                                  if identity!="minimum_diameter_mm")
+                    self.assertLessEqual(rightmost,rectangle.right()+1e-7)
+                    if view=="side":
+                        points=rotate_object(self.reference.object_triangles.reshape(-1,3),
+                                             self.reference.silhouette.center_xy,c._object_center,0)
+                        projected,_=c._spatial_frame().project(points)
+                        self.assertAlmostEqual(projected[:,0].min()-rightmost,15)
+                        self.assertLessEqual(projected[:,0].max(),rectangle.right()+1e-7)
+                        gap=projected[:,0].min()-c.profile_to_screen(c._fitting_radius(),0).x()
+                        c.zoom=2
+                        projected,_=c._spatial_frame().project(points)
+                        self.assertAlmostEqual(projected[:,0].min()-c.profile_to_screen(c._fitting_radius(),0).x(),2*gap)
+                        c.zoom=1
 
     def test_scale_values_do_not_overlap_units_when_the_fitted_object_reaches_the_top(self):
         p=self.panel;c=p.canvas
@@ -2016,6 +2140,24 @@ class ManualControllerTests(unittest.TestCase):
         w.resize(1450,1000);w.show()
         self.app.processEvents()
 
+    def test_manual_generation_requires_current_source_and_confirmed_slicer_profiles(self):
+        w,c,p=self.window,self.controller,self.panel
+        for attribute, value in (("analysis_snapshot",None),("profile_match_result",None)):
+            with self.subTest(attribute=attribute), patch.object(w,attribute,value), patch.object(c,"_start") as start:
+                with self.assertRaisesRegex(ValueError,"Quelle, Slicer und Druckprofile"):
+                    c.build_request(p.draft)
+                c.generate()
+                start.assert_not_called()
+                self.assertIsNone(c.session.preview)
+        for attribute, value in (("selected",None),("user_confirmed",False),("can_use_stl_mode",False)):
+            with self.subTest(attribute=attribute), patch.object(w.profile_match_result,attribute,value), patch.object(c,"_start") as start:
+                with self.assertRaisesRegex(ValueError,"Quelle, Slicer und Druckprofile"):
+                    c.build_request(p.draft)
+                c.generate()
+                start.assert_not_called()
+                self.assertIsNone(c.session.preview)
+        self.assertIs(c.build_request(p.draft).adapter,self.adapter)
+
     def test_empty_manual_footer_is_only_as_high_as_its_buttons(self):
         p,w=self.panel,self.window
         self.show_manual_footer()
@@ -2458,6 +2600,79 @@ class ManualControllerTests(unittest.TestCase):
         self.assertEqual(p.canvas.view,"side")
         self.assertNotEqual(p.canvas._spatial_key(),old_key)
         self.assertEqual(p.canvas._object_render_key,p.canvas._spatial_key())
+
+    def _large_resolution_reference(self):
+        import trimesh
+        from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
+        mesh=trimesh.creation.icosphere(subdivisions=4,radius=5)
+        mesh.apply_translation((5,5,5))
+        triangles=mesh.triangles.copy();triangles.setflags(write=False)
+        reference=replace(self.controller.reference,object_triangles=triangles,
+                          object_silhouette=build_mesh_silhouette(triangles))
+        self.panel.canvas.set_reference(reference)
+        self.panel.canvas.set_view("free")
+
+    def _wait_resolution_render(self,timeout=5):
+        canvas=self.panel.canvas
+        deadline=time.monotonic()+timeout
+        while (canvas._render_proxy or canvas._render_job or canvas._render_timer.isActive()) and time.monotonic()<deadline:
+            self.app.processEvents();time.sleep(.005)
+        self.assertFalse(canvas._render_proxy,"Object preview was left pending without a completed render")
+        self.assertIsNone(canvas._render_job)
+        self.assertFalse(canvas._render_timer.isActive())
+        self.assertEqual(canvas._object_render_key,canvas._spatial_key())
+
+    def test_repeated_resolution_render_returns_from_zero_to_same_stage(self):
+        self._large_resolution_reference()
+        p=self.panel;c=p.canvas
+        before=p.draft.artifact_payload()
+        for stage in (0,5,0,5,0,1,0,1,0,75,0,75):
+            p.change_setting("object_resolution_percent",stage);c.grab()
+            self._wait_resolution_render(timeout=2)
+            self.assertEqual(p.draft.artifact_payload(),before)
+
+    def test_resolution_render_cancels_active_job_and_ignores_stale_result(self):
+        from threading import Event
+        from PySide6.QtGui import QPicture
+        from cooling_tower.gui import manual_view_worker
+        self._large_resolution_reference()
+        p=self.panel;c=p.canvas
+        started,release=Event(),Event()
+        self.addCleanup(release.set)
+        original=manual_view_worker.render_spatial_object
+        def paused(*args,**kwargs):
+            if not started.is_set():
+                started.set();release.wait(5)
+            return original(*args,**kwargs)
+        with patch.object(manual_view_worker,"render_spatial_object",side_effect=paused):
+            p.change_setting("object_resolution_percent",5);c.grab()
+            deadline=time.monotonic()+2
+            while not started.is_set() and time.monotonic()<deadline:
+                self.app.processEvents();time.sleep(.005)
+            self.assertTrue(started.is_set())
+            old_job,old_request,old_key=c._render_job,c._view_request_id,c._spatial_key()
+            p.change_setting("object_resolution_percent",0);c.grab()
+            self.assertTrue(self.window.background_job_manager.job(old_job).cancel_requested)
+            self.assertFalse(c._render_proxy)
+            p.change_setting("object_resolution_percent",5);c.grab()
+            proxy=c._object_cache
+            c._spatial_succeeded(old_request,(old_key,QPicture()))
+            self.assertIs(c._object_cache,proxy)
+            # Consume the pending timer while the cancelled job still owns its
+            # thread. Its release must schedule the replacement afterwards.
+            c._render_timer.stop();c._start_spatial_render()
+            self.assertEqual(c._render_job,old_job)
+            release.set()
+            self._wait_resolution_render()
+
+    def test_resolution_render_requeues_same_key_when_no_job_or_timer_exists(self):
+        self._large_resolution_reference()
+        p=self.panel;c=p.canvas
+        p.change_setting("object_resolution_percent",5)
+        c._render_desired=c._spatial_key();c._render_timer.stop()
+        c.grab()
+        self.assertTrue(c._render_timer.isActive())
+        self._wait_resolution_render()
 
     def test_manual_export_summary_keeps_evidence_kind_when_reopened(self):
         from cooling_tower.manual.service import ManualExportService

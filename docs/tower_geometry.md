@@ -397,8 +397,8 @@ Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
 maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
 
 Die Kreissegmentzahl wird pro Kandidat aus dessen größtem aktuellen Durchmesser
-berechnet: `max(25, ceil(1,0 × Durchmesser in mm))`. Damit haben
-kleine Türme mindestens 25 Segmente; bei größeren Durchmessern gilt
+berechnet: `max(30, ceil(1,0 × Durchmesser in mm))`. Damit haben
+kleine Türme mindestens 30 Segmente; bei größeren Durchmessern gilt
 ein Segment pro Millimeter ohne obere Begrenzung.
 Alle Ringe eines STL verwenden dieselbe Segmentzahl,
 damit das Netz geschlossen bleibt. Getrennte und gemeinsame Slices verwenden
@@ -439,8 +439,8 @@ verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
 Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
 Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
 
-Die automatische Segmentanzeige verwendet unverändert
-`max(25, ceil(größter tatsächlicher Außendurchmesser in mm))`. Der manuelle
+Die automatische Segmentanzeige verwendet
+`max(30, ceil(größter tatsächlicher Außendurchmesser in mm))`. Der manuelle
 Editor leitet seinen ersten Segmentstandard einmalig aus seiner eigenen
 initialen Geometrie einschließlich Fuß ab und verwaltet danach eine eigene
 editierbare Kreissegmentzahl. Beide Auflösungen bleiben unabhängig.

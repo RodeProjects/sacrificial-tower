@@ -40,7 +40,7 @@ from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 
 class AutomaticGeometryTests(unittest.TestCase):
     def test_segments_follow_current_widest_diameter(self) -> None:
-        for diameter, expected in ((10, 25), (25, 25), (30, 30), (30.2, 31), (150, 150)):
+        for diameter, expected in ((10, 30), (25, 30), (30, 30), (30.2, 31), (150, 150)):
             with self.subTest(diameter=diameter):
                 profile = SimpleNamespace(points=(SimpleNamespace(radius_mm=diameter / 2),))
                 self.assertEqual(automatic_mesh_segments(profile), expected)

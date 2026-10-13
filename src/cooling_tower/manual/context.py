@@ -35,8 +35,6 @@ class ManualContext:
     occupied_bounds: object
     brim_width_mm: float
 
-    standalone = False
-
     @property
     def maximum_foot_diameter_mm(self):
         return maximum_foot_diameter(self.bed_geometry, self.occupied_bounds, self.brim_width_mm)
@@ -69,8 +67,6 @@ class ManualContext:
 
     def validate(self, draft):
         validate(draft)
-        if draft.standalone:
-            raise GeometryError("context", "Ein freier Entwurf benötigt den freien Turmmodus.")
         if draft.context_key != self.key:
             raise GeometryError("context", "Der Entwurf gehört zu einem anderen Quellen-/Profilkontext.")
         if draft.height_mm > self.maximum_height_mm+1e-9:

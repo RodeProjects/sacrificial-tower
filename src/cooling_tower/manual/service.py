@@ -126,14 +126,12 @@ class ManualEvaluation:
 class ManualResult(PreviewResult):
     manual_evaluation: ManualEvaluation | None = None
     diagnostics_directory: Path | None = None
-    standalone: bool = False
 
 
 @dataclass(frozen=True,slots=True)
 class ManualExportResult(PreviewExportResult):
     generation_method: str = "manual"
     joint_sliced: bool = False
-    standalone: bool = False
 
 
 class _CancelableAnalysis:
@@ -197,9 +195,6 @@ class ManualGenerationService:
         return ManualReference(context, data, silhouette, hashes,triangles,mesh_silhouette)
 
     def prepare(self, request, *, cancellation_event=None, progress_callback=None):
-        from cooling_tower.manual.standalone import StandaloneRequest, prepare_standalone
-        if isinstance(request, StandaloneRequest):
-            return prepare_standalone(request, self.workspace_parent, cancellation_event, progress_callback)
         notify = progress_callback or (lambda *_: None)
         check_cancel(cancellation_event)
         if request.draft is None or request.context is None:
@@ -337,9 +332,6 @@ class ManualGenerationService:
 
 class ManualExportService(PreviewExportService):
     def export(self, preview, request, output_root):
-        from cooling_tower.manual.standalone import StandaloneRequest, export_standalone
-        if isinstance(request, StandaloneRequest):
-            return export_standalone(preview, request, output_root)
         if not request.profiles_are_current():
             raise ValueError("Die bestätigten Slicerprofile wurden nach der Prüfung verändert.")
         e = preview.manual_evaluation

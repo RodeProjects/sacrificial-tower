@@ -4,10 +4,9 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 from pathlib import Path
-from uuid import uuid4
 
 from PySide6.QtCore import QObject, Slot, QPoint, QTimer, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.export_worker import ExportWorker
@@ -15,22 +14,21 @@ from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.gui.manual_worker import ManualWorker
 from cooling_tower.manual.context import overhang_default
 from cooling_tower.manual.geometry import ManualSettings
-from cooling_tower.manual.service import ManualGenerationService, ManualExportService, ManualRequest, ManualReference
-from cooling_tower.manual.standalone import StandaloneContext, StandaloneRequest
+from cooling_tower.manual.service import ManualGenerationService, ManualExportService, ManualRequest
 from cooling_tower.manual.settings_store import ManualSettingsStore
 from cooling_tower.models import GenerationSettings, CalibrationConfig
 from cooling_tower.preview import OutputMode, PreviewState
 
 
 class ManualGenerationController(QObject):
-    def __init__(self, window, panel, mode=GenerationMode.MANUAL):
+    def __init__(self, window, panel):
         super().__init__(window)
         self.window,self.panel = window,panel
         panel.canvas.set_render_manager(window.background_job_manager)
-        self.mode = mode
-        self.session = window.generation_sessions[mode]
-        self.store = ManualSettingsStore(window.settings_store.user_path.with_name("manual_settings.json")) if mode is GenerationMode.MANUAL else None
-        panel.settings = self.store.load() if self.store is not None else ManualSettings()
+        self.mode = GenerationMode.MANUAL
+        self.session = window.generation_sessions[self.mode]
+        self.store = ManualSettingsStore(window.settings_store.user_path.with_name("manual_settings.json"))
+        panel.settings = self.store.load()
         self.service = ManualGenerationService(window.preview_service,window.user_data_root / "temporary")
         self.export_service = ManualExportService()
         self.reference = None
@@ -43,9 +41,6 @@ class ManualGenerationController(QObject):
         self._locked_inputs = []
         self._automatic_scrollbar_policy = None
         self._automatic_viewport_margins = None
-        self.standalone_note = QLabel("Freie Turmerstellung: nur Turm-STL; ohne Objekt- und Druckergrenzen, Slice oder 3MF.",panel)
-        self.standalone_note.setWordWrap(True)
-        self.standalone_note.hide()
         window.settings_scroll.verticalScrollBar().rangeChanged.connect(self._sync_scrollbar_gutter)
         panel.generate_requested.connect(self.generate)
         panel.export_requested.connect(self.export)
@@ -57,12 +52,10 @@ class ManualGenerationController(QObject):
         panel.canvas.view_state_changed.connect(self._refresh_reset_actions)
         panel.settings_visibility_changed.connect(lambda:QTimer.singleShot(0,self.fit_editor_to_window))
         window.background_job_manager.job_released.connect(self.job_released)
-        if self.store is not None and self.store.warning:
+        if self.store.warning:
             panel.status_label.setText(self.store.warning)
 
     def build_request(self, draft=None):
-        if self.panel.standalone:
-            return StandaloneRequest(draft or self.panel.draft,self.reference.context)
         w = self.window
         result = w.profile_match_result
         if w.analysis_snapshot is None or result is None or result.selected is None or not result.user_confirmed or not result.can_use_stl_mode:
@@ -95,14 +88,6 @@ class ManualGenerationController(QObject):
 
     def ensure_context(self):
         if self.job_id is not None or self.window._closing:
-            return
-        if self.panel.standalone:
-            if self.reference is None:
-                self.reference = ManualReference(StandaloneContext(uuid4().hex),None,None,())
-                self.panel.initialize(self.reference,replace(ManualSettings(),maximum_foot_diameter_mm=250,
-                                                            layer_snap_enabled=False,critical_layers_enabled=False))
-                self.panel.status_label.clear()
-            self.refresh()
             return
         try:
             request = self.build_request()
@@ -175,8 +160,6 @@ class ManualGenerationController(QObject):
 
     def _context_current(self):
         if self.reference is None: return False
-        if self.panel.standalone:
-            return self.panel.draft is not None and self.panel.draft.context_key == self.reference.context.key
         try:
             current = replace(self.build_request(),context=None,profile_source_hashes=())
             return current.signature() == self.reference.context.key
@@ -218,15 +201,11 @@ class ManualGenerationController(QObject):
             self.session.preview_state = PreviewState.CURRENT
             self.session.exported_preview_identity = None
             if previous is not None: previous.dispose()
-            if result.standalone:
-                self.panel.result_label.setText("Turm-STL vorbereitet · Geometrie geprüft · ohne Slice oder Layerzeitbewertung.")
-                self.panel.status_label.setText("Freier Turm bereit zum STL-Export.")
-            else:
-                e = result.manual_evaluation
-                mode = "Gemeinsamer Prüfslice" if e.joint_sliced else "Separate Zeitprognose"
-                self.panel.result_label.setText(f"Geprüfter Stand: {mode} · kleinste Layerzeit {e.minimum_time_s:.3f} s\n"+
-                                                "\n".join(result.warnings))
-                self.panel.status_label.setText("Manueller Turm vollständig geprüft.")
+            e = result.manual_evaluation
+            mode = "Gemeinsamer Prüfslice" if e.joint_sliced else "Separate Zeitprognose"
+            self.panel.result_label.setText(f"Geprüfter Stand: {mode} · kleinste Layerzeit {e.minimum_time_s:.3f} s\n"+
+                                            "\n".join(result.warnings))
+            self.panel.status_label.setText("Manueller Turm vollständig geprüft.")
         elif self.operation == "export":
             self.session.export_result = result
             self.session.exported_preview_identity = self.identity(self.session.preview)
@@ -273,8 +252,6 @@ class ManualGenerationController(QObject):
         self.refresh()
 
     def invalidate_context(self):
-        if self.panel.standalone:
-            return
         if self.job_id is not None:
             self.cancelled = True
             self.window.background_job_manager.cancel_job(self.job_id,reason="manual_context_changed")
@@ -311,15 +288,10 @@ class ManualGenerationController(QObject):
         w,p = self.window,self.panel
         host = QWidget(w.footer_messages_content)
         self._footer_status_widget = host
-        if self.mode is GenerationMode.MANUAL:
-            w.manual_footer_status_widget = host
-        else:
-            w.free_footer_status_widget = host
+        w.manual_footer_status_widget = host
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(6)
-        layout.addWidget(self.standalone_note)
-        self.standalone_note.setVisible(p.standalone)
         for widget in (p.progress,p.status_label,p.result_label,p.action_hint):
             p.preview_container.layout().removeWidget(widget)
             layout.addWidget(widget)
@@ -401,7 +373,7 @@ class ManualGenerationController(QObject):
             label.setVisible(bool(label.text().strip()))
         self._footer_status_widget.setVisible(
             w.generation_mode is self.mode and
-            (p.standalone or not p.progress.isHidden() or any(label.text().strip() for label in
+            (not p.progress.isHidden() or any(label.text().strip() for label in
                 (p.status_label,p.result_label,p.action_hint))))
 
     def refresh_footer(self,*_):
@@ -447,26 +419,17 @@ class ManualGenerationController(QObject):
             return
         box = self.window._create_reset_defaults_message_box()
         box.setWindowTitle("Alles zurücksetzen")
-        method = "freien" if self.panel.standalone else "manuellen"
-        box.setText(f"Alle Werte der {method} Methode, die Turmform und die Vorschau werden auf ihre Standardwerte zurückgesetzt. Die anderen Methoden und die Dateivorbereitung bleiben erhalten.")
+        box.setText("Alle Werte der manuellen Methode, die Turmform und die Vorschau werden auf ihre Standardwerte zurückgesetzt. Die automatische Methode und die Dateivorbereitung bleiben erhalten.")
         box.exec()
         if box.clickedButton() is box._reset_yes_button:
             self.panel.reset_all()
 
     def save_settings(self):
-        if self.store is None:
-            return
         try: self.store.save(self.panel.settings)
         except (OSError,ValueError) as error: self.panel.status_label.setText(str(error))
 
     def describe_export(self,result):
         w = self.window
-        if result.standalone:
-            w.export_success_achieved_label.setText("Freier Turm als STL exportiert · ohne Slice.")
-            w.export_success_deviation_label.clear()
-            w.export_success_deviation_label.hide()
-            w.export_success_usage_label.setText("Exportiert wurde nur der gezeichnete Turm. Originalobjekt, Drucker und Druckbett wurden nicht berücksichtigt. Es wurden kein 3MF, kein G-Code und keine Layerzeitbewertung erzeugt.")
-            return
         evidence = "gemeinsam geprüfte" if result.joint_sliced else "prognostizierte"
         w.export_success_achieved_label.setText(f"Kleinste {evidence} Layerzeit: {result.minimum_verified_layer_time_s:.3f} s")
         w.export_success_deviation_label.clear()

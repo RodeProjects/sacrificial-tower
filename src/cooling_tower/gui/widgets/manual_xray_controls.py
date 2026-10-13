@@ -95,15 +95,8 @@ class XRayControls(QWidget):
 
     def _resize_buttons(self):
         self.title.set_compact(self.width() < self.preferred_width)
-        count = 1 if self.buttons["object"].isHidden() else 2
-        width=max(self.minimum_button_width,(self.width()-3*(count-1))//count)
+        width=max(self.minimum_button_width,(self.width()-3)//2)
         for button in self.buttons.values():button.setFixedWidth(width)
-
-    def set_standalone(self,enabled):
-        self.minimum_width = self.minimum_button_width if enabled else 2*self.minimum_button_width+3
-        self.preferred_width = max(self.preferred_button_width if enabled else 2*self.preferred_button_width+3,self.title.sizeHint().width())
-        self.setFixedWidth(self.preferred_width)
-        self._resize_buttons()
 
     def _emit_choice(self):
         tower,original=(self.buttons[name].isChecked() for name in ("tower","object"))

@@ -15,6 +15,16 @@ class GenerationModeGrid(ResponsiveCardGrid):
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(self.maximumWidth(), super().sizeHint().height())
 
+    def refresh_card_heights(self) -> None:
+        """Keep styled cards inside the grid, including their rounded edges."""
+        self.grid.invalidate()
+        self.setMinimumHeight(self.content_height_hint())
+        self.updateGeometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_card_heights()
+
 
 class GenerationModeCard(QPushButton):
     """A whole-card action with wrapping text and standard keyboard support."""
@@ -29,15 +39,17 @@ class GenerationModeCard(QPushButton):
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 22, 22, 22)
-        layout.setSpacing(12)
+        layout.setContentsMargins(26, 24, 26, 24)
+        layout.setSpacing(14)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("generationModeCardTitle")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.description_label = QLabel(description)
         self.description_label.setObjectName("generationModeCardDescription")
+        self.description_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.action_label = QLabel(action)
         self.action_label.setObjectName("generationModeCardAction")
+        self.action_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         for label in (self.title_label, self.description_label, self.action_label):
             label.setWordWrap(True)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -70,7 +82,15 @@ class GenerationModeCard(QPushButton):
         width = max(1,self.width()-margins.left()-margins.right())
         for label in (self.title_label,self.description_label,self.action_label):
             label.setMinimumHeight(self._label_height(label,width))
-        self.setMinimumHeight(self.heightForWidth(self.width()))
+        height = self.heightForWidth(self.width())
+        if height != self.minimumHeight():
+            self.setMinimumHeight(height)
+            # Styling can increase the height after the enclosing grid was
+            # measured. Update its minimum too; a stale parent allocation
+            # must never clip the card after polishing or a width change.
+            parent = self.parentWidget()
+            if isinstance(parent, GenerationModeGrid):
+                parent.refresh_card_heights()
 
     def resizeEvent(self,event):
         self._fit_wrapped_text()

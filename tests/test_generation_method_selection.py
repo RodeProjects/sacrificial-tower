@@ -51,10 +51,44 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         workflow.complete_preparation()
         self.app.processEvents()
 
+    def test_both_methods_require_source_slicer_and_preparation_confirmation(self) -> None:
+        window = self.window
+        self.assertEqual(set(GenerationMode), {GenerationMode.AUTOMATIC, GenerationMode.MANUAL})
+        self.assertEqual(set(window.generation_sessions), set(GenerationMode))
+        workflow = window.workflow
+        workflow.set_slicer_step_visible(True)
+        for stage in ("empty", "source", "slicer"):
+            if stage == "source":
+                workflow.source_validation_succeeded("modell.stl", analysis_complete=True)
+            elif stage == "slicer":
+                workflow.slicer_succeeded("Testslicer")
+            with self.subTest(stage=stage), patch.object(window.manual_controller, "ensure_context") as prepare:
+                for mode in GenerationMode:
+                    window.select_generation_mode(mode)
+                    self.assertIsNone(window.generation_mode)
+                window.show_generation_method_selection()
+                self.app.processEvents()
+                self.assertTrue(window.generation_workspace.isHidden())
+                self.assertTrue(window.footer.isHidden())
+                self.assertFalse(window.automatic_generation_card.isEnabled())
+                self.assertFalse(window.manual_generation_card.isEnabled())
+                prepare.assert_not_called()
+        workflow.complete_preparation()
+        self.app.processEvents()
+        self.assertTrue(window.generation_method_picker.isVisible())
+        for mode in GenerationMode:
+            with self.subTest(mode=mode), patch.object(window.manual_controller, "ensure_context"):
+                window.select_generation_mode(mode)
+                self.assertIs(window.generation_mode, mode)
+                self.assertTrue(window.workflow_group.isVisible())
+                self.assertTrue(window.footer.isVisible())
+                window.show_generation_method_selection()
+
     def test_confirmation_reveals_only_method_selection(self) -> None:
         window = self.window
         self.assertTrue(window.generation_workspace.isHidden())
-        self.assertTrue(window.free_generation_card.isEnabled())
+        self.assertFalse(window.automatic_generation_card.isEnabled())
+        self.assertFalse(window.manual_generation_card.isEnabled())
         window.automatic_generation_card.click()
         self.assertIsNone(window.generation_mode)
         self.finish_preparation()
@@ -159,7 +193,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNone(window.generation_mode)
         self.assertTrue(window.generation_workspace.isHidden())
-        self.assertTrue(window.free_generation_card.isEnabled())
+        self.assertFalse(window.automatic_generation_card.isEnabled())
+        self.assertFalse(window.manual_generation_card.isEnabled())
         for session, dispose in zip((window.generation_sessions[GenerationMode.AUTOMATIC],window.generation_sessions[GenerationMode.MANUAL]), disposals):
             self.assertIsNone(session.preview)
             self.assertIs(session.preview_state, PreviewState.EMPTY)
@@ -198,8 +233,9 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertLess(automatic_rect.right(), manual_rect.left())
             else:
                 self.assertLess(automatic_rect.bottom(), manual_rect.top())
-            for card in (window.automatic_generation_card, window.manual_generation_card, window.free_generation_card):
+            for card in (window.automatic_generation_card, window.manual_generation_card):
                 self.assertLessEqual(card.geometry().right(), grid.width())
+                self.assertLessEqual(card.geometry().bottom(), grid.height() - 1)
                 self.assertLessEqual(card.action_label.geometry().bottom(), card.height())
         card = window.automatic_generation_card
         QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.title_label.geometry().center())
@@ -216,7 +252,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         heading = window.generation_method_heading
         self.assertEqual(heading.text(), "Wie soll der Kühlturm erstellt werden?")
         self.assertTrue(heading.alignment() & Qt.AlignmentFlag.AlignHCenter)
-        for card in (window.automatic_generation_card, window.manual_generation_card, window.free_generation_card):
+        for card in (window.automatic_generation_card, window.manual_generation_card):
             self.assertTrue(card.title_label.alignment() & Qt.AlignmentFlag.AlignHCenter)
         for width in (1800, 1400, 1060, 1000, 860, 760, 1800):
             with self.subTest(width=width):
@@ -234,6 +270,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                     self.assertEqual(left_space, 0)
                 else:
                     self.assertGreater(left_space, 0)
+                for card in (window.automatic_generation_card, window.manual_generation_card):
+                    self.assertTrue(grid.rect().contains(card.geometry()))
 
     def test_every_method_description_fits_after_repeated_width_changes(self) -> None:
         from PySide6.QtCore import QRect
@@ -242,7 +280,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         for width in (1800,1060,860,760,950,1400,1800):
             window.resize(width,900)
             for _ in range(4):self.app.processEvents()
-            for card in (window.automatic_generation_card,window.manual_generation_card,window.free_generation_card):
+            for card in (window.automatic_generation_card,window.manual_generation_card):
                 for label in (card.title_label,card.description_label,card.action_label):
                     with self.subTest(width=width,text=label.text()):
                         required=label.fontMetrics().boundingRect(QRect(0,0,label.width(),100000),

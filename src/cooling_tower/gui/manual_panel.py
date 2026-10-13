@@ -65,7 +65,6 @@ class ManualGenerationPanel(QWidget):
         self.settings = settings or ManualSettings()
         self._resolution_default_percent = object_resolution_default()
         self.draft = self.reference = self.initial = None
-        self.standalone = False
         self.selected = ""
         self._busy = False
         self._interaction_feedback = set()
@@ -405,9 +404,9 @@ class ManualGenerationPanel(QWidget):
         if limit < s.minimum_diameter_mm+2-1e-9:
             raise GeometryError("maximum_foot_diameter_mm", "Für den Standfuß ist neben dem Originalobjekt nicht genügend freie Druckbettfläche vorhanden.")
         s = replace(s,maximum_foot_diameter_mm=limit,foot_diameter_mm=min(s.foot_diameter_mm,limit))
-        draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,standalone=self.standalone)
+        draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key)
         if draft.foot_diameter_mm > limit:
-            draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,foot_diameter_mm=limit,standalone=self.standalone)
+            draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,foot_diameter_mm=limit)
         default_foot_limit = limit
         self.initial = initial_draft(replace(ManualSettings(),overhang_angle_deg=s.overhang_angle_deg,
                                            minimum_diameter_mm=min(ManualSettings().minimum_diameter_mm,limit-2),
@@ -415,9 +414,7 @@ class ManualGenerationPanel(QWidget):
                                            foot_diameter_mm=draft.foot_diameter_mm,
                                            object_resolution_percent=self.default_value("object_resolution_percent")),
                                      reference.context.layers,reference.context.maximum_height_mm,reference.context.key,
-                                     foot_diameter_mm=draft.foot_diameter_mm,standalone=self.standalone)
-        if self.standalone:
-            self.initial = replace(self.initial,settings=replace(self.initial.settings,layer_snap_enabled=False,critical_layers_enabled=False))
+                                     foot_diameter_mm=draft.foot_diameter_mm)
         reference.context.validate(draft)
         self.canvas.set_reference(reference)
         self.height_note.setText(reference.context.height_note)
@@ -425,29 +422,6 @@ class ManualGenerationPanel(QWidget):
         self._point_defaults = {p.identity:p.position for p in draft.points if p.kind != "free"}
         self._control_defaults = {(draft.points[i].identity,n):getattr(c,f"control{n}") for i,c in enumerate(draft.curves) for n in (1,2)}
         self.commit(draft)
-
-    def set_standalone_display(self,enabled):
-        self.standalone = enabled
-        self.preview_tools.setVisible(not enabled)
-        self.resolution_host.setVisible(not enabled)
-        self.rotation_host.setVisible(not enabled)
-        self.highlight_buttons["object"].setVisible(not enabled)
-        self.highlight_host.set_standalone(enabled)
-        self.checks["layer_snap_enabled"].setVisible(not enabled)
-        self.checks["critical_layers_enabled"].setVisible(not enabled)
-        self.critical_note.setVisible(not enabled)
-        for name in ("foot_height_mm","height_mm"):
-            self.rows[name].label.setText(self.LABELS[name][0].replace("Druckbett","Boden") if enabled else self.LABELS[name][0])
-        for name in ("color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"):
-            self.rows[name].setVisible(not enabled)
-        for name,editor in self.editors.items():
-            if self.LABELS[name][1] == "mm":
-                with QSignalBlocker(editor):
-                    editor.setMaximum((500 if "height" in name else 250) if enabled else self.LABELS[name][3])
-        self.preview_information.legend_rows[1].setVisible(not enabled)
-        self.canvas.view_controls.set_standalone(enabled)
-        self.overhang_note.setText("Überhangwinkel ist eine rein geometrische Markierung." if enabled else "")
-        self.preview_tools.updateGeometry()
 
     def commit(self,draft):
         if (self.initial is not None and self.draft is not None and
@@ -542,7 +516,6 @@ class ManualGenerationPanel(QWidget):
         if self.draft is None or name not in {field.name for field in self._point_fields()}:
             raise GeometryError(name,"Dieser Greifer kann derzeit nicht bearbeitet werden.")
         _,_,low,high=self.LABELS[name]
-        if self.standalone:high=500 if "height" in name else 250
         if not math.isfinite(value) or not low<=value<=high:
             raise GeometryError(name,f"Der Wert muss zwischen {low:g} und {high:g} mm liegen.")
         if name in self.canvas.LIMITS:
@@ -643,7 +616,7 @@ class ManualGenerationPanel(QWidget):
             if error is not None and error.setting in {"minimum_diameter_mm","maximum_diameter_mm","maximum_foot_diameter_mm"}:
                 setting = error.setting
             elif point is not None:
-                bounds=("maximum_foot_diameter_mm",) if point.kind == "foot" else ("minimum_diameter_mm","maximum_diameter_mm")
+                bounds=("minimum_diameter_mm","maximum_foot_diameter_mm" if point.kind == "foot" else "maximum_diameter_mm")
                 for name in bounds:
                     boundary = getattr(self.settings,name)
                     if math.isclose(point.position.diameter_mm,boundary,rel_tol=0,abs_tol=1e-7):
@@ -883,12 +856,11 @@ class ManualGenerationPanel(QWidget):
             s = replace(ManualSettings(),object_resolution_percent=self.default_value("object_resolution_percent"),
                         maximum_foot_diameter_mm=self.default_value("maximum_foot_diameter_mm"),
                         foot_diameter_mm=self.default_value("foot_diameter_mm"))
-            if self.standalone:s=replace(s,layer_snap_enabled=False,critical_layers_enabled=False)
             if self.initial is not None:
                 s = replace(s,overhang_angle_deg=self.initial.settings.overhang_angle_deg,
                             minimum_diameter_mm=self.initial.settings.minimum_diameter_mm)
             draft = initial_draft(s,self.reference.context.layers,self.reference.context.maximum_height_mm,self.reference.context.key,
-                                  foot_diameter_mm=self.default_value("foot_diameter_mm"),standalone=self.standalone)
+                                  foot_diameter_mm=self.default_value("foot_diameter_mm"))
             self._checked(draft)
         except GeometryError as e:
             self.feedback(e,"points")
@@ -924,7 +896,7 @@ class ManualGenerationPanel(QWidget):
         settings = replace(settings,maximum_foot_diameter_mm=self.default_value("maximum_foot_diameter_mm"))
         return self._checked(initial_draft(settings,self.reference.context.layers,
                                           self.reference.context.maximum_height_mm,self.reference.context.key,
-                                          foot_diameter_mm=self.default_value("foot_diameter_mm"),standalone=self.standalone))
+                                          foot_diameter_mm=self.default_value("foot_diameter_mm")))
 
     def can_reset_tower(self):
         if self._busy or self.draft is None or self.reference is None:
@@ -999,7 +971,7 @@ class ManualGenerationPanel(QWidget):
             else:
                 self.settings = settings
         self.view_buttons[view].setChecked(True)
-        self.resolution_host.setVisible(not self.standalone)
+        self.resolution_host.show()
         self.preview_information.set_state(view,self.settings.critical_layers_enabled)
         if view in {"top","bottom"}:
             self.selected = self.canvas.selected = "top_width" if view == "top" else "foot"

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 from cooling_tower.tower.base_calculator import calculate_phase10_base_outer_radius, MINIMUM_AUTOMATIC_BASE_WIDTH_MM
-from cooling_tower.tower.mesh_generator import TriangleMesh
+from cooling_tower.tower.mesh_generator import TriangleMesh, MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS
 
 MINIMUM_POINT_GAP_MM = 0.05
 MINIMUM_INSERTION_GAP_MM = 0.1
@@ -173,7 +173,6 @@ class ManualDraft:
     maximum_height_mm: float
     context_key: str
     top_follows_base: bool = True
-    standalone: bool = False
 
     @property
     def height_mm(self):
@@ -246,7 +245,9 @@ def violated_width_limits(draft):
                for v in (p.radius_mm,p.z_mm)):
             continue
         radii=curve.radius_extrema()
-        if min(radii)<=0 or (i>0 and min(radii)<settings.minimum_diameter_mm/2-EPS):
+        minimum=settings.minimum_diameter_mm/2
+        foot_controls=(curve.control1.radius_mm,curve.control2.radius_mm) if i==0 else ()
+        if min(radii)<=0 or min((*radii,*foot_controls))<minimum-EPS:
             limits.append("minimum_diameter_mm")
         maximum=(settings.maximum_foot_diameter_mm if i==0 else settings.maximum_diameter_mm)/2
         if max(radii)>maximum+EPS:
@@ -263,8 +264,7 @@ def validate(draft):
         raise GeometryError("points", "Profilpunkte benötigen eindeutige Kennungen.")
     if not math.isfinite(draft.maximum_height_mm) or draft.maximum_height_mm <= 0:
         raise GeometryError("height_mm", "Eine sichere Höhengrenze fehlt.")
-    if (not math.isfinite(draft.first_layer_z_mm) or draft.first_layer_z_mm < 0 or
-            (draft.first_layer_z_mm == 0 and not draft.standalone)):
+    if not math.isfinite(draft.first_layer_z_mm) or draft.first_layer_z_mm <= 0:
         raise GeometryError("foot_height_mm", "Die erste tatsächliche Layerhöhe fehlt.")
     if abs(draft.points[0].position.z_mm - draft.first_layer_z_mm) > EPS:
         raise GeometryError("foot_height_mm", "Der Fußrand muss auf der ersten Druckschicht liegen.")
@@ -289,9 +289,10 @@ def validate(draft):
         if min(c.derivative(t, "z_mm") for t in ts) <= 1e-8:
             raise GeometryError("control_height_mm", "Die Kurve benötigt eine eindeutig steigende Höhe, auch an ihren Enden.",limits=violated_width_limits(draft))
         radii = c.radius_extrema()
-        minimum = 0 if i == 0 else s.minimum_diameter_mm / 2
+        minimum = s.minimum_diameter_mm / 2
         maximum = (s.maximum_foot_diameter_mm if i == 0 else s.maximum_diameter_mm) / 2
-        if min(radii) <= 0 or min(radii) < minimum-EPS:
+        foot_controls = (c.control1.radius_mm,c.control2.radius_mm) if i == 0 else ()
+        if min(radii) <= 0 or min((*radii,*foot_controls)) < minimum-EPS:
             raise GeometryError("minimum_diameter_mm", "Die vollständige Kurve unterschreitet den Mindestdurchmesser.",limits=violated_width_limits(draft))
         if max(radii) > maximum+EPS:
             raise GeometryError("maximum_foot_diameter_mm" if i == 0 else "maximum_diameter_mm", "Die vollständige Kurve überschreitet den Maximaldurchmesser.",limits=violated_width_limits(draft))
@@ -310,7 +311,7 @@ def validate(draft):
     return draft
 
 
-def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diameter_mm=None, standalone=False):
+def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diameter_mm=None):
     validate_settings(settings)
     object_height = float(layers[-1].z_mm)
     height = min(object_height, maximum_height_mm)
@@ -334,10 +335,10 @@ def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diam
     top = Coordinate(body, height)
     s = replace(settings, foot_diameter_mm=foot*2, foot_height_mm=foot_z,
                 maximum_foot_diameter_mm=max(settings.maximum_foot_diameter_mm,foot*2),
-                circle_segments=settings.circle_segments or max(25, math.ceil(foot*2)))
+                circle_segments=settings.circle_segments or max(MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS, math.ceil(foot*2)))
     d = ManualDraft(s, (ProfilePoint("foot", start, "foot"), ProfilePoint("base", end, "base"),
                        ProfilePoint("top", top, "top")), (curve, Cubic.line(end, top)),
-                    first, maximum_height_mm, context_key,standalone=standalone)
+                    first, maximum_height_mm, context_key)
     return validate(d)
 
 

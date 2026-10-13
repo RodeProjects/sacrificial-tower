@@ -291,36 +291,30 @@ class ManualPointEditorTests(unittest.TestCase):
                          Qt.KeyboardModifier.ShiftModifier if shift else Qt.KeyboardModifier.NoModifier)
         QApplication.sendEvent(c,event)
 
-    def test_shift_locks_exact_original_coordinate_for_free_points_and_controls_in_both_methods(self):
-        from dataclasses import replace
-        from cooling_tower.manual.standalone import StandaloneContext
-        from cooling_tower.manual.service import ManualReference
+    def test_shift_locks_exact_original_coordinate_for_free_points_and_controls(self):
         from cooling_tower.manual.geometry import ManualSettings
         p=self.panel;normal=p.reference
-        for standalone in (False,True):
-            for identity_kind in ("point","control"):
-                for delta in (QPointF(12,3),QPointF(2,-12)):
-                    with self.subTest(standalone=standalone,identity_kind=identity_kind,delta=delta):
-                        p.set_standalone_display(standalone)
-                        reference=ManualReference(StandaloneContext("shift-test"),None,None,()) if standalone else normal
-                        p.initialize(reference,replace(ManualSettings(),layer_snap_enabled=not standalone))
-                        p.insert(20);identity=p.selected;p.move(identity,21.060426,20.071234)
-                        p.segment_combo.setCurrentIndex(1)
-                        if identity_kind=="control":identity="control:2:1"
-                        p.select(identity);c=p.canvas
-                        handle=next(pos for name,pos,_ in c.handles() if name==identity)
-                        start=QPointF(handle.toPoint())
-                        old_radius=c._horizontal_handle_radius(identity);old_height=c._vertical_handle_height(identity)
-                        QTest.mousePress(c,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ShiftModifier,pos=start.toPoint())
-                        self.shift_drag_move(start+delta)
-                        if abs(delta.x())>abs(delta.y()):
-                            self.assertEqual(c._vertical_handle_height(identity),old_height)
-                            self.assertNotEqual(c._horizontal_handle_radius(identity),old_radius)
-                        else:
-                            self.assertEqual(c._horizontal_handle_radius(identity),old_radius)
-                            self.assertNotEqual(c._vertical_handle_height(identity),old_height)
-                        QTest.mouseRelease(c,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ShiftModifier,pos=(start+delta).toPoint())
-                        self.assertIsNone(c.constrained_drag_origin())
+        for identity_kind in ("point","control"):
+            for delta in (QPointF(12,3),QPointF(2,-12)):
+                with self.subTest(identity_kind=identity_kind,delta=delta):
+                    p.initialize(normal,ManualSettings())
+                    p.insert(20);identity=p.selected;p.move(identity,21.060426,20.071234)
+                    p.segment_combo.setCurrentIndex(1)
+                    if identity_kind=="control":identity="control:2:1"
+                    p.select(identity);c=p.canvas
+                    handle=next(pos for name,pos,_ in c.handles() if name==identity)
+                    start=QPointF(handle.toPoint())
+                    old_radius=c._horizontal_handle_radius(identity);old_height=c._vertical_handle_height(identity)
+                    QTest.mousePress(c,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ShiftModifier,pos=start.toPoint())
+                    self.shift_drag_move(start+delta)
+                    if abs(delta.x())>abs(delta.y()):
+                        self.assertEqual(c._vertical_handle_height(identity),old_height)
+                        self.assertNotEqual(c._horizontal_handle_radius(identity),old_radius)
+                    else:
+                        self.assertEqual(c._horizontal_handle_radius(identity),old_radius)
+                        self.assertNotEqual(c._vertical_handle_height(identity),old_height)
+                    QTest.mouseRelease(c,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ShiftModifier,pos=(start+delta).toPoint())
+                    self.assertIsNone(c.constrained_drag_origin())
 
     def test_shift_axis_changes_relative_to_drag_start_and_release_restores_two_axes(self):
         p=self.panel;p.insert(20);identity=p.selected;p.move(identity,20.060426,20.071234)
@@ -403,7 +397,8 @@ class ManualPointEditorTests(unittest.TestCase):
     def test_bezier_limits_show_body_foot_minimum_and_height_guides_with_normal_fade(self):
         p=self.panel;c=p.canvas
         for index,n,diameter,z,setting in ((1,1,300,15,"maximum_diameter_mm"),
-                (0,1,750,2,"maximum_foot_diameter_mm"),(1,1,-300,15,"minimum_diameter_mm")):
+                (0,1,750,2,"maximum_foot_diameter_mm"),(1,1,-300,15,"minimum_diameter_mm"),
+                (0,1,2,2,"minimum_diameter_mm"),(0,2,2,6,"minimum_diameter_mm")):
             p.reset_all();p._control_from_canvas(index,n,diameter,z)
             self.assertIn(setting,c._width_limit_settings)
             self.assertEqual(c._width_limit_opacity,1)
@@ -411,6 +406,43 @@ class ManualPointEditorTests(unittest.TestCase):
             c._width_limit_animation.setCurrentTime(550);self.assertFalse(c._width_limit_settings)
         p.reset_all();p._control_from_canvas(0,1,20,100)
         self.assertTrue(c._control_height_limits)
+
+    def test_fixed_foot_controls_stop_at_minimum_diameter_and_show_both_guides(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            for n in (1,2):
+                with self.subTest(view=view,control=n):
+                    p.reset_all();c.set_view(view)
+                    control=getattr(p.draft.curves[0],f"control{n}")
+                    with patch.object(c,"horizontal_drag_snaps",return_value=True):
+                        p._control_from_canvas(0,n,2,control.z_mm)
+                    self.assertAlmostEqual(getattr(p.draft.curves[0],f"control{n}").diameter_mm,p.settings.minimum_diameter_mm)
+                    self.assertGreaterEqual(min(p.draft.curves[0].radius_extrema())*2,p.settings.minimum_diameter_mm-1e-8)
+                    self.assertEqual(c._width_limit_settings,("minimum_diameter_mm",))
+                    self.assertEqual(c._width_limit_opacity,1)
+                    left=c.width_limit_guide_geometry(left=True)[0]
+                    right=c.width_limit_guide_geometry()[0]
+                    self.assertAlmostEqual((left.x()+right.x())/2,c.profile_to_screen(0,0).x())
+                    c._width_limit_animation.setCurrentTime(550)
+                    self.assertFalse(c._width_limit_settings)
+                    with patch.object(c,"horizontal_drag_snaps",return_value=True):
+                        p._control_from_canvas(0,n,1,control.z_mm)
+                    self.assertEqual(c._width_limit_opacity,1)
+
+    def test_mouse_drag_of_both_foot_controls_stops_at_minimum(self):
+        p=self.panel;c=p.canvas
+        for view in ("side","front"):
+            for n in (1,2):
+                with self.subTest(view=view,control=n):
+                    p.reset_all();c.set_view(view);p.select(f"control:0:{n}")
+                    start=next(point.toPoint() for identity,point,_ in c.handles() if identity==p.selected)
+                    QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=start)
+                    self.assertEqual(c._drag[1],f"control:0:{n}")
+                    target=start-QPoint(60,0)
+                    QTest.mouseMove(c,target)
+                    QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=target)
+                    self.assertAlmostEqual(getattr(p.draft.curves[0],f"control{n}").diameter_mm,p.settings.minimum_diameter_mm)
+                    self.assertEqual(c._width_limit_settings,("minimum_diameter_mm",))
 
     def test_coupled_bezier_attempt_shows_both_violated_widths(self):
         p=self.panel;c=p.canvas;p.insert(20);p.move(p.selected,20,20)

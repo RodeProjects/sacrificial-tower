@@ -154,7 +154,7 @@ def simplify_display_mesh(triangles,percent,event=None):
 def silhouette_backing_color():
     # Keep the full contour visible around reduced facets without flattening
     # their shading. Object X-Ray still applies to the complete original.
-    return QColor(78,162,177,210)
+    return QColor(83,167,182,210)
 
 
 def render_silhouette_backing(reference,frame,event=None):

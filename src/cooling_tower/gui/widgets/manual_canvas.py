@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QWidget
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.gui.widgets.manual_view_controls import ManualViewControls
 from cooling_tower.manual.geometry import tessellate, roots
+from cooling_tower.tower.mesh_generator import MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS
 from cooling_tower.manual.layer_snap import snap_layer_height
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS
@@ -108,7 +109,11 @@ class ManualCanvas(QWidget):
         self._tower_cache = None
         self._tower_render_key = None
         self._fit_width, self._fit_height = 100.0, 100.0
-        self._static_object_center = 40.0
+        self._static_object_offset = 40.0
+        self._profile_fit_center = 20.0
+        self._profile_object_gap_px = 0.0
+        self._profile_right_mm = 50.0
+        self._profile_height_grip_radius = 0.0
         self._world_origin = (0.0, 0.0)
         self._spatial_center = (0.0,0.0)
         self._fitted_framing = None
@@ -130,6 +135,7 @@ class ManualCanvas(QWidget):
         manager.job_released.connect(self._spatial_released)
 
     def invalidate_reference(self):
+        self._fitted_framing = None
         self._layer_tops = ()
         self._drag_height_z = None
         self._set_height_snap_feedback(None)
@@ -181,6 +187,8 @@ class ManualCanvas(QWidget):
             self._render_desired = key
             if self._render_job:self._render_manager.cancel_job(self._render_job,reason="manual_view_replaced")
             self._render_timer.start()
+        if self._render_job is None and not self._render_timer.isActive():
+            self._render_timer.start()
         self._render_proxy = True
 
     def _start_spatial_render(self):
@@ -227,16 +235,12 @@ class ManualCanvas(QWidget):
     def editable(self):
         return self.editing_enabled and self.view in {"side", "front", "top", "bottom"} and self.draft is not None
 
-    @property
-    def standalone(self):
-        return self.reference is not None and getattr(self.reference.context,"standalone",False)
-
     def set_reference(self, reference):
         self.invalidate_reference()
         self.reference = reference
-        self._layer_tops = () if self.standalone else tuple(layer.z_mm for layer in reference.context.layers)
+        self._layer_tops = tuple(layer.z_mm for layer in reference.context.layers)
         self._object_array = np.array([[(s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)]
-                                       for s in (() if self.standalone else reference.source_data.object_segments)], dtype=float).reshape(-1,2,3)
+                                       for s in reference.source_data.object_segments], dtype=float).reshape(-1,2,3)
         bounds = reference.context.occupied_bounds
         self._object_center = ((bounds.minimum_x_mm+bounds.maximum_x_mm)/2,
                                (bounds.minimum_y_mm+bounds.maximum_y_mm)/2)
@@ -262,7 +266,7 @@ class ManualCanvas(QWidget):
         self._rings = tessellate(draft).points
         if self.reference is not None:
             self._placement = self.reference.context.validate(draft)
-        if old is None:
+        if old is None or self._fitted_framing is None:
             self.fit_scene()
         color_fields = ("color_reference_time_s","critical_layers_enabled","gradient_start_deficit_s","gradient_full_deficit_s")
         if old is None or any(getattr(old.settings,n) != getattr(draft.settings,n) for n in color_fields):
@@ -319,8 +323,9 @@ class ManualCanvas(QWidget):
             return None
         camera = () if self.view in {"side","front"} else (self.yaw_deg,self.pitch_deg)
         return (id(self.reference),self.view,round(self.zoom,9),round(self.pan.x(),9),round(self.pan.y(),9),
-                self.object_rotation%360,camera,self._fitting_radius(),
-                self.draft.height_mm if self.standalone else max(self.reference.context.layers[-1].z_mm,self.draft.height_mm))
+                self.object_rotation%360,camera,self._fitting_radius(),self.draft.maximum_radius_mm,
+                max(self.draft.points[1].position.radius_mm,self.draft.points[-1].position.radius_mm),
+                max(self.reference.context.layers[-1].z_mm,self.draft.height_mm))
 
     def _update_fit_button(self):
         framing = self._framing_state()
@@ -331,29 +336,39 @@ class ManualCanvas(QWidget):
         self.zoom, self.pan = 1.0, QPointF()
         if self.draft is not None and self.reference is not None:
             b = self.reference.context.occupied_bounds
-            object_width = max(b.maximum_x_mm-b.minimum_x_mm, b.maximum_y_mm-b.minimum_y_mm)
-            if self.view in {"side","front"}:
-                source_center = self.reference.silhouette.center_xy if self.reference.object_triangles is not None else self._object_center
-                corners = rotate_object(self._object_xy_corners,source_center,self._object_center,self.object_rotation)
-                projected,_ = self._spatial_render_frame().project(corners)
-                object_width = 2*np.abs(projected[:,0]).max()
+            native = self.reference.object_triangles
+            source_points = native.reshape(-1,3) if native is not None else self._object_array.reshape(-1,3)
+            source_center = self.reference.silhouette.center_xy if native is not None else self._object_center
+            points = rotate_object(source_points,source_center,self._object_center,self.object_rotation)
+            self._fit_height = max(self.reference.context.layers[-1].z_mm,self.draft.height_mm,
+                                   float(points[:,2].max()) if len(points) else 0)
             radius = self._fitting_radius()
-            self._static_object_center = 0 if self.view == "front" else radius+object_width/2+15
-            self._fit_width = max(20, 2*radius, object_width)+30 if self.view == "front" else max(20, 2*radius+object_width+30)
-            self._fit_height = max(self.reference.context.layers[-1].z_mm, self.draft.height_mm)
+            self._profile_object_gap_px = 0.0
+            if self.view in {"side","front"}:
+                projected,_ = self._spatial_render_frame().project(points if len(points) else self._object_xy_corners)
+                object_left,object_right = float(projected[:,0].min()),float(projected[:,0].max())
+                # Limit grips occupy only the editable right side. Reserve the
+                # actual tower radius on the left and a pixel gap for its grips.
+                if self.view == "side":
+                    self._profile_object_gap_px = 15.0
+                    self._static_object_offset = radius-object_left
+                    low,high = -self.draft.maximum_radius_mm,radius+object_right-object_left
+                else:
+                    self._static_object_offset = 0.0
+                    low,high = min(-self.draft.maximum_radius_mm,object_left),max(radius,object_right)
+                self._profile_fit_center = (low+high)/2
+                self._fit_width = max(high-low,1e-6)
+                self._profile_right_mm = radius if self.view == "side" else high
+                self._profile_height_grip_radius = max(self.draft.points[1].position.radius_mm,
+                                                       self.draft.points[-1].position.radius_mm)
             placement = self.reference.context.validate(self.draft)
             self._placement = placement
             self._world_origin = ((b.minimum_x_mm+b.maximum_x_mm+2*placement.center_x_mm)/4,
                                   (b.minimum_y_mm+b.maximum_y_mm+2*placement.center_y_mm)/4)
-            if self.standalone:
-                self._static_object_center = 0
-                self._fit_width = max(20,2*radius)+30
-                self._fit_height = self.draft.height_mm
-                self._world_origin = (0,0)
             if self.view not in {"side", "front"}:
                 # Fit the actual polygon rings, rather than an oversized box
                 # around the whole tower. Four projected ring extrema suffice.
-                count=self.draft.settings.circle_segments or 25
+                count=self.draft.settings.circle_segments or MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS
                 angles=np.arange(count)*math.tau/count
                 circle=np.column_stack((np.cos(angles),np.sin(angles),np.zeros(count)))
                 circle_raw,_=self._raw_world(circle)
@@ -366,12 +381,6 @@ class ManualCanvas(QWidget):
                     name="maximum_diameter_mm" if self.view == "top" else "maximum_foot_diameter_mm"
                     tower_points=np.concatenate((tower_points,[(placement.center_x_mm+getattr(self.draft.settings,name)/2,
                                                                  placement.center_y_mm,point.z_mm)]))
-                    if self.standalone:
-                        tower_points=np.concatenate((tower_points,[(-getattr(self.draft.settings,name)/2,0,point.z_mm)]))
-                native = self.reference.object_triangles
-                source_points = native.reshape(-1,3) if native is not None else self._object_array.reshape(-1,3)
-                source_center = self.reference.silhouette.center_xy if native is not None else self._object_center
-                points = rotate_object(source_points,source_center,self._object_center,self.object_rotation)
                 raw,_ = self._raw_world(np.concatenate((points,tower_points)))
                 low,high = raw.min(axis=0),raw.max(axis=0)
                 self._spatial_center = tuple((low+high)/2)
@@ -388,10 +397,37 @@ class ManualCanvas(QWidget):
 
     def transform(self):
         rectangle=self.plot_rect()
-        scale = min(rectangle.width()/self._fit_width,rectangle.height()/self._fit_height)*self.zoom
-        origin_x = rectangle.center().x()-self._static_object_center*scale/2+self.pan.x()
+        fitted_scale=self._fit_scale(rectangle)
+        scale = fitted_scale*self.zoom
+        origin_x = rectangle.center().x()-self._profile_fit_center*scale-self._profile_gap_for_scale(fitted_scale)*self.zoom/2+self.pan.x()
         origin_y = rectangle.bottom()+self.pan.y()
         return scale, origin_x, origin_y
+
+    def _fit_scale(self,rectangle=None):
+        if rectangle is None:rectangle=self.plot_rect()
+        scale=min(max(1,rectangle.width()-self._profile_object_gap_px)/self._fit_width,
+                  rectangle.height()/self._fit_height)
+        if self.view in {"side","front"}:
+            # Height grips may already fit inside the width-limit envelope.
+            # Only their protruding pixels need additional horizontal space.
+            width=self._fit_width+self._profile_height_grip_radius-self._profile_right_mm
+            scale=min(scale,max(1,rectangle.width()-self._profile_object_gap_px-self.HEIGHT_HANDLE_OFFSET_PX)/max(width,1e-6))
+        return scale
+
+    @property
+    def _profile_gap_px(self):
+        return self._profile_gap_for_scale(self._fit_scale())
+
+    def _profile_gap_for_scale(self,scale):
+        if self.view not in {"side","front"}:return 0.0
+        return self._profile_object_gap_px+max(0,self.HEIGHT_HANDLE_OFFSET_PX+
+            (self._profile_height_grip_radius-self._profile_right_mm)*scale)
+
+    @property
+    def _static_object_center(self):
+        if self.view!="side":return 0.0
+        scale=self._fit_scale()
+        return self._static_object_offset+self._profile_gap_for_scale(scale)/scale
 
     def profile_to_screen(self, radius, z):
         scale, x, y = self.transform()
@@ -547,6 +583,12 @@ class ManualCanvas(QWidget):
             (native is not None and len(native)>4000 and (not silhouette or self.draft.settings.critical_layers_enabled))
             or (native is None and len(self._object_array)>4000))
         if not asynchronous:
+            self._render_timer.stop()
+            self._render_desired = self._render_failure_key = None
+            self.setAccessibleDescription("")
+            if self._render_job and self._render_manager is not None:
+                self._view_request_id += 1
+                self._render_manager.cancel_job(self._render_job,reason="manual_view_synchronous")
             self._object_cache = render_spatial_object(self.reference,self._spatial_render_frame(),
                                                      self.draft.settings,None,vector=True)
             self._object_render_key = self._spatial_key()
@@ -692,10 +734,9 @@ class ManualCanvas(QWidget):
             painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"Manueller Entwurf wird vorbereitet …")
             painter.end()
             return
-        if not self.standalone:
-            if self._object_cache is None or self._object_render_key != self._spatial_key():
-                self._render_object()
-            painter.drawImage(QPointF(),self._original_image())
+        if self._object_cache is None or self._object_render_key != self._spatial_key():
+            self._render_object()
+        painter.drawImage(QPointF(),self._original_image())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setOpacity(.35 if self.highlight in {"tower","all"} else 1)
         rings = self._display_rings()
@@ -824,8 +865,6 @@ class ManualCanvas(QWidget):
         if self.point_editor is not None:self.point_editor.reposition()
 
     def caption_text(self):
-        if self.standalone:
-            return "Freie Turmerstellung · nur Turm-STL"
         caption = ("Nebeneinander · Turm links, Original rechts · gleicher Maßstab" if self.view == "side" else
                    "Voreinander · Turm und Original hintereinander · gleicher Maßstab" if self.view == "front" else
                    "Räumliche Prüfung · tatsächliche Druckbettanordnung")
@@ -868,8 +907,6 @@ class ManualCanvas(QWidget):
         while z <= upper+1e-9:
             heights.append((z,origin-z*scale))
             z += step
-        if self.standalone:
-            return tuple(heights),()
         tops = [layer.z_mm for layer in self.reference.context.layers]
         start,end = bisect_left(tops,lower),bisect_left(tops,upper+1e-9)
         visible = tops[start:end]
@@ -890,8 +927,6 @@ class ManualCanvas(QWidget):
         z = self._drag_height_z
         if z is None:
             return ""
-        if self.standalone:
-            return f"Höhe: {z:.2f} mm".replace(".",",")
         tops = [layer.z_mm for layer in self.reference.context.layers]
         layer = str(bisect_left(tops,z-1e-8)+1) if 0 <= z <= tops[-1]+1e-8 else "–"
         return f"Höhe: {z:.2f} mm · Layer: {layer}".replace(".",",")
@@ -906,12 +941,10 @@ class ManualCanvas(QWidget):
         painter.setPen(QPen(QColor("#8195aa"),1))
         if self._axis_projection() is not None:
             painter.drawLine(QPointF(left,line_top),QPointF(left,self.height()-24))
-            if not self.standalone:
-                painter.drawLine(QPointF(right,line_top),QPointF(right,self.height()-24))
+            painter.drawLine(QPointF(right,line_top),QPointF(right,self.height()-24))
         painter.setPen(QColor("#526274"))
         painter.drawText(QRectF(3,top,left-6,20),Qt.AlignmentFlag.AlignRight,"mm")
-        if not self.standalone:
-            painter.drawText(self._layer_scale_heading_rect(),Qt.AlignmentFlag.AlignRight,"Layer")
+        painter.drawText(self._layer_scale_heading_rect(),Qt.AlignmentFlag.AlignRight,"Layer")
         for z,y in heights:
             painter.drawLine(QPointF(left-4,y),QPointF(left,y))
             if y >= top+30:
@@ -925,8 +958,7 @@ class ManualCanvas(QWidget):
             tops = [layer.z_mm for layer in self.reference.context.layers]
             layer = str(bisect_left(tops,z-1e-8)+1) if z <= tops[-1]+1e-8 else "–"
             painter.drawText(QRectF(2,top+24,left-8,20),Qt.AlignmentFlag.AlignRight,f"{z:g}".replace(".",","))
-            if not self.standalone:
-                painter.drawText(QRectF(right+6,top+24,36,20),Qt.AlignmentFlag.AlignLeft,layer)
+            painter.drawText(QRectF(right+6,top+24,36,20),Qt.AlignmentFlag.AlignLeft,layer)
 
     def _scale_line_top(self):
         return max(46,self.view_controls.geometry().bottom()+4)+2
@@ -1045,7 +1077,7 @@ class ManualCanvas(QWidget):
         height = self._vertical_handle_height(identity)
         if height is None:
             return ""
-        if self.draft.settings.layer_snap_enabled and not self.standalone:
+        if self.draft.settings.layer_snap_enabled:
             layer = str(bisect_left(self._layer_tops,height-1e-8)+1) if self._layer_tops and height <= self._layer_tops[-1]+1e-8 else "–"
             return f"Layer: {layer}"
         return f"Höhe: {height:.2f} mm".replace(".",",")

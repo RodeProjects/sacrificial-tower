@@ -6,41 +6,24 @@ bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und automatische
 Formberechnung bleiben eigenständige bestehende Abläufe. Ein Methodenwechsel
 erhält die Entwürfe und ihre getrennten Ergebnis- und Exportstände.
 
-## Freie Turmerstellung ohne Originalobjekt
+## Voraussetzungen und getrennte Methoden
 
-Die eigene Methodenkarte **Frei** ergänzt die Methodenauswahl. Der Menüeintrag
-**Freie Turmerstellung (nur STL)** öffnet diese Methode auch ohne
-Dateivorbereitung; zurück zur Methodenauswahl sind dann ebenfalls alle Karten
-sichtbar, wobei die quellenabhängigen Methoden bis zur Vorbereitung gesperrt
-bleiben. Die anfängliche Dateivorbereitung behält ihren bisherigen Aufbau.
-Dieser Modus verwendet weder Originalobjekt noch Slicerprofile,
-Druckbett oder Maschinenhöhe. Die geometrischen Regeln für geschlossene,
-monotone Kurven bleiben erhalten; Durchmesser sind auf **250 mm**, Höhen auf
-**500 mm** begrenzt. Der Fuß beginnt direkt bei Z = 0. Es gibt keine
-Drucklayer, Layer-Rastung oder kritischen Original-Layer. Die Vorschau zeigt
-den Turm zentriert; die gesamte Werkzeugzeile für X-Ray, Objektauflösung und
-Objektrotation entfällt. Ihre Höhe steht der Vorschau zur Verfügung.
-Ein dauerhafter Hinweis links im Footer erläutert den aktiven Modus.
+Die Anwendung setzt einen unterstützten Slicer voraus. Beide Methoden stehen
+erst nach erfolgreicher Datei-/Slicervorbereitung und ausdrücklicher Bestätigung
+der Druckprofile zur Verfügung. Der manuelle Editor verwendet die tatsächlichen
+Layer der vorbereiteten Quelle, die Druckbettfläche und die verfügbare
+Maschinenhöhe. Generieren prüft die gezeichnete Form mit einem Slicer; Export
+übernimmt ausschließlich den vollständig geprüften Stand einschließlich seiner
+Zeitbewertung. Eine quellen- und slicerunabhängige Turmerstellung wird nicht angeboten.
 
-Generieren erzeugt und prüft ausschließlich das unveränderte Turm-STL aus
-dem gezeichneten Profil. Export kopiert dieses STL und schreibt einen
-technischen JSON-Bericht und eine Textzusammenfassung. Es werden **kein Slice,
-kein G-Code, kein 3MF und keine Layerzeitbewertung** erzeugt. Der technische
-Bericht kennzeichnet ausdrücklich, dass Original- und Druckerprüfungen nicht
-stattgefunden haben. Der eigene `StandaloneRequest` enthält keine Quelle,
-Profile oder Adapter und durchläuft keine entsprechenden Aufbereitungsschritte.
-
-Normale und freie manuelle Erstellung besitzen jeweils einen eigenen Editor,
-Controller und `GenerationSession`. Entwürfe, Einstellungen, Objektstandardwerte,
-Kameras sowie Ergebnis- und Exportstände bleiben bis zum Sitzungsende unabhängig
-erhalten; die Turmform wird zwischen diesen Methoden nicht übertragen. Beim
-Betreten beider manuellen Methoden ist kein Punkt ausgewählt. Beide verwenden
-dieselbe Hauptfenster-Fußleiste; alle Resetaktionen betreffen ausschließlich die
-aktive Methode. Freie Werte werden nicht als normale Benutzereinstellungen
-gespeichert. Änderungen der Dateivorbereitung machen den normalen Kontext
-ungültig; der freie Entwurf und dessen Ergebnis bleiben erhalten. Laufende
-Generierungen/Exporte sperren den Methodenwechsel. Beim Schließen werden die
-Ergebnisdateien aller drei Sitzungen freigegeben.
+Automatische und manuelle Erstellung besitzen getrennte `GenerationSession`-Stände.
+Ein Wechsel erhält Entwurf, Einstellungen, Kamera sowie Ergebnis und Exportstatus
+der jeweiligen Methode. Beim Betreten des manuellen Editors ist kein Punkt ausgewählt.
+Beide Methoden verwenden die Hauptfenster-Fußleiste; manuelle Resetaktionen betreffen
+nur den manuellen Editor. Änderungen der Quelle oder Profile verwerfen die
+betroffenen Ergebnisse beider Methoden und den manuellen Kontext. Laufende
+Generierungen und Exporte sperren den Methodenwechsel. Beim Schließen werden
+die temporären Ergebnisdateien beider Sitzungen freigegeben.
 
 ## Bedienung und eigene Einstellungen
 
@@ -289,7 +272,17 @@ diese Markierung auf; Fenstergrößen-, Farb- und Auflösungsänderungen allein
 aktivieren sie nicht. Objektrotation,
 Transparenz, Auswahl, Hover und Kamera verändern keine Druckdatei.
 Die Einpassung nutzt die tatsächlichen projizierten Objektgrenzen und Turmsegmente
-ohne pauschale Reserve in Millimetern oder Prozent. Über den Objekten bleiben
+ohne pauschale Reserve in Millimetern oder Prozent. In den Profilansichten werden
+die Maximaldurchmesser-Griffe nur auf ihrer rechten Seite berücksichtigt, links
+die tatsächliche Turmbreite. Überstehende Höhengriffe werden nur mit ihrem
+tatsächlichen Pixelbedarf berücksichtigt. Zwischen dem äußersten Griff und dem
+Original bleiben beim Einpassen 15 Pixel Abstand. Beide Objekte verwenden
+denselben Maßstab und nutzen die verfügbare Höhe vollständig, solange die
+gemeinsame Breite einschließlich der Griffe und ihres Abstands hineinpasst.
+Die STL-Gesamthöhe wird auch dann berücksichtigt, wenn der letzte Drucklayer
+etwas darunter liegt.
+Ein neuer Quellenkontext wird auch in einer bereits verwendeten Vorschau neu
+eingepasst. Über den Objekten bleiben
 mindestens 20 Pixel Abstand zu den Ansichtsbuttons. In den Profilansichten ist
 unterhalb der Druckbettebene Platz für die Mindestdurchmesser-Maßlinie reserviert;
 die räumlichen Ansichten behalten einen kleinen unteren Abstand von 24 Pixeln.
@@ -376,6 +369,9 @@ Weitere Mausbewegungen verlängern diesen Impuls nicht; nach dessen Ende
 blendet ein erneuter Versuch in Richtung der Grenze ihn wieder sofort ein.
 Die Markierung erneuert keine Originalflächen und verwendet das fertige Originalbild weiter.
 Auch Grenzversuche mit Béziergriffen blenden die betroffenen Linien ein.
+Die Mindestgrenze gilt ebenfalls für die gesamte Fußkurve und beide
+Fußkurven-Kontrollgriffe. Ihre Anker stoppen beim Mindest-Turmdurchmesser;
+ein Unterschreitungsversuch zeigt beide symmetrischen Grenzlinien.
 Bei gekoppelten Tangenten werden alle verletzten Durchmessergrenzen der
 versuchten vollständigen Form angezeigt. Unzulässige Kontrollgriffhöhen zeigen
 die erreichte Grenze als horizontale Linie. Zeitverlauf und gültiges Abfangen
@@ -589,7 +585,7 @@ Mesh als gültig auszugeben.
 
 Alle STL-Ringe einschließlich Boden verwenden exakt dieselbe tatsächliche
 Kreissegmentzahl (12–720). Ohne eigene Wahl wird bei der Initialisierung
-`max(25, ceil(Fußdurchmesser in mm))` festgelegt und anschließend als eigener
+`max(30, ceil(Fußdurchmesser in mm))` festgelegt und anschließend als eigener
 manueller Wert geführt. Die radiale Polygonabweichung in XY ist davon getrennt:
 `Radius * (1 - cos(pi / Segmentzahl))`. Die räumliche Turmanzeige verwendet
 immer die vollständige eingestellte Kreissegmentzahl, unabhängig von der
@@ -669,6 +665,11 @@ Widgets bleiben im GUI-Thread. Request-ID und vollständige Kamera-/Farbidentit�
 verwerfen verspätete Ergebnisse. Ein Quellen-/Ansichtswechsel bricht ersetzte Jobs ab. Das
 Schließen des Hauptfensters verhindert neue Renderjobs und nutzt den zentralen
 kontrollierten Shutdown.
+Der Wechsel zu einer direkt gezeichneten Auflösungsstufe beendet ausstehende
+Renderaufträge und verwirft ihre verspäteten Ergebnisse. Beim erneuten Wählen
+derselben höheren Stufe wird ein neuer Auftrag eingeplant; eine gespeicherte
+Kennung allein gilt nicht als laufende Arbeit. Wird während des Abbruchs erneut
+gewechselt, startet der neueste Auftrag nach der Freigabe des alten Threads.
 
 Eine lokale Stichprobe am 11.10.2026 verwendete ein selbst erzeugtes Ellipsoid
 aus einer Icosphere mit 5.120 Dreiecken, ohne kritische Layerkonturen. Median
