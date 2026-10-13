@@ -426,7 +426,7 @@ Wird die Canvas nach dem Einblenden neu positioniert,
 folgen ihr die Navigationselemente. Die vier Ansichtsbuttons über der Canvas
 sind 32 px hoch.
 
-Nach Abschluss der Datei-/Slicer-Vorbereitung erscheint die fensterfüllende
+Nach Abschluss der Datei-/Slicer-Vorbereitung erscheint im Inhaltsbereich die
 Methodenauswahl mit der zentrierten Überschrift „Wie soll der Kühlturm erstellt werden?“. Die Karten
 „Automatisch“ und „Manuell“ stehen bei ausreichend Platz nebeneinander,
 ansonsten untereinander. Die gemeinsame Kartenbreite ist auf 980 px begrenzt;
@@ -436,9 +436,12 @@ verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
 „Automatisch“ öffnet den bestehenden Arbeitsbereich;
 „Manuell“ öffnet den eingebetteten [Profil- und Béziereditor](manual_editor.md).
 Über den Header-Button „Methode auswählen“ ist die Rückkehr möglich.
-„Datei und Slicer vorbereiten“ öffnet die gemeinsame Vorbereitung ebenfalls
-über das gesamte Fenster. Die Header-Buttons umbrechen bei Platzmangel als
-ganze Elemente. Einstellungen, Vorschau,
+Der Vorbereitungsbutton öffnet die gemeinsame Vorbereitung im Inhaltsbereich.
+Er zeigt links einen grünen Haken und rechts die bestätigten Datei-, Slicer-
+und Profilangaben. Bei genügend Breite stehen neben der Überschrift zuerst
+dieser Button und dann „Methode auswählen“. Bei Platzmangel wird die
+Methodenbeschriftung zu „Methode“ gekürzt; danach umbrechen die Bedienelemente.
+Header und Footer bleiben sichtbar. Einstellungen, Vorschau,
 Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
 Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
 

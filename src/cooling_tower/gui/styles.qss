@@ -53,6 +53,15 @@ QPushButton#preparationMethodButton:checked {
     color: #17486d;
 }
 
+QLabel#preparationFactsStatus {
+    color: #199764;
+    font-size: 28pt;
+    background: transparent;
+}
+QLabel#preparationFactsStatus[confirmed="false"] {
+    color: #526274;
+}
+
 QWidget#mainFooter {
     background: #f3f6f9;
     border-top: 1px solid #cbd6e1;
@@ -477,7 +486,9 @@ QLabel#sectionCardTitleNote[severity="warning"] { color: #8a4b08; }
 QLabel#sectionCardSummary,
 QLabel#sectionCardSummaryKey,
 QLabel#sectionCardSplitSummaryLeft,
-QLabel#sectionCardSplitSummaryRight {
+QLabel#sectionCardSplitSummaryRight,
+QLabel#workflowHeaderFactKey,
+QLabel#workflowHeaderFactValue {
     color: #526274;
     font-size: 9.5pt;
 }

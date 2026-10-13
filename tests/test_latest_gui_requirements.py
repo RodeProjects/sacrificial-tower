@@ -549,41 +549,46 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
     def test_internal_dialogs_stay_transparent_until_final_placement(self) -> None:
         window = self.window()
+        reveal_delay_ms = 250
         window.resize(900, 900)
         window.show()
         self.app.processEvents()
 
-        for opener, dialog_getter in (
-            (window.show_about_dialog, lambda: window.about_dialog),
-            (
-                window.show_additional_options,
-                lambda: window._joint_slice_settings_dialog,
-            ),
+        with patch(
+            "cooling_tower.gui.main_window.INTERNAL_DIALOG_REVEAL_DELAY_MS",
+            reveal_delay_ms,
         ):
-            opener()
-            dialog = dialog_getter()
-            self.app.processEvents()
-            self.assertTrue(dialog.isVisible())
-            self.assertEqual(dialog.windowOpacity(), 0.0)
+            for opener, dialog_getter in (
+                (window.show_about_dialog, lambda: window.about_dialog),
+                (
+                    window.show_additional_options,
+                    lambda: window._joint_slice_settings_dialog,
+                ),
+            ):
+                opener()
+                dialog = dialog_getter()
+                self.app.processEvents()
+                self.assertTrue(dialog.isVisible())
+                self.assertEqual(dialog.windowOpacity(), 0.0)
 
-            QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
-            self.app.processEvents()
-            self.assertEqual(dialog.windowOpacity(), 1.0)
-            dialog.close()
-            self.app.processEvents()
+                QTest.qWait(reveal_delay_ms + 20)
+                self.app.processEvents()
+                self.assertEqual(dialog.windowOpacity(), 1.0)
+                dialog.close()
+                self.app.processEvents()
 
-        # New dialogs are protected automatically even if their implementer
-        # accidentally omits the preferred main-window parent.
-        future_dialog = QDialog()
-        future_dialog.setWindowTitle("Zukünftiger Dialog")
-        future_dialog.show()
-        self.app.processEvents()
-        self.assertEqual(future_dialog.windowOpacity(), 0.0)
-        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
-        self.app.processEvents()
-        self.assertEqual(future_dialog.windowOpacity(), 1.0)
-        future_dialog.close()
-        future_dialog.setParent(window)
+            # New dialogs are protected automatically even if their implementer
+            # accidentally omits the preferred main-window parent.
+            future_dialog = QDialog()
+            future_dialog.setWindowTitle("Zukünftiger Dialog")
+            future_dialog.show()
+            self.app.processEvents()
+            self.assertEqual(future_dialog.windowOpacity(), 0.0)
+            QTest.qWait(reveal_delay_ms + 20)
+            self.app.processEvents()
+            self.assertEqual(future_dialog.windowOpacity(), 1.0)
+            future_dialog.close()
+            future_dialog.setParent(window)
         window.close()
 
     def test_file_status_precedes_guide_and_keeps_body_gap_below(self) -> None:

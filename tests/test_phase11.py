@@ -713,16 +713,26 @@ class NumericSettingWidgetTests(GuiCase):
         self.window.automatic_generation_card.click()
         QTest.qWait(300)
         editor = self.window.target_time_spin
+        self.window.activateWindow()
+        self.app.processEvents()
         editor.setFocus()
+        self.app.processEvents()
+        self.assertTrue(editor.hasFocus(), "Numeric editor did not receive focus")
         editor.selectAll()
         QTest.keyClicks(editor, "23")
         QTest.keyClick(editor, Qt.Key.Key_Return)
         self.assertEqual(editor.value(), 23)
+        self.assertTrue(editor.hasFocus(), "Enter removed focus from the numeric editor")
         QTest.keyClick(editor, Qt.Key.Key_Tab)
-        self.assertTrue(
-            self.window._setting_widgets[
-                "target_layer_time_s"
-            ].reset_button.hasFocus()
+        reset_button = self.window._setting_widgets[
+            "target_layer_time_s"
+        ].reset_button
+        focused = self.app.focusWidget()
+        self.assertIs(
+            focused,
+            reset_button,
+            f"Tab moved focus to {focused.objectName() if focused else None!r} "
+            f"({type(focused).__name__ if focused else None})",
         )
 
 

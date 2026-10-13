@@ -84,7 +84,7 @@ from cooling_tower.gui.generation_session import GenerationMode, GenerationSessi
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.manual_controller import ManualGenerationController
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
-from cooling_tower.gui.widgets.wrapping_layout import WrappingLayout
+from cooling_tower.gui.widgets.workflow_header import WorkflowHeader
 from cooling_tower.gui.widgets.stl_validation_feedback import StlValidationFeedback
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
@@ -1103,7 +1103,6 @@ class MainWindow(QMainWindow):
         )
         self.reset_button.clicked.connect(self.request_reset_defaults)
         title_row.addWidget(title)
-        title_row.addStretch(1)
         self.options_button = QToolButton()
         self.options_button.setObjectName("optionsButton")
         self.options_button.setText("")
@@ -1138,7 +1137,7 @@ class MainWindow(QMainWindow):
         )
         self.about_action.triggered.connect(self.show_about_dialog)
         self.options_button.clicked.connect(self.show_options_menu)
-        title_row.addWidget(self.options_button)
+        title_row.addWidget(self.options_button, 0, Qt.AlignmentFlag.AlignTop)
         subtitle = QLabel(APP_SUBTITLE)
         self.subtitle_label = subtitle
         subtitle.setObjectName("subtitleLabel")
@@ -1153,7 +1152,6 @@ class MainWindow(QMainWindow):
         subtitle_row = QHBoxLayout()
         subtitle_row.setContentsMargins(0, 0, 0, 0)
         subtitle_row.setSpacing(8)
-        subtitle_row.addWidget(subtitle)
         subtitle_row.addStretch(1)
         subtitle_row.addWidget(self.version_label)
         self.update_button = QPushButton("Aktualisieren")
@@ -1173,23 +1171,16 @@ class MainWindow(QMainWindow):
         subtitle_row.addWidget(self.update_cancel_button)
         header_layout.addLayout(title_row)
         header_layout.addLayout(subtitle_row)
-        self.header_workflow_actions = QWidget()
-        self.header_workflow_actions.setObjectName("headerWorkflowActions")
-        self.header_workflow_actions_layout = WrappingLayout(
-            self.header_workflow_actions, spacing=8
-        )
-        self.preparation_open_button = QPushButton("Datei und Slicer vorbereiten")
+        title_row.removeWidget(title)
+        self.workflow_header = WorkflowHeader(title, subtitle)
+        title_row.insertWidget(0, self.workflow_header, 1)
+        self.header_workflow_actions = self.workflow_header.actions_widget
+        self.preparation_open_button = self.workflow_header.preparation_button
         self.preparation_open_button.setObjectName("preparationOpenButton")
-        self.preparation_open_button.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
         self.preparation_open_button.setToolTip(
-            "Datei, Slicer und Druckprofile in der fensterfüllenden Ansicht bearbeiten"
+            "Datei, Slicer und Druckprofile im Inhaltsbereich bearbeiten"
         )
         self.preparation_open_button.clicked.connect(self.show_preparation_workspace)
-        self.header_workflow_actions_layout.addWidget(self.preparation_open_button)
-        self.header_workflow_actions.hide()
-        header_layout.addWidget(self.header_workflow_actions)
         root_layout.addWidget(header)
 
         self.settings_scroll = QScrollArea()
@@ -3080,7 +3071,7 @@ class MainWindow(QMainWindow):
         self.generation_method_back_button.clicked.connect(
             self.show_generation_method_selection
         )
-        self.header_workflow_actions_layout.addWidget(self.generation_method_back_button)
+        self.workflow_header.add_action(self.generation_method_back_button, "Methode auswählen", "Methode")
         self.generation_method_label = QLabel()
         self.generation_method_label.setObjectName("generationMethodLabel")
         self.generation_method_label.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Preferred)
@@ -3145,7 +3136,7 @@ class MainWindow(QMainWindow):
         # the workflow card itself consumes the available viewport height.
         self.content_layout.addStretch(1)
 
-        self._build_preparation_workspace(central)
+        self._build_preparation_workspace()
 
         workflow_group.toggled.connect(
             self._refresh_preparation_section_layout
@@ -3203,7 +3194,7 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self._on_main_export_clicked)
 
         self.settings_scroll.setWidget(content)
-        root_layout.addWidget(self.settings_scroll, 1)
+        root_layout.addWidget(self.window_pages, 1)
 
         footer = QWidget()
         self.footer = footer
@@ -3562,7 +3553,7 @@ class MainWindow(QMainWindow):
         self._footer_narrow_layout: bool | None = None
         self._refresh_footer_responsive_layout(force=True)
         root_layout.addWidget(footer)
-        self.setCentralWidget(self.window_pages)
+        self.setCentralWidget(central)
         self._footer_height_timer = QTimer(self)
         self._footer_height_timer.setSingleShot(True)
         self._footer_height_timer.timeout.connect(
@@ -3612,38 +3603,29 @@ class MainWindow(QMainWindow):
             self.confirm_profile_selection
         )
 
-    def _build_preparation_workspace(self, main_surface: QWidget) -> None:
-        """Use the entire client area for preparation and method selection."""
+    def _build_preparation_workspace(self) -> None:
+        """Switch only the body while preserving the main header and footer."""
 
-        self.main_surface = main_surface
+        self.main_surface = self.settings_scroll
         self.window_pages = QStackedWidget()
         self.window_pages.setObjectName("windowPages")
-        self.window_pages.addWidget(main_surface)
+        self.window_pages.addWidget(self.main_surface)
         self.preparation_workspace = QWidget()
         self.preparation_workspace.setObjectName("preparationWorkspace")
         workspace_layout = QVBoxLayout(self.preparation_workspace)
-        workspace_layout.setContentsMargins(22, 18, 22, 22)
-        workspace_layout.setSpacing(12)
-        workspace_navigation = QWidget()
-        workspace_navigation_layout = WrappingLayout(workspace_navigation, spacing=8)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
         self.preparation_close_button = QPushButton("← Zur Turmerstellung")
         self.preparation_close_button.clicked.connect(self.close_preparation_workspace)
-        self.preparation_view_button = QPushButton("Datei und Slicer vorbereiten")
+        self.preparation_view_button = self.preparation_open_button
         self.preparation_view_button.setObjectName("preparationViewButton")
-        self.preparation_method_button = QPushButton("Methodenauswahl")
+        self.preparation_method_button = self.generation_method_back_button
         self.preparation_method_button.setObjectName("preparationMethodButton")
         for button in (self.preparation_view_button, self.preparation_method_button):
             button.setCheckable(True)
-        self.preparation_view_button.clicked.connect(self.show_preparation_workspace)
-        self.preparation_method_button.clicked.connect(self.show_generation_method_selection)
-        for button in (
-            self.preparation_close_button,
-            self.preparation_view_button,
-            self.preparation_method_button,
-        ):
-            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            workspace_navigation_layout.addWidget(button)
-        workspace_layout.addWidget(workspace_navigation)
+        self.preparation_close_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.workflow_header.add_action(self.preparation_close_button, "← Zur Turmerstellung", "← Zurück")
+        self.preparation_close_button.hide()
         self.preparation_workspace_scroll = QScrollArea()
         self.preparation_workspace_scroll.setWidgetResizable(True)
         self.preparation_workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -3652,7 +3634,7 @@ class MainWindow(QMainWindow):
         )
         self.preparation_workspace_content = QWidget()
         self.preparation_workspace_layout = QVBoxLayout(self.preparation_workspace_content)
-        self.preparation_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.preparation_workspace_layout.setContentsMargins(22, 8, 22, 22)
         self.preparation_workspace_layout.setSpacing(16)
         self.preparation_workspace_layout.addWidget(self.generation_method_picker)
         self.preparation_workspace_layout.addStretch(1)
@@ -3673,10 +3655,11 @@ class MainWindow(QMainWindow):
             self.preparation_workspace_layout.insertWidget(0, self.workflow_group, 1)
             self._preparation_in_workspace = True
         self.workflow_group.setCheckable(False)
-        self.header_workflow_actions.setVisible(self._preparation_in_workspace)
+        self.workflow_header.set_actions_visible(self._preparation_in_workspace)
         self._refresh_workflow_navigation_actions()
         self.preparation_close_button.setVisible(
             preparation_ready and self.generation_mode is not None
+            and self.window_pages.currentWidget() is self.preparation_workspace
         )
         if self._preparation_in_workspace:
             if not preparation_ready:
@@ -3691,10 +3674,11 @@ class MainWindow(QMainWindow):
             )
             self.workflow_group.setVisible(workspace_open and preparation_visible)
             self.generation_method_picker.setVisible(workspace_open and not preparation_visible)
-            self.preparation_view_button.setChecked(preparation_visible)
-            self.preparation_method_button.setChecked(not preparation_visible)
+            self.preparation_view_button.setChecked(workspace_open and preparation_visible)
+            self.preparation_method_button.setChecked(workspace_open and not preparation_visible)
             if not preparation_ready or self.generation_mode is None:
                 self.window_pages.setCurrentWidget(self.preparation_workspace)
+        self.workflow_header.refresh_layout()
         QTimer.singleShot(0, self._refresh_preparation_section_layout)
 
     def _refresh_workflow_navigation_actions(self) -> None:
@@ -3709,7 +3693,11 @@ class MainWindow(QMainWindow):
         self.preparation_method_button.setEnabled(available and ready)
 
     def _show_preparation_workspace(self, view: str) -> None:
-        if not self._preparation_in_workspace or not self._generation_method_change_available():
+        if not self._generation_method_change_available():
+            return
+        if not self._preparation_in_workspace:
+            if view == "preparation":
+                self.settings_scroll.ensureWidgetVisible(self.workflow_group)
             return
         if view == "methods" and (
             self.workflow.stage is not WorkflowStage.READY
@@ -3722,6 +3710,8 @@ class MainWindow(QMainWindow):
         self.preparation_view_button.setChecked(view == "preparation")
         self.preparation_method_button.setChecked(view == "methods")
         self.window_pages.setCurrentWidget(self.preparation_workspace)
+        self.preparation_close_button.setVisible(self.generation_mode is not None)
+        self.workflow_header.refresh_layout()
         self.preparation_workspace_scroll.verticalScrollBar().setValue(0)
         QTimer.singleShot(0, self._refresh_preparation_section_layout)
 
@@ -3751,7 +3741,7 @@ class MainWindow(QMainWindow):
         actions_visible = preparation_ready and self.generation_mode in {GenerationMode.AUTOMATIC, GenerationMode.MANUAL}
         self._set_preparation_viewport_fill(not preparation_ready)
         if hasattr(self, "footer"):
-            self.footer.setVisible(actions_visible)
+            self.footer.setVisible(preparation_ready or self._preparation_in_workspace)
         self._set_setting_feedback_enabled(actions_visible and self.generation_mode is GenerationMode.AUTOMATIC)
         for widget in (
             self.open_output_button,
@@ -8943,30 +8933,26 @@ class MainWindow(QMainWindow):
         self._refresh_preparation_header_summary(preparation_complete)
 
     def _refresh_preparation_header_summary(self, complete: bool) -> None:
-        """Show the completed file and profile overview in one fact column."""
+        """Keep each currently confirmed fact in the persistent main header."""
 
-        if not complete:
-            self.workflow_group.set_split_summary_columns((), ())
-            return
+        self.workflow_group.set_split_summary_columns((), ())
         installation = self.selected_slicer_installation
         source_path = self.current_source_path
-        if installation is None or source_path is None:
-            self.workflow_group.set_split_summary_columns((), ())
-            return
+        rows = []
+        if source_path is not None and self._source_step_is_complete():
+            rows.append(("Dateiname", source_path.name))
 
         def selected_text(combo: QComboBox) -> str:
             return combo.currentText().strip() or "Nicht ausgewählt"
 
-        self.workflow_group.set_split_summary_columns(
-            (),
-            (
-                ("Dateiname", source_path.name),
+        if installation is not None and installation.verified and self._catalog_selection_is_confirmed():
+            rows.extend((
                 ("Slicer", installation.display_name),
                 ("Maschinenprofil", selected_text(self.machine_profile_combo)),
                 ("Filamentprofil", selected_text(self.filament_profile_combo)),
                 ("Prozessprofil", selected_text(self.process_profile_combo)),
-            ),
-        )
+            ))
+        self.workflow_header.set_facts(tuple(rows))
 
     def _set_slicer_progress(
         self,

@@ -318,19 +318,27 @@ steht als Badge direkt neben „3D-Vorschau“.
 
 ### Auswahl der Generierungsmethode und Sitzungszustände
 
-Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt eine fensterfüllende
-Ansicht zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
+Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt der Inhaltsbereich
+zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
 „Automatisch“ und einem dunkleren Blauton für „Manuell“. `GenerationMode` kennzeichnet die
 ausgewählte Methode; `None` bedeutet, dass noch keine Methode gewählt wurde. Die Vorbereitung und
 deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
-`window_pages` wechselt zwischen dem Hauptbereich und `preparation_workspace`,
-das den gesamten Fensterinhalt einschließlich des sonst sichtbaren Headers und
-Footers ersetzt. Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
+`window_pages` wechselt im Inhaltsbereich zwischen `settings_scroll` und
+`preparation_workspace`. Der bestehende Header und Footer bleiben sichtbar.
+Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
 Vorbereitungskarte dauerhaft in dieser Ansicht und ist kein Dropdown mehr.
-Die Header-Buttons „Datei und Slicer vorbereiten“ und „Methode auswählen“ öffnen
-die jeweilige Ansicht; `WrappingLayout` bricht sie bei Platzmangel als ganze
-Bedienelemente um. Innerhalb der Ansicht kann zwischen Vorbereitung und
-Methodenauswahl gewechselt werden. „Zur Turmerstellung“ kehrt zur gewählten
+`WorkflowHeader` ordnet bei genügend Breite rechts neben der Überschrift zuerst
+den Vorbereitungsbutton und danach „Methode auswählen“ an. `PreparationFactsButton`
+enthält links den vertikal zentrierten grünen Haken und rechts die aktuell
+bestätigten Datei-, Slicer- und Profilangaben. Die gesamte Fläche ist per Maus
+und Tastatur bedienbar; „Datei und Slicer vorbereiten“ bleibt als zugänglicher
+Name und Tooltip erhalten und erscheint nicht als sichtbarer Buttontext.
+Bei Platzmangel wird zuerst „Methode auswählen“ zu „Methode“ gekürzt; anschließend
+wandert die Buttongruppe unter die Überschrift und umbrechen bei Bedarf deren
+ganze Bedienelemente. Die Angaben bleiben unabhängig vom geöffneten Inhaltsbereich sichtbar.
+Lange Angaben werden umgebrochen und bleiben vollständig lesbar. Nicht mehr
+bestätigte Angaben werden entfernt; die übrigen bestätigten Angaben bleiben erhalten.
+„Zur Turmerstellung“ (bei Platzmangel „Zurück“) kehrt zur gewählten
 Methode zurück, solange die Vorbereitung weiterhin bestätigt ist.
 Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
 er wird lediglich ausgeblendet. `ManualGenerationPanel` besitzt einen eigenen

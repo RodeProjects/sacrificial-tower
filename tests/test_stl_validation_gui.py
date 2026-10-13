@@ -287,6 +287,7 @@ class StlValidationGuiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         observed: dict[str, object] = {}
+        callback_errors: list[BaseException] = []
 
         def rejected_dialog() -> QMessageBox:
             dialogs = [
@@ -299,38 +300,85 @@ class StlValidationGuiTests(unittest.TestCase):
             return dialogs[0]
 
         def inspect_concealed_position() -> None:
-            dialog = rejected_dialog()
-            observed["initial_opacity"] = dialog.windowOpacity()
-            observed["initial_center_offset"] = (
-                dialog.frameGeometry().center()
-                - window.frameGeometry().center()
-            )
-            QTimer.singleShot(
-                INTERNAL_DIALOG_REVEAL_DELAY_MS + 20,
-                inspect_and_cancel,
-            )
+            try:
+                dialog = rejected_dialog()
+                observed["initial_opacity"] = dialog.windowOpacity()
+                observed["initial_center_offset"] = (
+                    dialog.frameGeometry().center()
+                    - window.frameGeometry().center()
+                )
+                QTimer.singleShot(
+                    INTERNAL_DIALOG_REVEAL_DELAY_MS + 20,
+                    inspect_and_cancel,
+                )
+            except BaseException as error:
+                callback_errors.append(error)
+                reject_pending_dialog()
 
         def inspect_and_cancel() -> None:
-            dialog = rejected_dialog()
-            observed["visible"] = dialog.isVisible()
-            observed["opacity"] = dialog.windowOpacity()
-            observed["modality"] = dialog.windowModality()
-            observed["on_screen"] = bool(
-                dialog.frameGeometry().intersects(
-                    dialog.screen().availableGeometry()
+            dialog = None
+            try:
+                dialog = rejected_dialog()
+                observed["visible"] = dialog.isVisible()
+                observed["opacity"] = dialog.windowOpacity()
+                observed["modality"] = dialog.windowModality()
+                observed["on_screen"] = bool(
+                    dialog.frameGeometry().intersects(
+                        dialog.screen().availableGeometry()
+                    )
                 )
-            )
-            observed["center_offset"] = (
-                dialog.frameGeometry().center()
-                - window.frameGeometry().center()
-            )
-            observed["default"] = dialog.defaultButton().text()
-            observed["escape"] = dialog.escapeButton().text()
-            dialog._rejected_stl_cancel_button.click()
+                observed["center_offset"] = (
+                    dialog.frameGeometry().center()
+                    - window.frameGeometry().center()
+                )
+                observed["default"] = dialog.defaultButton().text()
+                observed["escape"] = dialog.escapeButton().text()
+            except BaseException as error:
+                callback_errors.append(error)
+            finally:
+                if dialog is not None and dialog.isVisible():
+                    cancel_button = getattr(
+                        dialog, "_rejected_stl_cancel_button", None
+                    )
+                    if cancel_button is not None:
+                        cancel_button.click()
+                    else:
+                        dialog.reject()
+
+        def reject_pending_dialog() -> None:
+            for widget in self.app.topLevelWidgets():
+                if (
+                    isinstance(widget, QMessageBox)
+                    and widget.objectName() == "rejectedStlConfirmationDialog"
+                    and widget.isVisible()
+                ):
+                    widget.reject()
+
+        watchdog = QTimer(window)
+        watchdog.setSingleShot(True)
+        watchdog.setInterval(5000)
+
+        def cancel_if_still_open() -> None:
+            if any(
+                isinstance(widget, QMessageBox)
+                and widget.objectName() == "rejectedStlConfirmationDialog"
+                and widget.isVisible()
+                for widget in self.app.topLevelWidgets()
+            ):
+                callback_errors.append(
+                    TimeoutError("STL-Bestätigungsdialog wurde nicht geschlossen.")
+                )
+                reject_pending_dialog()
+
+        watchdog.timeout.connect(cancel_if_still_open)
 
         try:
+            watchdog.start()
             QTimer.singleShot(0, inspect_concealed_position)
             self.assertFalse(window._ask_rejected_stl_confirmation())
+            watchdog.stop()
+            if callback_errors:
+                raise callback_errors[0]
 
             initial_center_offset = observed.pop("initial_center_offset")
             self.assertLessEqual(abs(initial_center_offset.x()), 3)
@@ -351,6 +399,8 @@ class StlValidationGuiTests(unittest.TestCase):
                 },
             )
         finally:
+            watchdog.stop()
+            reject_pending_dialog()
             window.close()
             window.deleteLater()
             self.app.processEvents()

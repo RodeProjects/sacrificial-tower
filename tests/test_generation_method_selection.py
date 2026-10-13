@@ -6,20 +6,21 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.models import SourceArtifact, SourceKind
 from cooling_tower.preview import PreviewState
 
 
@@ -99,7 +100,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.generation_method_picker.isVisible())
         self.assertTrue(window.ready_grid.isHidden())
         self.assertTrue(window.manual_generation_panel.isHidden())
-        self.assertTrue(window.footer.isHidden())
+        self.assertTrue(window.footer.isVisible())
         self.assertTrue(window.generation_method_navigation.isHidden())
         window.automatic_generation_card.click()
         self.app.processEvents()
@@ -146,7 +147,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(artifact.exists())
         dispose.assert_not_called()
 
-    def test_header_preparation_covers_entire_window_and_returns_to_current_method(self) -> None:
+    def test_preparation_uses_body_and_preserves_header_footer_and_current_method(self) -> None:
         window = self.window
         self.finish_preparation()
         window.automatic_generation_card.click()
@@ -158,11 +159,15 @@ class GenerationMethodSelectionTests(unittest.TestCase):
             for _ in range(3):
                 self.app.processEvents()
             self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
-            self.assertEqual(window.preparation_workspace.size(), window.centralWidget().size())
+            self.assertEqual(window.preparation_workspace.size(), window.window_pages.size())
+            self.assertLess(window.preparation_workspace.height(), window.centralWidget().height())
             self.assertTrue(window.workflow_group.isVisible())
-            self.assertTrue(window.main_header.isVisibleTo(window.main_surface))
-            self.assertFalse(window.main_header.isVisible())
-            self.assertFalse(window.footer.isVisible())
+            self.assertTrue(window.main_header.isVisible())
+            self.assertTrue(window.footer.isVisible())
+            self.assertTrue(window.main_header.isAncestorOf(window.preparation_open_button))
+            self.assertTrue(window.main_header.isAncestorOf(window.generation_method_back_button))
+            self.assertLess(window.main_header.geometry().bottom(), window.window_pages.y())
+            self.assertLess(window.window_pages.geometry().bottom(), window.footer.y())
             self.assertFalse(window.workflow_group.isCheckable())
             self.assertTrue(window.workflow_group.toggle_button.isHidden())
             self.assertEqual(window.preparation_workspace_scroll.horizontalScrollBar().maximum(), 0)
@@ -179,6 +184,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         window.automatic_generation_card.click()
         window.generation_method_back_button.click()
         self.assertTrue(window.generation_method_picker.isVisible())
+        self.assertTrue(window.main_header.isVisible())
+        self.assertTrue(window.footer.isVisible())
         self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
         window.preparation_view_button.click()
         self.assertTrue(window.workflow_group.isVisible())
@@ -191,24 +198,152 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.ready_grid.isVisible())
         self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
 
-    def test_header_buttons_wrap_as_whole_controls_without_overlap(self) -> None:
+    def test_header_combines_facts_and_places_actions_beside_title_before_wrapping(self) -> None:
         window = self.window
         self.finish_preparation()
         window.automatic_generation_card.click()
-        layout = window.header_workflow_actions_layout
-        buttons = (window.preparation_open_button, window.generation_method_back_button)
-        row_width = sum(button.sizeHint().width() for button in buttons) + layout.spacing()
-        for width, wraps in ((row_width + 20, False), (row_width - 20, True), (row_width + 20, False)):
+        window.resize(2000, 1000)
+        header = window.workflow_header
+        rows = (("Dateiname", "modell.stl"), ("Slicer", "Anycubic Slicer Next 2.0.0.3"),
+                ("Maschinenprofil", "Anycubic Kobra 3 V2 0.4 nozzle"),
+                ("Filamentprofil", "PLA - Tecbears - Schwarz (matt)"),
+                ("Prozessprofil", "0.20 mm Standard @Kobra 3 V2"))
+        header.set_facts(rows)
+        for _ in range(3):
+            self.app.processEvents()
+        preparation = window.preparation_open_button
+        method = window.generation_method_back_button
+        prep_width = preparation.sizeHint().width()
+        full_width = method.sizeHint().width()
+        method.setText("Methode")
+        compact_width = method.sizeHint().width()
+        offset = prep_width + header.actions_layout.spacing() + 5
+        inline_offset = offset + header.brand_widget.sizeHint().width() + header.grid.horizontalSpacing()
+        for width, text, inline, wraps in (
+            (full_width + inline_offset, "Methode auswählen", True, False),
+            (compact_width + inline_offset, "Methode", True, False),
+            (compact_width + offset, "Methode", False, False),
+            (offset - 10, "Methode", False, True),
+            (full_width + inline_offset, "Methode auswählen", True, False),
+        ):
             with self.subTest(width=width):
-                layout.setGeometry(QRect(0, 0, width, layout.heightForWidth(width)))
-                first, second = (button.geometry() for button in buttons)
+                header.setFixedWidth(width)
+                for _ in range(5):
+                    self.app.processEvents()
+                self.assertEqual(preparation.text(), "")
+                self.assertEqual(preparation.accessibleName(), "Datei und Slicer vorbereiten")
+                self.assertEqual(method.text(), text)
+                self.assertEqual(preparation.status_label.text(), "✓")
+                first = QRect(preparation.mapTo(header, QPoint()), preparation.size())
+                second = QRect(method.mapTo(header, QPoint()), method.size())
+                title = QRect(window.title_label.mapTo(header, QPoint()), window.title_label.size())
                 self.assertFalse(first.intersects(second))
                 self.assertLessEqual(first.right(), width - 1)
                 self.assertLessEqual(second.right(), width - 1)
+                self.assertTrue(preparation.isAncestorOf(header.facts_widget))
+                mark = preparation.status_label
+                self.assertLessEqual(abs(mark.geometry().center().y() - preparation.rect().center().y()), 1)
+                self.assertLess(mark.geometry().right(), header.facts_widget.x())
+                for key, value in rows:
+                    self.assertTrue(header.fact_labels[key].isVisible())
+                    self.assertEqual(header.fact_labels[key].text(), value)
                 if wraps:
                     self.assertLess(first.bottom(), second.top())
                 else:
-                    self.assertEqual(first.top(), second.top())
+                    self.assertLess(first.right(), second.left())
+                    self.assertLessEqual(abs(first.center().y() - second.center().y()), 1)
+                if inline:
+                    self.assertLess(title.right(), first.left())
+                    self.assertLessEqual(first.top(), title.center().y())
+                    self.assertGreaterEqual(first.bottom(), title.center().y())
+                else:
+                    self.assertLess(title.bottom(), first.top())
+
+    def test_entire_preparation_facts_button_opens_preparation_and_supports_keyboard(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        window.resize(1450, 1000)
+        header = window.workflow_header
+        header.set_facts((("Dateiname", "modell.stl"), ("Slicer", "Testslicer")))
+        self.app.processEvents()
+        preparation = window.preparation_open_button
+        for child in (preparation.status_label, header.fact_labels["Dateiname"], header.fact_labels["Slicer"]):
+            point = child.mapTo(preparation, child.rect().center())
+            QTest.mouseClick(preparation, Qt.MouseButton.LeftButton, pos=point)
+            self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
+            self.assertTrue(window.workflow_group.isVisible())
+            window.preparation_close_button.click()
+        preparation.setFocus()
+        QTest.keyClick(preparation, Qt.Key.Key_Space)
+        self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
+        self.assertTrue(window.main_header.isVisible())
+        self.assertTrue(window.footer.isVisible())
+
+    def test_header_shows_only_currently_confirmed_file_and_profiles_independently(self) -> None:
+        window = self.window
+        window.current_source_path = Path(self.temporary.name) / "bestätigt.stl"
+        window.current_source_path.write_text("solid test\nendsolid test\n", encoding="ascii")
+        window.current_source_kind = SourceKind.STL
+        window.source_artifact = SourceArtifact.capture(window.current_source_path)
+        window.stl_validation_result = SimpleNamespace(valid=True)
+        installation = SimpleNamespace(verified=True, display_name="Testslicer")
+        for combo, text in ((window.machine_profile_combo, "Maschine"),
+                            (window.filament_profile_combo, "Filament"),
+                            (window.process_profile_combo, "Prozess")):
+            combo.blockSignals(True)
+            combo.addItem(text)
+            combo.setCurrentIndex(combo.count() - 1)
+            combo.blockSignals(False)
+        with patch.object(type(window), "selected_slicer_installation", new_callable=PropertyMock, return_value=installation):
+            for file_confirmed, profiles_confirmed in ((True, False), (True, True), (False, True), (False, False)):
+                with self.subTest(file=file_confirmed, profiles=profiles_confirmed), \
+                     patch.object(window, "_source_step_is_complete", return_value=file_confirmed), \
+                     patch.object(window, "_catalog_selection_is_confirmed", return_value=profiles_confirmed):
+                    window._refresh_preparation_header_summary(False)
+                    self.app.processEvents()
+                    facts = dict(window.workflow_header.facts)
+                    self.assertEqual("Dateiname" in facts, file_confirmed)
+                    self.assertEqual("Slicer" in facts, profiles_confirmed)
+                    for key in ("Maschinenprofil", "Filamentprofil", "Prozessprofil"):
+                        self.assertEqual(key in facts, profiles_confirmed)
+                    self.assertEqual(window.workflow_header.facts_widget.isVisible(), file_confirmed or profiles_confirmed)
+                    if file_confirmed and profiles_confirmed:
+                        self.finish_preparation()
+                        window.automatic_generation_card.click()
+                        with patch.object(window, "_profile_matching_context", return_value=None):
+                            for action in (window.show_preparation_workspace,
+                                           window.show_generation_method_selection,
+                                           window.close_preparation_workspace):
+                                action()
+                                window._update_preparation_requirements()
+                                self.app.processEvents()
+                                self.assertTrue(window.main_header.isVisible())
+                                self.assertTrue(window.footer.isVisible())
+                                self.assertEqual(dict(window.workflow_header.facts), facts)
+                                self.assertTrue(all(label.isVisible() for label in window.workflow_header.fact_labels.values()))
+
+    def test_header_wraps_long_unbroken_names_without_losing_confirmed_information(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        window.resize(720, 1000)
+        values = (("Dateiname", "langes_modell_" * 12 + ".stl"),
+                  ("Maschinenprofil", "SehrLangerProfilname" * 12))
+        header = window.workflow_header
+        header.set_facts(values)
+        for _ in range(6):
+            self.app.processEvents()
+        for key, text in values:
+            label = header.fact_labels[key]
+            self.assertEqual(label.text(), text)
+            self.assertGreater(label.height(), label.fontMetrics().height() * 2)
+            self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+            self.assertTrue(header.facts_widget.rect().contains(label.geometry()))
+            self.assertTrue(window.main_header.isVisible())
+        facts_rectangle = QRect(header.facts_widget.mapTo(header, QPoint()), header.facts_widget.size())
+        self.assertTrue(header.rect().contains(facts_rectangle))
+        self.assertLess(window.main_header.geometry().bottom(), window.window_pages.y())
 
     def test_session_results_and_export_status_remain_independent(self) -> None:
         window = self.window
