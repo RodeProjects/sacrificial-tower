@@ -121,9 +121,9 @@ class PreviewToolsRow(QWidget):
         row.setContentsMargins(0,0,0,0)
         row.setSpacing(8)
         row.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-        row.addWidget(xray)
-        row.addWidget(resolution,1)
-        row.addWidget(rotation,2)
+        row.addWidget(xray,alignment=Qt.AlignmentFlag.AlignTop)
+        row.addWidget(resolution,1,Qt.AlignmentFlag.AlignTop)
+        row.addWidget(rotation,2,Qt.AlignmentFlag.AlignTop)
         row.addStretch()
 
     def _other_minimum_width(self):

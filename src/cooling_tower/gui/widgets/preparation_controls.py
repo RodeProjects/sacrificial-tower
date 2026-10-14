@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Callable
 from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt, Signal
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QLabel, QStackedWidget, QTabWidget, QWidget, QPushButton, QFrame, QHBoxLayout, QProgressBar
+from PySide6.QtWidgets import QLabel, QStackedWidget, QTabWidget, QWidget, QPushButton, QFrame, QHBoxLayout
+
+from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 
 class _SequentialPreparationTabs(QTabWidget):
     """Guarded preparation pages with a directional card transition."""
@@ -342,59 +344,8 @@ class _PreparationRequirementsPanel(QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
-class _ConfirmationProgressBar(QProgressBar):
+class _ConfirmationProgressBar(ActivityProgressBar):
     """Progress bar with stable, readable text and a larger activity glyph."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._display_format = ""
-        self.setTextVisible(False)
-        self.overlay = QWidget(self)
-        self.overlay.setObjectName("profileConfirmationProgressOverlay")
-        self.overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
-        )
-        overlay_layout = QHBoxLayout(self.overlay)
-        overlay_layout.setContentsMargins(8, 0, 8, 0)
-        overlay_layout.setSpacing(6)
-        overlay_layout.addStretch(1)
-        self.text_label = QLabel()
-        self.text_label.setObjectName("profileConfirmationProgressText")
-        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.activity_label = QLabel()
-        self.activity_label.setObjectName("profileConfirmationActivity")
-        self.activity_label.setFixedWidth(28)
-        self.activity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        activity_font = self.activity_label.font()
-        activity_font.setPointSizeF(max(17.0, activity_font.pointSizeF() + 7.0))
-        activity_font.setBold(True)
-        self.activity_label.setFont(activity_font)
-        overlay_layout.addWidget(self.text_label)
-        overlay_layout.addWidget(self.activity_label)
-        overlay_layout.addStretch(1)
-
-    def setFormat(self, text: str) -> None:  # noqa: N802
-        self._display_format = str(text)
-        super().setFormat(text)
-        self._sync_overlay_text()
-
-    def setValue(self, value: int) -> None:  # noqa: N802
-        super().setValue(value)
-        self._sync_overlay_text()
-
-    def set_activity_frame(self, frame: str) -> None:
-        self.activity_label.setText(str(frame))
-        self.activity_label.update()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self.overlay.setGeometry(self.rect())
-
-    def _sync_overlay_text(self) -> None:
-        if not hasattr(self, "text_label"):
-            return
-        text = self._display_format
-        if "%p" in text and self.maximum() > self.minimum():
-            text = text.replace("%p", str(self.value()))
-        self.text_label.setText(text)
+        super().__init__(parent, compact=False)

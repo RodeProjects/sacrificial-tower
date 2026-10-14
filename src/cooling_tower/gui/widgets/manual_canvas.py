@@ -478,7 +478,8 @@ class ManualCanvas(QWidget):
                 handles.append((p.identity,QPointF(pos.x()+self.HEIGHT_HANDLE_OFFSET_PX,pos.y()),p.kind))
             else:
                 handles.append((p.identity, pos, p.kind))
-        selected_index = next((i for i,p in enumerate(self.draft.points) if p.identity == self.selected), 1)
+        selected_identity={"foot_height":"base","top_width":"top"}.get(self.selected,self.selected)
+        selected_index = next((i for i,p in enumerate(self.draft.points) if p.identity == selected_identity), None)
         if self.selected.startswith("control:"):
             _,index,number = self.selected.split(":")
             selected_index = int(index)+(number == "2")
@@ -489,11 +490,21 @@ class ManualCanvas(QWidget):
             controls = ((0,1 if self.selected == "foot" else 2),)
         elif not self.selected or self.selected in self.LIMITS:
             controls = ()
+        elif selected_index is None:
+            controls = ()
         else:
             controls = ((selected_index-1,2),(selected_index,1))
-        reveal_linear = self.draft.points[selected_index].identity == self._revealed_control_anchor
+        neighbor_controls = ()
+        selected_point = self.draft.points[selected_index] if selected_index is not None else None
+        if selected_point is not None:
+            # Every selected endpoint, including fixed points and the owner
+            # of a selected control, keeps its neighbors' facing controls.
+            neighbor_controls = ((selected_index-1,1),(selected_index,2))
+        controls += neighbor_controls
+        reveal_linear = selected_point is not None and (selected_point.kind == "free" or selected_point.identity == self._revealed_control_anchor)
         for i,n in controls:
-            if 0 <= i < len(self.draft.curves) and (self.draft.curves[i].curved or reveal_linear or
+            if 0 <= i < len(self.draft.curves) and (self.draft.curves[i].curved or reveal_linear or (i,n) in neighbor_controls or
+                    self.selected == f"control:{i}:{n}" or
                     (i == len(self.draft.curves)-1 and n == 2 and self.selected in {"top_width",f"control:{i}:2"})):
                 pos = getattr(self.draft.curves[i],f"control{n}")
                 handles.append((f"control:{i}:{n}", self.profile_to_screen(pos.radius_mm,pos.z_mm), "control"))
@@ -1119,6 +1130,9 @@ class ManualCanvas(QWidget):
 
     def constrained_drag_origin(self):
         return self._drag_origin_draft if self._drag_axis is not None and self._drag is not None else None
+
+    def limit_drag_origin(self, identity):
+        return self._drag_origin_draft if self._drag is not None and self._drag[:2] == ("edit",identity) else None
 
     def vertical_drag_snaps(self):
         return (self.draft is not None and self.draft.settings.layer_snap_enabled and

@@ -96,6 +96,21 @@ class GenerationModeCard(QPushButton):
         self._fit_wrapped_text()
         super().resizeEvent(event)
 
+    def _set_action_hover(self, hovered: bool) -> None:
+        self.action_label.setProperty("cardHover", hovered)
+        style = self.action_label.style()
+        style.unpolish(self.action_label)
+        style.polish(self.action_label)
+        self.action_label.update()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self._set_action_hover(True)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self._set_action_hover(False)
+
     def changeEvent(self,event):
         super().changeEvent(event)
         if event.type() in {QEvent.Type.FontChange,QEvent.Type.StyleChange} and hasattr(self,"action_label"):

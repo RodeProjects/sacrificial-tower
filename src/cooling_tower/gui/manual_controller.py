@@ -6,12 +6,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot, QPoint, QTimer, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QFrame, QLabel
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.gui.manual_worker import ManualWorker
+from cooling_tower.gui.widgets.footer_notice_dropdown import FooterNoticeDropdown
 from cooling_tower.manual.context import overhang_default
 from cooling_tower.manual.geometry import ManualSettings
 from cooling_tower.manual.service import ManualGenerationService, ManualExportService, ManualRequest
@@ -50,7 +51,7 @@ class ManualGenerationController(QObject):
         panel.status_changed.connect(self.refresh_footer)
         panel.canvas.view_changed.connect(self.refresh_footer)
         panel.canvas.view_state_changed.connect(self._refresh_reset_actions)
-        panel.settings_visibility_changed.connect(lambda:QTimer.singleShot(0,self.fit_editor_to_window))
+        panel.settings_visibility_changed.connect(lambda:QTimer.singleShot(0,self,self.fit_editor_to_window))
         window.background_job_manager.job_released.connect(self.job_released)
         if self.store.warning:
             panel.status_label.setText(self.store.warning)
@@ -95,6 +96,7 @@ class ManualGenerationController(QObject):
             request = replace(request,context=None,profile_source_hashes=())
         except ValueError as error:
             self.panel.status_label.setText(str(error))
+            self.refresh_footer()
             return
         if self._reference_request is not None and self.reference is not None and self.panel.draft is not None and request.signature() == self.reference.context.key:
             self.refresh()
@@ -111,6 +113,7 @@ class ManualGenerationController(QObject):
     def _start(self,worker,operation,kind):
         if self.window.background_job_manager.has_active(JobKind.PREVIEW) or self.window.background_job_manager.has_active(JobKind.EXPORT):
             self.panel.status_label.setText("Eine Generierung oder ein Export läuft bereits.")
+            self.refresh_footer()
             return
         self.operation,self.cancelled,self._result_received = operation,False,False
         worker.progress.connect(self.progress)
@@ -118,8 +121,9 @@ class ManualGenerationController(QObject):
         worker.failed.connect(self.failed)
         self.panel.progress.setRange(0,100)
         self.panel.progress.setValue(0)
-        self.panel.status_label.setText("Manuelle Vorschau wird vorbereitet …" if operation == "reference" else
-                                        "Geprüfter manueller Stand wird exportiert …" if operation == "export" else "Feste manuelle Geometrie wird geprüft …")
+        self.panel.status_label.clear()
+        self._progress_status_label.setText("Manuelle Vorschau wird vorbereitet …" if operation == "reference" else
+                                           "Geprüfter manueller Stand wird exportiert …" if operation == "export" else "Feste manuelle Geometrie wird geprüft …")
         self.job_id = self.window.background_job_manager.start_job(kind=kind,request_id=self.request_id,worker=worker,
                                                                     parent_operation_id=f"manual-{operation}-{abs(self.request_id)}")
         self._locked_inputs = [(widget,widget.isEnabled()) for widget in
@@ -139,6 +143,7 @@ class ManualGenerationController(QObject):
             if not self._context_current(): raise ValueError("Der bestätigte Quellen-/Profilkontext hat sich geändert.")
         except (ValueError,RuntimeError) as error:
             self.panel.status_label.setText(str(error))
+            self.refresh_footer()
             return
         self.session.running_request = request
         self._start(ManualWorker(self._next_id(),request,self.service),"generation",JobKind.PREVIEW)
@@ -149,6 +154,7 @@ class ManualGenerationController(QObject):
         if not self._context_current():
             self.invalidate_context()
             self.panel.status_label.setText("Der Quellen-/Profilkontext hat sich geändert; bitte erneut vorbereiten.")
+            self.refresh_footer()
             return
         worker = ExportWorker(self._next_id(),self.session.preview,self.session.successful_request,
                               Path(self.window.output_root_edit.text()),self.export_service)
@@ -169,7 +175,8 @@ class ManualGenerationController(QObject):
     def progress(self,request_id,percent,status):
         if request_id != self.request_id or self.window._closing: return
         self.panel.progress.setValue(percent)
-        self.panel.status_label.setText(status)
+        self._progress_status_label.setText(status)
+        self.sync_footer_content_visibility()
         self.window._schedule_footer_height_update()
 
     @Slot(int,object)
@@ -190,8 +197,9 @@ class ManualGenerationController(QObject):
             except (ValueError,RuntimeError) as error:
                 self.panel.status_label.setText(str(error))
                 self.panel.retry_button.show()
+                self.refresh_footer()
                 return
-            self.panel.status_label.setText(self.store.warning or "Manueller Entwurf bereit. Profil doppelklicken, um freie Punkte hinzuzufügen.")
+            self.panel.status_label.setText(self.store.warning or "Turmprofil doppelklicken, um freie Punkte hinzuzufügen.")
         elif self.operation == "generation":
             if not self._context_current():
                 result.dispose()
@@ -203,19 +211,26 @@ class ManualGenerationController(QObject):
             if previous is not None: previous.dispose()
             e = result.manual_evaluation
             mode = "Gemeinsamer Prüfslice" if e.joint_sliced else "Separate Zeitprognose"
-            self.panel.result_label.setText(f"Geprüfter Stand: {mode} · kleinste Layerzeit {e.minimum_time_s:.3f} s\n"+
-                                            "\n".join(result.warnings))
-            self.panel.status_label.setText("Manueller Turm vollständig geprüft.")
+            title = "Erreichte Mindest-Layerzeit" if e.joint_sliced else "Prognostizierte Mindest-Layerzeit"
+            self.panel.result_label.setText(
+                f"<b>{title}: {e.minimum_time_s:.3f} s</b><br>"
+                f"{mode} · {len(e.layer_times)} Layer")
+            self._result_warnings_label.setText("\n".join(result.warnings))
+            self._result_notice.reset_collapsed()
+            self.panel.status_label.clear()
         elif self.operation == "export":
             self.session.export_result = result
             self.session.exported_preview_identity = self.identity(self.session.preview)
-            self.panel.status_label.setText(f"Manueller Turm exportiert: {result.run_directory}")
+            self.panel.status_label.clear()
+            if self.session.preview.manual_evaluation.joint_sliced:
+                self.panel.result_label.setText(self.panel.result_label.text().partition("<br>")[0])
             self.window._last_export_report_result = result
             self.window._latest_export_directory = result.run_directory
             self.window._latest_export_root_text = self.window.output_root_edit.text().strip()
             self.window._latest_export_unavailable_reason = ""
             self.window._refresh_last_export_report_action()
             self.window._show_export_success_dialog(result)
+        self._progress_status_label.clear()
         self._result_received = True
         self.refresh()
 
@@ -224,13 +239,16 @@ class ManualGenerationController(QObject):
         if request_id != self.request_id or self.window._closing: return
         self.window._write_gui_error_log("manual_generation_error.log",details)
         self.panel.status_label.setText("Neuer manueller Lauf fehlgeschlagen: "+message)
+        self._progress_status_label.clear()
         if self.operation == "reference": self.panel.retry_button.show()
+        self.refresh_footer()
 
     @Slot(object)
     def job_released(self,job):
         if job.job_id != self.job_id: return
         operation,cancelled,received = self.operation,self.cancelled,self._result_received
         self.job_id = self.operation = None
+        self._progress_status_label.clear()
         for widget,enabled in self._locked_inputs: widget.setEnabled(enabled)
         self._locked_inputs = []
         self.session.running_request = None
@@ -243,7 +261,7 @@ class ManualGenerationController(QObject):
         self.refresh()
         self.window._refresh_phase17_actions()
         if received and operation in {"reference","generation"}:
-            QTimer.singleShot(0,self.fit_editor_to_window)
+            QTimer.singleShot(0,self,self.fit_editor_to_window)
 
     def cancel(self):
         if self.job_id is None or self.operation == "export": return
@@ -263,6 +281,8 @@ class ManualGenerationController(QObject):
         self.panel.canvas.invalidate_reference()
         self.panel.reference = None
         self.panel.result_label.clear()
+        self._result_warnings_label.clear()
+        self._result_notice.reset_collapsed()
         self.panel.canvas.update()
         self.refresh()
 
@@ -286,17 +306,47 @@ class ManualGenerationController(QObject):
     def attach_footer(self):
         """Use the existing main footer and its responsive action layout."""
         w,p = self.window,self.panel
-        host = QWidget(w.footer_messages_content)
+        scroll = QScrollArea(w.footer_action_area)
+        scroll.setObjectName("manualFooterStatusScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        w.manual_footer_status_scroll = scroll
+        host = QWidget()
+        host.setObjectName("manualFooterStatusContent")
         self._footer_status_widget = host
         w.manual_footer_status_widget = host
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(6)
-        for widget in (p.progress,p.status_label,p.result_label,p.action_hint):
+        self._progress_status_label = QLabel()
+        self._progress_status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._progress_status_label.setWordWrap(True)
+        for widget in (p.progress,p.result_label,p.action_hint):
             p.preview_container.layout().removeWidget(widget)
             layout.addWidget(widget)
-        w.footer_messages_layout.addWidget(host)
+        layout.insertWidget(1,self._progress_status_label)
+        self._footer_message_widget = QWidget(w.footer_messages_content)
+        self._footer_message_widget.setObjectName("manualFooterMessageContent")
+        w.manual_footer_message_widget = self._footer_message_widget
+        message_layout = QVBoxLayout(self._footer_message_widget)
+        message_layout.setContentsMargins(0,0,0,0)
+        p.preview_container.layout().removeWidget(p.status_label)
+        message_layout.addWidget(p.status_label)
+        w.footer_messages_layout.addWidget(self._footer_message_widget)
+        self._footer_message_widget.hide()
+        self._result_notice = FooterNoticeDropdown("Hinweise zum Ergebnis",severity="warning",parent=host)
+        self._result_warnings_label = QLabel()
+        self._result_warnings_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._result_warnings_label.setWordWrap(True)
+        self._result_notice.content_layout.addWidget(self._result_warnings_label)
+        self._result_notice.toggled.connect(w._schedule_footer_height_update)
+        layout.insertWidget(3,self._result_notice)
+        scroll.setWidget(host)
+        w.footer_action_layout.insertWidget(0,scroll)
         host.hide()
+        scroll.hide()
         p.actions_host.hide()
         p.reset_button.hide()
         p.footer_hosted = True
@@ -369,12 +419,47 @@ class ManualGenerationController(QObject):
 
     def sync_footer_content_visibility(self):
         w,p = self.window,self.panel
-        for label in (p.status_label,p.result_label,p.action_hint):
+        for label in (p.status_label,p.action_hint,self._progress_status_label):
             label.setVisible(bool(label.text().strip()))
-        self._footer_status_widget.setVisible(
+        self._footer_message_widget.setVisible(w.generation_mode is self.mode and bool(p.status_label.text().strip()))
+        checking = self.job_id is not None and self.operation == "generation" and not self._result_received
+        p.result_label.setVisible(bool(p.result_label.text().strip()) and not checking)
+        self._result_notice.setVisible(not p.result_label.isHidden() and bool(self._result_warnings_label.text().strip()))
+        visible = (
             w.generation_mode is self.mode and
-            (not p.progress.isHidden() or any(label.text().strip() for label in
-                (p.status_label,p.result_label,p.action_hint))))
+            any(not widget.isHidden() for widget in (p.progress,self._progress_status_label,p.result_label,p.action_hint)))
+        self._footer_status_widget.setVisible(visible)
+        w.manual_footer_status_scroll.setVisible(visible)
+
+    def fit_footer_message(self,width):
+        """Keep general messages readable in the left scrollable footer column."""
+        host,label = self._footer_message_widget,self.panel.status_label
+        host.setMinimumHeight(0)
+        label.setMinimumHeight(0)
+        if host.isHidden():
+            return
+        label.setMinimumHeight(max(label.minimumSizeHint().height(),label.heightForWidth(width)))
+        layout=host.layout()
+        layout.invalidate()
+        host.setMinimumHeight(max(0,layout.heightForWidth(width),layout.minimumSize().height()))
+
+    def fit_footer_status(self,maximum_height):
+        """Wrap feedback at the action width and scroll long details above buttons."""
+        w = self.window
+        scroll,host = w.manual_footer_status_scroll,self._footer_status_widget
+        if scroll.isHidden():
+            scroll.setFixedHeight(0)
+            return 0
+        # Reserve the scrollbar gutter so enabling it cannot add wrapped lines
+        # after calculating the content height.
+        width = max(1,w.footer_action_area.width()-scroll.verticalScrollBar().sizeHint().width())
+        host.setMinimumHeight(0)
+        layout = host.layout()
+        layout.invalidate()
+        height = max(0,layout.heightForWidth(width),layout.minimumSize().height())
+        host.setMinimumHeight(height)
+        scroll.setFixedHeight(min(height,max(0,maximum_height)))
+        return scroll.height()
 
     def refresh_footer(self,*_):
         w,p = self.window,self.panel

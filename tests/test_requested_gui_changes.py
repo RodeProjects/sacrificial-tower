@@ -45,6 +45,7 @@ from cooling_tower.slicers import (
 )
 from cooling_tower.version import APP_VERSION, APP_VERSION_LABEL
 from cooling_tower.update import UpdateInfo
+from gui_lifecycle import dispose_test_widget
 
 
 class RequestedGuiChangesTests(unittest.TestCase):
@@ -61,7 +62,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
 
     def window(self) -> MainWindow:
-        return MainWindow(user_settings_path=self.root / "settings.json")
+        window = MainWindow(user_settings_path=self.root / "settings.json")
+        self.addCleanup(dispose_test_widget, window)
+        return window
 
     def complete_source_step(self, window: MainWindow) -> None:
         window.workflow.set_slicer_step_visible(True)
@@ -409,15 +412,17 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.version_label.mapTo(window, QPoint(0, 0)).y(),
             window.options_button.mapTo(window, QPoint(0, 0)).y(),
         )
-        self.assertEqual(
-            window.version_label.mapTo(window, QPoint(0, 0)).x()
-            + window.version_label.width(),
-            window.options_button.mapTo(window, QPoint(0, 0)).x()
-            + window.options_button.width(),
+        # The existing menu/version group centers the menu above the label.
+        self.assertLessEqual(
+            abs(
+                window.version_label.mapTo(window, QPoint()).x() + window.version_label.width() / 2
+                - window.options_button.mapTo(window, QPoint()).x() - window.options_button.width() / 2
+            ),
+            1,
         )
         window.close()
 
-    def test_update_button_appears_right_of_version_only_for_an_update(self) -> None:
+    def test_update_button_appears_below_version_only_for_an_update(self) -> None:
         window = self.window()
         window.show()
         self.app.processEvents()
@@ -440,8 +445,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(window.update_button.isHidden())
         self.assertGreater(
-            window.update_button.mapTo(window, QPoint(0, 0)).x(),
-            window.version_label.mapTo(window, QPoint(0, 0)).x(),
+            window.update_button.mapTo(window, QPoint(0, 0)).y(),
+            window.version_label.mapTo(window, QPoint(0, 0)).y() + window.version_label.height(),
         )
 
         window._on_update_check_succeeded(7, None)
@@ -1072,7 +1077,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         window.close()
 
-    def test_ready_cards_reopen_while_geometry_stays_collapsed(self) -> None:
+    def test_ready_sections_stay_open_without_changing_advanced_collapse_state(self) -> None:
         window = self.window()
         window.resize(1300, 900)
         window.show()
@@ -1082,6 +1087,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.automatic_generation_card.click()
         self.app.processEvents()
 
+        window.geometry_group.setChecked(False)
         window.geometry_settings_group.setChecked(False)
         window.timing_group.setChecked(False)
         window.prediction_frame.setChecked(False)
@@ -1096,15 +1102,80 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         self.assertGreater(window.timing_group.height(), 54)
         self.assertEqual(window.ready_grid.height(), collapsed_height)
-        self.assertFalse(window.timing_group.isVisible())
+        self.assertTrue(window.timing_group.isVisible())
+        self.assertTrue(window.geometry_settings_group.isChecked())
+        self.assertTrue(window.prediction_frame.isChecked())
+        self.assertFalse(window.geometry_group.isChecked())
 
         timing_open_height = window.ready_grid.height()
         window.prediction_frame.setChecked(True)
         self.app.processEvents()
         self.assertGreater(window.prediction_frame.height(), 54)
-        self.assertGreater(window.ready_grid.height(), timing_open_height)
-        self.assertFalse(window.geometry_settings_group.isChecked())
+        self.assertEqual(window.ready_grid.height(), timing_open_height)
+        self.assertTrue(window.geometry_settings_group.isChecked())
+        self.assertFalse(window.geometry_group.isChecked())
         window.close()
+
+    def test_automatic_sections_meet_window_edges_and_share_full_height_divider(self) -> None:
+        window = self.window()
+        self.addCleanup(window.close)
+        window.resize(1400, 1000)
+        window.show()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
+        for width in (1400, 760, 1400):
+            window.resize(width, 1000)
+            for _ in range(8):
+                self.app.processEvents()
+            settings = window.geometry_settings_group
+            preview = window.prediction_frame
+            divider = window.ready_columns_divider
+            viewport = window.settings_scroll.viewport()
+            self.assertEqual(window.ready_grid.width(), viewport.width())
+            for section in (settings, preview):
+                self.assertFalse(section.isCheckable())
+                self.assertTrue(section.toggle_button.isHidden())
+                self.assertEqual(section.contentsMargins().left(), 0)
+                self.assertEqual(section.contentsMargins().right(), 0)
+                image = section.header.grab().toImage()
+                self.assertEqual(image.pixelColor(0, 0), image.pixelColor(20, 0))
+                self.assertEqual(
+                    image.pixelColor(image.width() - 1, 0),
+                    image.pixelColor(image.width() - 20, 0),
+                )
+            top_section = settings if width == 1400 else preview
+            self.assertEqual(top_section.mapTo(viewport, QPoint(0, 0)).y(), 0)
+            self.assertEqual(
+                top_section.mapTo(window, QPoint(0, 0)).y(),
+                window.main_header.geometry().bottom() + 1,
+            )
+            self.assertEqual(window.workflow_header.divider_shadow.y(), top_section.mapTo(window, QPoint(0, 0)).y())
+            if width == 1400:
+                self.assertTrue(divider.isVisible())
+                self.assertEqual(divider.width(), 1)
+                self.assertEqual(divider.x(), window.ready_left_column.geometry().right() + 1)
+                self.assertEqual(preview.x(), divider.geometry().right() + 1)
+                self.assertEqual(preview.geometry().right() + 1, viewport.width())
+                self.assertEqual(divider.height(), max(settings.height(), preview.height()))
+                window.geometry_group.toggle()
+                for _ in range(5):
+                    self.app.processEvents()
+                self.assertEqual(divider.height(), max(settings.height(), preview.height()))
+            else:
+                self.assertTrue(divider.isHidden())
+                self.assertEqual(settings.width(), viewport.width())
+                self.assertEqual(preview.width(), viewport.width())
+                self.assertEqual(window.ready_left_column.y(), preview.geometry().bottom() + 1)
+        # The divider must also follow the settings surface if it grows taller.
+        settings.setFixedHeight(preview.height() + 80)
+        window.ready_left_column.layout().invalidate()
+        window._refresh_ready_grid_layout()
+        for _ in range(5):
+            self.app.processEvents()
+        self.assertGreater(settings.height(), preview.height())
+        self.assertEqual(divider.height(), settings.height())
 
     def test_geometry_fields_share_one_named_section(self) -> None:
         window = self.window()
@@ -1185,7 +1256,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             grid.grid.getItemPosition(
                 grid.grid.indexOf(window.prediction_frame)
             )[:2],
-            (0, 1),
+            (0, 2),
         )
         preserved_target = window.target_time_spin.value()
 
@@ -1253,7 +1324,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             grid.grid.getItemPosition(
                 grid.grid.indexOf(window.prediction_frame)
             )[:2],
-            (0, 1),
+            (0, 2),
         )
         self.assertEqual(window.target_time_spin.value(), preserved_target)
         window.close()

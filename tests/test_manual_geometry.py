@@ -8,7 +8,7 @@ from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 
 from cooling_tower.manual.geometry import (Coordinate, Cubic, ManualSettings, GeometryError, initial_draft,
-                                          validate, move_point, insert_point, remove_point, set_curve, set_point_curve_mode, reset_point_curves, couple_point,
+                                          validate, validate_settings, set_minimum_diameter, move_point, insert_point, remove_point, set_curve, set_point_curve_mode, reset_point_curves, couple_point,
                                           bounded_edit, tessellate, create_mesh, CURVE_RADIAL_ERROR_MM)
 from cooling_tower.tower.mesh_generator import validate_triangle_mesh
 from cooling_tower.preview import PreviewCancelled
@@ -19,6 +19,53 @@ def draft(height=100,settings=None):
 
 
 class ManualGeometryTests(unittest.TestCase):
+    def test_minimum_diameter_has_absolute_one_millimetre_floor(self):
+        for value in (.999, .1, 0, -1):
+            with self.subTest(value=value), self.assertRaises(GeometryError):
+                validate_settings(replace(ManualSettings(),minimum_diameter_mm=value))
+        validate_settings(replace(ManualSettings(),minimum_diameter_mm=1))
+
+    def test_minimum_moves_fixed_free_and_curve_anchors_without_changing_heights_or_maxima(self):
+        original,identity=insert_point(draft(),50)
+        original=move_point(original,identity,diameter_mm=12)
+        original=set_curve(original,1,control=1,position=Coordinate(3,20))
+        changed=set_minimum_diameter(original,30)
+        self.assertEqual(changed.settings.minimum_diameter_mm,30)
+        self.assertEqual(changed.settings.maximum_diameter_mm,original.settings.maximum_diameter_mm)
+        self.assertEqual(changed.settings.maximum_foot_diameter_mm,original.settings.maximum_foot_diameter_mm)
+        for old,new in zip(original.points,changed.points):
+            self.assertEqual(new.position,Coordinate(max(15,old.position.radius_mm),old.position.z_mm))
+            self.assertEqual(new.identity,old.identity)
+        for old,new in zip(original.curves,changed.curves):
+            self.assertEqual(new.curved,old.curved)
+            for name in ("start","control1","control2","end"):
+                self.assertGreaterEqual(getattr(new,name).radius_mm,15)
+                self.assertEqual(getattr(new,name).z_mm,getattr(old,name).z_mm)
+        # An accepted numeric edit is permanent, even if the minimum is lowered.
+        self.assertEqual(set_minimum_diameter(changed,5).artifact_payload(),changed.artifact_payload())
+        for settings in (replace(original.settings,maximum_diameter_mm=29),
+                         replace(original.settings,maximum_foot_diameter_mm=29)):
+            with self.assertRaises(GeometryError):set_minimum_diameter(replace(original,settings=settings),30)
+
+    def test_minimum_preserves_coupled_tangents_when_controls_or_points_hit_boundary(self):
+        original=move_point(draft(),"base",diameter_mm=12)
+        original,identity=insert_point(original,50)
+        original=move_point(original,identity,diameter_mm=20)
+        original=set_curve(original,1,control=2,position=Coordinate(4,40))
+        original=couple_point(original,identity,True)
+        for minimum in (16,24):
+            with self.subTest(minimum=minimum):
+                changed=set_minimum_diameter(original,minimum)
+                self.assertTrue(changed.points[2].smooth)
+                incoming,outgoing=changed.curves[1:3]
+                self.assertAlmostEqual(incoming.derivative(1,"radius_mm")/incoming.derivative(1,"z_mm"),
+                                       outgoing.derivative(0,"radius_mm")/outgoing.derivative(0,"z_mm"))
+                self.assertGreaterEqual(incoming.control2.diameter_mm,minimum)
+                self.assertGreaterEqual(outgoing.control1.diameter_mm,minimum)
+                validate(changed)
+                self.assertEqual(set_minimum_diameter(changed,1).artifact_payload(),changed.artifact_payload())
+        self.assertEqual(set_minimum_diameter(original,5),original)
+
     def test_draft_requires_a_positive_actual_first_layer_height(self):
         for height in (0, -0.2, float("nan"), float("inf")):
             with self.subTest(height=height), self.assertRaises(GeometryError):

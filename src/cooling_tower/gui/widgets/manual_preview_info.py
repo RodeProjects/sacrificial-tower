@@ -99,16 +99,15 @@ class ManualPreviewInformation(QWidget):
     def set_state(self,view,critical):
         self.swatches["object"].split = critical
         self.swatches["object"].update()
-        items = (["Punkt ziehen: Form ändern","Doppelklick auf Turmprofil: Punkt hinzufügen",
-                  "Doppelklick auf Punkt: Bézier zurücksetzen","Manuellen Punkt rechtsklicken: Punkt entfernen"]
+        items = (["Punkt/Ankerpunkt ziehen: Turmform ändern","Doppelklick auf Turmprofil: Punkt hinzufügen",
+                  "Doppelklick auf Punkt: Bézierkurven zurücksetzen","Rechtsklick auf manuellen Punkt: Punkt entfernen"]
                  if view in {"side","front"} else
                  ["Punkt ziehen: Spitzenbreite ändern"] if view == "top" else
                  ["Punkt ziehen: Fußbreite ändern"] if view == "bottom" else
                  ["Linke Maustaste: Ansicht drehen"])
         if view in {"side","front"}:
-            items.insert(1,"Shift + Ziehen: nur waagerecht oder senkrecht")
-        items += ["Rechte oder mittlere Maustaste: Ansicht verschieben" if view == "free" else
-                  "Mittlere Maustaste: Ansicht verschieben","Mausrad: Zoom"]
+            items.insert(1,"Shift + Ziehen: Punkt nur waagerecht/senkrecht verschieben")
+        items += ["Mittlere Maustaste + Ziehen: Ansicht verschieben","Mausrad: Zoom"]
         self.instructions.setText('\n'.join(f"• {item}" for item in items))
 
     def _set_legend_columns(self,width):

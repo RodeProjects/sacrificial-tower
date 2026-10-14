@@ -168,10 +168,12 @@ class AboutDialog(QDialog):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(24, 22, 24, 20)
         content_layout.setSpacing(14)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.about_content_layout = content_layout
 
         hero = QFrame()
         hero.setObjectName("aboutHero")
+        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         hero_layout = QHBoxLayout(hero)
         hero_layout.setContentsMargins(18, 16, 18, 16)
         hero_layout.setSpacing(20)
@@ -205,12 +207,11 @@ class AboutDialog(QDialog):
         self.about_product_description = product_description
         version = QLabel(APP_VERSION_LABEL)
         version.setObjectName("aboutVersion")
-        hero_text.addStretch(1)
         hero_text.addWidget(product_title)
         hero_text.addWidget(product_description)
         hero_text.addWidget(version)
-        hero_text.addStretch(1)
         hero_layout.addLayout(hero_text, 1)
+        hero_layout.setAlignment(hero_text, Qt.AlignmentFlag.AlignVCenter)
         content_layout.addWidget(hero)
 
         developer_section = QFrame()

@@ -388,7 +388,7 @@ class TowerGenerationDialog(QDialog):
         self._fit_and_center()
         self.showNormal()
         self._fit_and_center()
-        QTimer.singleShot(0, self._fit_and_center)
+        QTimer.singleShot(0, self, self._fit_and_center)
         self.raise_()
         self.activateWindow()
 

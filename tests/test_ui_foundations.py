@@ -157,17 +157,24 @@ class UiFoundationTests(unittest.TestCase):
         self.assertEqual(right_pos[:2], (1, 0))
         grid.close()
 
-    def test_main_window_uses_common_cards_and_symmetric_inner_gutters(self) -> None:
+    def test_main_window_uses_common_cards_with_inner_gutters_and_no_outer_inset(self) -> None:
         settings_path = Path(self.temporary.name) / "settings.json"
         window = MainWindow(user_settings_path=settings_path)
+        self.addCleanup(window.close)
         self.assertIsInstance(window.source_group, SectionCard)
         self.assertIsInstance(window.slicer_group, SectionCard)
         self.assertIsInstance(window.timing_group, SectionCard)
         self.assertIsInstance(window.geometry_group, SectionCard)
         self.assertIsInstance(window.stability_group, SectionCard)
         margins = window.content_layout.contentsMargins()
-        self.assertEqual(margins.left(), METRICS.content_gutter_px)
-        self.assertEqual(margins.right(), METRICS.content_gutter_px)
+        self.assertEqual(margins.left(), 0)
+        self.assertEqual(margins.right(), 0)
+        for card in (window.source_group, window.slicer_group, window.timing_group,
+                     window.geometry_group):
+            with self.subTest(card=card.title_label.text()):
+                inner = card.content_layout.contentsMargins()
+                self.assertGreater(inner.left(), 0)
+                self.assertEqual(inner.left(), inner.right())
 
         window.resize(720, 900)
         window.show()

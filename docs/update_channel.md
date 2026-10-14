@@ -10,6 +10,17 @@ Endnutzer nicht erforderlich. Der öffentliche Kanal enthält ausschließlich de
 Windows-Installer, das kryptografisch signierte Manifest und die zugehörigen
 Prüfdaten.
 
+Ist eine neue Version verfügbar, erscheint unter Menü und Versionsnummer am
+rechten Headerrand die kompakte Schaltfläche „Aktualisieren“. Beim Download
+bleibt sie blau und zeigt „Lädt... x%“; direkt rechts liegt ein quadratischer
+Abbruchbutton mit X im gemeinsamen roten Abbruchdesign. Die Zeile endet ohne
+Außenabstand an der Headertrennlinie. Nur in diesen Updatezuständen werden Menü
+und Versionsnummer horizontal über der gesamten Updatezeile einschließlich
+des Abbruchbuttons zentriert. Beim Einblenden des X bleiben beide an ihrer
+horizontalen Position. Die
+Erstellungsmethode reserviert daneben den benötigten Platz; falls die Höhe
+nicht reicht, wächst der Header nach unten.
+
 ## Kostenlose kryptografische Absicherung
 
 Der Windows-Installer wird vorerst ohne Authenticode-Zertifikat erzeugt. Deshalb

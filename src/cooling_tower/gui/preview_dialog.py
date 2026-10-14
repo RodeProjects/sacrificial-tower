@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from cooling_tower.gui.widgets import PreviewCanvas
+from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.preview import PreviewResult, PreviewScene, PreviewState
 
@@ -269,7 +269,7 @@ class PreviewDialog(QDialog):
         quality_layout.addWidget(self.quality_details_label)
         if not embedded:
             layout.addWidget(self.quality_widget)
-        self.progress = QProgressBar()
+        self.progress = ActivityProgressBar()
         self.progress.setObjectName("previewProgressBar")
         self.progress.setRange(0, 100)
         self.progress.setValue(0)

@@ -29,6 +29,7 @@ from cooling_tower.gui.generation_progress_dialog import (
 )
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.settings_store import UserSettingsStore
+from gui_lifecycle import dispose_test_widget
 
 
 class GenerationProgressDialogTests(unittest.TestCase):
@@ -354,7 +355,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
-        self.addCleanup(window.close)
+        self.addCleanup(dispose_test_widget, window)
         window.layer_time_tolerance_spin.setValue(0.6)
         self.assertFalse(window._has_non_default_settings())
         window.target_time_spin.setValue(12.0)
@@ -381,7 +382,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def test_generation_panel_is_embedded_and_keeps_preview_accessible(self) -> None:
         window = MainWindow(user_settings_path=self.root / "settings.json", enable_update_check=False, enable_startup_slicer_discovery=False)
-        self.addCleanup(window.close)
+        self.addCleanup(dispose_test_widget, window)
         panel = window.joint_generation_dialog
         panel.begin(12.0, 0.25, 0, 15)
         self.assertFalse(panel.isWindow())
@@ -478,7 +479,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
-        self.addCleanup(window.close)
+        self.addCleanup(dispose_test_widget, window)
         window.local_window_spin.setValue(31)
         window.target_time_spin.setValue(12)
         window.reset_defaults()
@@ -509,6 +510,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
+        self.addCleanup(dispose_test_widget, window)
         self.assertEqual(window.maximum_joint_slices, 17)
         self.assertEqual(window.maximum_separate_slices, 8)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 17)
@@ -521,7 +523,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def test_joint_export_starts_directly_from_main(self) -> None:
         window = MainWindow(user_settings_path=self.root / "settings.json", enable_update_check=False, enable_startup_slicer_discovery=False)
-        self.addCleanup(window.close)
+        self.addCleanup(dispose_test_widget, window)
         panel = window.joint_generation_dialog
         panel.begin(9.0, 0.25, 1, 10)
         panel.mark_finished(paused=True, can_continue=True)
@@ -539,7 +541,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
-        self.addCleanup(window.close)
+        self.addCleanup(dispose_test_widget, window)
         window.show()
         window._on_preview_progress(
             window._preview_request_id,
@@ -555,7 +557,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             window.isolated_progress_title_label.text(),
             "Turmgenerierung wird vorbereitet...",
         )
-        self.assertEqual(window.footer_action_layout.count(), 2)
+        self.assertEqual(window.footer_action_layout.count(), 3)
         self.assertEqual(
             window.isolated_progress_bar.objectName(),
             "preparationProgressBar",
@@ -621,7 +623,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertTrue(fade_in_done.wait(1500))
         self.assertTrue(window.isolated_progress_widget.isHidden())
         self.assertFalse(window.footer_status_widget.isHidden())
-        self.assertEqual(window.footer_action_layout.count(), 2)
+        self.assertEqual(window.footer_action_layout.count(), 3)
         window.joint_generation_dialog.allow_programmatic_close()
         window.joint_generation_dialog.close()
         window.close()

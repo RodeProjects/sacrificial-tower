@@ -56,6 +56,7 @@ from cooling_tower.slicers import (
     SlicerSupportLevel,
 )
 from cooling_tower.tower.solid_profile import validate_solid_settings
+from gui_lifecycle import dispose_test_widget
 
 
 class Phase18UiTests(unittest.TestCase):
@@ -65,14 +66,16 @@ class Phase18UiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
         self.app.processEvents()
-        self.temporary.cleanup()
 
     def window(self) -> MainWindow:
-        return MainWindow(user_settings_path=self.root / "settings.json")
+        window = MainWindow(user_settings_path=self.root / "settings.json")
+        self.addCleanup(dispose_test_widget, window)
+        return window
 
     def complete_source_step(self, window: MainWindow) -> None:
         window.workflow.set_slicer_step_visible(True)
@@ -187,7 +190,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.timing_group.state(), SectionState.NEUTRAL)
         window.close()
 
-    def test_header_border_only_appears_below_top_of_real_scroll_range(self) -> None:
+    def test_header_divider_stays_visible_across_scroll_range_changes(self) -> None:
         window = self.window()
         window.resize(1400, 1400)
         window.show()
@@ -195,9 +198,7 @@ class Phase18UiTests(unittest.TestCase):
         scrollbar = window.settings_scroll.verticalScrollBar()
         self.assertEqual(scrollbar.maximum(), scrollbar.minimum())
         self.assertFalse(window.main_header.property("scrolled"))
-        footer_border = window.footer.grab().toImage().pixelColor(
-            window.footer.width() // 2, 0
-        )
+        divider_colour = window.workflow_header.separator.grab().toImage().pixelColor(0, 0)
 
         window.settings_content.setMinimumHeight(
             window.settings_scroll.viewport().height() + 300
@@ -208,17 +209,17 @@ class Phase18UiTests(unittest.TestCase):
         header_pixel = lambda: window.main_header.grab().toImage().pixelColor(
             window.main_header.width() // 2, window.main_header.height() - 1
         )
-        self.assertNotEqual(header_pixel(), footer_border)
+        self.assertEqual(header_pixel(), divider_colour)
 
         scrollbar.setValue(scrollbar.minimum() + 1)
         self.app.processEvents()
         self.assertTrue(window.main_header.property("scrolled"))
-        self.assertEqual(header_pixel(), footer_border)
+        self.assertEqual(header_pixel(), divider_colour)
 
         scrollbar.setValue(scrollbar.minimum())
         self.app.processEvents()
         self.assertFalse(window.main_header.property("scrolled"))
-        self.assertNotEqual(header_pixel(), footer_border)
+        self.assertEqual(header_pixel(), divider_colour)
 
         scrollbar.setValue(scrollbar.maximum())
         self.app.processEvents()
@@ -227,7 +228,7 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(scrollbar.maximum(), scrollbar.minimum())
         self.assertFalse(window.main_header.property("scrolled"))
-        self.assertNotEqual(header_pixel(), footer_border)
+        self.assertEqual(header_pixel(), divider_colour)
         window.close()
 
     def test_ready_columns_and_single_geometry_column_are_independently_sized(self) -> None:
@@ -252,23 +253,19 @@ class Phase18UiTests(unittest.TestCase):
             sorted(section.y() for section in geometry_sections),
         )
         for card in (window.geometry_settings_group, window.prediction_frame):
-            self.assertTrue(card.isCheckable())
+            self.assertFalse(card.isCheckable())
             self.assertTrue(card.isChecked())
-            self.assertTrue(card.toggle_button.isVisible())
+            self.assertFalse(card.toggle_button.isVisible())
         self.assertTrue(bool(window.geometry_settings_group.property("outerDropdown")))
         self.assertEqual(window.prediction_frame.property("cardTone"), "preview")
-        expanded_prediction_height = window.prediction_frame.height()
+        expanded_geometry_height = window.geometry_settings_group.height()
         window.geometry_settings_group.setChecked(False)
         self.app.processEvents()
-        self.assertTrue(window.geometry_settings_group.content_widget.isHidden())
+        self.assertTrue(window.geometry_settings_group.content_widget.isVisible())
         self.assertTrue(window.prediction_frame.content_widget.isVisible())
-        self.assertLess(
+        self.assertEqual(
             window.geometry_settings_group.height(),
-            expanded_prediction_height,
-        )
-        self.assertLessEqual(
-            window.geometry_settings_group.height(),
-            window.geometry_settings_group.header.height() + 2,
+            expanded_geometry_height,
         )
         self.assertEqual(
             window.geometry_settings_group.title_label.text(),
@@ -588,7 +585,7 @@ class Phase18UiTests(unittest.TestCase):
                 1,
                 outer_geometry_image.height() // 2,
             ).name(),
-            "#1769aa",
+            "#ffffff",
         )
         window._refresh_collapsible_error_badges(
             {"local_reference_window": ["Ungültiges Zeitfenster"]}
@@ -723,7 +720,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(window.slicer_group.width(), 700)
         window.close()
 
-    def test_outer_dropdowns_use_matching_header_and_left_accent_colours(self) -> None:
+    def test_outer_sections_keep_header_colours_without_side_accents(self) -> None:
         window = self.window()
         window.resize(1200, 900)
         window.show()
@@ -832,10 +829,12 @@ class Phase18UiTests(unittest.TestCase):
         }
         for group, colour in expected_accents.items():
             image = group.grab().toImage()
-            self.assertEqual(
+            self.assertNotEqual(
                 image.pixelColor(1, image.height() // 2).name(),
                 colour,
             )
+            self.assertEqual(group.contentsMargins().left(), 0)
+            self.assertEqual(group.contentsMargins().right(), 0)
         preparation_image = window.workflow_group.grab().toImage()
         self.assertNotEqual(
             preparation_image.pixelColor(
@@ -904,7 +903,7 @@ class Phase18UiTests(unittest.TestCase):
             "#ebf5fb",
         )
         completed_preparation = window.workflow_group.grab().toImage()
-        self.assertEqual(
+        self.assertNotEqual(
             completed_preparation.pixelColor(
                 1,
                 completed_preparation.height() // 2,
@@ -924,7 +923,7 @@ class Phase18UiTests(unittest.TestCase):
                 1,
                 prediction_image.height() // 2,
             ).name(),
-            "#6f52c9",
+            "#fbfaff",
         )
         icon_colours = {
             group.status_icon.palette().color(
@@ -937,7 +936,7 @@ class Phase18UiTests(unittest.TestCase):
                 window.prediction_frame,
             )
         }
-        self.assertEqual(icon_colours, {"#176b45", "#26965f"})
+        self.assertEqual(icon_colours, {"#176b45"})
         self.assertFalse(hasattr(window, "profile_group"))
         window.close()
 
@@ -1744,7 +1743,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertEqual(icon.width(), 18)
         window.close()
 
-    def test_tower_dropdown_toggles_timing_and_geometry_together(self) -> None:
+    def test_tower_settings_remain_open_at_wide_and_narrow_widths(self) -> None:
         window = self.window()
         self.addCleanup(window.close)
         window.resize(1400, 1000)
@@ -1760,8 +1759,10 @@ class Phase18UiTests(unittest.TestCase):
             self.app.processEvents()
             window.geometry_settings_group.setChecked(False)
             self.app.processEvents()
-            self.assertFalse(window.timing_group.isVisible())
-            self.assertFalse(window.geometry_group.isVisible())
+            self.assertTrue(window.timing_group.isVisible())
+            self.assertTrue(window.geometry_group.isVisible())
+            self.assertTrue(window.geometry_settings_group.isChecked())
+            self.assertTrue(window.geometry_settings_group.toggle_button.isHidden())
             self.assertTrue(window.prediction_frame.isVisible())
             self.assertTrue(window.prediction_frame.content_widget.isVisible())
             window.geometry_settings_group.setChecked(True)
@@ -1774,7 +1775,7 @@ class Phase18UiTests(unittest.TestCase):
             self.assertIsNone(window.prediction_frame.graphicsEffect())
 
 
-    def test_geometry_dropdown_first_open_from_restored_collapsed_state(self) -> None:
+    def test_fixed_geometry_surface_ignores_legacy_collapse_requests(self) -> None:
         window = self.window()
         geometry = window.geometry_settings_group
         body = geometry.content_widget
@@ -1788,9 +1789,9 @@ class Phase18UiTests(unittest.TestCase):
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
 
-        self.assertFalse(geometry.isChecked())
-        self.assertTrue(body.isHidden())
-        self.assertFalse(window.timing_group.isVisible())
+        self.assertTrue(geometry.isChecked())
+        self.assertFalse(body.isHidden())
+        self.assertTrue(window.timing_group.isVisible())
         prediction_y = window.prediction_frame.y()
         prediction_height = window.prediction_frame.height()
 
@@ -1824,7 +1825,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
 
-    def test_geometry_dropdown_first_open_is_complete_when_stacked(self) -> None:
+    def test_fixed_geometry_surface_is_complete_when_stacked(self) -> None:
         window = self.window()
         geometry = window.geometry_settings_group
         body = geometry.content_widget
@@ -2027,19 +2028,21 @@ class Phase18UiTests(unittest.TestCase):
         window.automatic_generation_card.click()
         QTest.qWait(METRICS.first_success_animation_duration_ms + 100)
         self.app.processEvents()
-        geometry = window.geometry_settings_group
+        geometry = window.geometry_group
         self.assertTrue(geometry.isChecked())
-        self.assertFalse(window.local_window_spin.isHidden())
+        self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
         geometry.set_expanded(False, animated=True)
         QTest.qWait(METRICS.animation_duration_ms + 40)
         self.app.processEvents()
         self.assertTrue(geometry.content_widget.isHidden())
-        self.assertFalse(window.local_window_spin.isVisible())
+        self.assertFalse(window.maximum_expansion_angle_spin.isVisible())
+        self.assertTrue(window.timing_group.isVisible())
+        self.assertTrue(window.geometry_settings_group.isChecked())
         geometry.set_expanded(True, animated=True)
         QTest.qWait(METRICS.animation_duration_ms + 40)
         self.app.processEvents()
         self.assertFalse(geometry.content_widget.isHidden())
-        self.assertFalse(window.local_window_spin.isHidden())
+        self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
         window.close()
 
     def test_export_notice_uses_content_height(self) -> None:

@@ -8,19 +8,20 @@ import math
 from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLayout, QLabel, QPushButton, QSizePolicy,
-                              QCheckBox, QScrollArea, QSplitter, QSlider, QProgressBar)
+                              QCheckBox, QScrollArea, QSplitter, QSlider)
 
 from cooling_tower.gui.widgets import SectionCard, WheelSafeComboBox
+from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 from cooling_tower.gui.widgets.manual_canvas import ManualCanvas
 from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox,ManualNumericSettingWidget
 from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
-from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider,ResolutionEndLabels
+from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider,ResolutionEndLabels,RotationSlider,RotationEndLabels,slider_handle_style,SLIDER_GROOVE_OFFSET_STYLE,SLIDER_VALUE_STYLE
 from cooling_tower.gui.widgets.manual_xray_controls import XRayControls,PreviewToolsRow
 from cooling_tower.gui.widgets.manual_settings_pane import ManualSettingsPane
 from cooling_tower.gui.widgets.manual_point_editor import ManualPointEditor,PointField
 from cooling_tower.gui.design_tokens import COLORS,METRICS
-from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, OBJECT_RESOLUTION_STAGES, object_resolution_default, bounded_edit, bounded_coordinate_edit, initial_draft,
-                                          insert_point, move_point, remove_point, set_curve, reset_point_curves, couple_point, validate, validate_settings)
+from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, MINIMUM_TOWER_DIAMETER_MM, OBJECT_RESOLUTION_STAGES, object_resolution_default, bounded_edit, bounded_coordinate_edit, initial_draft,
+                                          insert_point, move_point, remove_point, set_minimum_diameter, set_curve, reset_point_curves, couple_point, validate, validate_settings)
 from cooling_tower.manual.layer_snap import snap_layer_height
 
 
@@ -39,7 +40,7 @@ class ManualGenerationPanel(QWidget):
 
     LABELS = {
         "color_reference_time_s": ("Farbreferenz für Original-Layer", "s", 5, 30),
-        "minimum_diameter_mm": ("Minimaler Turm-Außendurchmesser", "mm", .1, 1000),
+        "minimum_diameter_mm": ("Minimaler Turm-Außendurchmesser", "mm", MINIMUM_TOWER_DIAMETER_MM, 1000),
         "maximum_diameter_mm": ("Maximaler Turm-Außendurchmesser", "mm", .1, 1000),
         "top_diameter_mm": ("Außendurchmesser der Turmspitze", "mm", .1, 1000),
         "base_diameter_mm": ("Grunddurchmesser am Körperbeginn", "mm", .1, 1000),
@@ -76,6 +77,7 @@ class ManualGenerationPanel(QWidget):
         self._settings_horizontal_extent = 480
         self._settings_vertical_extent = 360
         self._settings_scroll_position = 0
+        self._settings_scroll_restore_pending = False
         self.rows, self.editors, self.checks = {}, {}, {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0,0,0,0)
@@ -93,7 +95,8 @@ class ManualGenerationPanel(QWidget):
         self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.settings_content = QWidget()
         form = QVBoxLayout(self.settings_content)
-        form.setContentsMargins(0,0,14,0)
+        form.setContentsMargins(0,0,0,0)
+        form.setSpacing(0)
         self.settings_scroll.setWidget(self.settings_content)
         self.settings_pane = ManualSettingsPane(self.settings_scroll)
         self.settings_collapse_button = self.settings_pane.button
@@ -106,6 +109,8 @@ class ManualGenerationPanel(QWidget):
             ("Ausgewählter Profilpunkt und Kurve", ("point_diameter_mm","point_height_mm","control_diameter_mm","control_height_mm")),
             ("Visuelle Prüfung", ("overhang_angle_deg","color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"))):
             card = SectionCard(title)
+            card.setProperty("manualSettings", True)
+            card.body_divider.hide()
             form.addWidget(card)
             for name in names:
                 if name in {"expansion_angle_deg","contraction_angle_deg","overhang_angle_deg"}:
@@ -219,16 +224,17 @@ class ManualGenerationPanel(QWidget):
             rgb = [round(a+(b-a)*fraction) for a,b in zip(first.getRgb()[:3],last.getRgb()[:3])]
             stops.append(f"stop:{index/(len(OBJECT_RESOLUTION_STAGES)-1):.6f} {QColor(*rgb).name()}")
         self.resolution_slider.setStyleSheet(
-            "QSlider::groove:horizontal { height: 4px; border: none; border-radius: 2px; "
+            "QSlider::groove:horizontal { height: 4px; border: 1px solid #000000; border-radius: 2px; "
+            +SLIDER_GROOVE_OFFSET_STYLE+
             "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "+", ".join(stops)+"); } "
             "QSlider::sub-page:horizontal, QSlider::add-page:horizontal { background: transparent; border: none; } "
-            "QSlider::handle:horizontal { width: 10px; margin: -4px 0; border: 2px solid #536980; "
-            "border-radius: 6px; background: #f8fbfd; }")
+            +slider_handle_style(4))
         self.resolution_slider.valueChanged.connect(lambda value:self.change_setting("object_resolution_percent",OBJECT_RESOLUTION_STAGES[value-1]))
         slider_column.addWidget(self.resolution_slider)
         resolution.addWidget(slider_host,1)
         self.resolution_label = QLabel()
-        self.resolution_label.setStyleSheet("font-size: 8pt; padding: 0;")
+        self.resolution_label.setStyleSheet(SLIDER_VALUE_STYLE)
+        self.resolution_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.resolution_label.setMinimumWidth(self.resolution_label.fontMetrics().horizontalAdvance("100 %"))
         resolution_group.addLayout(resolution)
         value_host=QWidget()
@@ -254,20 +260,31 @@ class ManualGenerationPanel(QWidget):
         self.rotation_title = QLabel("Originalobjekt drehen")
         self.rotation_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.rotation_title.setStyleSheet("font-size: 8pt; padding: 0;")
-        rotation_group.addWidget(self.rotation_title)
+        rotation_header=QHBoxLayout()
+        rotation_header.setSpacing(3)
+        rotation_header.addWidget(self.rotation_title,1)
+        rotation_group.addLayout(rotation_header)
         rotation = QHBoxLayout()
         rotation.setSpacing(3)
-        self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rotation_slider = RotationSlider()
         self.rotation_slider.setMinimumWidth(50)
         self.rotation_slider.setRange(-180,180)
-        self.rotation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.rotation_slider.setTickInterval(45)
         self.rotation_slider.setToolTip("Originalobjekt drehen: −180° bis +180° · 0° in der Mitte · Rastpunkte alle 45°")
         self.rotation_slider.valueChanged.connect(self._queue_rotation)
-        rotation.addWidget(self.rotation_slider,1)
-        self.rotation_label = QLabel("0,00°")
-        self.rotation_label.setStyleSheet("font-size: 8pt; padding: 0;")
-        rotation.addWidget(self.rotation_label)
+        self.rotation_slider_host = QWidget()
+        rotation_slider_column = QVBoxLayout(self.rotation_slider_host)
+        rotation_slider_column.setContentsMargins(0,0,0,0)
+        rotation_slider_column.setSpacing(0)
+        self.rotation_end_labels=RotationEndLabels(self.rotation_slider)
+        rotation_slider_column.addWidget(self.rotation_end_labels)
+        rotation_slider_column.addWidget(self.rotation_slider)
+        rotation.addWidget(self.rotation_slider_host,1)
+        self.rotation_label = QLabel("0°")
+        self.rotation_label.setStyleSheet(SLIDER_VALUE_STYLE)
+        self.rotation_label.setMinimumWidth(self.rotation_label.fontMetrics().horizontalAdvance("-180°"))
+        self.rotation_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        rotation.addWidget(self.rotation_label,alignment=Qt.AlignmentFlag.AlignBottom)
         self.rotation_reset = QPushButton("↺")
         self.rotation_reset.setObjectName("settingResetButton")
         self.rotation_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
@@ -276,8 +293,9 @@ class ManualGenerationPanel(QWidget):
         self.rotation_reset.setAccessibleName("Objektdrehung zurücksetzen")
         self.rotation_reset.setToolTip("Originalorientierung wiederherstellen")
         self.rotation_reset.clicked.connect(self.reset_rotation)
-        rotation.addWidget(self.rotation_reset)
+        rotation.addWidget(self.rotation_reset,alignment=Qt.AlignmentFlag.AlignTop)
         rotation_group.addLayout(rotation)
+        rotation_header.addSpacing(self.rotation_label.minimumWidth()+self.rotation_reset.width()+6)
         self.preview_tools = PreviewToolsRow(self.highlight_host,self.resolution_host,self.rotation_host)
         preview_layout.addWidget(self.preview_tools)
         self.canvas = ManualCanvas()
@@ -311,7 +329,7 @@ class ManualGenerationPanel(QWidget):
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         preview_layout.addWidget(self.status_label)
-        self.progress = QProgressBar()
+        self.progress = ActivityProgressBar()
         self.progress.hide()
         preview_layout.addWidget(self.progress)
         self.action_hint = QLabel()
@@ -347,6 +365,17 @@ class ManualGenerationPanel(QWidget):
         self._settings_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self._settings_animation.valueChanged.connect(self._animate_settings_extent)
         self._settings_animation.finished.connect(self._finish_settings_animation)
+        self._settings_scroll_restore_timer = QTimer(self)
+        self._settings_scroll_restore_timer.setSingleShot(True)
+        self._settings_scroll_restore_timer.setInterval(0)
+        self._settings_scroll_restore_timer.timeout.connect(self._restore_settings_scroll_position)
+        self._settings_scroll_restore_end = QTimer(self)
+        self._settings_scroll_restore_end.setSingleShot(True)
+        self._settings_scroll_restore_end.setInterval(250)
+        self._settings_scroll_restore_end.timeout.connect(self._finish_settings_scroll_restore)
+        self.settings_scroll.verticalScrollBar().rangeChanged.connect(self._defer_settings_scroll_restore)
+        self.settings_scroll.verticalScrollBar().sliderPressed.connect(self._cancel_settings_scroll_restore)
+        self.settings_scroll.verticalScrollBar().actionTriggered.connect(self._cancel_settings_scroll_restore)
         self._sync()
         self.set_actions(False,False,False,False)
         self._view_changed("side")
@@ -508,8 +537,8 @@ class ManualGenerationPanel(QWidget):
                 names=("point_diameter_mm","point_height_mm")
                 values.update(point_diameter_mm=point.position.diameter_mm,point_height_mm=point.position.z_mm)
         short={"minimum_diameter_mm":"Min. Turm-Ø","maximum_diameter_mm":"Max. Turm-Ø",
-               "maximum_foot_diameter_mm":"Max. Fuß-Ø","base_diameter_mm":"Grund-Ø",
-               "foot_diameter_mm":"Fuß-Ø","foot_height_mm":"Fußhöhe","height_mm":"Turmhöhe",
+               "maximum_foot_diameter_mm":"Max. Standfuß-Ø","base_diameter_mm":"Grund-Ø",
+               "foot_diameter_mm":"Standfuß-Ø","foot_height_mm":"Fußhöhe","height_mm":"Turmhöhe",
                "top_diameter_mm":"Spitzen-Ø","point_diameter_mm":"Durchmesser","point_height_mm":"Höhe",
                "control_diameter_mm":"Ø-Position","control_height_mm":"Höhe"}
         return tuple(PointField(name,short[name],values[name],self.default_value(name),self.LABELS[name][0])
@@ -522,6 +551,8 @@ class ManualGenerationPanel(QWidget):
         if not math.isfinite(value) or not low<=value<=high:
             raise GeometryError(name,f"Der Wert muss zwischen {low:g} und {high:g} mm liegen.")
         if name in self.canvas.LIMITS:
+            if name == "minimum_diameter_mm":
+                return self._checked(set_minimum_diameter(self.draft,value))
             return self._checked(validate(replace(self.draft,settings=replace(self.settings,**{name:value}))))
         if name.startswith("control_"):
             i,n=self._selected_control();position=getattr(self.draft.curves[i],f"control{n}")
@@ -572,7 +603,8 @@ class ManualGenerationPanel(QWidget):
             return
         try:
             s = replace(self.draft.settings,**{name:value},**({"overhang_user_set":True} if name == "overhang_angle_deg" else {}))
-            candidate = self._checked(validate(replace(self.draft,settings=s)))
+            candidate = self._checked(set_minimum_diameter(self.draft,value) if name == "minimum_diameter_mm"
+                                      else validate(replace(self.draft,settings=s)))
         except (GeometryError,ValueError) as error:
             self.feedback(error,name)
             self._sync()
@@ -632,8 +664,11 @@ class ManualGenerationPanel(QWidget):
             return
         old = self.draft
         start = getattr(old.settings,name)
-        target = min(1000,max(.1,round(diameter*10)/10))
+        origin = self.canvas.limit_drag_origin(name) or old
+        target = min(1000,max(self.LABELS[name][2],round(diameter*10)/10))
         def operation(value):
+            if name == "minimum_diameter_mm":
+                return self._checked(set_minimum_diameter(origin,value))
             return self._checked(validate(replace(old,settings=replace(old.settings,**{name:value}))))
         candidate,error = bounded_edit(old,lambda t:operation(start+(target-start)*t))
         if error:
@@ -951,7 +986,7 @@ class ManualGenerationPanel(QWidget):
             if angle != snapped and abs(angle-snapped) <= 3:
                 self.rotation_slider.setValue(snapped)
                 return
-        self.rotation_label.setText(f"{angle:.2f}°".replace(".",","))
+        self.rotation_label.setText(f"{angle}°")
         self.rotation_reset.setProperty("modified",angle != 0)
         self.rotation_reset.setEnabled(angle != 0)
         self.rotation_reset.style().unpolish(self.rotation_reset)
@@ -1045,6 +1080,9 @@ class ManualGenerationPanel(QWidget):
             return
         reversing=self._settings_transitioning
         self._settings_animation.stop()
+        self._settings_scroll_restore_timer.stop()
+        self._settings_scroll_restore_end.stop()
+        self._settings_scroll_restore_pending = False
         if collapsed and not reversing:
             self._settings_scroll_position=self.settings_scroll.verticalScrollBar().value()
             if self.splitter.orientation() == Qt.Orientation.Horizontal:
@@ -1098,14 +1136,37 @@ class ManualGenerationPanel(QWidget):
             self.settings_pane._position_children()
         self.settings_visibility_changed.emit()
         if not self._settings_collapsed:
-            QTimer.singleShot(0,self,self._restore_settings_scroll_position)
+            self._settings_scroll_restore_pending = True
+            self._settings_scroll_restore_end.start()
+            self._settings_scroll_restore_timer.start()
+
+    def _cancel_settings_scroll_restore(self, *_):
+        self._settings_scroll_restore_pending = False
+        self._settings_scroll_restore_timer.stop()
+        self._settings_scroll_restore_end.stop()
+
+    def _finish_settings_scroll_restore(self):
+        self._restore_settings_scroll_position()
+        self._cancel_settings_scroll_restore()
+
+    def _defer_settings_scroll_restore(self, *_):
+        # Window fitting can briefly enlarge the viewport after expansion.
+        # Preserve the target through these range changes during the bounded
+        # restoration phase. Later unrelated range changes stay untouched.
+        if self._settings_scroll_restore_pending:
+            self._settings_scroll_restore_timer.start()
 
     def _restore_settings_scroll_position(self):
-        if not self._settings_collapsed and not self._settings_transitioning:
-            self.settings_scroll.verticalScrollBar().setValue(self._settings_scroll_position)
+        if not self._settings_scroll_restore_pending:
+            return
+        if self._settings_collapsed or self._settings_transitioning:
+            self._cancel_settings_scroll_restore()
+            return
+        bar = self.settings_scroll.verticalScrollBar()
+        bar.setValue(self._settings_scroll_position)
 
     def _configure_settings_margins(self,narrow):
-        self.settings_content.layout().setContentsMargins(0,0,0 if narrow else 14,14 if narrow else 0)
+        self.settings_content.layout().setContentsMargins(0,0,0,14 if narrow else 0)
         self.preview_container.layout().setContentsMargins(0 if narrow else 14,14 if narrow else 0,0,0)
 
     def _configure_settings_layout(self):
@@ -1133,12 +1194,10 @@ class ManualGenerationPanel(QWidget):
         self.resolution_heading.setFixedHeight(self.resolution_title.height())
         for button in self.highlight_buttons.values():
             button.setFixedHeight(max(14,height-self.highlight_title.height()-1))
-        for title,widgets in ((self.resolution_title,(self.resolution_slider,self.resolution_label)),
-                              (self.rotation_title,(self.rotation_slider,self.rotation_label))):
-            row_height=height-title.height()-1
-            if title is self.resolution_title:row_height-=self.resolution_end_labels.height()
-            for widget in widgets:
-                widget.setFixedHeight(max(14,row_height))
+        row_height=height-self.rotation_title.height()-1
+        compact_height=max(14,row_height-self.resolution_end_labels.height())
+        for widget in (self.resolution_slider,self.resolution_label,self.rotation_slider,self.rotation_label):
+            widget.setFixedHeight(compact_height)
         if not self._settings_transitioning:
             self._configure_settings_layout()
             if self._settings_collapsed:

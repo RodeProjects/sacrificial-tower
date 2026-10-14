@@ -589,8 +589,14 @@ class PreviewCircleSegmentTests(unittest.TestCase):
             dialog, QPoint(0, dialog.layers_info_label.height())
         ).y()
         layer_line_spacing = dialog.layers_info_label.fontMetrics().lineSpacing()
-        self.assertGreaterEqual(before - layer_info_edge, layer_line_spacing - 4)
-        self.assertLessEqual(before - layer_info_edge, layer_line_spacing + 4)
+        # Font registration in other GUI modules changes the default fallback
+        # metrics. Check separation and the canvas-relative overlay position
+        # instead of estimating the visible gap from a whole text line.
+        self.assertGreater(before, layer_info_edge)
+        self.assertEqual(
+            before - canvas.mapTo(dialog, QPoint(0, 0)).y(),
+            10 - layer_line_spacing,
+        )
         dialog.preview_frame.layout().setEnabled(False)
         canvas.move(canvas.x(), canvas.y() + 18)
         self.app.processEvents()

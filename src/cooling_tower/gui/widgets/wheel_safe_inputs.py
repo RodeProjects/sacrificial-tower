@@ -70,7 +70,8 @@ class WheelSafeComboBox(QComboBox):
         # lists, however, begin with category headers that provide essential
         # orientation, so every opening starts at the first row.
         self.view().scrollToTop()
-        QTimer.singleShot(0, self.view().scrollToTop)
+        view = self.view()
+        QTimer.singleShot(0, view, view.scrollToTop)
 
 
 class WheelSafeSpinBox(QSpinBox):

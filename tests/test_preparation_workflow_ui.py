@@ -34,6 +34,7 @@ from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.widgets import SectionCard, SectionState
 from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
 from cooling_tower.models import SourceKind
+from gui_lifecycle import dispose_test_widget
 from cooling_tower.slicers import (
     ProfileCatalog,
     ProfileKind,
@@ -50,18 +51,20 @@ class PreparationWorkflowUiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
         self.app.processEvents()
-        self.temporary.cleanup()
 
     def window(self) -> MainWindow:
-        return MainWindow(
+        window = MainWindow(
             user_settings_path=self.root / "settings.json",
             enable_update_check=False,
             enable_startup_slicer_discovery=False,
         )
+        self.addCleanup(dispose_test_widget, window)
+        return window
 
     def mark_valid_source(
         self,
@@ -412,14 +415,11 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.profile_confirmation_progress.activity_label.text(),
                 "◐◓◑◒",
             )
-            self.assertGreaterEqual(
-                window.profile_confirmation_progress.activity_label.font()
-                .pointSizeF(),
-                17.0,
-            )
+            progress_text = window.profile_confirmation_progress.text_label
+            text_height = progress_text.fontMetrics().tightBoundingRect(progress_text.text()).height()
             self.assertEqual(
-                window.profile_confirmation_progress.activity_label.width(),
-                28,
+                window.profile_confirmation_progress.activity_label.text_height(),
+                text_height,
             )
             self.assertTrue(window.slicer_progress_bar.isHidden())
             stylesheet = window.styleSheet()
@@ -1235,23 +1235,61 @@ class PreparationWorkflowUiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_preparation_header_lead_icon_is_larger_than_title_text(self) -> None:
+    def test_preparation_header_only_displays_its_centered_caption_in_every_state(self) -> None:
         window = self.window()
         window.show()
         self.app.processEvents()
         try:
-            icon = window.workflow_group.status_icon
-            title = window.workflow_group.title_label
-            self.assertTrue(icon.property("headerLead"))
-            self.assertEqual((icon.width(), icon.height()), (45, 40))
-            self.assertGreaterEqual(
-                icon.font().pointSizeF(),
-                title.font().pointSizeF(),
-            )
-            window.workflow_group.set_state(SectionState.ERROR)
-            self.assertEqual((icon.width(), icon.height()), (45, 40))
+            title=window.preparation_section_title
+            self.assertEqual(title.text(),"Datei und Slicer vorbereiten")
+            self.assertEqual(title.alignment(),Qt.AlignmentFlag.AlignCenter)
+            for state in (SectionState.ACTIVE,SectionState.ERROR,SectionState.SUCCESS):
+                window.workflow_group.set_state(state)
+                window.workflow_group.set_summary("Vorbereitung abgeschlossen")
+                window.workflow_group.set_badge("Status")
+                self.app.processEvents()
+                self.assertTrue(window.workflow_group.header.isHidden())
+                self.assertFalse(window.workflow_group.status_icon.isVisible())
+                self.assertFalse(window.workflow_group.summary_label.isVisible())
+                self.assertFalse(window.workflow_group.badge_label.isVisible())
+                self.assertTrue(title.isVisible())
+                center=title.mapTo(window,QPoint(title.width()//2,0)).x()
+                self.assertLessEqual(abs(center-window.width()//2),1)
         finally:
             window.close()
+
+    def test_preparation_surface_matches_window_background_without_bottom_fade(self) -> None:
+        window = self.window()
+        self.addCleanup(window.close)
+        window.resize(1200, 1000)
+        window.show()
+        for _ in range(5):
+            self.app.processEvents()
+        for width, height in ((1200, 1000), (760, 700), (1400, 1000)):
+            window.resize(width, height)
+            for _ in range(5):
+                self.app.processEvents()
+            body = window.workflow_group.content_widget
+            self.assertEqual(body.geometry().bottom(), window.workflow_group.rect().bottom())
+            image = body.grab().toImage()
+            for y in (0, image.height() // 2, image.height() - 1):
+                self.assertEqual(image.pixelColor(10, y).name(), "#f3f6f9")
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded("Test-STL", analysis_complete=True)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
+        window.show_preparation_workspace()
+        for _ in range(5):
+            self.app.processEvents()
+        body = window.workflow_group.content_widget
+        self.assertEqual(
+            body.geometry().bottom(),
+            window.workflow_group.rect().bottom(),
+        )
+        image = body.grab().toImage()
+        for y in (0, image.height() // 2, image.height() - 1):
+            self.assertEqual(image.pixelColor(10, y).name(), "#f3f6f9")
 
     def test_step_heads_share_colours_and_page_surface_stays_connected(self) -> None:
         window = self.window()
@@ -1278,7 +1316,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 '[role="preparation"] > QFrame#sectionCardBody {',
                 1,
             )[1].split("}", 1)[0]
-            self.assertIn("stop: 0 #e7f1f7", preparation_body_rule)
+            self.assertIn("background: #f3f6f9;", preparation_body_rule)
             overview_rule = stylesheet.split(
                 "QWidget#preparationOverview,",
                 1,
@@ -2048,7 +2086,6 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
             self.assertIs(window.slicer_group.state(), SectionState.ERROR)
             self.assertEqual(window.workflow_group.status_icon.text(), "⇧")
-            icon_size = window.workflow_group.status_icon.size()
             window.preparation_tabs.setCurrentIndex(1)
             self.app.processEvents()
             self.assertIs(window.workflow_group.state(), SectionState.ERROR)
@@ -2056,13 +2093,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertTrue(
                 window.workflow_group.property("preparationError")
             )
-            self.assertEqual(
-                window.workflow_group.status_icon.palette()
-                .color(QPalette.ColorRole.WindowText)
-                .name(),
-                "#b42318",
-            )
-            self.assertEqual(window.workflow_group.status_icon.size(), icon_size)
+            self.assertFalse(window.workflow_group.status_icon.isVisible())
             self.assertIs(window.workflow.stage, WorkflowStage.ERROR)
             window.workflow.begin_slicer_search()
             self.assertIs(window.workflow_group.state(), SectionState.ACTIVE)
@@ -2070,13 +2101,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertFalse(
                 window.workflow_group.property("preparationError")
             )
-            self.assertEqual(
-                window.workflow_group.status_icon.palette()
-                .color(QPalette.ColorRole.WindowText)
-                .name(),
-                "#26965f",
-            )
-            self.assertEqual(window.workflow_group.status_icon.size(), icon_size)
+            self.assertFalse(window.workflow_group.status_icon.isVisible())
         finally:
             window.close()
 

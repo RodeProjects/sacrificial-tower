@@ -20,6 +20,7 @@ from PySide6.QtCore import QEventLoop, QMimeData, QTimer, Qt, QUrl
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import (
     INTERNAL_DIALOG_REVEAL_DELAY_MS,
     MainWindow,
@@ -52,10 +53,17 @@ class StlValidationGuiTests(unittest.TestCase):
         loop = QEventLoop()
         poll_timer = QTimer()
         poll_timer.setInterval(20)
+
+        def validation_finished() -> bool:
+            return (
+                window.stl_validation_result is not None
+                and not window.background_job_manager.has_active(
+                    JobKind.STL_VALIDATION
+                )
+            )
+
         poll_timer.timeout.connect(
-            lambda: loop.quit()
-            if window.stl_validation_result is not None
-            else None
+            lambda: loop.quit() if validation_finished() else None
         )
         timeout_timer = QTimer()
         timeout_timer.setSingleShot(True)
@@ -66,6 +74,10 @@ class StlValidationGuiTests(unittest.TestCase):
         poll_timer.stop()
         timeout_timer.stop()
         self.assertIsNotNone(window.stl_validation_result)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.STL_VALIDATION),
+            "STL-Prüfjob wurde nach dem Ergebnis nicht freigegeben",
+        )
 
     def wait_for_stage(
         self,
@@ -77,7 +89,14 @@ class StlValidationGuiTests(unittest.TestCase):
         poll_timer = QTimer()
         poll_timer.setInterval(20)
         poll_timer.timeout.connect(
-            lambda: loop.quit() if window.workflow.stage is stage else None
+            lambda: loop.quit()
+            if (
+                window.workflow.stage is stage
+                and not window.background_job_manager.has_active(
+                    JobKind.STL_VALIDATION
+                )
+            )
+            else None
         )
         timeout_timer = QTimer()
         timeout_timer.setSingleShot(True)
@@ -88,6 +107,10 @@ class StlValidationGuiTests(unittest.TestCase):
         poll_timer.stop()
         timeout_timer.stop()
         self.assertIs(window.workflow.stage, stage)
+        self.assertFalse(
+            window.background_job_manager.has_active(JobKind.STL_VALIDATION),
+            "STL-Prüfjob wurde nach dem Zustandswechsel nicht freigegeben",
+        )
 
     @staticmethod
     def drop_file(window: MainWindow, path: Path) -> bool:

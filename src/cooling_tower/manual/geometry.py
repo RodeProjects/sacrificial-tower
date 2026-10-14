@@ -20,12 +20,14 @@ MINIMUM_INSERTION_GAP_MM = 0.1
 CURVE_RADIAL_ERROR_MM = 0.02
 MAXIMUM_CURVE_Z_STEP_MM = 1.0
 MAXIMUM_PROFILE_POINTS = 2048
+MINIMUM_TOWER_DIAMETER_MM = 1.0
 EPS = 1e-9
 OBJECT_RESOLUTION_STAGES = (0, 1, 5, 10, 15, 25, 50, 75, 100)
 
 
 def object_resolution_default(view="side"):
-    return 0 if view in {"side", "front"} else 15
+    """Use the same preview quality preference in every view."""
+    return 75
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +226,8 @@ def validate_settings(s):
                  "maximum_foot_diameter_mm", "foot_height_mm"):
         if not 0 < getattr(s, name) <= 1000:
             raise GeometryError(name, "Der Wert muss positiv sein und darf 1000 mm nicht überschreiten.")
+    if s.minimum_diameter_mm < MINIMUM_TOWER_DIAMETER_MM:
+        raise GeometryError("minimum_diameter_mm", "Der Mindest-Turmdurchmesser darf 1,00 mm nicht unterschreiten.")
     if s.minimum_diameter_mm > s.maximum_diameter_mm:
         raise GeometryError("maximum_diameter_mm", "Das Maximum unterschreitet den Mindestdurchmesser.")
     if s.minimum_diameter_mm > s.maximum_foot_diameter_mm or s.foot_diameter_mm > s.maximum_foot_diameter_mm:
@@ -340,6 +344,51 @@ def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diam
                        ProfilePoint("top", top, "top")), (curve, Cubic.line(end, top)),
                     first, maximum_height_mm, context_key)
     return validate(d)
+
+
+def set_minimum_diameter(draft, diameter_mm):
+    """Raise every radial anchor to the minimum without expanding either maximum.
+
+    Call with the press-time draft for a reversible drag preview. Profile points
+    above the boundary and all heights stay unchanged. Linear controls and
+    coupled tangents follow their geometric invariants when an anchor moves.
+    """
+    settings = replace(draft.settings, minimum_diameter_mm=diameter_mm)
+    validate_settings(settings)
+    minimum = diameter_mm / 2
+    if all(position.radius_mm >= minimum for curve in draft.curves
+           for position in (curve.start,curve.control1,curve.control2,curve.end)):
+        return validate(replace(draft,settings=settings))
+    def clamped(position):
+        return replace(position, radius_mm=max(minimum, position.radius_mm))
+    points = tuple(replace(point, position=clamped(point.position)) for point in draft.points)
+    curves = [replace(curve, start=points[i].position, end=points[i+1].position,
+                      control1=clamped(curve.control1), control2=clamped(curve.control2))
+              if curve.curved else Cubic.line(points[i].position, points[i+1].position)
+              for i,curve in enumerate(draft.curves)]
+    for i,point in enumerate(points[1:-1], 1):
+        if not point.smooth:
+            continue
+        incoming,outgoing = curves[i-1:i+1]
+        anchor = point.position
+        if (anchor == draft.points[i].position and
+                incoming.control2 == draft.curves[i-1].control2 and
+                outgoing.control1 == draft.curves[i].control1):
+            continue
+        dz_in = incoming.control2.z_mm-anchor.z_mm
+        dz_out = outgoing.control1.z_mm-anchor.z_mm
+        # A point on the minimum needs a horizontal tangent on both sides.
+        # Otherwise shorten both tangents by the same slope factor whenever
+        # one of their controls reaches the minimum.
+        original = draft.curves[i-1]
+        slope = original.derivative(1,"radius_mm") / original.derivative(1,"z_mm")
+        slopes = ((incoming.control2.radius_mm-anchor.radius_mm)/dz_in,
+                  (outgoing.control1.radius_mm-anchor.radius_mm)/dz_out)
+        slope = max(0,min(slope,*slopes)) if slope >= 0 else min(0,max(slope,*slopes))
+        curves[i-1] = replace(incoming, control2=Coordinate(anchor.radius_mm+slope*dz_in,incoming.control2.z_mm))
+        curves[i] = replace(outgoing, control1=Coordinate(anchor.radius_mm+slope*dz_out,outgoing.control1.z_mm))
+    settings = replace(settings, foot_diameter_mm=points[0].position.diameter_mm)
+    return validate(replace(draft, settings=settings, points=points, curves=tuple(curves)))
 
 
 def move_point(draft, identity, *, diameter_mm=None, z_mm=None):

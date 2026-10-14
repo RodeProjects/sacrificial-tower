@@ -66,6 +66,12 @@ bis zum gemeinsamen Interpreterende an. Fehler, Abstürze und ein Zeitlimit
 von zehn Minuten pro Muster lassen den Gesamtlauf fehlschlagen; der CI-Job
 ist einschließlich Prozessstarts auf 30 Minuten begrenzt.
 
+GUI-Fixtures müssen ihre eigenen Fenster nach dem Test auch nativ freigeben:
+`dispose_test_widget` aus `tests/gui_lifecycle.py` schließt das jeweilige Widget
+und verarbeitet ausschließlich dessen verzögerte Qt-Löschung. Ein bloßes
+`close()` versteckt das Fenster, lässt aber seine Qt-Objekte im gemeinsamen
+Testprozess bestehen. Andere, noch verwendete Testwidgets bleiben erhalten.
+
 ## Native Erweiterung und Windows-Paket
 
 Eine für den eigenen Anwendungscode gültig lizenzierte Visual-Studio-/Build-Tools-

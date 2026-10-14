@@ -81,7 +81,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         )
         self.assertEqual(
             grid.grid.getItemPosition(grid.grid.indexOf(window.prediction_frame))[:2],
-            (0, 1),
+            (0, 2),
         )
         self.assertTrue(
             window.ready_left_column.isAncestorOf(window.timing_group)

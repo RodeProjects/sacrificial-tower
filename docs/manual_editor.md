@@ -18,14 +18,45 @@ Zeitbewertung. Eine quellen- und slicerunabhängige Turmerstellung wird nicht an
 
 Automatische und manuelle Erstellung besitzen getrennte `GenerationSession`-Stände.
 Ein Wechsel erhält Entwurf, Einstellungen, Kamera sowie Ergebnis und Exportstatus
-der jeweiligen Methode. Beim Betreten des manuellen Editors ist kein Punkt ausgewählt.
+der jeweiligen Methode. Beim Wechsel zur manuellen Methode ist kein Punkt ausgewählt.
 Beide Methoden verwenden die Hauptfenster-Fußleiste; manuelle Resetaktionen betreffen
-nur den manuellen Editor. Änderungen der Quelle oder Profile verwerfen die
+nur den manuellen Editor. Bei geöffneter Datei-/Slicervorbereitung ist die gesamte
+Fußleiste ausgeblendet und erscheint bei Rückkehr zum Editor wieder.
+Änderungen der Quelle oder Profile verwerfen die
 betroffenen Ergebnisse beider Methoden und den manuellen Kontext. Laufende
 Generierungen und Exporte sperren den Methodenwechsel. Beim Schließen werden
 die temporären Ergebnisdateien beider Sitzungen freigegeben.
 
+Allgemeine Bedienhinweise und Fehlermeldungen
+stehen links in der Fußleiste. Nach dem Vorbereiten lautet der Bedienhinweis
+„Turmprofil doppelklicken, um freie Punkte hinzuzufügen.“
+Fortschrittsbalken und aktueller Prüfschritt erscheinen rechts in der Fußleiste
+über den Aktionsbuttons. Nach der Generierung zeigt derselbe Bereich kompakt
+die Mindest-Layerzeit von Objekt und Turm, die Prüfart und die Anzahl bewerteter
+Layer. Ein gemeinsamer Prüfslice wird als erreichte Zeit ausgewiesen; ein
+separater Turm-Slice bleibt ausdrücklich eine Prognose.
+Nach einem erfolgreichen Export entfällt die Zusatzzeile zum gemeinsamen
+Prüfslice mit Layeranzahl; die erreichte Mindest-Layerzeit bleibt sichtbar.
+Der Exportpfad wird nicht als linke Footer-Meldung wiederholt. Die vorhandenen
+Öffnen-Buttons führen zu den exportierten Dateien und ihrem Ordner.
+Zusätzliche Hinweise stehen in einem zunächst eingeklappten Bereich. Bei langen Meldungen oder
+ausgeklappten Details scrollt nur die Rückmeldung; die Buttons bleiben sichtbar.
+Ein veränderter Entwurf behält die Ergebniswerte des bisherigen geprüften
+Stands und den zugehörigen Hinweis, bis ein neuer Lauf erfolgreich abschließt.
+
 ## Bedienung und eigene Einstellungen
+
+Die festen Einstellungsgruppen verwenden denselben grauen Überschriftenverlauf
+und dieselbe Schriftgröße wie „Erweiterte Turmeinstellungen“ im automatischen
+Modus. Sie bleiben ohne Dropdown und Chevron. Die Gruppen schließen ohne
+vertikalen Zwischenraum aneinander an; ihre Ecken
+sind rechtwinklig. Sie reichen horizontal vom linken Fensterrand bis an die
+Einklappleiste beziehungsweise den sichtbaren Scrollbalken und besitzen keine
+seitlichen Rahmenlinien. Die grauen Überschriften haben jeweils eine obere
+und untere Rahmenlinie; Einstellungszeilen bleiben ohne Trennlinien.
+Die grauen Bereichsbezeichnungen
+oberhalb des Editors entfallen. Nur in einspaltiger Darstellung erscheint der
+rote Hinweis zum Verbreitern des Fensters, horizontal zur Fenstermitte zentriert.
 
 **Nebeneinander** und **Voreinander** ermöglichen alle Greiferaktionen. Fußrand,
 Körperanschluss, oberer Abschluss und freie Profilpunkte besitzen unterschiedliche Greifer.
@@ -83,6 +114,9 @@ Einstellungen wie bisher oberhalb der Vorschau angeordnet; eingeklappt steht
 auch dort nur die schmale Leiste links. Dieser Anzeigezustand wird nicht gespeichert.
 Die Scrollposition wird nach dem Aufklappen wiederhergestellt, sobald die
 Layout-Umstellung abgeschlossen ist; bei kürzerem Inhalt gilt der verbleibende gültige Bereich.
+Kurzzeitig veränderte Scrollbereiche werden während der nachfolgenden
+Layoutkorrekturen berücksichtigt. Diese Wiederherstellung ist zeitlich begrenzt
+und endet sofort bei einer Scrollaktion des Benutzers.
 Horizontale Greiferbewegungen ändern Durchmesser in Schritten von 0,1 mm,
 einschließlich Bézierkontrollgriffen sowie Drauf- und Untersicht. Grenzen
 zwischen zwei Schritten stoppen auf dem letzten gültigen Zehntelmillimeter;
@@ -159,7 +193,7 @@ unverändert. Eine Tangentenkopplung an diesen beiden Nachbarn wird gelöst, dam
 sie keine zusätzlichen Anker verändert.
 Fuß, Körperanschluss und oberer Abschluss bleiben erforderlich. Jeder Abschnitt
 kann gerade oder als kubische Bézierkurve bearbeitet werden. Kontrollgreifer
-erscheinen ausschließlich am angewählten Punkt: sein eingehender und sein
+erscheinen am angewählten Punkt: sein eingehender und sein
 ausgehender Griff. Neue freie Punkte zeigen beide Griffe sofort nach dem
 Hinzufügen, sowohl per Profildoppelklick als auch über die Punktaktion.
 Bei freien Punkten zeigt bereits der erste einfache Klick
@@ -170,8 +204,15 @@ Profilpunkt verschiebt weiterhin den Punkt. Ein weiterer Doppelklick setzt die
 Kontrollgriffe erneut zurück, ohne sie auszublenden.
 Dieser Doppelklick-Reset gilt ausschließlich in Nebeneinander und Voreinander;
 in Drauf- und Untersicht sind Funktion und Bedienungshinweis nicht verfügbar.
-Nachbarpunkte zeigen keine zusätzlichen Griffe. Fußrand und Fußhöhe besitzen
-jeweils nur ihren eigenen Fußkurvengriff. Der reine Auswahlklick ändert keine
+Ist ein fester oder freier Profilpunkt oder einer seiner Kontrollgriffe ausgewählt, erscheinen
+zusätzlich die zu ihm gerichteten Kontrollgriffe beider direkt benachbarten Punkte,
+unabhängig davon, ob diese fest oder frei sind. Bei einem Kontrollgriff bestimmt
+sein zugehöriger Profilpunkt die direkte Nachbarschaft; der Kontext bleibt auch
+beim Wechsel vom Punkt auf seinen Kontrollgriff erhalten. Die zugewandten
+Nachbargriffe bleiben auch bei linearen Abschnitten sichtbar. Weiter entfernte
+Punkte und die abgewandten Griffe der Nachbarn werden nicht eingeblendet.
+Fußrand und Fußhöhe besitzen
+jeweils ihren eigenen Fußkurvengriff sowie die zugewandten Nachbargriffe. Der reine Auswahlklick ändert keine
 Geometrie. Beim Auswählen eines Kontrollgriffs bleiben die Griffe seines
 zugehörigen Profilpunkts sichtbar.
 Ein Klick auf eine leere, nicht interaktive Fläche hebt die Auswahl auf;
@@ -329,7 +370,29 @@ Bedienungsstichpunkte beginnen bündig unter ihrer Überschrift, ohne Satzendpun
 Zoom steht zuletzt. Der Drehslider reicht von −180° bis +180°; der Standard 0°
 steht genau in der Mitte und wird vom Reset wiederhergestellt. Er besitzt sichtbare Teilstriche alle 45° und
 rastet beim Ziehen innerhalb von ±3° an diesen Winkeln ein. Andere Winkel bleiben
-einstellbar; Tastaturänderungen erfolgen weiterhin gradweise.
+einstellbar; Tastaturänderungen erfolgen weiterhin gradweise. Ein Linksklick auf
+die Slider-Leiste setzt den Greifer direkt an die angeklickte Position; bei
+gehaltener Maustaste lässt er sich von dort weiterziehen. Der Drehslider
+verwendet den klassischen Qt-Fusion-Stil mit blauer Leiste und einem schwarzen
+1-Pixel-Rahmen; auch der Auflösungsbalken besitzt einen schwarzen 1-Pixel-Rahmen.
+Sein weißer, leicht abgerundeter Greifer hat einen schwarzen
+2-Pixel-Rahmen, entsprechend der Rahmenstärke des Auflösungs-Sliders. Die
+Greifer beider Slider besitzen dieselbe Form und Größe und verwenden dieselbe
+zentrale Stildeklaration. Die Darstellung bleibt unabhängig vom Windows-Theme. Seine
+45°-Teilstriche liegen unterhalb des Balkens auf derselben Höhe wie die
+Schrittmarkierungen der STL-Auflösung. Der kompakte Slider bleibt innerhalb
+der bisherigen Werkzeugleistenhöhe und verschiebt die Vorschau nicht. Die
+Überschrift behält ihre vertikale Position und ist über der Leiste ohne die
+Wert-/Resetspalte zentriert. Über jedem 45°-Einrastpunkt steht dessen Gradwert
+im selben grauen Stil wie die Auflösungstexte. Bei Platzmangel werden zuerst
+die Werte ±45° und ±135°, danach bei Bedarf ±90° ausgeblendet. Zwischen den
+verbleibenden Beschriftungen bleiben mindestens 12 Pixel Abstand; −180°, 0°
+und 180° bleiben sichtbar, solange auch dafür genug Platz besteht. Beim
+Verbreitern erscheinen die Werte wieder. Die Winkelanzeige steht
+rechts neben dem Drehslider mit demselben Textabstand wie der Prozentwert
+und zeigt ganze Grad ohne Nachkommastellen. Beide Zahlenwerte sind vertikal
+zur Mitte ihres jeweiligen Slider-Balkens ausgerichtet. Beide Balken
+sind um 3 Pixel nach oben versetzt; ihre Teilstriche sind nach oben um 1 Pixel verlängert.
 Farbquadrate passen sich der Schriftgröße an; bei kritischer
 Original-Layeranzeige ist das Objektquadrat diagonal von links unten nach
 rechts oben geteilt, links oben rot und rechts unten grün.
@@ -353,9 +416,20 @@ symmetrisch zur Turmachse und liegen genau den eingestellten Mindestdurchmesser
 auseinander. Der blaue Punkt am rechten unteren Ende lässt sich horizontal ziehen.
 Beide Linien verschieben sich symmetrisch, während rechts neben dem ausgewählten
 Punkt der aktuelle Mindestdurchmesser erscheint. Der Griff verwendet dieselben
-validierten 0,1-mm-Durchmesserschritte wie die Maximalgrenzen und verändert die
-bestehende Form nicht. Das Erhöhen stoppt an der kleinsten zulässigen Breite der
-vorhandenen Form. Beide Footer-Resets stellen Mindestgrenze und Turmform wieder her.
+validierten 0,1-mm-Durchmesserschritte wie die Maximalgrenzen. Der Mindestwert
+beträgt **1,00 mm**. Beim Erhöhen werden alle unterschreitenden festen und freien
+Profilpunkte einschließlich Grunddurchmesser, Standfuß, Spitze und Bézier-Anker
+an die neue Grenze angehoben. Während einer Greiferbewegung basiert jeder Schritt
+auf der Form beim Drücken: Beim Zurückziehen kehren die Punkte bis zu ihren
+ursprünglichen Positionen zurück. Erst das Loslassen übernimmt die neue Form
+dauerhaft. Eine bestätigte Zahleneingabe übernimmt Grenze und Form sofort;
+ein späteres Verkleinern der Mindestgrenze verschiebt die Punkte nicht zurück.
+Maximaler Turm- und Standfußdurchmesser bleiben unverändert und verbindlich.
+Höhen, gerade Abschnitte und gekoppelte Tangenten bleiben erhalten; die vollständige
+Geometrie- und Platzierungsprüfung gilt weiterhin. Der Grunddurchmesser kann die
+Mindestgrenze nicht verschieben. Im Greifer-Infobereich heißen die Fußbreiten
+**Standfuß-Ø** und **Max. Standfuß-Ø**.
+Beide Footer-Resets stellen Mindestgrenze und Turmform wieder her.
 Beim horizontalen Ziehen eines manuellen oder festen Profilpunkts erscheint an einer erreichten
 Mindest- oder Maximalbreite sofort eine sattblaue gestrichelte vertikale Linie
 mit einer Breite von 1 Pixel. Sie bleibt 350 ms vollständig sichtbar und blendet
@@ -416,11 +490,10 @@ Die äußere Höhe der gemeinsamen Bedienleiste bleibt erhalten. Beide
 Hoverhinweise enthalten ausdrückliche Zeilenumbrüche. Der Reset rechts
 stellt die Standardauflösung wieder her und verwendet die üblichen
 Resetzustände; während eines Auftrags ist er ebenfalls gesperrt.
-Der Standard für **Nebeneinander** und **Voreinander** ist **0 %** (Stufe 1),
-für **Draufsicht**, **Untersicht** und **Freie 3D-Ansicht** **15 %** (Stufe 5).
-Beim Ansichtswechsel folgt die Auflösung dem neuen Standard, solange der bisherige
-Standard eingestellt war. Individuell gewählte andere Stufen bleiben erhalten.
-Einzel-Reset und **Alles zurücksetzen** verwenden den Standard der aktuellen Ansicht;
+Der Standard ist in allen Ansichten **75 %** (Stufe 8).
+Ansichtswechsel behalten die eingestellte Auflösung bei. Bestehende gültige
+individuelle Prozentwerte bleiben beim Laden erhalten. Einzel-Reset und
+**Alles zurücksetzen** stellen die Auflösung auf 75 % zurück;
 der reine Ansichtswechsel aktiviert bei sonst unverändertem Zustand keinen Reset.
 Der gewählte Prozentwert wird als manuelle Qualitätspräferenz in Schema 9
 gespeichert. Kleine Teilnetze mit höchstens 6.000 Dreiecken bleiben vollständig.

@@ -99,8 +99,8 @@ class SettingsAndValidationTests(GuiTestCase):
         try:
             self.assertAlmostEqual(restored.target_time_spin.value(), 27.5)
             self.assertEqual(restored.output_root_edit.text(), str(self.root / "custom"))
-            self.assertFalse(restored.geometry_settings_group.isChecked())
-            self.assertFalse(restored.prediction_frame.isChecked())
+            self.assertTrue(restored.geometry_settings_group.isChecked())
+            self.assertTrue(restored.prediction_frame.isChecked())
         finally:
             restored.close()
 

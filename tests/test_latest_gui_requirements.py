@@ -363,7 +363,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "Erzeugt Opferobjekte passend zur gewünschten Layerzeit",
         )
         self.assertEqual(window.windowTitle(), APP_NAME)
-        self.assertEqual(window.title_label.text(), APP_NAME)
+        self.assertEqual(window.title_label.text().replace("\n", ""), APP_NAME)
         self.assertEqual(window.subtitle_label.text(), APP_SUBTITLE)
         self.assertEqual(window.options_button.toolTip(), "")
         self.assertEqual(window.options_button.accessibleName(), "Menü öffnen")

@@ -435,13 +435,58 @@ Freiräume bis zum regulären Seitenrand, bevor die Karten unter 800 px
 verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
 „Automatisch“ öffnet den bestehenden Arbeitsbereich;
 „Manuell“ öffnet den eingebetteten [Profil- und Béziereditor](manual_editor.md).
-Über den Header-Button „Methode auswählen“ ist die Rückkehr möglich.
+Nach der ersten Wahl über die Karten sind beide Methoden im Header direkt erreichbar.
+Die grauen Bereichsbezeichnungen oberhalb der jeweiligen Inhalte entfallen.
+Nur im einspaltigen manuellen Modus bleibt der rote Breitenhinweis fensterzentriert.
 Der Vorbereitungsbutton öffnet die gemeinsame Vorbereitung im Inhaltsbereich.
-Er zeigt links einen grünen Haken und rechts die bestätigten Datei-, Slicer-
-und Profilangaben. Bei genügend Breite stehen neben der Überschrift zuerst
-dieser Button und dann „Methode auswählen“. Bei Platzmangel wird die
-Methodenbeschriftung zu „Methode“ gekürzt; danach umbrechen die Bedienelemente.
-Header und Footer bleiben sichtbar. Einstellungen, Vorschau,
+Er beginnt direkt am oberen linken Fensterrand und zeigt die fünf Angaben
+untereinander ohne Haken. Oben stehen 7 Pixel, unten 8 Pixel und seitlich jeweils
+7 Pixel Innenabstand zur Verfügung; die gemeinsame Headerhöhe wächst mit dem Inhalt. Alle Ecken sind rechtwinklig;
+kleinere Schrift und der vorhandene grüne Bestätigungsverlauf halten ihn kompakt.
+Die Angaben erscheinen erst
+gemeinsam nach erfolgreichem Abschluss; unbestätigte Teilangaben bleiben verborgen.
+Der Hover-Hinweis lautet „Datei- und Slicereinstellungen ändern“.
+Die Methodenwahl beginnt links neben dem Menü direkt am oberen Fensterrand.
+In der Kartenansicht bleibt dieser Bereich ausgeblendet. Nach der Wahl steht
+dort „Erstellungsmethode“ als zentrierte Textüberschrift.
+Ihre Fläche wächst in der Höhe, sodass die darunterliegenden Methodenbuttons
+mit der Infofläche und der Header-Trennlinie bündig abschließen.
+Direkt darunter schließen die violette Aktion „Automatisch“ und die blaue Aktion
+„Manuell“ nebeneinander ohne Abstand an. Alle Ecken sind rechtwinklig;
+zusammen bilden sie ein Element. Die aktive Methode wirkt durch einen
+hellen umgekehrten Verlauf und dünne Schatten-/Lichtkanten eingedrückt. Die Schrift
+bleibt normal. Die Aktionen wechseln
+direkt zum Arbeitsbereich und ersetzen auch „Zurück“ beim Öffnen der Vorbereitung.
+Nach dem Klick bleibt kein Fokusrahmen stehen. Beim Hover der Methodenkarten
+wird auch ihre enthaltene Aktionsfläche passend eingefärbt.
+Titel und Untertitel stehen horizontal mittig im Fenster. Beim Verkleinern
+folgen sie der Fenstermitte, bis der Abstand zur linken Infofläche 12 Pixel
+beträgt. An dieser Stelle bleiben sie, bis rechts zur Methodenwahl ebenfalls
+nur 12 Pixel frei sind. Bei weiterer Verkleinerung verschwindet die Titelgruppe;
+der Platz bleibt frei. Beim Vergrößern erscheint die Titelgruppe wieder.
+Während der unbestätigten Vorbereitung steht die Titelgruppe vertikal mittig
+zwischen Fensteroberkante und Vorbereitungskarte. Nach Abschluss wird sie
+mittig zur höchsten Header-Fläche ausgerichtet. Der Abstand
+zu Methodenwahl und Generierungsseiten beträgt 22 Pixel, wie deren seitliche
+Content-Ränder. Die Vorbereitungsfläche schließt dagegen ohne Abstand an den
+Header an, reicht horizontal bis zum Fensterrand bzw. Scrollbalken und besitzt
+keine äußeren Rahmenlinien oder abgerundeten Ecken. Ihr Header zeigt nur die
+zentrierte Überschrift. Details zur gemeinsamen Header-/Overlay-Anordnung
+stehen in [architecture.md](architecture.md#auswahl-der-generierungsmethode-und-sitzungszustände).
+Bei sichtbarer Methodenwahl sind Menü und Version jeweils im verbleibenden
+rechten Bereich horizontal zentriert. Ihre gemeinsame vertikale Mitte liegt
+zwischen Fensteroberkante und der Header-Trennlinie. Die Version bleibt
+unter dem Menü. Ohne sichtbare Methodenwahl bleibt die Position der Version
+erhalten; der Menübutton steht horizontal zentriert darüber.
+Die dünne horizontale Trennlinie und ihr über die nächste Seite reichender
+Schatten sind bereits beim Programmstart sichtbar. Die bisherige vertikale
+Zentrierung der Titelgruppe bei unbestätigter Vorbereitung bleibt erhalten.
+Nach erfolgreicher Vorbereitung liegt die Linie auf Höhe der grünen Unterkante
+und ersetzt dort die untere Rahmenkante der Infofläche.
+Angaben und Buttons bleiben im Header. Der Abschluss wechselt mit Aus- und Einblenden zur
+Methodenauswahl. Der Header bleibt sichtbar; der Footer ist in der geöffneten
+Vorbereitung ausgeblendet und erscheint mit der Methodenauswahl wieder.
+Einstellungen, Vorschau,
 Generierungsergebnis und Exportstatus bleiben innerhalb der Sitzung erhalten.
 Während einer laufenden Generierung oder eines Exports ist der Wechsel gesperrt.
 

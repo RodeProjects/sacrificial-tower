@@ -13,7 +13,7 @@ class _AttemptAware:
             if not getattr(self,"_attempt_pending",False):
                 self._attempt_pending = True
                 self._attempt_value = value
-                QTimer.singleShot(0,self._emit_attempt)
+                QTimer.singleShot(0,self,self._emit_attempt)
 
     def _emit_attempt(self):
         self._attempt_pending = False
@@ -26,7 +26,7 @@ class _AttemptAware:
             self._attempt_value = attempted
             if not getattr(self,"_attempt_pending",False):
                 self._attempt_pending = True
-                QTimer.singleShot(0,self._emit_attempt)
+                QTimer.singleShot(0,self,self._emit_attempt)
 
 
 class ManualDoubleSpinBox(_AttemptAware,WheelSafeDoubleSpinBox):

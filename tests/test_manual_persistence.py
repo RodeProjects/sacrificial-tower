@@ -103,10 +103,10 @@ class ManualPersistenceTests(unittest.TestCase):
     def test_resolution_normalization_rejects_wrong_types_and_stages(self):
         for value in (True,"50",None,-1,3,20,2,55,110,50.0,{"unit":"ratio","value":.5}):
             self.path.write_text(json.dumps({"manual_settings_schema_version":MANUAL_SCHEMA_VERSION,"manual":{"object_resolution_percent":value}}))
-            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
+            self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,75)
 
-    def test_new_resolution_default_is_silhouette_and_existing_choices_remain(self):
-        self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,0)
+    def test_new_resolution_default_is_75_and_existing_choices_remain(self):
+        self.assertEqual(ManualSettingsStore(self.path).load().object_resolution_percent,75)
         for value in (0,1,10,15,75):
             self.path.write_text(json.dumps({"manual_settings_schema_version":MANUAL_SCHEMA_VERSION,
                                             "manual":{"object_resolution_percent":value}}))
@@ -275,7 +275,7 @@ class ManualPersistenceTests(unittest.TestCase):
             store=ManualSettingsStore(self.path);settings=store.load()
             self.assertEqual(settings.object_resolution_percent,stage)
             self.assertEqual(settings.circle_segments,48)
-            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],9)
+            self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],MANUAL_SCHEMA_VERSION)
             self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
             store.save(settings)
             self.assertFalse(list(self.root.glob("*.tmp")))
@@ -312,6 +312,60 @@ class ManualPersistenceTests(unittest.TestCase):
             "circle_segments":True,"overhang_enabled":"true","expansion_angle_deg":float("nan")}}))
         s=ManualSettingsStore(self.path).load()
         self.assertEqual(s,replace(ManualSettings(),object_resolution_percent=50))
+
+    def test_one_millimetre_migration_direct_multistep_backup_and_atomic_write(self):
+        for version in (1,8,9):
+            for minimum in (.25,1,12):
+                with self.subTest(version=version,minimum=minimum):
+                    original=json.dumps({"manual_settings_schema_version":version,"manual":{
+                        "minimum_diameter_mm":minimum,"circle_segments":48}}).encode()
+                    self.path.write_bytes(original)
+                    store=ManualSettingsStore(self.path);settings=store.load()
+                    self.assertEqual(settings.minimum_diameter_mm,max(1,minimum))
+                    self.assertEqual(settings.circle_segments,48)
+                    self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+                    store.save(settings)
+                    self.assertEqual(json.loads(self.path.read_bytes())["manual_settings_schema_version"],10)
+                    self.assertFalse(list(self.root.glob("*.tmp")))
+        self.path.write_text(json.dumps({"manual_settings_schema_version":9,"manual":{
+            "minimum_diameter_mm":.2,"maximum_diameter_mm":.8,
+            "foot_diameter_mm":.5,"maximum_foot_diameter_mm":.9}}))
+        settings=ManualSettingsStore(self.path).load()
+        self.assertEqual(tuple(getattr(settings,name) for name in
+            ("minimum_diameter_mm","maximum_diameter_mm","foot_diameter_mm","maximum_foot_diameter_mm")),(1,1,1,1))
+
+    def test_v10_downgrade_blocks_incompatible_diameters_without_overwriting(self):
+        for value in (.5,0,1001,False,"1",{"unit":"micrometres","value":1000}):
+            original=json.dumps({"manual_settings_schema_version":10,"manual":{
+                "minimum_diameter_mm":value}}).encode()
+            self.path.write_bytes(original)
+            older=VersionedJsonStore(self.path,schema_key="manual_settings_schema_version",current_version=9)
+            with self.assertRaises(FutureSchemaVersionError):older.load()
+            with self.assertRaises(VersionedDocumentWriteBlockedError):older.save({"manual":{}})
+            self.assertEqual(self.path.read_bytes(),original)
+        for version in (9,10):
+            for value in (0,1001,False,"1",{"unit":"micrometres","value":1000}):
+                self.path.write_text(json.dumps({"manual_settings_schema_version":version,"manual":{
+                    "minimum_diameter_mm":value}}))
+                self.assertEqual(ManualSettingsStore(self.path).load().minimum_diameter_mm,ManualSettings().minimum_diameter_mm)
+        self.path.write_text(json.dumps({"manual_settings_schema_version":10,"manual":{"minimum_diameter_mm":.5}}))
+        self.assertEqual(ManualSettingsStore(self.path).load().minimum_diameter_mm,ManualSettings().minimum_diameter_mm)
+
+    def test_v9_floor_migration_write_failure_external_change_and_recovery(self):
+        original=b'{"manual_settings_schema_version":9,"manual":{"minimum_diameter_mm":0.5}}'
+        self.path.write_bytes(original);store=ManualSettingsStore(self.path)
+        with patch("cooling_tower.persistence.versioned_json.atomic_write_json",side_effect=OSError("disk unavailable")):
+            settings=store.load()
+        self.assertEqual(self.path.read_bytes(),original)
+        with self.assertRaises(VersionedDocumentWriteBlockedError):store.save(settings)
+        self.assertTrue(any(p.read_bytes()==original for p in self.root.glob("*backup*")))
+        store=ManualSettingsStore(self.path);settings=store.load()
+        changed=self.path.read_bytes()+b" "
+        self.path.write_bytes(changed)
+        with self.assertRaises(ConcurrentDocumentChangeError):store.save(settings)
+        self.assertEqual(self.path.read_bytes(),changed)
+        store.recover()
+        self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
 
 
 if __name__ == "__main__": unittest.main()

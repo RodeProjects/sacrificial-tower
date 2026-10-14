@@ -9,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,8 +19,10 @@ if str(SRC_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from shiboken6 import isValid
 
 from cooling_tower.application import enable_native_crash_log
 from cooling_tower.gui.background_jobs import JobKind
@@ -34,6 +37,7 @@ from cooling_tower.slicers import (
     SlicerInstallation,
     SlicerSupportLevel,
 )
+from gui_lifecycle import dispose_test_widget
 
 
 class StaticSlicerService:
@@ -171,11 +175,11 @@ class GuiCrashStabilityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
     def tearDown(self) -> None:
         self.app.processEvents()
-        self.temporary.cleanup()
 
     def make_window(
         self,
@@ -203,6 +207,7 @@ class GuiCrashStabilityTests(unittest.TestCase):
             slicer_service=StaticSlicerService(),
             profile_service=profile_service,
         )
+        self.addCleanup(dispose_test_widget, window)
         window.analysis_snapshot = object()
         window.profile_match_result = object()
         stl_path = self.root / "stability.stl"
@@ -227,6 +232,25 @@ class GuiCrashStabilityTests(unittest.TestCase):
             time.sleep(0.001)
         self.app.processEvents()
         self.assertTrue(predicate(), "Timed out waiting for Qt background work")
+
+    def test_pending_window_layout_callbacks_stop_at_native_deletion(self) -> None:
+        window = MainWindow(
+            user_settings_path=self.root / "deleted_window_settings.json",
+            enable_update_check=False,
+            enable_startup_slicer_discovery=False,
+        )
+        self.addCleanup(dispose_test_widget, window)
+        window.show()
+        window.resize(1100, 900)
+        window._on_settings_scroll_range_changed(0, 1)
+        self.assertTrue(window.close())
+        window.deleteLater()
+        self.app.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(window))
+        with patch("sys.excepthook") as unhandled_error:
+            self.app.processEvents()
+            QTest.qWait(400)
+        unhandled_error.assert_not_called()
 
     def test_worker_reference_is_retained_until_qthread_finished(self) -> None:
         window = self.make_window(StableProfileService())

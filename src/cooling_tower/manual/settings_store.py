@@ -1,11 +1,12 @@
 """Separate versioned manual preferences; no object geometry is persisted."""
 from dataclasses import fields, replace
+import math
 from pathlib import Path
 
-from cooling_tower.manual.geometry import GeometryError, ManualSettings, validate_settings
+from cooling_tower.manual.geometry import GeometryError, ManualSettings, MINIMUM_TOWER_DIAMETER_MM, validate_settings
 from cooling_tower.persistence.versioned_json import VersionedJsonStore, VersionedDocumentError
 
-MANUAL_SCHEMA_VERSION = 9
+MANUAL_SCHEMA_VERSION = 10
 
 
 def migrate_manual_v1(payload):
@@ -117,6 +118,17 @@ def migrate_manual_v8(payload):
     return {**payload,"manual_settings_schema_version":9,"manual":manual}
 
 
+def migrate_manual_v9(payload):
+    """Raise old positive sub-millimetre diameter preferences to the new floor."""
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw,dict) else {}
+    for name in ("minimum_diameter_mm", "maximum_diameter_mm", "foot_diameter_mm", "maximum_foot_diameter_mm"):
+        value = manual.get(name)
+        if type(value) in (int,float) and math.isfinite(value) and 0 < value < MINIMUM_TOWER_DIAMETER_MM:
+            manual[name] = MINIMUM_TOWER_DIAMETER_MM
+    return {**payload,"manual_settings_schema_version":10,"manual":manual}
+
+
 class ManualSettingsStore:
     def __init__(self, path: Path):
         self.store = VersionedJsonStore(path, schema_key="manual_settings_schema_version",
@@ -129,7 +141,8 @@ class ManualSettingsStore:
                                                     5: migrate_manual_v5,
                                                     6: migrate_manual_v6,
                                                     7: migrate_manual_v7,
-                                                    8: migrate_manual_v8},
+                                                    8: migrate_manual_v8,
+                                                    9: migrate_manual_v9},
                                         normalizer=normalize_manual_settings,
                                         document_name="Die manuellen Einstellungen")
         self.warning = None

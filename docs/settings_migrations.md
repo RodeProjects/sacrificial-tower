@@ -343,7 +343,7 @@ und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
 
-## Getrennte manuelle Einstellungen (eigenes Schema 8)
+## Getrennte manuelle Einstellungen (eigenes Schema 10)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
@@ -396,11 +396,11 @@ Vorher gültige 1-%- und 3-%-Werte werden zu 5 %; 0 % und alle übrigen gültige
 Werte bleiben erhalten. In Schema 6 ungültige Typen, Einheiten oder Werte
 fallen beim Migrationsschritt weiterhin auf den damaligen Standard 10 zurück.
 Neue Dateien und ungültige Werte in Schema 7 verwenden 0 %.
-Die Oberfläche verwendet je Ansicht unterschiedliche Standards: 0 % für
+Die Oberfläche verwendete damals je Ansicht unterschiedliche Standards: 0 % für
 Nebeneinander/Voreinander, 15 % für die anderen Ansichten. Bestehende gültige
 individuelle Prozentwerte bleiben erhalten; die Ansichtsstandards verändern
 weder die Bedeutung noch die Einheit der gespeicherten Werte. Einzel- und
-Gesamt-Reset beachten die aktuelle Ansicht. Die Ansicht selbst wird nicht gespeichert.
+Gesamt-Reset beachteten die aktuelle Ansicht. Die Ansicht selbst wird nicht gespeichert.
 Auch ältere Programmversionen mit Schema 6 dürfen Dateien mit Schema 7 nicht
 übernehmen oder überschreiben. Der historische Rückfallwert 10 bleibt in allen
 früheren Auflösungsmigrationen festgeschrieben.
@@ -409,18 +409,32 @@ Integer-Stufen bleiben erhalten; dort ungültige Werte (auch 1 und 3), Typen ode
 Einheiten fallen auf 0 % zurück. Erst Schema 8 akzeptiert den strikten Integer 1.
 Die historischen 6→7-Regeln bleiben erhalten: Eine ursprünglich dort gespeicherte
 1-%- oder 3-%-Wahl wird bei einem mehrstufigen Sprung weiterhin zuerst zu 5 %.
-Schema 8 verwendet dieselben ansichtsabhängigen Standards. Ältere Versionen mit
+Schema 8 verwendete dieselben ansichtsabhängigen Standards. Ältere Versionen mit
 Schema 7 dürfen neue Dateien einschließlich 1-%-Werten nicht lesen oder überschreiben.
 8→9 ändert die Bedeutung positiver `object_resolution_percent`-Werte: Sie sind
 nun Gewichtungen der automatischen Vorschauqualität zwischen Performance und
 Optik, keine gewünschten Flächenprozente. 0 bleibt die Originalsilhouette.
 Alle in Schema 8 gültigen strikten Integer-Stufen bleiben als entsprechende
 Präferenz erhalten; ungültige Werte/Typen/Einheiten fallen auf 0 zurück.
-Ansichtsstandards und Druck-/Artefaktdaten bleiben unverändert. Ältere Versionen
-mit Schema 8 dürfen Schema 9 nicht lesen oder überschreiben, damit eine
+Die damaligen Ansichtsstandards und Druck-/Artefaktdaten bleiben bei der Migration
+unverändert. Ältere Versionen mit Schema 8 dürfen Schema 9 nicht lesen oder überschreiben, damit eine
 Qualitätspräferenz nicht als früheres Flächenbudget interpretiert wird.
-Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8→9 wird das Original gesichert,
+9→10 setzt die Untergrenze für `minimum_diameter_mm` auf 1,00 mm. Alte endliche,
+positive Durchmesser unter 1 mm werden auf 1 mm angehoben, einschließlich der
+zugehörigen Maximal-/Standfußwerte, damit zuvor gültige kleine Durchmessergruppen
+konsistent bleiben. Typen, Einheiten oder Werte, die bereits im alten Schema
+ungültig waren, werden weiterhin streng normalisiert. Andere gültige Präferenzen
+bleiben erhalten. Ältere Versionen dürfen Schema 10 weder übernehmen noch überschreiben.
+Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8→9→10 wird das Original gesichert,
 anschließend atomar gespeichert. Alle früheren Migrationsschritte bleiben erhalten.
+
+Der aktuelle Oberflächenstandard beträgt in allen Ansichten 75 %; Einzel- und
+Gesamt-Reset verwenden ebenfalls 75 %. Neue Einstellungen und ungültige Werte
+bei der Normalisierung im aktuellen Schema erhalten diesen Standard. Bestehende
+gültige individuelle Werte und alle historischen Migrationsregeln bleiben erhalten.
+Diese Standardänderung verändert weder Format, Einheit noch Bedeutung gespeicherter
+Qualitätspräferenzen und benötigt keine zusätzliche Schemamigration. Die Bedienung ist in
+[manual_editor.md](manual_editor.md) beschrieben.
 
 Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
 zwischenzeitliche externe Änderungen werden vom vorhandenen Bytesvergleich

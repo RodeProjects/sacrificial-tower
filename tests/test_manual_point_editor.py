@@ -29,6 +29,29 @@ class ManualPointEditorTests(unittest.TestCase):
     def type_value(self,row,text):
         row.editor.setFocus();row.editor.selectAll();QTest.keyClicks(row.editor,text)
 
+    def test_minimum_enter_moves_all_anchors_and_rejects_values_below_one(self):
+        p=self.panel;p.insert(20);p.move(p.selected,12,20)
+        p.select("minimum_diameter_mm")
+        row=p.point_editor.rows["minimum_diameter_mm"]
+        original=p.draft
+        self.type_value(row,"30,00")
+        self.assertFalse(row.invalid)
+        self.assertEqual(p.draft,original)
+        QTest.keyClick(row.editor,Qt.Key.Key_Return)
+        self.assertEqual(p.settings.minimum_diameter_mm,30)
+        for curve in p.draft.curves:
+            for position in (curve.start,curve.control1,curve.control2,curve.end):
+                self.assertGreaterEqual(position.diameter_mm,30)
+        committed=p.draft
+        for text in ("0,99","41,00","81,00"):
+            self.type_value(row,text)
+            self.assertTrue(row.invalid)
+            QTest.keyClick(row.editor,Qt.Key.Key_Return)
+            self.assertEqual(p.draft,committed)
+        for identity,label in (("foot","Standfuß-Ø"),("maximum_foot_diameter_mm","Max. Standfuß-Ø")):
+            p.select(identity)
+            self.assertEqual(next(iter(p.point_editor.rows.values())).label.text(),label)
+
     def test_each_handle_exposes_only_its_editable_coordinates_and_reset_defaults(self):
         p=self.panel;p.insert(20);free=p.selected
         mapping={"foot":("foot_diameter_mm",),"base":("base_diameter_mm",),

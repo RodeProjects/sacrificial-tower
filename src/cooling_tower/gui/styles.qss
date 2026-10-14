@@ -37,25 +37,31 @@ QScrollArea, QScrollArea > QWidget > QWidget {
     border: none;
 }
 
+/* Die Überblendung benötigt auch ohne sichtbare Seite einen hellen Hintergrund. */
+QStackedWidget#windowPages {
+    background: #f3f6f9;
+    border: none;
+}
+
 QWidget#mainHeader {
     background: #f3f6f9;
-    border-bottom: 1px solid transparent;
+    border: none;
 }
 
-QWidget#mainHeader[scrolled="true"] {
-    border-bottom: 1px solid #cbd6e1;
+QFrame#workflowHeaderDivider {
+    background: #bac7d4;
+    border: none;
 }
 
-QPushButton#preparationViewButton:checked,
-QPushButton#preparationMethodButton:checked {
-    background: #e7f1fa;
-    border-color: #84abc8;
-    color: #17486d;
+QWidget#workflowHeaderDividerShadow {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 rgba(21, 37, 54, 23), stop: 1 rgba(21, 37, 54, 0));
+    border: none;
 }
 
 QLabel#preparationFactsStatus {
-    color: #199764;
-    font-size: 28pt;
+    color: #176b45;
+    font-size: 22pt;
     background: transparent;
 }
 QLabel#preparationFactsStatus[confirmed="false"] {
@@ -75,6 +81,10 @@ QWidget#footerNoticeHost,
 QWidget#footerContent,
 QWidget#footerMessageArea,
 QWidget#footerActionArea,
+QScrollArea#manualFooterStatusScroll,
+QScrollArea#manualFooterStatusScroll > QWidget > QWidget,
+QWidget#manualFooterStatusContent,
+QWidget#manualFooterMessageContent,
 QScrollArea#footerNoticeColumn,
 QScrollArea#footerNoticeColumn > QWidget > QWidget,
 QWidget#footerNoticeColumnContent {
@@ -130,9 +140,9 @@ QPushButton#updateButton {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #2f7fb7, stop: 1 #1769aa);
     border: 1px solid #0f568f;
-    border-radius: 5px;
-    min-height: 22px;
-    padding: 2px 9px;
+    border-radius: 0;
+    min-height: 0;
+    padding: 0 8px;
     font-size: 9pt;
     font-weight: 600;
 }
@@ -146,10 +156,10 @@ QPushButton#updateButton:pressed {
         stop: 0 #0d4c7e, stop: 1 #246fa7);
 }
 QPushButton#updateButton:disabled {
-    color: #dce7f0;
+    color: #ffffff;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #7898b2, stop: 1 #5f83a3);
-    border-color: #527491;
+        stop: 0 #2f7fb7, stop: 1 #1769aa);
+    border-color: #0f568f;
 }
 
 QLabel#sectionHeading {
@@ -281,17 +291,27 @@ QFrame#sectionCard[outerDropdown="true"][state="error"] {
     border-left-color: #c6372d;
 }
 
-/* Die Vorbereitung ist bis zum letzten erfüllten Punkt ein fester Bereich.
-   Die linke Kante behält intern bereits die Dropdown-Breite, wird aber erst
-   nach dem Abschluss grün hervorgehoben. Dadurch kann Qt beim dynamischen
-   Wechsel zum einklappbaren Header die volle Akzentbreite zuverlässig neu
-   einfärben. */
-QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="false"] {
-    border-left-color: #d6dee8;
+/* Die Vorbereitung verbindet sich rahmenlos mit dem Programmheader. */
+QFrame#sectionCard[outerDropdown="true"][role="preparation"] {
+    background: #f3f6f9;
+    border: none;
+    border-radius: 0;
 }
 
-QFrame#sectionCard[outerDropdown="true"][role="preparation"][collapsible="false"][state="success"] {
-    border-left-color: #238a5b;
+QFrame#preparationSectionHeader {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #eef7fc, stop: 1 #cfe3ef);
+    border: none;
+    border-bottom: 1px solid #9fb6c5;
+    border-radius: 0;
+}
+
+QLabel#preparationSectionTitle {
+    color: #40576a;
+    font-size: 12pt;
+    font-weight: 700;
+    background: transparent;
+    border: none;
 }
 
 QFrame#sectionCard[outerDropdown="true"][cardTone="preview"] {
@@ -451,6 +471,22 @@ QFrame#sectionCard[expanded="true"] > QFrame#sectionCardHeader:pressed {
     border-bottom-right-radius: 0;
 }
 
+/* Die festen Automatikbereiche schließen direkt an Header und Fensterränder an. */
+QFrame#sectionCard[outerDropdown="true"][edgeAttached="true"] {
+    border: none;
+    border-bottom: 1px solid #d6dee8;
+    border-radius: 0;
+}
+QFrame#sectionCard[outerDropdown="true"][edgeAttached="true"] > QFrame#sectionCardHeader,
+QFrame#sectionCard[outerDropdown="true"][edgeAttached="true"] > QFrame#sectionCardBody,
+QFrame#sectionCard[edgeAttached="true"] QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"] {
+    border-radius: 0;
+}
+QFrame#readyColumnsDivider {
+    background: #bac7d4;
+    border: none;
+}
+
 QLabel#sectionCardTitle {
     color: #21384f;
     font-size: 13pt;
@@ -486,11 +522,17 @@ QLabel#sectionCardTitleNote[severity="warning"] { color: #8a4b08; }
 QLabel#sectionCardSummary,
 QLabel#sectionCardSummaryKey,
 QLabel#sectionCardSplitSummaryLeft,
-QLabel#sectionCardSplitSummaryRight,
-QLabel#workflowHeaderFactKey,
-QLabel#workflowHeaderFactValue {
+QLabel#sectionCardSplitSummaryRight {
     color: #526274;
     font-size: 9.5pt;
+}
+
+QLabel#workflowHeaderFactKey,
+QLabel#workflowHeaderFactValue {
+    color: #28563d;
+    font-size: 8.5pt;
+    padding: 0;
+    background: transparent;
 }
 
 QWidget#sectionCardSplitSummary {
@@ -568,10 +610,7 @@ QLabel#generationMethodHeading {
     color: #153b60;
     font-size: 18pt;
     font-weight: 700;
-    padding: 12px 0 4px;
-}
-QLabel#generationMethodLabel {
-    color: #526274;
+    padding: 12px 0 13px;
 }
 QPushButton[generationModeCard="true"] {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #ffffff, stop:1 #e9f0f7);
@@ -625,6 +664,16 @@ QPushButton[generationMode="automatic"] QLabel#generationModeCardTitle,
 QPushButton[generationMode="automatic"] QLabel#generationModeCardAction {
     color: #563284;
 }
+QPushButton[generationMode="automatic"] QLabel#generationModeCardAction {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #fbf8ff, stop:1 #e6daf6);
+    border-color: #bdabda;
+}
+QPushButton[generationMode="automatic"] QLabel#generationModeCardAction[cardHover="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f4edff, stop:1 #dbc8f1);
+    border-color: #9d82c2;
+}
 QPushButton[generationMode="manual"] {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #f4f9fe, stop:0.45 #e0eaf5, stop:1 #bad0e7);
     border-color: #91aecb;
@@ -641,6 +690,16 @@ QPushButton[generationMode="manual"]:pressed {
 QPushButton[generationMode="manual"] QLabel#generationModeCardTitle,
 QPushButton[generationMode="manual"] QLabel#generationModeCardAction {
     color: #22486f;
+}
+QPushButton[generationMode="manual"] QLabel#generationModeCardAction {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f4f9fe, stop:1 #d6e5f4);
+    border-color: #91aecb;
+}
+QPushButton[generationMode="manual"] QLabel#generationModeCardAction[cardHover="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #eef7ff, stop:1 #c3d9ed);
+    border-color: #6c96bc;
 }
 
 QGroupBox {
@@ -695,9 +754,25 @@ QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"] > QFrame#s
     border-radius: 0;
 }
 
-QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"][collapsible="true"] > QFrame#sectionCardHeader {
+QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"][collapsible="true"] > QFrame#sectionCardHeader,
+QFrame#sectionCard[manualSettings="true"] > QFrame#sectionCardHeader {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #f5f7f9, stop: 1 #e8edf2);
+}
+
+/* Die manuellen Einstellungen bilden eine zusammenhängende Fläche. */
+QFrame#sectionCard[manualSettings="true"] {
+    border: none;
+    border-radius: 0;
+}
+QFrame#sectionCard[manualSettings="true"] > QFrame#sectionCardHeader {
+    border: none;
+    border-top: 1px solid #d6dee8;
+    border-bottom: 1px solid #d6dee8;
+    border-radius: 0;
+}
+QFrame#sectionCard[manualSettings="true"] QWidget#numericSettingRow {
+    border: none;
 }
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"][collapsible="true"] > QFrame#sectionCardHeader:hover {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -711,6 +786,7 @@ QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"][collapsibl
 /* Die Dropdown-Titel bleiben bewusst groß. Nur die darin liegenden
    Geometrie-Unterüberschriften verwenden wieder ihre frühere Größe. */
 QWidget#geometrySettingsSplit QFrame#sectionCard[subsection="single"] QLabel#sectionCardTitle,
+QFrame#sectionCard[manualSettings="true"] QLabel#sectionCardTitle,
 QFrame#geometryCalculationHeader QLabel#sectionCardTitle[subsectionHeader="true"] {
     font-size: 11.5pt;
 }
@@ -804,16 +880,11 @@ QProgressBar#preparationProgressBar::chunk {
     border-radius: 5px;
 }
 
-/* Ein einziger Verlauf verbindet Reiterübersicht und aktuelle Arbeitsfläche.
-   Dadurch entsteht unterhalb des Dropdown-Headers keine weiße Zwischenzone. */
+/* Die Vorbereitungsfläche verwendet durchgehend den Programmhintergrund. */
 QFrame#sectionCard[outerDropdown="true"][role="preparation"] > QFrame#sectionCardBody {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #e7f1f7,
-        stop: 0.42 #f0f6f9,
-        stop: 1 #f7fafc
-    );
+    background: #f3f6f9;
     border: none;
+    border-radius: 0;
 }
 
 QWidget#preparationStepSelectorContainer {
@@ -1323,8 +1394,6 @@ QLabel#profileConfirmationActivity {
     color: #176b45;
     background: transparent;
     border: none;
-    font-size: 17pt;
-    font-weight: 700;
 }
 
 QFrame#slicerMessageDivider {
@@ -2281,6 +2350,120 @@ QPushButton:disabled {
     border-color: #d8dee3;
 }
 
+/* The fact card owns its interior layout, avoiding double button padding. */
+QPushButton#preparationViewButton {
+    padding: 0;
+    min-height: 0;
+    border-radius: 0;
+    border-top: 0;
+    border-left: 0;
+    border-bottom: 0;
+}
+QLabel#headerMethodHeading {
+    color: #40576a;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #eef7fc, stop:1 #cfe3ef);
+    border: 1px solid #9fb6c5;
+    border-top: 0;
+    border-bottom: 0;
+    padding: 0 8px;
+    font-weight: 600;
+}
+QPushButton#headerMethodButton {
+    padding: 0 10px;
+    min-height: 0;
+    text-align: center;
+    border: 1px solid #bdabda;
+    border-top: 0;
+    border-radius: 0;
+    font-weight: 400;
+}
+QPushButton#headerMethodButton[generationMode="automatic"] {
+    color: #563284;
+    border-right: 0;
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #fcfaff, stop:0.45 #f0e8fb, stop:1 #d7c5ed);
+}
+QPushButton#headerMethodButton[generationMode="manual"] {
+    color: #22486f;
+    border-color: #91aecb;
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #f4f9fe, stop:0.45 #e0eaf5, stop:1 #bad0e7);
+}
+QPushButton#headerMethodButton[generationMode="automatic"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #faf6ff, stop:0.45 #e9ddf8, stop:1 #cbb6e8);
+}
+QPushButton#headerMethodButton[generationMode="manual"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #eef6ff, stop:0.45 #d6e5f4, stop:1 #aac5e2);
+}
+QPushButton#headerMethodButton[generationMode="automatic"]:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ddd1ed, stop:0.18 #efe7f9, stop:1 #f7f2fc);
+    border-top: 1px solid #b7a3d2;
+    border-bottom: 1px solid #fcfaff;
+    padding: 1px 10px 0;
+}
+QPushButton#headerMethodButton[generationMode="manual"]:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #c5d8e9, stop:0.18 #e0ecf6, stop:1 #f1f7fc);
+    border-top: 1px solid #9ab5ce;
+    border-bottom: 1px solid #fbfdff;
+    padding: 1px 10px 0;
+}
+QPushButton#headerMethodButton[generationMode="automatic"]:checked:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #d7c9e8, stop:0.18 #e8ddf5, stop:1 #f2ebfa);
+}
+QPushButton#headerMethodButton[generationMode="manual"]:checked:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #bdd3e6, stop:0.18 #d8e7f3, stop:1 #eaf3fa);
+}
+QPushButton#headerMethodButton[generationMode="automatic"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #d7c9e8, stop:0.18 #e8ddf5, stop:1 #f2ebfa);
+    border-top: 1px solid #b7a3d2;
+}
+QPushButton#headerMethodButton[generationMode="manual"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #bdd3e6, stop:0.18 #d8e7f3, stop:1 #eaf3fa);
+    border-top: 1px solid #9ab5ce;
+}
+QPushButton#headerMethodButton[generationMode="automatic"]:focus,
+QPushButton#headerMethodButton[generationMode="manual"]:focus {
+    border-bottom: 1px dotted #1769aa;
+}
+QPushButton#headerMethodButton:disabled {
+    color: #8995a0;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f5f7f8, stop:1 #e7ecef);
+    border-color: #d8dee3;
+}
+QPushButton#headerMethodButton:checked:disabled {
+    color: #637386;
+    border-top: 1px solid #c7d0d8;
+    border-bottom: 1px solid #f5f7f8;
+}
+QPushButton#preparationViewButton[confirmed="true"] {
+    color: #28563d;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #e7f8ed, stop: 1 #c7e9d3);
+    border-color: #a6cbb4;
+}
+QPushButton#preparationViewButton[confirmed="true"]:hover {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #effbf3, stop: 1 #d3efdc);
+    border-color: #86b798;
+}
+QPushButton#preparationViewButton[confirmed="true"]:pressed {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #bddfc9, stop: 1 #e2f6e9);
+}
+QPushButton#preparationViewButton[confirmed="true"]:checked {
+    border-color: #86b798;
+}
+
 QPushButton#sourcePrimaryActionButton,
 QPushButton#layerRangeApplyButton,
 QPushButton#profileConfirmButton {
@@ -2869,6 +3052,18 @@ QProgressBar {
 }
 
 QProgressBar::chunk { background: #1769aa; border-radius: 5px; }
+QWidget#progressBarOverlay,
+QWidget#profileConfirmationProgressOverlay {
+    background: transparent;
+    border: none;
+}
+QLabel#progressBarText,
+QLabel#progressBarActivity {
+    color: #243b50;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
 QProgressBar#sourceValidationProgressBar::chunk {
     background: #26965f;
     border-radius: 5px;
@@ -3084,6 +3279,14 @@ QPushButton#updateRestartCancelButton:disabled {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #f5f7f8, stop: 1 #e7ecef);
     border-color: #d8dee3;
+}
+
+/* Edge-attached update strip; use the shared red cancel palette above. */
+QPushButton#updateCancelButton {
+    border-radius: 0;
+    min-height: 0;
+    padding: 0;
+    border-left: 0;
 }
 
 

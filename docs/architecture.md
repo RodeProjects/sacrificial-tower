@@ -138,6 +138,12 @@ begrenzten Timeout. Ein noch laufender Job bleibt bei Zeitüberschreitung
 registriert; die Oberfläche verweigert den unsicheren Programmabschluss und
 versucht niemals, den Thread gewaltsam freizugeben.
 
+Verzögerte `singleShot`-Callbacks des Hauptfensters, des manuellen Controllers
+und ihrer GUI-Widgets verwenden den jeweiligen `QObject` als Qt-Kontext.
+Wird das Fenster nativ
+gelöscht, verwirft Qt noch wartende Callbacks, bevor sie auf bereits gelöschte
+Layout- oder Vorschauwidgets zugreifen können.
+
 ## Externe Slicer-Prozesse
 
 `prepare_slice()`, Prozess-Runner und `finalize_slice()` bilden drei getrennte
@@ -313,6 +319,19 @@ nach zusätzlicher Abweichung unterschieden: bis einschließlich 0,5 s „leicht
 Vor der ersten Generierung ersetzt ein kurzer Start-Hinweis diese Informationen;
 nach dem Pre-Slice erklärt er, dass die Vorschau zunächst nur das Originalobjekt
 ohne Kühlturm zeigt.
+Alle horizontalen Ladebalken verwenden `ActivityProgressBar`: Der Fortschrittstext
+steht mit dem rotierenden Halbkreis `◐ ◓ ◑ ◒` gemeinsam im Balken; der Animationstakt
+beträgt wie bei der Profilbestätigung 140 ms. Die Frames werden als Kreise mit
+geglätteten Kanten und identischer Breite und Höhe gezeichnet, unabhängig von Schriftart und
+Zeichenform. Ihr äußerer Durchmesser entspricht der sichtbaren Schriftzeichenhöhe
+des Textes direkt links daneben, einschließlich der Kontur. Schrift- und Textänderungen
+aktualisieren diese Größe. Bei knappen Balkenhöhen verkleinern sie sich gleichmäßig;
+die Kontur bleibt einschließlich Rand innerhalb des verfügbaren Platzes.
+Ausgeblendete und abgeschlossene
+Balken stoppen ihre Animation. Der Preslice-Controller steuert seine bisherigen
+Frames weiterhin selbst; währenddessen pausiert die automatische Widget-Animation.
+Ausgenommen sind der Gesamtbalken „Fortschritt der Vorbereitungen“ und der
+vertikale Kühlturm-Bildbalken während der Generierung.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
@@ -320,32 +339,112 @@ steht als Badge direkt neben „3D-Vorschau“.
 
 Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt der Inhaltsbereich
 zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
-„Automatisch“ und einem dunkleren Blauton für „Manuell“. `GenerationMode` kennzeichnet die
+„Automatisch“ und einem dunkleren Blauton für „Manuell“. Die hellen Aktionsflächen
+innerhalb der Karten zeigen dauerhaft ihren bisherigen violetten bzw. blauen
+Hover-Verlauf. Beim Hover werden ausschließlich diese inneren Flächen zusätzlich
+farblich kräftiger und ihre Konturen deutlicher; die bestehende Hover-Darstellung
+der äußeren Karten bleibt erhalten. Beim Verlassen wird der neue Normalzustand
+wiederhergestellt. `GenerationMode` kennzeichnet die
 ausgewählte Methode; `None` bedeutet, dass noch keine Methode gewählt wurde. Die Vorbereitung und
 deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
 `window_pages` wechselt im Inhaltsbereich zwischen `settings_scroll` und
-`preparation_workspace`. Der bestehende Header und Footer bleiben sichtbar.
+`preparation_workspace`. Der Header bleibt sichtbar. Solange „Datei und Slicer
+vorbereiten“ geöffnet ist, bleibt der gesamte Footer ausgeblendet. Nach Rückkehr
+zur Methodenwahl oder zum bestätigten Generierungsmodus erscheint er wieder.
 Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
 Vorbereitungskarte dauerhaft in dieser Ansicht und ist kein Dropdown mehr.
-`WorkflowHeader` ordnet bei genügend Breite rechts neben der Überschrift zuerst
-den Vorbereitungsbutton und danach „Methode auswählen“ an. `PreparationFactsButton`
-enthält links den vertikal zentrierten grünen Haken und rechts die aktuell
-bestätigten Datei-, Slicer- und Profilangaben. Die gesamte Fläche ist per Maus
-und Tastatur bedienbar; „Datei und Slicer vorbereiten“ bleibt als zugänglicher
-Name und Tooltip erhalten und erscheint nicht als sichtbarer Buttontext.
-Bei Platzmangel wird zuerst „Methode auswählen“ zu „Methode“ gekürzt; anschließend
-wandert die Buttongruppe unter die Überschrift und umbrechen bei Bedarf deren
-ganze Bedienelemente. Die Angaben bleiben unabhängig vom geöffneten Inhaltsbereich sichtbar.
+`WorkflowHeader` verankert den kompakten `PreparationFactsButton` direkt am
+oberen linken Fensterrand. Die fünf bestätigten Angaben stehen in kleinerer,
+lesbarer Schrift untereinander ohne zusätzlichen Haken. Die Infofläche verwendet
+7 Pixel oberen, 8 Pixel unteren und jeweils 7 Pixel seitlichen Innenabstand.
+Ihre Inhaltshöhe bestimmt die
+gemeinsame Headerhöhe; Methodenwahl und Update-/Abbruchleiste schließen weiterhin
+an derselben unteren Trennlinie ab. Die grüne Infofläche hat ausschließlich
+rechtwinklige Ecken.
+Titel und Untertitel stehen horizontal mittig im Fenster, auch bei sichtbarer
+Infofläche und Methodenwahl. Bei schmaler werdendem Fenster folgt die Gruppe
+der Fenstermitte, bis sie den üblichen Zwischenabstand von 12 Pixeln zur Infofläche
+erreicht. Dort bleibt sie stehen. Erreicht die rechte Methodenwahl denselben
+Abstand zur Gruppe, wird der Text bei weiterer Verkleinerung ausgeblendet;
+der Platz bleibt frei. Beim Vergrößern erscheint die Titelgruppe wieder.
+Während der unbestätigten Vorbereitung steht die Titelgruppe vertikal mittig
+zwischen Fensteroberkante und der Vorbereitungskarte. Nach erfolgreichem
+Abschluss steht sie mittig auf Höhe des höchsten Header-Elements,
+üblicherweise der Infofläche. Die Programmheader-Trennlinie erscheint bereits
+beim Start. Während der unbestätigten Vorbereitung gehören die bisherigen
+oberen und unteren Abstände der Titelgruppe zur Headerfläche; die vertikalen
+Titelpositionen bleiben erhalten. Ein 8 Pixel hoher, für Mausereignisse
+durchlässiger Schatten liegt als Overlay im zentralen Widget über der folgenden
+Seite und erzeugt keinen Layoutabstand.
+„Datei und Slicer vorbereiten“ schließt unmittelbar an den Header an und reicht
+bis zu den seitlichen Fensterrändern beziehungsweise zum aktiven Scrollbalken.
+Die äußere Fläche besitzt weder Rahmenlinien noch abgerundete Ecken. Ihr
+eigener Header enthält ausschließlich die zentrierte Überschrift; das verborgene
+Standardheader-Widget behält die Zustands-/Summary-Schnittstelle für den
+WorkflowController. Schrittstatus und Fehlerrückmeldungen stehen weiterhin in
+den jeweiligen Vorbereitungsschritten. Die Methodenwahl behält ihre äußeren
+Abstände von 22 Pixeln. Die manuelle Generierungsseite behält diese Abstände
+oben, unten und rechts; ihre Einstellungsseite schließt links bündig mit dem
+Fensterrand ab.
+Die Vorbereitungsfläche verwendet durchgehend den grauen Programmhintergrund
+(`#f3f6f9`); am unteren Rand ist kein eigener Farbverlauf oder Abstand nötig. Bei
+sichtbarer Methodenwahl sind Menü und Version jeweils horizontal zwischen
+Methodenfläche und rechtem Fensterrand zentriert. Gemeinsam sind sie vertikal
+zwischen Fensteroberkante und der Header-Trennlinie zentriert.
+Ohne Methodenfläche behält die Version ihre bisherigen äußeren Abstände;
+der Menübutton steht horizontal zentriert direkt darüber.
+Eine dünne horizontale Linie trennt den Header dauerhaft vom Content, auch
+am oberen Scrollrand. Nach Bestätigung liegt sie auf Höhe der grünen Unterkante
+und ersetzt dort die untere Rahmenkante,
+sodass keine doppelte Linie entsteht.
+Die Methodenwahl beginnt links neben dem Menübereich direkt am oberen
+Fensterrand. In der Kartenansicht bleibt dieser Bereich ausgeblendet.
+Nach der Wahl erscheint `HeaderMethodSelection` als verbundenes
+Element: oben die zentrierte Textüberschrift „Erstellungsmethode“, unmittelbar
+darunter nebeneinander „Automatisch“ und „Manuell“. Die Buttons behalten die
+Höhe des Menübuttons; die Überschriftenfläche wächst bis zur Höhe der Infofläche,
+sodass beide Bereiche bündig an der gemeinsamen Header-Trennlinie enden.
+Layoutabstände sind null. Alle Ecken der Methodenfläche und ihrer Buttons sind
+rechtwinklig. Die Buttons verwenden die violetten
+bzw. blauen Verläufe der Methodenkarten. Die aktive Methode ist exklusiv
+ausgewählt und wirkt durch einen hellen umgekehrten Verlauf, eine dünne obere
+Schattenkante und eine helle Unterkante eingedrückt. Beide Beschriftungen verwenden
+normale Schriftstärke. Nach dem Klick bleibt kein Fokusrahmen zurück. Tab und Leertaste
+bleiben verfügbar. Die Version steht direkt unter dem Menü.
+„Datei und Slicer vorbereiten“ bleibt als zugänglicher
+Name erhalten und erscheint nicht als sichtbarer Buttontext. Der Tooltip lautet
+„Datei- und Slicereinstellungen ändern“.
+Der Infobutton nutzt denselben grünen Bestätigungsverlauf wie die vorhandenen
+Bestätigungsaktionen; die Methodenbuttons besitzen passende Hover- und Druckzustände.
+Angaben und Buttons bleiben im Header; lange Angaben umbrechen innerhalb
+der Infofläche. Menü und Version bleiben rechts.
 Lange Angaben werden umgebrochen und bleiben vollständig lesbar. Nicht mehr
-bestätigte Angaben werden entfernt; die übrigen bestätigten Angaben bleiben erhalten.
-„Zur Turmerstellung“ (bei Platzmangel „Zurück“) kehrt zur gewählten
-Methode zurück, solange die Vorbereitung weiterhin bestätigt ist.
+bestätigte Angaben werden gemeinsam entfernt. Vor dem erfolgreichen Abschluss
+werden keine Teilangaben im Header angezeigt.
+Die Methodenbuttons wechseln direkt in den jeweiligen Arbeitsbereich und dienen
+auch zur Rückkehr aus der Vorbereitung. Ein Klick auf die bereits aktive Methode
+erhält die aktuelle Auswahl im manuellen Editor. Bei unbestätigter Vorbereitung
+werden Infofläche und Methodenaktionen gemeinsam ausgeblendet.
 Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
 er wird lediglich ausgeblendet. `ManualGenerationPanel` besitzt einen eigenen
 eingebetteten Editor mit links angeordneten Einstellungen und rechts der Vorschau.
 Ein Methodenwechsel startet keinen Slice und invalidiert kein Ergebnis.
 Bei erneut erforderlicher Vorbereitung öffnet sich die Vorbereitung wieder;
-nach „Fertig“ folgt erneut die Methodenauswahl.
+nach „Fertig“ folgt erneut die Methodenauswahl. `ContentTransition` blendet
+beim Abschluss den bisherigen Inhaltsbereich aus und die Methodenauswahl ein.
+Auf 0,275 Sekunden Fade-out folgen 0,1 Sekunden Pause bei vollständig unsichtbarem
+Inhalt und anschließend 0,275 Sekunden Fade-in; der Gesamtübergang dauert 0,65 Sekunden.
+Das ausblendende Bild behält seine ursprüngliche Größe. Der Layoutwechsel mit
+angepasstem Header und eingeblendetem Footer erfolgt erst zwischen beiden
+Fades, wenn der Inhalt vollständig unsichtbar ist. Ein durchgehend heller
+Hintergrund verhindert eine dunkle Leerfläche während der Überblendung.
+Beide Fades verändern ausschließlich die Deckkraft und behalten die Farben der
+Bedienelemente bei. Ein auf den Inhaltsbereich begrenzter Ereignisfilter sperrt
+Eingaben während Fade-out, Pause und Fade-in, ohne Widgets zu deaktivieren und
+dadurch Qt-typische graue Disabled-Farben auszulösen.
+Der Header bleibt während des Übergangs sichtbar. Die Animation wird
+beim erneuten Öffnen der Vorbereitung, bei ungültiger Vorbereitung oder beim
+Schließen beendet und die Bedienbarkeit wiederhergestellt.
 Das Öffnen der Methodenauswahl erhält die aktuelle Methode bis zur Auswahl
 einer anderen Methode. Laufende Generierung und Export sperren beide Header-Zugänge.
 
@@ -396,6 +495,16 @@ zurück. Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
 „Deaktivierte Turmstützen simulieren“. Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
+Die äußeren Automatikbereiche „Turmeinstellungen“ und „Generierung und Vorschau“
+sind dauerhaft geöffnet und besitzen keine Aufklappdreiecke, seitlichen Rahmen
+oder abgerundeten Ecken. Beide schließen ohne oberen oder seitlichen Außenabstand
+an den Programmheader und die nutzbaren Fensterränder an; der Headerschatten
+liegt über ihren Überschriften. In der zweispaltigen Ansicht trennt eine
+ein Pixel breite vertikale Linie die unmittelbar angrenzenden Bereiche bis zur
+Unterkante des höheren Bereichs. In schmalen Fenstern bleiben sie ohne
+Zwischenabstand gestapelt, mit „Generierung und Vorschau“ an erster Stelle;
+die vertikale Linie wird dabei ausgeblendet. Innere Inhaltsabstände und der
+untere Seitenabstand bleiben erhalten.
 Die Dropdown-Köpfe verwenden einheitliche, selbst gezeichnete Dreiecke ohne
 eigenen Rahmen, Hintergrund oder Hover-Effekt. Beide Richtungen entstehen
 durch Drehung um die Mitte desselben festen Symbolbereichs.

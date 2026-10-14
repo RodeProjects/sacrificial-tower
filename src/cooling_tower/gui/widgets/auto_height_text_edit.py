@@ -24,7 +24,7 @@ class AutoHeightTextEdit(QTextEdit):
         self.schedule_height_update()
 
     def schedule_height_update(self) -> None:
-        QTimer.singleShot(0, self.fit_to_document)
+        QTimer.singleShot(0, self, self.fit_to_document)
 
     def fit_to_document(self) -> None:
         viewport_width = max(120, self.viewport().width())
