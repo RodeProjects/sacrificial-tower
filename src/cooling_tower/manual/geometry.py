@@ -43,7 +43,7 @@ class ManualSettings:
     expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
     contraction_enabled: bool = False
     contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
-    overhang_enabled: bool = False
+    overhang_enabled: bool = True
     overhang_angle_deg: float = 45.0
     overhang_user_set: bool = False
     critical_layers_enabled: bool = False

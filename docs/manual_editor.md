@@ -67,7 +67,7 @@ hellgrau am Griff. Die tatsächliche Geometrie bleibt an ihrer Position.
 Fußbreite und Fußhöhe bleiben getrennte Greifer. Die Konturlinie der Fußkurve
 verwendet denselben lila Farbton wie die Fußgreifer; die Körperkontur bleibt
 im bisherigen Profilfarbton.
-Zahlenfelder und Greifer synchronisieren
+Die direkten Zahlenfelder in der Vorschau und die Greifer synchronisieren
 sich in beiden Richtungen. Durchmesser werden in Millimetern angezeigt, intern
 werden Radien gespeichert.
 Bei frei beweglichen Profilpunkten und Béziergriffen begrenzt **Shift + Ziehen**
@@ -172,8 +172,7 @@ auch als Beschriftungen erkennbar. Drauf- und Untersicht zeigen Höhe und Layer
 des jeweiligen Abschlusses, da die Höhenachse dort senkrecht zur Bildebene liegt.
 
 Ein Doppelklick auf das Körperprofil fügt einen neuen Punkt ein.
-Alternativ fügt die Punktaktion einen Punkt in den ausgewählten Körperabschnitt
-ein. Die Position liegt auf dem bisherigen Profil; eine bestehende Bézierkurve
+Die Position liegt auf dem bisherigen Profil; eine bestehende Bézierkurve
 wird formtreu geteilt, ohne die zum neuen Punkt gerichteten Kurven fester oder
 manueller Nachbarn zurückzusetzen. Gerade Abschnitte bleiben linear.
 Ein Doppelklick auf einen
@@ -185,7 +184,7 @@ Grundform zwischen den aktuellen Endpunkten zurück; der Körperbeginn setzt
 Fußkurve und ausgehenden Abschnitt zurück, die Spitze ihren letzten Abschnitt.
 Punktpositionen und Durchmesser bleiben erhalten. Die Abschnittsauswahl erlaubt
 weiterhin den gezielten Wechsel zu einer geraden Verbindung.
-Freie Punkte lassen sich per Rechtsklick, über die Aktion oder die Entf-Taste entfernen;
+Freie Punkte lassen sich per Rechtsklick oder Entf/Backspace entfernen;
 beim Entfernen werden ausschließlich die beiden zum entfernten Punkt gerichteten
 Nachbaranker auf Drittelpunkte der neuen Verbindung zurückgesetzt. Das gilt auch
 für feste Nachbarpunkte; deren gegenüberliegende Anker und weitere Kurven bleiben
@@ -195,7 +194,7 @@ Fuß, Körperanschluss und oberer Abschluss bleiben erforderlich. Jeder Abschnit
 kann gerade oder als kubische Bézierkurve bearbeitet werden. Kontrollgreifer
 erscheinen am angewählten Punkt: sein eingehender und sein
 ausgehender Griff. Neue freie Punkte zeigen beide Griffe sofort nach dem
-Hinzufügen, sowohl per Profildoppelklick als auch über die Punktaktion.
+Hinzufügen per Profildoppelklick.
 Bei freien Punkten zeigt bereits der erste einfache Klick
 ohne Ziehen beide Griffe, auch wenn die angrenzenden Abschnitte noch linear sind.
 Die Anzeige allein ändert weder Kurvenmodus noch Form; das Ziehen eines
@@ -228,8 +227,8 @@ gibt es weder eine gewünschte Mindest-Layerzeit noch eine Layerzeit-Toleranz.
 Die Farbreferenz in „Visuelle Prüfung“ färbt ausschließlich Originalschichten;
 sie bewertet weder den gestalteten Turm noch das geprüfte Ergebnis. Der Gesamtreset
 erzeugt einen neuen gültigen Anfangsentwurf. Manuell hinzugefügte Profilpunkte
-haben keinen Positionsstandard und keine Positions-Resetbuttons, weder links
-noch in der Vorschau. Ihre Kurven lassen sich weiterhin zurücksetzen.
+haben keinen Positionsstandard und keine Positions-Resetbuttons in der
+Vorschau. Ihre Kurven lassen sich weiterhin zurücksetzen.
 Feste Punkt-/Kontrollpunktresets verwenden den Ausgangswert des jeweiligen
 stabil identifizierten Greifers. Die
 Automatikeinstellungen werden dabei nicht verändert.
@@ -253,11 +252,20 @@ beide Koordinaten. Béziergriffe zeigen die Felder des zugehörigen Profilpunkts
 die Box bleibt auf dessen Höhe. Während des Ziehens bleibt ihre Position
 erhalten und ändert sich nur bei einem kollidierenden Greifer oder geänderten
 Anker-/Vorschaumaßen. Werte mit Standard besitzen einen eigenen Reset auf
-denselben Objektstandard wie links. Die kleinen Reset-Buttons verwenden
+den jeweiligen Objektstandard. Die kleinen Reset-Buttons verwenden
 einen selbst gezeichneten Rücksetzpfeil, unabhängig von Schriftglyphen.
 Die gesamte Box bleibt außerhalb der Ansichtsleiste und innerhalb der Vorschau;
 bei fehlendem Platz rechts wechselt sie neben die linken Greifergrenzen.
-Die linken Felder bleiben vorerst erhalten und synchronisieren sich mit dem Editor.
+Die zehn redundanten linken Maß- und Grenzfelder sowie die Buttons
+„Punkt hinzufügen“ und „Punkt entfernen“ entfallen. Maße, Durchmessergrenzen
+und freie Profilpunktkoordinaten werden direkt in der Vorschau eingestellt;
+Punkte werden dort per Doppelklick hinzugefügt und per Rechtsklick oder
+Entf/Backspace entfernt. Links bleiben Kreissegmente, geometrische Winkelgrenzen,
+Layer-Snapping, Abschnittsmodus, Tangentenkopplung und visuelle Prüfeinstellungen.
+Die beiden präzisen Béziergriff-Koordinatenfelder bleiben ebenfalls links, da
+der direkte Editor bei einem ausgewählten Kontrollgriff dessen Profilpunkt zeigt.
+Die Auswahl der Vorschaugreifer und das Hinzufügen von Punkten benötigen
+derzeit weiterhin die Maus.
 
 In den beiden Profilansichten erscheint beim Hover innerhalb von 33 px links
 oder rechts einer der beiden Körperkonturen ein heller, leicht transparenter
@@ -751,6 +759,8 @@ mit den tatsächlichen ursprünglichen Layerzeiten. Farbreferenz, Beginn des Def
 und volle Rotmarkierung sind eigene manuelle Werte. Sie zeigen den vorbereiteten
 Originalstand; geprüfte gemeinsame Layerzeiten stehen getrennt im Ergebnis.
 
+„Überhangstellen visuell markieren“ ist standardmäßig aktiviert; eine gespeicherte
+Abwahl bleibt erhalten. „Alles zurücksetzen“ aktiviert die Markierung wieder.
 Die Überhangmarkierung ist rein visuell. Sie betrifft nur nach außen wachsende
 Abschnitte und prüft die lokale positive Steigung, einschließlich exakter
 Übergangspunkte am Warnwinkel. Ein interpretierbarer Orca-/Bambu-/Anycubic-Wert
@@ -1062,7 +1072,7 @@ Layeranzeige und drei Wiederholungen ergab für den Aufbau des Vektorbilds
 etwa 0,8 ms bei 0 %, 45 ms bei 5 %, 63 ms bei 10 % und 289 ms bei 100 %.
 Die einmalige Konturvorbereitung dauerte etwa 44 ms. Dies beschreibt diesen
 synthetischen Messfall und keine allgemeine Bildratenzusage.
-Eine Bewertung möglicher Vereinfachungen der linken Bedienfelder steht in
+Eine Übersicht der entfernten und verbleibenden linken Bedienfelder steht in
 [Bedienelemente und Vorschau](manual_controls_analysis.md).
 
 Die abschließende Regressionsprüfung verwendet die vollständige vorhandene

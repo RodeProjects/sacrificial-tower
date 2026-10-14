@@ -12,7 +12,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY","1")
 
 from PySide6.QtCore import QEvent,QPointF,Qt,QPoint,QObject
 from PySide6.QtGui import QWheelEvent,QFont,QFontDatabase,QColor,QImage,QPainter
-from PySide6.QtWidgets import QApplication,QStyle,QStyleOptionSlider
+from PySide6.QtWidgets import QApplication,QStyle,QStyleOptionSlider,QPushButton
 from PySide6.QtTest import QTest
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
@@ -44,6 +44,23 @@ def restore_preview_test_application(app,previous_font,font_id):
         QFontDatabase.removeApplicationFont(font_id)
     app.setFont(previous_font)
     app.processEvents()
+
+
+def preview_row(panel,name):
+    identity={"minimum_diameter_mm":"minimum_diameter_mm","maximum_diameter_mm":"maximum_diameter_mm",
+              "maximum_foot_diameter_mm":"maximum_foot_diameter_mm","base_diameter_mm":"base",
+              "foot_diameter_mm":"foot","foot_height_mm":"foot_height","height_mm":"top",
+              "top_diameter_mm":"top_width"}.get(name)
+    if identity is not None:panel.select(identity)
+    return panel.point_editor.rows[name]
+
+
+def enter_preview_value(panel,name,value):
+    row=preview_row(panel,name)
+    row.editor.setFocus();row.editor.selectAll()
+    QTest.keyClicks(row.editor,str(value).replace(".",","))
+    QTest.keyClick(row.editor,Qt.Key.Key_Return)
+    return row
 
 
 class ManualGuiTests(unittest.TestCase):
@@ -99,17 +116,42 @@ class ManualGuiTests(unittest.TestCase):
         self.assertFalse(p.can_reset_tower())
 
     def test_bidirectional_diameter_handles_and_numeric_values(self):
-        self.panel.editors["base_diameter_mm"].setValue(10)
+        enter_preview_value(self.panel,"base_diameter_mm",10)
         self.assertEqual(self.panel.draft.base_diameter_mm,10)
         self.panel.move("base",20,90)
-        self.assertEqual(self.panel.editors["base_diameter_mm"].value(),20)
+        self.assertEqual(preview_row(self.panel,"base_diameter_mm").field.value,20)
         self.assertEqual(self.panel.draft.settings.foot_height_mm,8)
         self.panel.move("foot_height",999,10)
         self.assertEqual(self.panel.draft.base_diameter_mm,20)
-        self.assertEqual(self.panel.editors["foot_height_mm"].value(),10)
+        self.assertEqual(preview_row(self.panel,"foot_height_mm").field.value,10)
         self.panel.move("top",999,35)
         self.assertEqual(self.panel.draft.height_mm,35)
         self.assertEqual(self.panel.draft.points[-1].position.diameter_mm,20)
+
+    def test_redundant_left_controls_are_absent_and_preview_point_actions_work(self):
+        p=self.panel;c=p.canvas
+        removed={"minimum_diameter_mm","maximum_diameter_mm","base_diameter_mm","foot_diameter_mm",
+                 "maximum_foot_diameter_mm","foot_height_mm","height_mm","top_diameter_mm",
+                 "point_diameter_mm","point_height_mm"}
+        self.assertFalse(removed & p.rows.keys())
+        buttons={button.text() for button in p.settings_content.findChildren(QPushButton)}
+        self.assertFalse({"Punkt hinzufügen","Punkt entfernen"} & buttons)
+        self.assertIn("control_diameter_mm",p.rows)
+        self.assertIn("control_height_mm",p.rows)
+        for view in ("side","front"):
+            for key in (Qt.Key.Key_Delete,Qt.Key.Key_Backspace):
+                with self.subTest(view=view,key=key):
+                    c.set_view(view)
+                    position=c.profile_to_screen(p.draft.radius_at_z(20),20).toPoint()
+                    QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                    identity=p.selected
+                    self.assertEqual(len(p.draft.points),4)
+                    enter_preview_value(p,"point_diameter_mm",15.123456)
+                    self.assertAlmostEqual(p.draft.points[2].position.diameter_mm,15.123456)
+                    c.setFocus();QTest.keyClick(c,key)
+                    self.assertNotIn(identity,{point.identity for point in p.draft.points})
+                    self.assertEqual(len(p.draft.points),3)
+                    self.reference.context.validate(p.draft)
 
     def test_object_height_defines_foot_default_and_required_limit_growth_becomes_object_default(self):
         p=self.panel
@@ -122,13 +164,13 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,physical_limit))
         self.assertEqual(p.default_value("foot_diameter_mm"),42)
         self.assertEqual(p.default_value("maximum_foot_diameter_mm"),physical_limit)
-        self.assertFalse(p.rows["foot_diameter_mm"].reset_button.isEnabled())
-        self.assertFalse(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
+        self.assertFalse(preview_row(p,"foot_diameter_mm").reset.isEnabled())
+        self.assertFalse(preview_row(p,"maximum_foot_diameter_mm").reset.isEnabled())
         p.move("top",5,40)
         self.assertEqual(p.default_value("foot_diameter_mm"),42)
-        p.editors["foot_diameter_mm"].setValue(30)
+        enter_preview_value(p,"foot_diameter_mm",30)
         self.assertEqual(p.settings.foot_diameter_mm,30)
-        p.rows["foot_diameter_mm"].reset_button.click()
+        preview_row(p,"foot_diameter_mm").reset.click()
         self.assertEqual(p.settings.foot_diameter_mm,42)
         for view in ("side","bottom"):
             p.change_setting("maximum_foot_diameter_mm",42)
@@ -136,13 +178,13 @@ class ManualGuiTests(unittest.TestCase):
             p._move_from_canvas("foot",95,p.draft.first_layer_z_mm)
             self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(95,95))
             self.assertEqual(p.default_value("maximum_foot_diameter_mm"),95)
-            self.assertFalse(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
+            self.assertFalse(preview_row(p,"maximum_foot_diameter_mm").reset.isEnabled())
             p.move("foot",90,p.draft.first_layer_z_mm)
             self.assertEqual(p.settings.maximum_foot_diameter_mm,95)
             p.change_setting("maximum_foot_diameter_mm",100)
             self.assertEqual(p.default_value("maximum_foot_diameter_mm"),95)
-            self.assertTrue(p.rows["maximum_foot_diameter_mm"].reset_button.isEnabled())
-            p.rows["maximum_foot_diameter_mm"].reset_button.click()
+            self.assertTrue(preview_row(p,"maximum_foot_diameter_mm").reset.isEnabled())
+            preview_row(p,"maximum_foot_diameter_mm").reset.click()
             self.assertEqual(p.settings.maximum_foot_diameter_mm,95)
             p.reset_tower()
             self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,95))
@@ -154,8 +196,8 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual((p.default_value("foot_diameter_mm"),p.default_value("maximum_foot_diameter_mm")),(25,context.maximum_foot_diameter_mm))
         p.initialize(reference,replace(ManualSettings(),minimum_diameter_mm=50,maximum_diameter_mm=60))
         self.assertEqual((p.settings.foot_diameter_mm,p.default_value("foot_diameter_mm")),(52,52))
-        p.editors["foot_diameter_mm"].setValue(60)
-        p.rows["foot_diameter_mm"].reset_button.click()
+        enter_preview_value(p,"foot_diameter_mm",60)
+        preview_row(p,"foot_diameter_mm").reset.click()
         self.assertEqual(p.settings.foot_diameter_mm,52)
         p.reset_tower()
         self.assertEqual(p.settings.foot_diameter_mm,52)
@@ -163,10 +205,10 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_manual_field_feedback_only_colors_label_and_frame_with_boundary_timing(self):
         from cooling_tower.gui.design_tokens import COLORS
-        p=self.panel;row=p.rows["maximum_diameter_mm"]
+        p=self.panel;row=p.rows["circle_segments"]
         normal_label=row.label.styleSheet();normal_editor=row.editor.styleSheet()
         geometry=row.geometry();canvas=p.canvas.geometry()
-        p.feedback(GeometryError("maximum_diameter_mm","Grenze überschritten"),"points")
+        p.feedback(GeometryError("circle_segments","Grenze überschritten"),"points")
         self.assertFalse(row.message_container.isVisible())
         self.assertFalse(row.message_label.isVisible())
         self.assertIn(COLORS["error"],row.label.styleSheet())
@@ -180,7 +222,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(row._feedback_amount,1)
         animation.setCurrentTime(950)
         self.assertAlmostEqual(row._feedback_amount,.5)
-        p.feedback(GeometryError("maximum_diameter_mm","Grenze weiter überschritten"),"points")
+        p.feedback(GeometryError("circle_segments","Grenze weiter überschritten"),"points")
         self.assertEqual(animation.currentTime(),950)
         self.assertEqual(row.geometry(),geometry)
         self.assertEqual(p.canvas.geometry(),canvas)
@@ -188,7 +230,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(row._feedback_amount,0)
         self.assertEqual(row.label.styleSheet(),normal_label)
         self.assertEqual(row.editor.styleSheet(),normal_editor)
-        p.feedback(GeometryError("maximum_diameter_mm","Erneuter Versuch"),"points")
+        p.feedback(GeometryError("circle_segments","Erneuter Versuch"),"points")
         self.assertEqual(row._feedback_amount,1)
         for candidate in p.rows.values():
             candidate.set_error("Grenze")
@@ -299,7 +341,7 @@ class ManualGuiTests(unittest.TestCase):
             self.assertAlmostEqual(p.draft.height_mm,expected)
             self.assertLess(p.draft.height_mm,object_top)
             self.assertIsNone(canvas._height_snap_z)
-        p.editors["height_mm"].setValue(object_top-.03)
+        enter_preview_value(p,"height_mm",object_top-.03)
         self.assertAlmostEqual(p.draft.height_mm,object_top-.03)
         self.assertIsNone(canvas._height_snap_z)
         p.checks["layer_snap_enabled"].setChecked(False)
@@ -495,7 +537,7 @@ class ManualGuiTests(unittest.TestCase):
                     height=canvas._vertical_handle_height(identity)
                     self.assertAlmostEqual(height,snap_layer_height(height,canvas._layer_tops))
         p.commit(original);p.select(free)
-        p.editors["point_height_mm"].setValue(20.07)
+        enter_preview_value(p,"point_height_mm",20.07)
         self.assertAlmostEqual(canvas._vertical_handle_height(free),20.07)
         before=p.draft.artifact_payload()
         p.checks["layer_snap_enabled"].setChecked(False)
@@ -588,16 +630,13 @@ class ManualGuiTests(unittest.TestCase):
                 p.select(identity)
                 self.assertFalse(controls())
 
-    def test_new_point_immediately_shows_own_and_facing_fixed_controls_for_both_creation_actions(self):
+    def test_profile_double_click_shows_own_and_facing_fixed_controls(self):
         p=self.panel;c=p.canvas
         for view in ("side","front"):
-            for action in ("profile","button"):
+            with self.subTest(view=view):
                 p.reset_all();c.set_view(view)
-                if action == "profile":
-                    position=c.profile_to_screen(p.draft.radius_at_z(20),20).toPoint()
-                    QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
-                else:
-                    p.add_point_button.click()
+                position=c.profile_to_screen(p.draft.radius_at_z(20),20).toPoint()
+                QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
                 self.assertEqual(len(p.draft.points),4)
                 self.assertEqual(p.draft.points[2].identity,p.selected)
                 self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
@@ -621,30 +660,26 @@ class ManualGuiTests(unittest.TestCase):
                     self.assertEqual(p.draft.points,points)
                     self.reference.context.validate(p.draft)
 
-    def test_both_creation_actions_keep_existing_neighbor_curves_and_show_new_anchors(self):
+    def test_profile_double_click_keeps_existing_neighbor_curves_and_shows_new_anchors(self):
         p=self.panel;c=p.canvas
         for view in ("side","front"):
-            for action in ("profile","button"):
-                with self.subTest(view=view,action=action):
-                    p.reset_all();c.set_view(view)
-                    p.move_control(1,1,14,15)
-                    p.move_control(1,2,10,30)
-                    before=p.draft
-                    p.select("base")
-                    if action == "profile":
-                        position=c.profile_to_screen(before.radius_at_z(24),24).toPoint()
-                        QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
-                    else:
-                        p.add_point_button.click()
-                    self.assertEqual(len(p.draft.points),4)
-                    self.assertEqual(p.draft.points[2].identity,p.selected)
-                    self.assertEqual(p.draft.curves[0],before.curves[0])
-                    self.assertTrue(all(curve.curved for curve in p.draft.curves[1:]))
-                    for z in range(8,41):
-                        self.assertAlmostEqual(p.draft.radius_at_z(z),before.radius_at_z(z),places=10)
-                    self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
-                                     {"control:1:1","control:1:2","control:2:1","control:2:2"})
-                    self.reference.context.validate(p.draft)
+            with self.subTest(view=view):
+                p.reset_all();c.set_view(view)
+                p.move_control(1,1,14,15)
+                p.move_control(1,2,10,30)
+                before=p.draft
+                p.select("base")
+                position=c.profile_to_screen(before.radius_at_z(24),24).toPoint()
+                QTest.mouseDClick(c,Qt.MouseButton.LeftButton,pos=position)
+                self.assertEqual(len(p.draft.points),4)
+                self.assertEqual(p.draft.points[2].identity,p.selected)
+                self.assertEqual(p.draft.curves[0],before.curves[0])
+                self.assertTrue(all(curve.curved for curve in p.draft.curves[1:]))
+                for z in range(8,41):
+                    self.assertAlmostEqual(p.draft.radius_at_z(z),before.radius_at_z(z),places=10)
+                self.assertEqual({name for name,_,kind in c.handles() if kind=="control"},
+                                 {"control:1:1","control:1:2","control:2:1","control:2:2"})
+                self.reference.context.validate(p.draft)
 
     def test_double_click_resets_fixed_point_curves_and_keeps_own_anchors_visible(self):
         p=self.panel;c=p.canvas
@@ -973,7 +1008,7 @@ class ManualGuiTests(unittest.TestCase):
                 self.assertIn(f"Ø {value:.2f} mm".replace(".",","),c.selected_handle_text())
                 QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=position+QPoint(13,-18))
                 self.assertEqual(p.draft.artifact_payload(),artifact)
-                self.assertEqual(p.editors[name].value(),value)
+                self.assertEqual(preview_row(p,name).field.value,value)
 
     def test_minimum_measure_is_symmetric_and_drags_the_limit_in_tenths(self):
         p=self.panel;c=p.canvas
@@ -997,7 +1032,7 @@ class ManualGuiTests(unittest.TestCase):
             value=p.settings.minimum_diameter_mm
             self.assertGreater(value,5)
             self.assertAlmostEqual(value*10,round(value*10))
-            self.assertEqual(p.editors["minimum_diameter_mm"].value(),value)
+            self.assertEqual(preview_row(p,"minimum_diameter_mm").field.value,value)
             self.assertIn(f"Minimum: Ø {value:.2f} mm".replace(".",","),c.selected_handle_text())
             self.assertEqual(p.draft.artifact_payload(),original)
             left,right,left_end,right_end=c.minimum_measure_geometry()
@@ -1043,7 +1078,7 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_minimum_numeric_edit_moves_form_immediately_and_base_cannot_move_minimum(self):
         p=self.panel
-        p.editors["minimum_diameter_mm"].setValue(30)
+        enter_preview_value(p,"minimum_diameter_mm",30)
         self.assertEqual(p.draft.base_diameter_mm,30)
         self.assertEqual(p.draft.foot_diameter_mm,30)
         self.assertTrue(all(point.position.diameter_mm>=30 for point in p.draft.points))
@@ -1052,7 +1087,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(p.settings.minimum_diameter_mm,30)
         p.move_limit("minimum_diameter_mm",-10)
         self.assertEqual(p.settings.minimum_diameter_mm,1)
-        p.editors["minimum_diameter_mm"].setValue(.5)
+        enter_preview_value(p,"minimum_diameter_mm",.5)
         self.assertEqual(p.settings.minimum_diameter_mm,1)
 
     def test_minimum_drag_respects_each_maximum_without_expanding_it(self):
@@ -1804,7 +1839,7 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_rotation_reset_uses_standard_size_style_and_modified_state(self):
         p=self.panel
-        standard=p.rows["maximum_diameter_mm"].reset_button
+        standard=p.rows["circle_segments"].reset_button
         self.assertEqual(p.rotation_reset.objectName(),standard.objectName())
         self.assertEqual(p.rotation_reset.size(),standard.size())
         self.assertEqual(p.rotation_reset.text(),standard.text())
@@ -1903,11 +1938,11 @@ class ManualGuiTests(unittest.TestCase):
         for name,spin in p.editors.items():
             if name != "circle_segments":
                 self.assertEqual(spin.textFromValue(12.345678),"12,35",name)
-        self.assertEqual(p.editors["point_diameter_mm"].text(),"12,35")
+        self.assertEqual(preview_row(p,"point_diameter_mm").editor.text(),"12,35")
         self.assertAlmostEqual(p.draft.points[2].position.diameter_mm,12.345678)
         self.assertAlmostEqual(p.draft.points[2].position.z_mm,20.123456)
         before=p.draft.artifact_payload()
-        p.editors["point_diameter_mm"].setFocus();self.app.processEvents()
+        preview_row(p,"point_diameter_mm").editor.setFocus();self.app.processEvents()
         p.canvas.setFocus();self.app.processEvents()
         self.assertEqual(p.draft.artifact_payload(),before)
 
@@ -1921,11 +1956,11 @@ class ManualGuiTests(unittest.TestCase):
             self.app.processEvents()
             before=p.canvas.geometry()
             previous_scroll=p.settings_scroll.verticalScrollBar().maximum()
-            p.rows["maximum_diameter_mm"].set_error("Eine ausführliche Grenzrückmeldung. "*12)
+            p.rows["circle_segments"].set_error("Eine ausführliche Grenzrückmeldung. "*12)
             for _ in range(4):self.app.processEvents()
             self.assertEqual(p.canvas.geometry(),before)
             self.assertGreaterEqual(p.settings_scroll.verticalScrollBar().maximum(),previous_scroll)
-            p.rows["maximum_diameter_mm"].set_error(None)
+            p.rows["circle_segments"].set_error(None)
             self.app.processEvents()
             self.assertEqual(p.canvas.geometry(),before)
 
@@ -1962,7 +1997,7 @@ class ManualGuiTests(unittest.TestCase):
     def test_free_points_selection_removal_curve_and_reset(self):
         self.panel.insert(20)
         identity=self.panel.selected
-        self.panel.editors["point_diameter_mm"].setValue(30)
+        enter_preview_value(self.panel,"point_diameter_mm",30)
         self.assertEqual(self.panel.draft.points[2].position.diameter_mm,30)
         self.panel.reset_value("point_diameter_mm")
         self.assertAlmostEqual(self.panel.draft.points[2].position.diameter_mm,30)
@@ -2003,9 +2038,8 @@ class ManualGuiTests(unittest.TestCase):
             p.canvas.set_view(view)
             limit="maximum_diameter_mm" if view=="top" else "maximum_foot_diameter_mm"
             self.assertEqual([h[0] for h in p.canvas.handles()],[identity,limit])
-            self.assertTrue(p.rows[limit].isEnabled())
-            self.assertTrue(p.rows[field].isEnabled())
-            self.assertFalse(p.add_point_button.isEnabled())
+            self.assertTrue(preview_row(p,limit).isEnabled())
+            self.assertTrue(preview_row(p,field).isEnabled())
             pos=p.canvas.handles()[0][1].toPoint()
             old=p.draft.points[-1 if view=="top" else 0].position
             QTest.mousePress(p.canvas,Qt.MouseButton.LeftButton,pos=pos)
@@ -2019,10 +2053,10 @@ class ManualGuiTests(unittest.TestCase):
         self.assertFalse(p.canvas.editable)
         self.assertFalse(p.canvas.handles())
         self.assertEqual((p.canvas.yaw_deg,p.canvas.pitch_deg),(-35,25))
-        self.assertFalse(p.rows["base_diameter_mm"].isEnabled())
+        self.assertTrue(p.point_editor.isHidden())
         p.canvas.set_view("side")
         self.assertTrue(p.canvas.editable)
-        self.assertTrue(p.rows["base_diameter_mm"].isEnabled())
+        self.assertTrue(preview_row(p,"base_diameter_mm").isEnabled())
         self.assertEqual(p.draft,before)
 
     def test_canvas_gestures_edit_pan_and_free_rotation_are_separate(self):
@@ -2045,20 +2079,18 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(canvas.view,"free")
         self.assertEqual(self.panel.draft.artifact_payload(),before.artifact_payload())
 
-    def test_boundary_feedback_debounced_and_correct_field(self):
+    def test_boundary_feedback_survives_without_left_diameter_fields(self):
         self.panel.change_setting("maximum_foot_diameter_mm",30)
-        row=self.panel.rows["maximum_diameter_mm"]
-        with patch.object(row,"set_error",wraps=row.set_error) as feedback:
-            self.panel._begin_interaction()
-            for width in (40,45,50):self.panel.move("base",width,8)
-            self.assertEqual(feedback.call_count,1)
-            self.assertAlmostEqual(self.panel.draft.base_diameter_mm,40,places=6)
-            self.assertEqual(self.panel.settings.maximum_foot_diameter_mm,42)
-            self.panel._end_interaction()
-            QTest.qWait(1150)
-            self.assertEqual(feedback.call_count,2)
-        self.panel.editors["base_diameter_mm"].setValue(45)
+        self.panel._begin_interaction()
+        for width in (40,45,50):self.panel.move("base",width,8)
+        self.assertAlmostEqual(self.panel.draft.base_diameter_mm,40,places=6)
+        self.assertEqual(self.panel.settings.maximum_foot_diameter_mm,42)
         self.assertIn("Maximaldurchmesser",self.panel.status_label.text())
+        self.panel._end_interaction()
+        row=enter_preview_value(self.panel,"base_diameter_mm",45)
+        self.assertTrue(row.invalid)
+        self.assertIn("Maximaldurchmesser",row.editor.toolTip())
+        self.assertAlmostEqual(self.panel.draft.base_diameter_mm,40,places=6)
 
     def test_angle_activation_rejected_atomically(self):
         old=self.panel.draft
@@ -2069,18 +2101,18 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.draft.curves,old.curves)
         self.assertIn("Verjüngung",self.panel.status_label.text())
 
-    def test_numeric_attempt_beyond_qt_range_reports_domain_limit(self):
-        spin=self.panel.editors["base_diameter_mm"]
-        spin.setFocus();self.app.processEvents()
-        spin.validate("9999",4)
-        self.app.processEvents()
+    def test_preview_numeric_attempt_beyond_range_is_rejected(self):
+        old=self.panel.draft
+        row=enter_preview_value(self.panel,"base_diameter_mm",9999)
         self.assertLessEqual(self.panel.draft.base_diameter_mm,self.panel.settings.maximum_diameter_mm+1e-6)
-        self.assertIn("Maximaldurchmesser",self.panel.status_label.text())
+        self.assertEqual(self.panel.draft,old)
+        self.assertTrue(row.invalid)
+        self.assertIn("1000",row.editor.toolTip())
 
     def test_pending_feedback_is_cancelled_when_its_editor_is_deleted(self):
         panel=ManualGenerationPanel()
         panel.initialize(self.reference)
-        panel.feedback(GeometryError("maximum_diameter_mm","Test limit"),"points")
+        panel.feedback(GeometryError("circle_segments","Test limit"),"points")
         with patch("sys.excepthook") as unhandled:
             panel.close()
             self.app.processEvents()
@@ -2124,6 +2156,18 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(p.canvas._surface_color(30).name(),p.canvas.TOWER_COLOR)
         p.change_setting("overhang_enabled",False)
         self.assertEqual(p.canvas._surface_color(15).name(),p.canvas.TOWER_COLOR)
+
+    def test_overhang_marking_starts_enabled_and_reset_restores_it(self):
+        p=self.panel
+        self.assertTrue(p.checks["overhang_enabled"].isChecked())
+        self.assertTrue(p.draft.settings.overhang_enabled)
+        artifact=p.draft.artifact_payload()
+        p.checks["overhang_enabled"].setChecked(False)
+        self.assertFalse(p.draft.settings.overhang_enabled)
+        self.assertEqual(p.draft.artifact_payload(),artifact)
+        p.reset_all()
+        self.assertTrue(p.checks["overhang_enabled"].isChecked())
+        self.assertTrue(p.draft.settings.overhang_enabled)
 
     def test_geometry_changes_preserve_view_and_object_cache(self):
         canvas=self.panel.canvas
@@ -2708,7 +2752,7 @@ class ManualControllerTests(unittest.TestCase):
             else:
                 w.tower_reset_button.click()
             self.assertEqual(p.settings.minimum_diameter_mm,default)
-            self.assertEqual(p.editors["minimum_diameter_mm"].value(),default)
+            self.assertEqual(preview_row(p,"minimum_diameter_mm").field.value,default)
             self.assertEqual(p.draft.base_diameter_mm,default)
             self.assertEqual(p.draft.points[-1].position.diameter_mm,default)
             left,right,_,_=p.canvas.minimum_measure_geometry()
@@ -2853,11 +2897,11 @@ class ManualControllerTests(unittest.TestCase):
                     self.assertLessEqual(p.settings_scroll.height(),360)
                     rectangle=p.canvas.geometry()
                     position=p.canvas.mapToGlobal(QPoint())
-                    p.rows["maximum_diameter_mm"].set_error("Eine ausführliche Grenzrückmeldung. "*12)
+                    p.rows["circle_segments"].set_error("Eine ausführliche Grenzrückmeldung. "*12)
                     for _ in range(4):self.app.processEvents()
                     self.assertEqual(p.canvas.geometry(),rectangle)
                     self.assertEqual(p.canvas.mapToGlobal(QPoint()),position)
-                    p.rows["maximum_diameter_mm"].set_error(None)
+                    p.rows["circle_segments"].set_error(None)
 
     def test_states_draft_previous_result_export_identity_and_exact_restore(self):
         c,p=self.controller,self.panel

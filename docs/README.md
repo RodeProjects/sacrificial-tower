@@ -10,7 +10,7 @@ bei Änderungen zuerst das zuständige Thema lesen.
 | Komponenten, Verantwortlichkeiten, Datenfluss und Erweiterung | [Architektur](architecture.md) |
 | Turmhöhe, lineare Verbreiterung, konkave Verjüngung und Absätze | [Turmgeometrie](tower_geometry.md) |
 | Manueller Béziereditor, Slicervoraussetzungen, feste Slicerprüfung, Zustände und Abnahme | [Manueller Editor](manual_editor.md) |
-| Bewertung direkter Vorschauaktionen und möglicher Vereinfachungen links | [Manuelle Bedienelemente](manual_controls_analysis.md) |
+| Direkte Vorschauaktionen sowie entfernte und verbleibende Einstellungen links | [Manuelle Bedienelemente](manual_controls_analysis.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Proprietäre Distribution, Rechtstexte, Freigaben | [Kommerzieller Vertrieb](commercial_release.md) |

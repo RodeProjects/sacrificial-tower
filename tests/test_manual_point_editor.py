@@ -87,7 +87,7 @@ class ManualPointEditorTests(unittest.TestCase):
         row.animation.setCurrentTime(550);self.assertEqual(row.amount,0)
         self.assertTrue(p.point_editor.isVisible())
         self.assertIsNone(row.field.default);self.assertTrue(row.reset.isHidden())
-        self.assertTrue(p.rows["point_diameter_mm"].reset_button.isHidden())
+        self.assertNotIn("point_diameter_mm",p.rows)
         old=p.draft;row.reset_value();p.reset_value("point_diameter_mm")
         self.assertEqual(p.draft,old)
 
@@ -201,10 +201,10 @@ class ManualPointEditorTests(unittest.TestCase):
         p.insert(20);identity=p.selected;p.move(identity,20,22)
         for name,row in p.point_editor.rows.items():
             self.assertIsNone(row.field.default);self.assertTrue(row.reset.isHidden())
-            self.assertTrue(p.rows[name].reset_button.isHidden())
+            self.assertNotIn(name,p.rows)
         p.select("base")
         self.assertFalse(p.point_editor.rows["base_diameter_mm"].reset.isHidden())
-        self.assertFalse(p.rows["point_diameter_mm"].reset_button.isHidden())
+        self.assertNotIn("point_diameter_mm",p.rows)
 
     def test_control_selection_keeps_owner_fields_and_position_until_obstructed(self):
         p=self.panel;c=p.canvas;p.insert(20);identity=p.selected

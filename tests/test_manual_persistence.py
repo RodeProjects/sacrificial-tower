@@ -20,6 +20,17 @@ class ManualPersistenceTests(unittest.TestCase):
         self.path = self.root/"manual_settings.json"
     def tearDown(self): self.temp.cleanup()
 
+    def test_overhang_default_is_enabled_and_saved_choices_remain(self):
+        store = ManualSettingsStore(self.path)
+        self.assertTrue(store.load().overhang_enabled)
+        self.path.write_text(json.dumps({"manual_settings_schema_version":MANUAL_SCHEMA_VERSION,"manual":{}}))
+        self.assertTrue(ManualSettingsStore(self.path).load().overhang_enabled)
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                store = ManualSettingsStore(self.path)
+                store.save(replace(store.load(),overhang_enabled=enabled))
+                self.assertEqual(ManualSettingsStore(self.path).load().overhang_enabled,enabled)
+
     def test_separate_settings_roundtrip_and_no_source_bound_geometry(self):
         auto = self.root/"user_settings.json"; auto.write_bytes(b"automatic settings")
         store = ManualSettingsStore(self.path)

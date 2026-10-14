@@ -103,10 +103,9 @@ class ManualGenerationPanel(QWidget):
         self.settings_pane.toggle_requested.connect(self.toggle_settings)
         self.splitter.addWidget(self.settings_pane)
         for title, names in (
-            ("Turm und Standfuß", ("minimum_diameter_mm","maximum_diameter_mm","base_diameter_mm","foot_diameter_mm",
-                                  "maximum_foot_diameter_mm","foot_height_mm","height_mm","top_diameter_mm","circle_segments")),
+            ("Turm und Standfuß", ("circle_segments",)),
             ("Geometrische Winkelgrenzen", ("expansion_angle_deg","contraction_angle_deg")),
-            ("Ausgewählter Profilpunkt und Kurve", ("point_diameter_mm","point_height_mm","control_diameter_mm","control_height_mm")),
+            ("Ausgewählter Profilpunkt und Kurve", ("control_diameter_mm","control_height_mm")),
             ("Visuelle Prüfung", ("overhang_angle_deg","color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"))):
             card = SectionCard(title)
             card.setProperty("manualSettings", True)
@@ -144,14 +143,6 @@ class ManualGenerationPanel(QWidget):
                 self.smooth_checkbox = QCheckBox("Tangenten am ausgewählten Punkt koppeln")
                 self.smooth_checkbox.toggled.connect(self._smooth_changed)
                 card.content_layout.addWidget(self.smooth_checkbox)
-                buttons = QHBoxLayout()
-                self.add_point_button = QPushButton("Punkt hinzufügen")
-                self.remove_point_button = QPushButton("Punkt entfernen")
-                self.add_point_button.clicked.connect(self.add_point)
-                self.remove_point_button.clicked.connect(lambda: self.remove(self.selected))
-                buttons.addWidget(self.add_point_button)
-                buttons.addWidget(self.remove_point_button)
-                card.content_layout.addLayout(buttons)
             elif title == "Visuelle Prüfung":
                 box = QCheckBox("Kritische Original-Layer anzeigen")
                 box.toggled.connect(partial(self.change_setting,"critical_layers_enabled"))
@@ -473,16 +464,11 @@ class ManualGenerationPanel(QWidget):
         s = self.settings
         values = s.to_dict()
         if self.draft:
-            values.update(base_diameter_mm=self.draft.base_diameter_mm,height_mm=self.draft.height_mm,
-                          top_diameter_mm=self.draft.points[-1].position.diameter_mm)
             point = next((p for p in self.draft.points if p.identity == ("top" if self.selected == "top_width" else self.selected)),None)
             if not self.selected:self.selection_label.setText("Kein Profilpunkt ausgewählt")
             if point:
-                values.update(point_diameter_mm=point.position.diameter_mm,point_height_mm=point.position.z_mm)
                 self.selection_label.setText(f"{'Freier Profilpunkt' if point.kind == 'free' else {'foot':'Fußrand','base':'Körperbeginn','top':'Oberer Abschluss'}[point.kind]} · {point.position.z_mm:.2f} mm")
             if self.selected == "foot_height":
-                p = self.draft.points[1]
-                values.update(point_diameter_mm=p.position.diameter_mm,point_height_mm=p.position.z_mm)
                 self.selection_label.setText("Fußübergang · vertikal verschieben")
             if self.selected in self.canvas.LIMITS:
                 self.selection_label.setText(self.LABELS[self.selected][0]+" · horizontal verschieben")
@@ -494,11 +480,6 @@ class ManualGenerationPanel(QWidget):
                 self.selection_label.setText(f"Bézier-Kontrollgriff {n} · Abschnitt {i+1}")
             self.rows["control_diameter_mm"].setVisible(control is not None)
             self.rows["control_height_mm"].setVisible(control is not None)
-            self.rows["point_diameter_mm"].setVisible(control is None)
-            self.rows["point_height_mm"].setVisible(control is None)
-            self.editors["point_diameter_mm"].setEnabled(point is not None and (point.kind != "top" or self.selected == "top_width"))
-            self.editors["point_height_mm"].setEnabled(self.selected == "foot_height" or (point is not None and (point.kind == "free" or self.selected == "top")))
-            self.remove_point_button.setEnabled(point is not None and point.kind == "free")
             self.smooth_checkbox.setEnabled(point is not None and point.kind in {"base","free"})
             with QSignalBlocker(self.smooth_checkbox): self.smooth_checkbox.setChecked(point.smooth if point else False)
             index = self._segment_index()
@@ -622,8 +603,6 @@ class ManualGenerationPanel(QWidget):
             p = self.draft.points[1 if identity == "foot_height" else 0 if identity == "foot" else -1 if identity in {"top","top_width"} else 1].position
             self.move(identity,value if name in {"base_diameter_mm","foot_diameter_mm","top_diameter_mm"} else p.diameter_mm,
                       value if name in {"height_mm","foot_height_mm"} else p.z_mm)
-        elif name in {"point_diameter_mm","point_height_mm"}:
-            self.move(self.selected,self.editors["point_diameter_mm"].value(),self.editors["point_height_mm"].value())
         elif name in {"control_diameter_mm","control_height_mm"}:
             control = self._selected_control()
             if control: self.move_control(*control,self.editors["control_diameter_mm"].value(),self.editors["control_height_mm"].value())
@@ -842,13 +821,6 @@ class ManualGenerationPanel(QWidget):
         except (GeometryError,ValueError):return False
         return True
 
-    def add_point(self):
-        if self.draft is None: return
-        i = self._segment_index()
-        i = max(1,i or 1)
-        c = self.draft.curves[min(i,len(self.draft.curves)-1)]
-        self.insert((c.start.z_mm+c.end.z_mm)/2)
-
     def remove(self,identity):
         if self._busy or self.draft is None: return
         try:
@@ -1019,22 +991,16 @@ class ManualGenerationPanel(QWidget):
     def _apply_view_editability(self):
         if not hasattr(self,"canvas"): return
         editable = self.canvas.view in {"side","front"}
-        plan_field = {"top":"top_diameter_mm","bottom":"foot_diameter_mm"}.get(self.canvas.view)
-        plan_limit = {"top":"maximum_diameter_mm","bottom":"maximum_foot_diameter_mm"}.get(self.canvas.view)
         self.smooth_checkbox.setEnabled(editable and self.draft is not None and self.selected in {p.identity for p in self.draft.points[1:-1]})
         for name,row in self.rows.items():
             if name not in {"color_reference_time_s","overhang_angle_deg","gradient_start_deficit_s","gradient_full_deficit_s"}:
-                row.setEnabled(editable or (plan_field is not None and name in {plan_field,plan_limit}))
+                row.setEnabled(editable)
         for name in ("expansion_enabled","contraction_enabled"):
             self.checks[name].setEnabled(editable)
-        if plan_field is not None and self.selected in {"top_width","foot"}:
-            self.rows["point_diameter_mm"].setEnabled(True)
-        self.add_point_button.setEnabled(editable)
         self.reset_button.setEnabled(self.can_reset_all())
         if not editable:
             self.segment_combo.setEnabled(False)
             self.smooth_checkbox.setEnabled(False)
-            self.remove_point_button.setEnabled(False)
 
     def set_busy(self,busy,cancelling=False,exporting=False):
         self._busy = busy
