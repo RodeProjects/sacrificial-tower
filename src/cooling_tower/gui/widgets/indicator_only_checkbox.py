@@ -1,3 +1,5 @@
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionButton, QStylePainter
 
 
@@ -41,5 +43,32 @@ class IndicatorOnlyCheckBox(QCheckBox):
         self.initStyleOption(option)
         if not self._indicator_hovered:
             option.state &= ~QStyle.StateFlag.State_MouseOver
+        text = option.text
+        text_rect = self.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxContents, option, self
+        )
+        indicator = self.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxIndicator, option, self
+        )
+        option.text = ""
         painter = QStylePainter(self)
         painter.drawControl(QStyle.ControlElement.CE_CheckBox, option)
+        # Center the visible glyphs on the indicator, not the font's line box.
+        metrics = painter.fontMetrics()
+        bounds = metrics.tightBoundingRect(text)
+        baseline = int(
+            indicator.y() + (indicator.height() - 1) / 2
+            - (bounds.top() + bounds.bottom()) / 2
+        ) + 1
+        x = (
+            text_rect.right() + 1 - metrics.horizontalAdvance(text)
+            if self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+            else text_rect.left()
+        )
+        group = (
+            QPalette.ColorGroup.Active
+            if self.isEnabled()
+            else QPalette.ColorGroup.Disabled
+        )
+        painter.setPen(option.palette.color(group, QPalette.ColorRole.WindowText))
+        painter.drawText(QPoint(x, baseline), text)

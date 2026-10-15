@@ -2351,13 +2351,16 @@ QPushButton:disabled {
 }
 
 /* The fact card owns its interior layout, avoiding double button padding. */
-QPushButton#preparationViewButton {
+QPushButton#preparationViewButton,
+QPushButton#preparationViewButton:focus {
     padding: 0;
     min-height: 0;
     border-radius: 0;
     border-top: 0;
     border-left: 0;
     border-bottom: 0;
+    border-right-width: 1px;
+    outline: none;
 }
 QLabel#headerMethodHeading {
     color: #40576a;

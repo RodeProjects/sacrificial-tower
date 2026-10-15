@@ -32,9 +32,9 @@ class ProfilePreparationHint(QWidget):
     COLOR = "#06449c"
     SENTENCES = (
         "Wähle dieselben Profile und Einstellungen, mit denen du das Objekt tatsächlich drucken würdest.",
-        "Nur gespeicherte globale Einstellungen werden berücksichtigt.",
-        "Je niedriger die grundlegenden Druckgeschwindigkeiten und Beschleunigungen sind, "
-        "desto leichter lässt sich ein passender Kühlturm erzeugen.",
+        "Nur die gespeicherten globalen Einstellungen der gewählten Profile werden berücksichtigt.",
+        "Niedrigere Druckgeschwindigkeiten können den benötigten Kühlturm "
+        "verkleinern und Material sparen.",
     )
 
     def __init__(self, parent=None):
@@ -43,14 +43,17 @@ class ProfilePreparationHint(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setVerticalSpacing(5)
         layout.setHorizontalSpacing(6)
+        layout.setVerticalSpacing(0)
+        # Prevent surplus height from stretching the heading away from the body.
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setColumnStretch(1, 1)
         self.icon = _InformationMark(self)
         self.title = QLabel("Die Profilauswahl entscheidet über das Ergebnis.")
         self.title.setWordWrap(True)
         font = self.title.font()
         font.setWeight(QFont.Weight.Bold)
+        font.setUnderline(True)
         font.setPointSizeF(font.pointSizeF() + 0.5)
         self.title.setFont(font)
         # A local style also retains the heading weight under the app's

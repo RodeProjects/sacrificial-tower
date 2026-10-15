@@ -83,6 +83,7 @@ from cooling_tower.gui.background_jobs import (
 )
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.profile_preparation_hint import ProfilePreparationHint
+from cooling_tower.gui.widgets.preparation_requirements_layout import PreparationRequirementsLayout
 from cooling_tower.gui.widgets.indicator_only_checkbox import IndicatorOnlyCheckBox
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.generation_panel import GenerationPanel
@@ -1605,11 +1606,13 @@ class MainWindow(QMainWindow):
             object_name="settingInfoButton",
             diameter_px=METRICS.setting_info_diameter_px,
         )
-        show_all_profiles_row_layout.addWidget(self.show_all_profiles_info_button)
+        show_all_profiles_row_layout.addWidget(
+            self.show_all_profiles_info_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
         show_all_profiles_row_layout.addWidget(
             self.show_all_profiles_checkbox,
             0,
-            Qt.AlignmentFlag.AlignLeft,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
         show_all_profiles_row_layout.addStretch(1)
         slicer_selectors_layout.addWidget(self.show_all_profiles_row)
@@ -2091,7 +2094,7 @@ class MainWindow(QMainWindow):
         self.preparation_slicer_requirements.setAccessibleName(
             "Voraussetzungen für Slicer und Profile"
         )
-        slicer_requirements_layout = QGridLayout(
+        slicer_requirements_layout = PreparationRequirementsLayout(
             self.preparation_slicer_requirements
         )
         for requirements_layout in (
@@ -2112,10 +2115,6 @@ class MainWindow(QMainWindow):
             ("profiles_loaded", "Zugehörige Profile geladen"),
             ("profiles_confirmed", "Slicer- und Profilauswahl bestätigt"),
             ("preslice_completed", "Pre-Slice erfolgreich durchgeführt"),
-            (
-                "model_analyzed",
-                "Modell mit bestätigten Profilen analysiert",
-            ),
         )
         for requirements_layout, requirement_texts in (
             (source_requirements_layout, source_requirement_texts),
@@ -2138,6 +2137,10 @@ class MainWindow(QMainWindow):
                     text_label,
                 )
             requirements_layout.setColumnStretch(1, 1)
+        slicer_requirements_layout.set_rows(tuple(
+            self.preparation_requirement_rows[key]
+            for key, _text in slicer_requirement_texts
+        ))
 
         self.preparation_source_divider = QFrame()
         self.preparation_source_divider.setObjectName(
@@ -8875,8 +8878,8 @@ class MainWindow(QMainWindow):
         fulfilled = sum(
             int(complete) for complete in progress_requirements.values()
         )
-        for key, complete in requirements.items():
-            icon_label, text_label = self.preparation_requirement_rows[key]
+        for key, (icon_label, text_label) in self.preparation_requirement_rows.items():
+            complete = requirements[key]
             icon_label.setText("✓" if complete else "○")
             state = "complete" if complete else "missing"
             icon_label.setProperty("state", state)
@@ -8927,8 +8930,13 @@ class MainWindow(QMainWindow):
             "state", progress_state
         )
         self._refresh_widget_style(self.preparation_progress_status_label)
+        visible_fulfilled = sum(
+            int(progress_requirements[key])
+            for key in self.preparation_requirement_rows
+        )
         self.preparation_requirements.setAccessibleDescription(
-            f"{fulfilled} von {len(requirements)} Voraussetzungen erfüllt"
+            f"{visible_fulfilled} von {len(self.preparation_requirement_rows)} "
+            "Voraussetzungen erfüllt"
         )
 
         slicer_step_complete = bool(

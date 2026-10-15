@@ -2119,7 +2119,6 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                     "profiles_loaded",
                     "profiles_confirmed",
                     "preslice_completed",
-                    "model_analyzed",
                 },
             )
             source_keys = {"source_selected", "source_validated"}

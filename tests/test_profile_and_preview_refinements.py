@@ -160,6 +160,8 @@ class RefinedEditorTests(unittest.TestCase):
         self.addCleanup(hint.close)
         hint.resize(760, 220); hint.show(); self.app.processEvents()
         self.assertEqual(hint.body.text().count("<br>"), 2)
+        self.assertTrue(hint.title.font().underline())
+        self.assertEqual(hint.layout().verticalSpacing(), 0)
         self.assertEqual(hint.icon.width(), hint.icon.height())
         self.assertGreater(hint.title.font().pointSizeF(), hint.body.font().pointSizeF())
         self.assertGreater(hint.title.font().weight(), hint.body.font().weight())
@@ -169,6 +171,87 @@ class RefinedEditorTests(unittest.TestCase):
         self.assertNotIn("<br>", hint.body.text())
         for sentence in hint.SENTENCES:
             self.assertIn(sentence, hint.body.text())
+
+    def checklist_panel(self):
+        window = self.window()
+        panel = window.preparation_slicer_requirements
+        panel.setParent(None)
+        panel.setStyleSheet(window.styleSheet())
+        self.addCleanup(panel.close)
+        rows = tuple(window.preparation_requirement_rows[key] for key in (
+            "slicer_detected", "profiles_loaded", "profiles_confirmed", "preslice_completed"
+        ))
+        panel.show()
+        return panel, rows
+
+    def test_checklist_columns_preserve_reading_order_and_never_wrap_wide_text(self):
+        panel, rows = self.checklist_panel()
+        seen_modes = set()
+        for width in range(260, 1001, 40):
+            panel.resize(width, 240)
+            self.app.processEvents()
+            labels = tuple(label for _icon, label in rows)
+            for label in labels:
+                self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+            two_column = labels[2].x() > labels[0].x()
+            seen_modes.add(two_column)
+            if two_column:
+                self.assertEqual(labels[0].x(), labels[1].x())
+                self.assertEqual(labels[2].x(), labels[3].x())
+                self.assertEqual(labels[0].y(), labels[2].y())
+                self.assertEqual(labels[1].y(), labels[3].y())
+                self.assertLess(labels[0].y(), labels[1].y())
+                for label in labels:
+                    self.assertGreaterEqual(
+                        label.contentsRect().width(),
+                        label.fontMetrics().horizontalAdvance(label.text()),
+                    )
+            else:
+                self.assertEqual(len({label.x() for label in labels}), 1)
+                self.assertTrue(all(first.y() < second.y()
+                                    for first, second in zip(labels, labels[1:])))
+        self.assertEqual(seen_modes, {False, True})
+        wide_height = panel.layout().heightForWidth(1000)
+        panel.resize(260, 240)
+        self.app.processEvents()
+        self.assertGreater(panel.layout().heightForWidth(260), wide_height)
+
+    def test_checklist_breakpoint_tracks_the_rendered_font(self):
+        panel, rows = self.checklist_panel()
+        panel.resize(800, 240)
+        self.app.processEvents()
+        self.assertGreater(rows[2][1].x(), rows[0][1].x())
+        for _icon, label in rows:
+            label.setStyleSheet("font-size: 20pt;")
+        panel.resize(801, 300)
+        self.app.processEvents()
+        self.assertEqual(rows[2][1].x(), rows[0][1].x())
+        for _icon, label in rows:
+            self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+        panel.resize(1800, 300)
+        self.app.processEvents()
+        self.assertGreater(rows[2][1].x(), rows[0][1].x())
+
+    def test_hidden_analysis_still_blocks_finishing_preparation(self):
+        from dataclasses import replace
+        from cooling_tower.gui.widgets.preparation_controls import _PreparationState
+
+        window = self.window()
+        state = _PreparationState(
+            source_selected=True, source_accepted=True, slicer_detected=True,
+            profiles_loaded=True, profiles_confirmed=True,
+            preslice_completed=True, model_analyzed=False,
+        )
+        self.assertNotIn("model_analyzed", window.preparation_requirement_rows)
+        with patch.object(window, "_current_preparation_state", return_value=state):
+            window._update_preparation_requirements()
+            self.assertFalse(window.preparation_finish_button.isEnabled())
+            self.assertLess(window.preparation_progress_bar.value(), 100)
+        with patch.object(window, "_current_preparation_state",
+                          return_value=replace(state, model_analyzed=True)):
+            window._update_preparation_requirements()
+            self.assertTrue(window.preparation_finish_button.isEnabled())
+            self.assertEqual(window.preparation_progress_bar.value(), 100)
 
     def test_filter_info_matches_setting_info_and_support_copy_is_updated(self):
         window = self.window()

@@ -27,6 +27,13 @@ wählbare Option ihrer neu geladenen Liste zurück. Die Profilauswahl muss nach
 dem Neuladen erneut bestätigt werden. Diese Sitzungsauswahl hat bei einer
 expliziten erneuten Erkennung Vorrang vor gespeicherten aktiven Slicer-Presets.
 
+Die Slicer-Vorbereitung zeigt vier Statuspunkte: Slicererkennung, geladene Profile,
+bestätigte Auswahl und erfolgreichen Pre-Slice. Bei ausreichender Textbreite stehen
+die ersten beiden links und die nächsten beiden rechts, ohne Trennlinie. Sobald
+ein Text in zwei Spalten umbrechen müsste, erscheinen alle vier Punkte untereinander.
+Die Analyse mit den bestätigten Profilen läuft weiterhin im Hintergrund und bleibt
+Voraussetzung für „Fertig“, besitzt jedoch keinen eigenen sichtbaren Statuspunkt.
+
 Die Vorbereitung erklärt oberhalb der Profilfelder, dass dieselben gespeicherten
 globalen Profileinstellungen wie beim tatsächlichen Objektdruck gewählt werden
 sollen. Der Profilfilter besitzt einen eigenen Hover-Hinweis; „Filter deaktivieren
