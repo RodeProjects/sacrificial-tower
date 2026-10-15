@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+ORIGINAL_OBJECT_BLUE = "#74b5cc"
+ORIGINAL_OBJECT_TOPOLOGY_DARKENING = (110, 120)
+
 
 @dataclass(frozen=True, slots=True)
 class UiMetrics:

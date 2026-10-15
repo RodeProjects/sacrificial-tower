@@ -2,6 +2,7 @@
 from PySide6.QtCore import QEvent,QPointF,QSize,Qt
 from PySide6.QtGui import QColor,QPainter,QPolygonF
 from PySide6.QtWidgets import QWidget,QLabel,QVBoxLayout,QHBoxLayout,QGridLayout,QSizePolicy,QFrame
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE
 
 
 class LegendSwatch(QWidget):
@@ -58,7 +59,7 @@ class ManualPreviewInformation(QWidget):
         self.legend_columns = 1
         legend.addWidget(self.legend_entries)
         self.swatches = {}
-        for key,text,color in (("tower","Turm","#e99032"),("object","Originalobjekt","#429baa"),
+        for key,text,color in (("tower","Turm","#e99032"),("object","Originalobjekt",ORIGINAL_OBJECT_BLUE),
                                ("foot","Fuß / Fußhöhe / Fußgrenze","#7952ba"),("base","Grunddurchmesser / Höhe / Grenze","#2476ca"),
                                ("top_width","Spitzenbreite","#d43b48"),("free","Freie Profilpunkte","#16856b"),
                                ("control","Bézier-Kontrollgriffe","#536980"),("profile","Profilkante","#ba299d")):

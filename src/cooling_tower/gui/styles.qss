@@ -13,11 +13,34 @@ QPushButton[rangeAction="remove"] {
 QPushButton[rangeAction="remove"]:hover { background: #921c13; }
 QPushButton[rangeAction]:disabled { background: #d6dee8; color: #637386; border-color: #d6dee8; }
 QFrame#layerRangeRow { background: #fff; border: 1px solid #d6dee8; border-radius: 7px; }
-QFrame#layerRangeRow[selected="true"] { background: #c6ddee; border-color: #6f9fc4; }
+QFrame#layerRangeRow[selected="true"] { background: #e6eff6; border-color: #91aec5; }
 QWidget#layerRangeCanvas { background: #e6ecf2; border: 1px solid #9eafbf; border-radius: 6px; }
 QSplitter#layerRangeSplitter::handle { background: #cbd6e1; border: none; }
 QDialog#layerRangeDialog QPushButton[rangeCompact="true"] {
     min-height: 30px; max-height: 30px; padding: 0 10px;
+}
+QDialog#layerRangeDialog QPushButton#layerRangeSelectButton {
+    border: none;
+    border-bottom: 1px solid #9eafbf;
+    border-right: 1px solid #9eafbf;
+    border-radius: 0; border-top-left-radius: 6px;
+}
+QDialog#layerRangeDialog QPushButton#layerRangeRemoveButton {
+    border: none;
+    border-bottom: 1px solid #9eafbf;
+    border-radius: 0; border-top-right-radius: 6px;
+}
+QPushButton#layerRangeFitButton {
+    padding: 0 10px; min-height: 0;
+    border: 1px solid #bdcad5; color: #637386;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fafcfd,stop:1 #e8eef3);
+}
+QPushButton#layerRangeFitButton[needsFit="true"] {
+    border-color: #81b292; color: #245c36;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #eff9f1,stop:1 #d6ecdc);
+}
+QPushButton#layerRangeFitButton[needsFit="true"]:hover {
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #e6f5eb,stop:1 #c4e2cf);
 }
 QMainWindow, QDialog {
     background: #f3f6f9;
@@ -2137,6 +2160,13 @@ QDoubleSpinBox, QSpinBox {
 /* The range tool uses native suffixes, without the main window's unit overlay. */
 QDialog#layerRangeDialog QDoubleSpinBox,
 QDialog#layerRangeDialog QSpinBox { padding: 0 8px; }
+QDialog#layerRangeDialog QSpinBox[rangeCompactInput="true"],
+QDialog#layerRangeDialog QDoubleSpinBox[rangeCompactInput="true"] {
+    min-height: 0; padding: 2px 8px;
+}
+QDialog#layerRangeDialog QPushButton[rangeCompactReset="true"] {
+    min-height: 0; padding: 0;
+}
 
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"] {
     color: #667684;
@@ -3200,6 +3230,7 @@ QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton:press
 }
 
 QPushButton#layerRangeCancelButton,
+QPushButton#layerRangeRemoveButton,
 QPushButton#removeSourceButton,
 QPushButton#supportSimulationCancelButton,
 QPushButton#presliceCancelButton,
@@ -3213,6 +3244,7 @@ QPushButton#updateRestartCancelButton {
 }
 
 QPushButton#layerRangeCancelButton:hover,
+QPushButton#layerRangeRemoveButton:hover,
 QPushButton#removeSourceButton:hover,
 QPushButton#supportSimulationCancelButton:hover,
 QPushButton#presliceCancelButton:hover,
@@ -3225,6 +3257,7 @@ QPushButton#updateRestartCancelButton:hover {
 }
 
 QPushButton#layerRangeCancelButton:pressed,
+QPushButton#layerRangeRemoveButton:pressed,
 QPushButton#removeSourceButton:pressed,
 QPushButton#supportSimulationCancelButton:pressed,
 QPushButton#presliceCancelButton:pressed,
@@ -3235,6 +3268,7 @@ QPushButton#updateRestartCancelButton:pressed {
 }
 
 QPushButton#layerRangeCancelButton:disabled,
+QPushButton#layerRangeRemoveButton:disabled,
 QPushButton#removeSourceButton:disabled,
 QPushButton#supportSimulationCancelButton:disabled,
 QPushButton#supportSimulationReloadButton:disabled,

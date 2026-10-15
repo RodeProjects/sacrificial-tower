@@ -8,8 +8,9 @@ from unittest.mock import patch
 import numpy as np
 import trimesh
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor,QImage,QPainter
 from cooling_tower.gui import manual_view_worker as rendering
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE,ORIGINAL_OBJECT_TOPOLOGY_DARKENING
 from cooling_tower.gui.manual_view_worker import simplify_display_mesh,SpatialFrame
 from cooling_tower.manual.geometry import OBJECT_RESOLUTION_STAGES,ManualSettings
 from cooling_tower.preview import PreviewCancelled
@@ -17,6 +18,131 @@ from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 
 
 class ManualViewResolutionTests(unittest.TestCase):
+    def test_shared_topology_has_less_contrast_without_changing_the_surface(self):
+        brightness=np.array([.9,1.,1.1])
+        standard,indices=rendering.surface_styles(QColor(ORIGINAL_OBJECT_BLUE),brightness,
+            topology_darkening=(125,145))
+        subdued,subdued_indices=rendering.surface_styles(QColor(ORIGINAL_OBJECT_BLUE),brightness)
+        np.testing.assert_array_equal(indices,subdued_indices)
+        def difference(first,second):
+            return sum(abs(a-b) for a,b in zip(first.getRgb()[:3],second.getRgb()[:3]))
+        for (fill,edge,node),(soft_fill,soft_edge,soft_node) in zip(standard,subdued):
+            self.assertEqual(fill,soft_fill)
+            for normal,soft in ((edge,soft_edge),(node,soft_node)):
+                self.assertLess(difference(soft.color(),fill),difference(normal.color(),fill))
+                self.assertEqual(soft.widthF(),normal.widthF())
+        reference=SimpleNamespace(context=SimpleNamespace(layers=(
+            SimpleNamespace(z_mm=1,total_time_s=20),SimpleNamespace(z_mm=2,total_time_s=1))))
+        frame=SpatialFrame(240,240,90,(0,90),0,0,(0,0),(0,0),(0,0),0,"both",True)
+        settings=replace(ManualSettings(),critical_layers_enabled=True)
+        standard,_,backing,contour=rendering.profile_surface_styles(reference,frame,settings,brightness,None,
+            topology_darkening=(125,145))
+        subdued,_,soft_backing,soft_contour=rendering.profile_surface_styles(reference,frame,settings,brightness,None)
+        self.assertEqual(backing,soft_backing)
+        self.assertEqual(contour,soft_contour)
+        for (fill,edge,_),(soft_fill,soft_edge,_) in zip(standard,subdued):
+            self.assertEqual(fill,soft_fill)
+            fill_colors=[color for _,color in fill.gradient().stops()]
+            for surface,(_,normal),(_,soft) in zip(fill_colors,edge.brush().gradient().stops(),soft_edge.brush().gradient().stops()):
+                self.assertLess(difference(soft,surface),difference(normal,surface))
+
+    def test_range_neutral_blue_replaces_time_colors_at_all_quality_stages(self):
+        triangles=trimesh.creation.icosphere(subdivisions=2).triangles.copy()
+        triangles[:,:,2]+=1
+        reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
+            object_color=ORIGINAL_OBJECT_BLUE,
+            silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=()),
+            context=SimpleNamespace(layers=(SimpleNamespace(z_mm=2,total_time_s=0),)))
+        frame=SpatialFrame(240,240,90,(0,90),0,0,(0,0),(0,0),(0,0),0,"both",True)
+        for stage in OBJECT_RESOLUTION_STAGES:
+            settings=replace(ManualSettings(),object_resolution_percent=stage,critical_layers_enabled=False)
+            image=rendering.render_spatial_object(reference,frame,settings,None)
+            manual_reference=SimpleNamespace(**{key:value for key,value in vars(reference).items() if key!="object_color"})
+            manual_image=rendering.render_spatial_object(manual_reference,frame,settings,None)
+            self.assertEqual(manual_image,image,stage)
+            data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(240,image.bytesPerLine()//4,4)
+            pixels=data[data[:,:,3]>200]
+            self.assertGreater(len(pixels),1000,stage)
+            self.assertTrue(np.all(pixels[:,0]>pixels[:,2]),stage)
+            self.assertTrue(np.all(pixels[:,1]>pixels[:,2]),stage)
+            if stage==0:
+                self.assertEqual(image.pixelColor(120,120).name(),ORIGINAL_OBJECT_BLUE)
+            for xray in (False,True):
+                alternate=rendering.render_spatial_object(reference,replace(frame,highlight="object" if xray else "both"),settings,None)
+                alpha=alternate.pixelColor(120,120).alpha()
+                if xray:self.assertLess(alpha,255)
+                else:self.assertEqual(alpha,255)
+                self.assertGreater(alpha,0)
+            if stage in (0,75):
+                picture=rendering.render_spatial_object(reference,frame,settings,None,vector=True)
+                faded=QImage(240,240,QImage.Format.Format_ARGB32_Premultiplied);faded.fill(0)
+                painter=QPainter(faded);painter.setOpacity(.28)
+                painter.drawPicture(0,0,picture);painter.end()
+                self.assertLess(faded.pixelColor(120,120).alpha(),255)
+
+    def test_profile_layer_material_keeps_mesh_shading_in_green_and_red_bands(self):
+        triangles=trimesh.creation.icosphere(subdivisions=2).triangles.copy()
+        triangles[:,:,2]+=1
+        triangles.setflags(write=False)
+        layers=tuple(SimpleNamespace(z_mm=i/50,total_time_s=20 if i<=50 else 5)
+                     for i in range(1,101))
+        section=np.array([[[-1,0],[1,0]]])
+        reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
+            silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=(section,)*len(layers)),
+            context=SimpleNamespace(layers=layers))
+        frame=SpatialFrame(240,240,90,(0,90),0,0,(0,0),(0,0),(0,0),0,"both",True)
+        for rotation,stage in ((angle,stage) for angle in (0,37,90)
+                               for stage in OBJECT_RESOLUTION_STAGES[1:]):
+            settings=replace(ManualSettings(),object_resolution_percent=stage,critical_layers_enabled=True)
+            image=rendering.render_spatial_object(reference,replace(frame,object_rotation=rotation),settings,None)
+            data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(240,image.bytesPerLine()//4,4)
+            red=data[50:110,70:170,:3].reshape(-1,3)
+            red=red[red[:,2]>red[:,1]*1.6]
+            self.assertGreater(len(np.unique(red,axis=0)),10,stage)
+            green=data[130:190,70:170,:3].reshape(-1,3)
+            green=green[green[:,1]>green[:,2]*1.6]
+            self.assertGreater(len(np.unique(green,axis=0)),10,stage)
+            self.assertEqual(image.pixelColor(5,5).alpha(),0)
+        self.assertFalse(triangles.flags.writeable)
+
+    def test_many_alternating_layer_colors_keep_worker_picture_size_bounded(self):
+        triangles=trimesh.creation.icosphere(subdivisions=2).triangles.copy()
+        triangles[:,:,2]+=1
+        layers=tuple(SimpleNamespace(z_mm=i/500,total_time_s=5 if i%2 else 20)
+                     for i in range(1,1001))
+        reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
+            silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=()),context=SimpleNamespace(layers=layers))
+        frame=SpatialFrame(0,0,1,(0,0),0,0,(0,0),(0,0),(0,0),0,"both",True)
+        picture=rendering.render_spatial_object(reference,frame,
+            replace(ManualSettings(),critical_layers_enabled=True),None,vector=True)
+        self.assertIsInstance(picture,rendering.RasterObjectPicture)
+        self.assertLess(picture.size()+picture.xray_picture.size(),4*1024*1024)
+
+    def test_dense_profile_material_replays_with_colored_detail_and_open_holes(self):
+        mesh=trimesh.creation.torus(major_radius=1,minor_radius=.2,major_sections=128,minor_sections=32)
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi/2,(1,0,0)))
+        triangles=mesh.triangles.copy();triangles[:,:,2]+=1.2
+        triangles.setflags(write=False)
+        layers=tuple(SimpleNamespace(z_mm=i*.024,total_time_s=5) for i in range(1,101))
+        section=np.array([[[-1.2,0],[1.2,0]]])
+        reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
+            silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=(section,)*len(layers)),
+            context=SimpleNamespace(layers=layers))
+        frame=SpatialFrame(0,0,1,(0,0),0,0,(0,0),(0,0),(0,0),0,"both",True)
+        for stage in (1,75,100):
+            picture=rendering.render_spatial_object(reference,frame,
+                replace(ManualSettings(),object_resolution_percent=stage,critical_layers_enabled=True),None,vector=True)
+            self.assertIsInstance(picture,rendering.RasterObjectPicture)
+            image=QImage(300,300,QImage.Format.Format_ARGB32_Premultiplied);image.fill(0)
+            painter=QPainter(image);painter.translate(150,258);painter.scale(90,90)
+            painter.drawPicture(0,0,picture);painter.end()
+            self.assertEqual(image.pixelColor(150,150).alpha(),0)
+            self.assertGreater(image.pixelColor(240,150).alpha(),200)
+            data=np.frombuffer(image.constBits(),dtype=np.uint8).reshape(300,image.bytesPerLine()//4,4)
+            red=data[data[:,:,3]>240,:3]
+            red=red[red[:,2]>red[:,1]*1.6]
+            self.assertGreater(len(np.unique(red,axis=0)),10,stage)
+
     def test_mesh_backing_is_lighter_transparent_and_xray_applies_consistently(self):
         triangles=trimesh.creation.icosphere(subdivisions=2).triangles
         reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
@@ -28,10 +154,10 @@ class ManualViewResolutionTests(unittest.TestCase):
             xray=rendering.render_spatial_object(reference,replace(frame,highlight="object"),settings,None)
         backing=plain.pixelColor(120,120)
         self.assertEqual(backing.alpha(),210)
-        self.assertGreater(backing.lightness(),QColor("#429baa").lightness())
+        self.assertGreater(backing.lightness(),QColor(ORIGINAL_OBJECT_BLUE).lightness())
         self.assertAlmostEqual(xray.pixelColor(120,120).alpha()/backing.alpha(),.28,delta=.025)
         solid=rendering.render_spatial_object(reference,frame,replace(settings,object_resolution_percent=0),None)
-        self.assertEqual(solid.pixelColor(120,120),QColor("#429baa"))
+        self.assertEqual(solid.pixelColor(120,120),QColor(ORIGINAL_OBJECT_BLUE))
 
     def test_exact_silhouette_keeps_full_bounds_at_all_mesh_stages_and_rotations(self):
         triangles=trimesh.creation.icosphere(subdivisions=3).triangles.copy()
@@ -54,7 +180,7 @@ class ManualViewResolutionTests(unittest.TestCase):
                 for percent in OBJECT_RESOLUTION_STAGES[1:]:
                     image=rendering.render_spatial_object(reference,frame,replace(ManualSettings(),object_resolution_percent=percent),None)
                     np.testing.assert_allclose(bounds(image),expected,atol=1)
-                    self.assertNotEqual(image.pixelColor(150,150),QColor("#429baa"))
+                    self.assertNotEqual(image.pixelColor(150,150),QColor(ORIGINAL_OBJECT_BLUE))
         self.assertFalse(triangles.flags.writeable)
 
     def test_silhouette_clips_coarse_surfaces_out_of_holes_including_free_view(self):
@@ -74,23 +200,32 @@ class ManualViewResolutionTests(unittest.TestCase):
 
     def test_reused_styles_keep_identical_colors_edges_and_transparent_pixels(self):
         brightness=np.linspace(.86,1.14,5120)
-        color=QColor("#429baa")
+        color=QColor(ORIGINAL_OBJECT_BLUE)
         styles,indices=rendering.surface_styles(color,brightness)
         self.assertLess(len(styles),200)
         for index,value in enumerate(brightness):
             fill,edge,node=styles[indices[index]]
             self.assertEqual(fill,rendering.shaded_color(color,value))
-            self.assertEqual(edge.color(),fill.darker(125))
-            self.assertEqual(node.color(),fill.darker(145))
+            self.assertEqual(edge.color(),fill.darker(ORIGINAL_OBJECT_TOPOLOGY_DARKENING[0]))
+            self.assertEqual(node.color(),fill.darker(ORIGINAL_OBJECT_TOPOLOGY_DARKENING[1]))
             self.assertTrue(edge.isCosmetic())
             self.assertTrue(node.isCosmetic())
+            self.assertEqual(edge.widthF(),.5)
+            self.assertEqual(node.widthF(),.5)
         reference=SimpleNamespace(object_triangles=trimesh.creation.icosphere(subdivisions=2).triangles,
             silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=(np.array([[[-.5,0],[.5,0]]]),)),
             context=SimpleNamespace(layers=(SimpleNamespace(z_mm=.2,total_time_s=1),)))
         frame=SpatialFrame(240,240,90,(0,0),-35,25,(0,0),(0,0),(0,0),37,"both")
         original=rendering.draw_surface
         def legacy(painter,polygon,color,brightness,style=None):
-            original(painter,polygon,color,brightness)
+            palette,_=rendering.surface_styles(color,np.array([brightness]))
+            original(painter,polygon,color,brightness,palette[0])
+        profile_styles,_,_,contour=rendering.profile_surface_styles(reference,frame,
+            replace(ManualSettings(),critical_layers_enabled=True),brightness[:3],None)
+        self.assertEqual(contour.widthF(),1)
+        for _,edge,node in profile_styles:
+            self.assertEqual(edge.widthF(),.5)
+            self.assertEqual(node.widthF(),.5)
         for critical in (False,True):
             settings=replace(ManualSettings(),object_resolution_percent=100,critical_layers_enabled=critical)
             for highlight in ("both","object","all"):
@@ -140,7 +275,7 @@ class ManualViewResolutionTests(unittest.TestCase):
                  patch.object(rendering,"draw_surface",side_effect=AssertionError("mesh details")),\
                  patch.object(rendering,"build_mesh_silhouette",side_effect=AssertionError("topology rebuilt")):
                 image=rendering.render_spatial_object(reference,frame,settings,None)
-            self.assertEqual(image.pixelColor(120,120),QColor("#429baa"))
+            self.assertEqual(image.pixelColor(120,120),QColor(ORIGINAL_OBJECT_BLUE))
             self.assertEqual(image.pixelColor(5,5).alpha(),0)
             self.assertLess(len(topology.contour_edges((0,0,1))),len(triangles)//20)
         np.testing.assert_array_equal(triangles,original)
@@ -155,7 +290,7 @@ class ManualViewResolutionTests(unittest.TestCase):
         frame=SpatialFrame(240,240,90,(0,0),0,90,(0,0),(0,0),(0,0),0,"both")
         image=rendering.render_spatial_object(reference,frame,replace(ManualSettings(),object_resolution_percent=0),None)
         self.assertEqual(image.pixelColor(120,120).alpha(),0)
-        self.assertEqual(image.pixelColor(180,120),QColor("#429baa"))
+        self.assertEqual(image.pixelColor(180,120),QColor(ORIGINAL_OBJECT_BLUE))
 
     def test_zero_profile_silhouette_keeps_disconnected_islands_and_layer_colors(self):
         pieces=[]

@@ -3,6 +3,7 @@ from PySide6.QtCore import QEvent,QSize,Qt
 from PySide6.QtGui import QColor,QFont,QFontMetrics,QMouseEvent,QPainter,QPen
 from PySide6.QtWidgets import QLabel,QSlider,QStyle,QStyleOptionSlider,QWidget,QStyleFactory
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
+from cooling_tower.manual.geometry import OBJECT_RESOLUTION_STAGES,object_resolution_default
 
 SLIDER_GROOVE_OFFSET_PX=3
 SLIDER_GROOVE_OFFSET_STYLE=f"margin: -{SLIDER_GROOVE_OFFSET_PX}px 0 {SLIDER_GROOVE_OFFSET_PX}px; "
@@ -17,9 +18,41 @@ def slider_handle_style(groove_height):
             "border: 2px solid #000000; border-radius: 3px; background: #ffffff; }")
 
 
-class ResolutionSlider(QSlider):
-    def __init__(self,parent=None):
+class _HandleResetSlider(QSlider):
+    """Reset only a double click that starts on the grip, never on the track."""
+
+    def __init__(self,reset_value,parent=None):
         super().__init__(Qt.Orientation.Horizontal,parent)
+        self._reset_value=reset_value
+        self._press_started_on_handle=None
+
+    def _handle_contains(self,position):
+        option=QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle=self.style().subControlRect(QStyle.ComplexControl.CC_Slider,option,
+                                          QStyle.SubControl.SC_SliderHandle,self)
+        return handle.contains(position.toPoint())
+
+    def mousePressEvent(self,event):
+        self._press_started_on_handle=(event.button()==Qt.MouseButton.LeftButton
+                                       and self._handle_contains(event.position()))
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self,event):
+        if (event.button()==Qt.MouseButton.LeftButton
+                and self._press_started_on_handle is not False
+                and self._handle_contains(event.position())):
+            self.setSliderDown(False)
+            self.setValue(self._reset_value)
+            self._press_started_on_handle=None
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
+class ResolutionSlider(_HandleResetSlider):
+    def __init__(self,parent=None):
+        super().__init__(OBJECT_RESOLUTION_STAGES.index(object_resolution_default())+1,parent)
 
     def tick_mark_top(self):
         return self.height()-6
@@ -43,11 +76,11 @@ class ResolutionSlider(QSlider):
         painter.end()
 
 
-class RotationSlider(QSlider):
+class RotationSlider(_HandleResetSlider):
     """Classic blue track and white grip, independent of the Windows theme."""
 
     def __init__(self,parent=None):
-        super().__init__(Qt.Orientation.Horizontal,parent)
+        super().__init__(0,parent)
         self._rotation_style=QStyleFactory.create("Fusion")
         self._rotation_style.setParent(self)
         self.setStyle(self._rotation_style)
@@ -224,20 +257,39 @@ class RotationEndLabels(ResolutionEndLabels):
 
     def _position_labels(self):
         if not hasattr(self,"labels"):return super()._position_labels()
-        positions=self.slider.snap_positions(self.width())
-        rectangles={}
+        rectangles=self._label_rectangles(self.width())
         for angle,label in self.labels.items():
             label.resize(label.sizeHint().width(),self.height())
-            left=max(0,min(self.width()-label.width(),positions[angle]-label.width()//2))
-            label.move(left,0)
-            rectangles[angle]=(left,left+label.width())
+            label.move(rectangles[angle][0],0)
         visible_angles=set()
         for step in (45,90,180):
             angles={angle for angle in self.labels if angle % step == 0}
-            bounds=sorted(rectangles[angle] for angle in angles)
-            if (all(right<=self.width() for left,right in bounds) and
-                    all(next_left-right>=self.MINIMUM_GAP_PX
-                        for (_,right),(next_left,_) in zip(bounds,bounds[1:]))):
+            if self.angles_fit(step,self.width()):
                 visible_angles=angles
                 break
         for angle,label in self.labels.items():label.setVisible(angle in visible_angles)
+
+    def _label_rectangles(self,width):
+        positions=self.slider.snap_positions(width)
+        rectangles={}
+        for angle,label in self.labels.items():
+            label_width=label.sizeHint().width()
+            left=max(0,min(width-label_width,positions[angle]-label_width//2))
+            rectangles[angle]=(left,left+label_width)
+        return rectangles
+
+    def angles_fit(self,step,width):
+        rectangles=self._label_rectangles(width)
+        bounds=sorted(rectangles[angle] for angle in self.labels if angle % step == 0)
+        return (all(right<=width for left,right in bounds) and
+                all(next_left-right>=self.MINIMUM_GAP_PX
+                    for (_,right),(next_left,_) in zip(bounds,bounds[1:])))
+
+    def minimum_width_for_step(self,step):
+        lower,upper=0,max(1,self.sizeHint().width())
+        while not self.angles_fit(step,upper):upper*=2
+        while lower<upper:
+            middle=(lower+upper)//2
+            if self.angles_fit(step,middle):upper=middle
+            else:lower=middle+1
+        return upper

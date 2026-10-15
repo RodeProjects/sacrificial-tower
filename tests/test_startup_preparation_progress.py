@@ -283,12 +283,18 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window.deleteLater()
             self.app.processEvents()
 
-    def test_startup_preselects_last_confirmed_profiles_for_same_slicer(self) -> None:
+    def test_startup_restores_selected_slicer_and_its_profiles_ahead_of_usage(self) -> None:
+        last_used = replace(
+            self.installation,
+            product_name="Other Slicer",
+            executable_path=self.root / "OtherSlicer.exe",
+        )
         discovery = SlicerDiscoveryResult(
-            installations=(self.installation,),
+            installations=(last_used, self.installation),
             recommended_key=self.installation.identity_key,
             gui_state=SlicerGuiState.AVAILABLE_AND_RECOMMENDED,
             message="Slicer gefunden",
+            last_used_key=last_used.identity_key,
         )
         slicer_service = StartupSlicerService(discovery)
         slicer_service.profile_selections = {
@@ -315,6 +321,9 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 )
             )
 
+            self.assertEqual(
+                window.slicer_combo.currentData(), self.installation.identity_key
+            )
             self.assertEqual(
                 window._profile_combo_reference(
                     window.machine_profile_combo

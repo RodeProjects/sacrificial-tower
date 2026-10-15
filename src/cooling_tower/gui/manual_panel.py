@@ -213,7 +213,7 @@ class ManualGenerationPanel(QWidget):
         self.rotation_slider.setMinimumWidth(50)
         self.rotation_slider.setRange(-180,180)
         self.rotation_slider.setTickInterval(45)
-        self.rotation_slider.setToolTip("Originalobjekt drehen: −180° bis +180° · 0° in der Mitte · Rastpunkte alle 45°")
+        self.rotation_slider.setToolTip("Originalobjekt drehen: −180° bis +180° · 0° in der Mitte · Rastpunkte alle 45°\nDoppelklick auf den Greifer: 0° wiederherstellen.")
         self.rotation_slider.valueChanged.connect(self._queue_rotation)
         self.rotation_slider_host = QWidget()
         rotation_slider_column = QVBoxLayout(self.rotation_slider_host)

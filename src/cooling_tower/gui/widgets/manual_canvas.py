@@ -17,7 +17,7 @@ from cooling_tower.manual.geometry import tessellate, roots
 from cooling_tower.tower.mesh_generator import MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS
 from cooling_tower.manual.layer_snap import snap_layer_height
 from cooling_tower.gui.background_jobs import JobKind
-from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS
+from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS,ORIGINAL_OBJECT_BLUE
 from cooling_tower.gui.manual_view_worker import (SpatialFrame,ManualViewWorker,render_spatial_object,rotate_object,
                                                 cosmetic_pen,surface_brightness,draw_surface,render_silhouette_backing)
 
@@ -64,7 +64,7 @@ class ManualCanvas(QWidget):
     interaction_started = Signal()
     interaction_finished = Signal()
     view_changed = Signal(str)
-    OBJECT_COLOR = "#429baa"
+    OBJECT_COLOR = ORIGINAL_OBJECT_BLUE
     TOWER_COLOR = "#e99032"
     PROFILE_COLOR = "#ba299d"
     COLORS = {"top_width": "#d43b48", "foot": "#7952ba", "base": "#2476ca", "top": "#2476ca", "free": "#16856b", "control": "#536980",

@@ -29,7 +29,6 @@ from cooling_tower.slicers.models import (
     SlicerDiscoverySource,
     SlicerGuiState,
     SlicerInstallation,
-    SlicerSupportLevel,
 )
 from cooling_tower.slicers.preferences import SlicerPreferenceStore
 
@@ -320,7 +319,6 @@ class SlicerDiscoveryService:
         last_used = self._last_used_installation(installations)
         recommended = self._recommend(
             installations,
-            source_slicer,
             last_used.identity_key if last_used is not None else None,
             last_selected,
         )
@@ -401,68 +399,22 @@ class SlicerDiscoveryService:
     @staticmethod
     def _recommend(
         installations: tuple[SlicerInstallation, ...],
-        source: SlicerIdentity | None,
         last_used_key: str | None,
         last_selected_key: str | None,
     ) -> SlicerInstallation | None:
-        if not installations:
-            return None
-
-        actually_used = next(
-            (
-                item
-                for item in installations
-                if item.identity_key == last_used_key
-            ),
-            None,
-        )
-        if actually_used is not None:
-            return actually_used
-
-        # A selection made in this application is only a fallback when no
-        # module can establish actual external use.  It is intentionally not
-        # exposed as "zuletzt verwendet".
-        remembered = next(
-            (
-                item
-                for item in installations
-                if item.identity_key == last_selected_key
-            ),
-            None,
-        )
-        if remembered is not None:
-            return remembered
-
-        source_product = _normalised_product(
-            source.product_name if source is not None else None
-        )
-        source_version = _version_tuple(source.version if source else None)
-
-        def score(item: SlicerInstallation) -> tuple[int, tuple[int, ...]]:
-            value = 0
-            if source is not None:
-                if source.adapter_id and item.adapter_id == source.adapter_id:
-                    value += 1000
-                elif (
-                    source_product
-                    and _normalised_product(item.product_name) == source_product
-                ):
-                    value += 950
-                elif source.family is item.family:
-                    value += 700
-                item_version = _version_tuple(item.version)
-                if source_version and item_version:
-                    if item_version == source_version:
-                        value += 150
-                    elif item_version > source_version:
-                        value += 100
-                    else:
-                        value += 40
-            if item.support_level is SlicerSupportLevel.FULL:
-                value += 50
-            return value, _version_tuple(item.version)
-
-        return max(installations, key=score)
+        selectable = tuple(
+            item for item in installations if item.verified and item.can_slice
+        ) or installations
+        # Keep the application's explicit choice ahead of external usage.
+        # Missing installations fall through without changing the saved choice.
+        for key in (last_selected_key, last_used_key):
+            match = next(
+                (item for item in selectable if item.identity_key == key),
+                None,
+            )
+            if match is not None:
+                return match
+        return next(iter(selectable), None)
 
     @staticmethod
     def _gui_state(

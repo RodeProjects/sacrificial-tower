@@ -11,7 +11,7 @@ from cooling_tower.manual.geometry import OBJECT_RESOLUTION_STAGES,object_resolu
 class ObjectResolutionControl(QWidget):
     percent_changed = Signal(int)
 
-    def __init__(self,parent=None):
+    def __init__(self,parent=None,*,title="Auflösung (STL)",show_reset=True):
         super().__init__(parent)
         self.resolution_host = self
         self.resolution_host.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
@@ -20,6 +20,8 @@ class ObjectResolutionControl(QWidget):
         resolution_group.setSpacing(1)
         self.resolution_heading = ResolutionHeading()
         self.resolution_title = self.resolution_heading.title
+        self.resolution_title.setText(title)
+        self.resolution_heading._fit_heading()
         resolution_header = QHBoxLayout()
         resolution_header.setSpacing(3)
         resolution_header.addWidget(self.resolution_heading,1)
@@ -40,7 +42,8 @@ class ObjectResolutionControl(QWidget):
             "0 %: hochauflösende Silhouette.\n"
             "Über 0 %: automatische Netzqualität mit geschützter Mindestqualität.\n"
             "Der Wert gewichtet Performance und Optik, nicht den Anteil der Flächen.\n"
-            "Analyse und Druckdaten bleiben gleich.")
+            "Analyse und Druckdaten bleiben gleich.\n"
+            "Doppelklick auf den Greifer: Standardauflösung wiederherstellen.")
         self.resolution_slider.setRange(1,len(OBJECT_RESOLUTION_STAGES))
         self.resolution_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.resolution_slider.setTickInterval(1)
@@ -78,14 +81,17 @@ class ObjectResolutionControl(QWidget):
         value_column.addSpacing(self.resolution_end_labels.height())
         value_column.addWidget(self.resolution_label,1)
         resolution.addWidget(value_host)
-        self.resolution_reset = QPushButton("↺")
-        self.resolution_reset.setObjectName("settingResetButton")
-        self.resolution_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
-        self.resolution_reset.setAccessibleName("Auflösung des Originalobjekts zurücksetzen")
-        self.resolution_reset.setToolTip("Standardauflösung des Originalobjekts wiederherstellen")
-        self.resolution_reset.clicked.connect(lambda:self.set_percent(object_resolution_default()))
-        resolution.addWidget(self.resolution_reset)
-        resolution_header.addSpacing(self.resolution_label.minimumWidth()+self.resolution_reset.width()+6)
+        self.resolution_reset = None
+        if show_reset:
+            self.resolution_reset = QPushButton("↺")
+            self.resolution_reset.setObjectName("settingResetButton")
+            self.resolution_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
+            self.resolution_reset.setAccessibleName("Auflösung des Originalobjekts zurücksetzen")
+            self.resolution_reset.setToolTip("Standardauflösung des Originalobjekts wiederherstellen")
+            self.resolution_reset.clicked.connect(lambda:self.set_percent(object_resolution_default()))
+            resolution.addWidget(self.resolution_reset)
+        resolution_header.addSpacing(self.resolution_label.minimumWidth()+
+                                     (self.resolution_reset.width()+6 if show_reset else 3))
         self.set_percent(object_resolution_default())
 
     def set_percent(self,percent):
@@ -99,6 +105,7 @@ class ObjectResolutionControl(QWidget):
 
     def _refresh_value(self,percent):
         self.resolution_label.setText(f"{percent} %")
+        if self.resolution_reset is None:return
         modified=percent != object_resolution_default()
         self.resolution_reset.setProperty("modified",modified)
         self.resolution_reset.setEnabled(modified)

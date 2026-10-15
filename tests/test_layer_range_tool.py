@@ -17,9 +17,9 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, QSignalBlocker, Qt
-from PySide6.QtGui import QFontDatabase, QWheelEvent
+from PySide6.QtGui import QColor, QFontDatabase, QPainter, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QStyle, QStyleOptionFrame, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QStyle, QStyleOptionFrame, QStyleOptionSlider, QStyleOptionSpinBox, QWidget
 from cooling_tower.gui.layer_range_dialog import LayerRangeDialog
 from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.settings_store import UserSettingsStore
@@ -41,6 +41,7 @@ from cooling_tower.tower.mesh_generator import TowerMeshConfig, generate_solid_t
 from test_phase9 import make_snapshot, make_layer
 from test_solid_tower_changes import radius_layer
 import test_phase16 as calibration_fixture
+from gui_lifecycle import dispose_test_widget
 
 
 def object_segments(layers):
@@ -273,10 +274,10 @@ class LayerRangeUiTests(unittest.TestCase):
     def setUp(self):
         self.layers = tuple(make_layer(i, i * .2, .2, 9.7) for i in range(1, 101))
         self.dialog = LayerRangeDialog(self.layers, object_segments(self.layers), target_time_s=10,
-            target_minimum=5, target_maximum=120)
+            target_minimum=5, target_maximum=120, time_coloring_enabled=True, xray_enabled=False)
         self.dialog.show()
         self.app.processEvents()
-        self.addCleanup(self.dialog.close)
+        self.addCleanup(dispose_test_widget, self.dialog)
 
     def test_heatmap_exact_endpoints_and_one_second_threshold(self):
         self.assertEqual(LayerRangeCanvas.layer_color(10, 10).name(), LayerRangeCanvas.OBJECT_COLOR)
@@ -284,6 +285,295 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertEqual(LayerRangeCanvas.layer_color(10, 5).name(), LayerRangeCanvas.CRITICAL_COLOR)
         self.assertNotEqual(LayerRangeCanvas.layer_color(10, 9.75).name(), LayerRangeCanvas.CRITICAL_COLOR)
         self.assertEqual(LayerRangeCanvas.layer_color(10, 20).name(), LayerRangeCanvas.OBJECT_COLOR)
+
+    def test_editor_defaults_to_opaque_object_without_time_coloring(self):
+        dialog=LayerRangeDialog(self.layers,object_segments(self.layers),target_time_s=10,
+            target_minimum=5,target_maximum=120)
+        self.addCleanup(dispose_test_widget, dialog)
+        dialog.show()
+        self._settle_layout()
+        self.assertFalse(dialog.xray_button.isChecked())
+        self.assertFalse(dialog.canvas.xray_enabled)
+        self.assertFalse(dialog.color_enabled_checkbox.isChecked())
+        self.assertFalse(dialog.canvas.time_coloring_enabled)
+        self.assertTrue(dialog.color_settings.isHidden())
+        self.assertTrue(dialog.legend.color_key.isHidden())
+
+    def test_excluded_ranges_have_faint_red_pattern_confined_to_their_interior(self):
+        canvas=self.dialog.canvas
+        before=canvas.grab().toImage()
+        rect=canvas.range_rect((20,60))
+        x,y=round(rect.right()-32),round(rect.top()+8)
+        for draft in (False,True):
+            with self.subTest(draft=draft):
+                canvas.set_ranges(() if draft else ((20,60),))
+                if draft:canvas._draft=(20,60)
+                after=canvas.grab().toImage()
+                colors=[after.pixelColor(x+dx,y+dy) for dx in range(24) for dy in range(24)]
+                self.assertGreater(len({color.rgb() for color in colors}),1)
+                lightest=max(colors,key=lambda color:color.green())
+                darkest=min(colors,key=lambda color:color.green())
+                self.assertGreater(lightest.green()-darkest.green(),5)
+                self.assertLess(lightest.green()-darkest.green(),35)
+                self.assertGreater(darkest.red()-darkest.green(),lightest.red()-lightest.green())
+                for row in (round(rect.top()-8),round(rect.bottom()+8)):
+                    self.assertEqual(after.pixelColor(x,row),before.pixelColor(x,row))
+
+    def test_exclusion_hatch_and_dark_border_are_painted_over_an_opaque_mesh(self):
+        canvas=self.dialog.canvas
+        def draw_opaque_mesh(painter):
+            painter.fillRect(canvas.plot_rect(),QColor(canvas.NEUTRAL_OBJECT_COLOR))
+            return True
+        canvas.object_view=SimpleNamespace(draw=draw_opaque_mesh)
+        canvas._background=None
+        canvas.set_ranges(())
+        before=canvas.grab().toImage()
+        span=(20,60)
+        canvas.set_ranges((span,),selected=0)
+        after=canvas.grab().toImage()
+        rect=canvas.range_rect(span)
+        x,y=round(rect.center().x()),round(rect.center().y())
+        colors=[after.pixelColor(x+dx,y+dy) for dx in range(24) for dy in range(24)]
+        stripe=min(colors,key=lambda color:color.green())
+        clear=max(colors,key=lambda color:color.green())
+        self.assertGreater(stripe.red(),clear.red()+2)
+        self.assertLess(stripe.green(),clear.green()-15)
+        self.assertEqual(after.pixelColor(round(rect.left()),y).name(),canvas.SELECTION_BORDER_COLOR)
+        self.assertEqual(after.pixelColor(x,round(rect.bottom()+8)),before.pixelColor(x,round(rect.bottom()+8)))
+
+    def test_range_card_header_is_a_flush_pair_with_a_compact_remove_action(self):
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        row,first,last,select=dialog.range_rows[0]
+        remove=row.findChild(QPushButton,"layerRangeRemoveButton")
+        self.assertEqual(select.x(),row.contentsRect().left())
+        self.assertEqual(select.y(),row.contentsRect().top())
+        self.assertEqual(select.geometry().right()+1,remove.x())
+        self.assertEqual(remove.geometry().right(),row.contentsRect().right())
+        self.assertEqual(remove.width(),remove.sizeHint().width())
+        self.assertGreater(select.width(),remove.width())
+        dialog.select_range(-1)
+        QTest.mouseClick(select,Qt.MouseButton.LeftButton,pos=QPoint(3,select.height()//2))
+        self.assertEqual(dialog.selected,0)
+        previous=len(dialog.ranges)
+        QTest.mouseClick(remove,Qt.MouseButton.LeftButton,pos=QPoint(remove.width()-3,remove.height()//2))
+        self._settle_layout()
+        self.assertEqual(len(dialog.ranges),previous-1)
+
+    def test_layer_digit_changes_leave_field_and_preview_geometry_unchanged(self):
+        dialog=self._styled_dialog()
+        dialog.set_ranges(((1,1),))
+        self._settle_layout()
+        expected=(dialog.splitter.sizes()[0],dialog.canvas.mapTo(dialog,QPoint()),dialog.canvas.size())
+        field_width=dialog.range_rows[0][1].width()
+        for layer in (9,10,99,100,1):
+            dialog.commit_range(0,layer,layer)
+            dialog.new_start_spin.setValue(layer)
+            dialog.new_end_spin.setValue(layer)
+            self._settle_layout()
+            self.assertEqual((dialog.splitter.sizes()[0],dialog.canvas.mapTo(dialog,QPoint()),dialog.canvas.size()),expected)
+            for spin in (*dialog.range_rows[0][1:3],dialog.new_start_spin,dialog.new_end_spin):
+                self.assertEqual(spin.width(),field_width)
+
+    def test_preview_controls_share_manual_design_and_fit_color_state(self):
+        from cooling_tower.gui.widgets.manual_resolution_control import RotationSlider
+        from cooling_tower.gui.widgets.object_resolution_control import ObjectResolutionControl
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        self.assertIsInstance(dialog.rotation_slider,RotationSlider)
+        self.assertEqual(dialog.resolution_control.resolution_title.text(),"Auflösung")
+        manual_control=ObjectResolutionControl()
+        self.addCleanup(dispose_test_widget, manual_control)
+        self.assertEqual(manual_control.resolution_title.text(),"Auflösung (STL)")
+        self.assertFalse(dialog.fit_button.property("needsFit"))
+        idle=dialog.fit_button.grab().toImage().pixelColor(6,6)
+        dialog.canvas.zoom=1.2
+        dialog.canvas._refresh_fit_available()
+        self._settle_layout()
+        self.assertTrue(dialog.fit_button.isEnabled())
+        self.assertTrue(dialog.fit_button.property("needsFit"))
+        active=dialog.fit_button.grab().toImage().pixelColor(6,6)
+        self.assertGreater(active.green()-active.red(),idle.green()-idle.red())
+        dialog.fit_button.click()
+        self.assertFalse(dialog.fit_button.property("needsFit"))
+        self.assertFalse(dialog.fit_button.isEnabled())
+
+    def test_toolbar_stacks_at_the_quarter_turn_caption_boundary(self):
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        controls=dialog.preview_controls
+        controls.setParent(None)
+        controls.setStyleSheet(dialog.parentWidget().styleSheet())
+        controls.show()
+        self.addCleanup(dispose_test_widget, controls)
+        boundary=controls._horizontal_width(2)
+        for width,stacked in ((boundary,False),(boundary-1,True),(boundary+1,False)):
+            controls.resize(width,controls.heightForWidth(width))
+            self._settle_layout()
+            self.assertEqual(dialog.rotation_controls.y()>dialog.resolution_control.geometry().bottom(),stacked)
+            for angle in (-90,90):
+                self.assertFalse(dialog.rotation_controls.end_labels.labels[angle].isHidden())
+            if stacked:
+                self.assertEqual(dialog.fit_button.x(),dialog.xray_button.x())
+                self.assertEqual(dialog.fit_button.width(),dialog.xray_button.width())
+                self.assertLess(dialog.rotation_controls.geometry().right(),dialog.fit_button.x())
+            else:
+                self.assertLess(dialog.rotation_controls.geometry().right(),dialog.fit_button.x())
+            self.assertEqual(dialog.fit_button.height(),dialog.xray_button.height())
+            self.assertEqual(dialog.fit_button.geometry().bottom(),dialog.rotation_controls.geometry().bottom())
+            self.assertEqual(dialog.fit_button.geometry().bottom(),controls.height()-1)
+
+    def test_card_titles_stay_gray_and_remove_shares_the_cancel_palette(self):
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        dialog.select_range(0)
+        QTest.mouseMove(dialog,QPoint(1,1))
+        self._settle_layout()
+        row,_,_,select=dialog.range_rows[0]
+        remove=row.findChild(QPushButton,"layerRangeRemoveButton")
+        title=select.grab().toImage().pixelColor(select.width()//2,5)
+        self.assertLess(abs(title.red()-title.blue()),15)
+        colors=[]
+        for button in (remove,dialog.cancel_button):
+            image=button.grab().toImage()
+            colors.append(image.pixelColor(image.width()//2,round(image.height()*.15)))
+        for left,right in zip(colors[0].getRgb(),colors[1].getRgb()):
+            self.assertLessEqual(abs(left-right),2)
+
+    def test_card_header_has_clear_seams_and_a_subtle_selected_body(self):
+        dialog=self._styled_dialog()
+        dialog.select_range(0)
+        self._settle_layout()
+        row,_,_,select=dialog.range_rows[0]
+        remove=row.findChild(QPushButton,"layerRangeRemoveButton")
+        for button in (select,remove):
+            image=button.grab().toImage()
+            line=image.pixelColor(8,image.height()-1)
+            adjacent=image.pixelColor(8,image.height()-3)
+            self.assertLess(line.lightness(),adjacent.lightness()-20)
+        image=select.grab().toImage()
+        self.assertLess(image.pixelColor(image.width()-1,8).lightness(),
+                        image.pixelColor(image.width()-3,8).lightness()-20)
+        body=row.grab().toImage().pixelColor(6,row.height()-8)
+        self.assertGreaterEqual(body.red(),225)
+        self.assertLess(body.blue()-body.red(),25)
+
+    def test_coloring_toggle_hides_settings_and_removes_their_visual_effect(self):
+        dialog=self._styled_dialog()
+        canvas=dialog.canvas
+        canvas.set_ranges(())
+        point=QPoint(round(canvas.plot_rect().center().x()),round(canvas.y_for_z(self.layers[39].z_mm)))
+        self.assertTrue(dialog.color_enabled_checkbox.isChecked())
+        ranges=dialog.ranges
+        dialog.color_enabled_checkbox.setChecked(False)
+        self._settle_layout()
+        self.assertTrue(dialog.color_settings.isHidden())
+        self.assertTrue(dialog.legend.color_key.isHidden())
+        self.assertFalse(canvas.time_coloring_enabled)
+        self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.NEUTRAL_OBJECT_COLOR)
+        dialog.color_start_spin.setValue(.5)
+        dialog.color_full_spin.setValue(1.5)
+        dialog.target_spin.setValue(20)
+        self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.NEUTRAL_OBJECT_COLOR)
+        dialog.color_enabled_checkbox.setChecked(True)
+        self._settle_layout()
+        self.assertFalse(dialog.color_settings.isHidden())
+        self.assertFalse(dialog.legend.color_key.isHidden())
+        self.assertEqual((dialog.color_start_spin.value(),dialog.color_full_spin.value()),(.5,1.5))
+        self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.CRITICAL_COLOR)
+        self.assertEqual(dialog.ranges,ranges)
+
+    def test_xray_uses_manual_button_style_and_fades_only_the_object(self):
+        from cooling_tower.gui.widgets.manual_xray_controls import XRayControls
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        manual=XRayControls()
+        self.addCleanup(dispose_test_widget, manual)
+        self.assertEqual(dialog.xray_button.styleSheet(),manual.buttons["object"].styleSheet())
+        self.assertIsNone(dialog.resolution_control.resolution_reset)
+        self.assertFalse(dialog.rotation_controls.findChildren(QPushButton))
+        self.assertFalse(any(label.text().startswith("Originalobjekt ·") for label in dialog.findChildren(QLabel)))
+        self.assertLess(dialog.xray_button.geometry().right(),dialog.resolution_control.x())
+        canvas=dialog.canvas
+        canvas.set_ranges(())
+        point=QPoint(round(canvas.plot_rect().center().x()),round(canvas.y_for_z(self.layers[39].z_mm)))
+        for enabled in (True,False):
+            dialog.color_enabled_checkbox.setChecked(enabled)
+            opaque=canvas.grab().toImage()
+            dialog.xray_button.click()
+            faded=canvas.grab().toImage()
+            self.assertTrue(canvas.xray_enabled)
+            background=opaque.pixelColor(4,canvas.height()//2)
+            solid=opaque.pixelColor(point)
+            translucent=faded.pixelColor(point)
+            for actual,foreground,behind in zip(translucent.getRgb()[:3],solid.getRgb()[:3],background.getRgb()[:3]):
+                self.assertAlmostEqual(actual,foreground*.28+behind*.72,delta=2)
+            self.assertEqual(opaque.pixelColor(4,canvas.height()//2),faded.pixelColor(4,canvas.height()//2))
+            dialog.xray_button.click()
+            self.assertFalse(canvas.xray_enabled)
+            self.assertEqual(canvas.grab().toImage().pixelColor(point),solid)
+
+    def test_preview_caption_is_short_translucent_and_at_the_upper_left(self):
+        from cooling_tower.gui.widgets import layer_range_canvas as canvas_module
+        canvas=self.dialog.canvas
+        canvas.set_ranges(((20,70),),selected=0)
+        calls=[]
+        class RecordingPainter(QPainter):
+            def drawText(self,*args):
+                calls.append(args)
+                return super().drawText(*args)
+        with patch.object(canvas_module,"QPainter",RecordingPainter):
+            image=canvas.grab().toImage()
+        captions=[args for args in calls if isinstance(args[-1],str) and args[-1].startswith("Bereich ")]
+        self.assertEqual(len(captions),1)
+        caption=captions[0]
+        self.assertEqual(caption[-1],"Bereich 1")
+        self.assertFalse(any(isinstance(args[-1],str) and args[-1].startswith("Ausschlussbereich") for args in calls))
+        rect=canvas.range_rect((20,70))
+        self.assertEqual(caption[0].left(),rect.left()+6)
+        self.assertEqual(caption[0].top(),rect.top()+6)
+        background=image.pixelColor(round(caption[0].left()+2),round(caption[0].top()+2))
+        self.assertLess(max(background.getRgb()[:3]),255)
+
+    def test_layer_inputs_use_compact_height_without_clipping_text_or_arrows(self):
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        spins=(dialog.target_spin,dialog.color_start_spin,dialog.color_full_spin,
+               dialog.new_start_spin,dialog.new_end_spin,
+               *(spin for _,first,last,_ in dialog.range_rows for spin in (first,last)))
+        for spin in spins:
+            self.assertEqual(spin.height(),dialog.new_start_spin.height())
+            self.assertGreaterEqual(spin.lineEdit().height(),spin.lineEdit().fontMetrics().height())
+            self.assertGreaterEqual(spin.height(),spin.fontMetrics().height()+6)
+            option=QStyleOptionSpinBox();spin.initStyleOption(option)
+            for control in (QStyle.SubControl.SC_SpinBoxUp,QStyle.SubControl.SC_SpinBoxDown):
+                self.assertGreaterEqual(spin.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,option,control,spin).height(),11)
+
+    def test_slider_grip_double_click_resets_resolution_and_rotation(self):
+        dialog=self._styled_dialog()
+        self._settle_layout()
+        for slider,value,expected in ((dialog.resolution_slider,3,8),(dialog.rotation_slider,57,0)):
+            slider.setValue(value)
+            option=QStyleOptionSlider();slider.initStyleOption(option)
+            handle=slider.style().subControlRect(QStyle.ComplexControl.CC_Slider,option,
+                                                 QStyle.SubControl.SC_SliderHandle,slider)
+            QTest.mouseClick(slider,Qt.MouseButton.LeftButton,pos=handle.center())
+            QTest.mouseDClick(slider,Qt.MouseButton.LeftButton,pos=handle.center())
+            self._settle_layout()
+            self.assertEqual(slider.value(),expected)
+            self.assertFalse(slider.isSliderDown())
+        self.assertEqual(dialog.canvas.object_resolution_percent,75)
+        self.assertEqual(dialog.resolution_label.text(),"75 %")
+        self.assertEqual(dialog.canvas.yaw_deg,0)
+        self.assertEqual(dialog.rotation_label.text(),"0°")
+
+    def test_double_click_on_rotation_track_does_not_reset_the_grip(self):
+        slider=self.dialog.rotation_slider
+        slider.setValue(-90)
+        target=QPoint(slider.snap_positions()[135],slider.height()//2-3)
+        QTest.mouseClick(slider,Qt.MouseButton.LeftButton,pos=target)
+        QTest.mouseDClick(slider,Qt.MouseButton.LeftButton,pos=target)
+        self.assertNotEqual(slider.value(),0)
 
     def _styled_dialog(self):
         # Windows' offscreen backend does not enumerate installed fonts.
@@ -296,11 +586,12 @@ class LayerRangeUiTests(unittest.TestCase):
         # A styled parent supplies the font and metrics during construction.
         style_host = QWidget()
         style_host.setStyleSheet((ROOT / "src/cooling_tower/gui/styles.qss").read_text(encoding="utf-8"))
-        self.addCleanup(style_host.deleteLater)
+        self.addCleanup(dispose_test_widget, style_host)
         dialog = LayerRangeDialog(self.layers, object_segments(self.layers), target_time_s=10,
-            target_minimum=5, target_maximum=120, ranges=((1, 20), (50, 100)), parent=style_host)
+            target_minimum=5, target_maximum=120, ranges=((1, 20), (50, 100)), parent=style_host,
+            time_coloring_enabled=True, xray_enabled=False)
         dialog.show()
-        self.addCleanup(dialog.close)
+        self.addCleanup(dispose_test_widget, dialog)
         return dialog
 
     def _settle_layout(self):
@@ -323,11 +614,11 @@ class LayerRangeUiTests(unittest.TestCase):
         preferred = dialog._preferred_pane_widths[0]
 
         def assert_unwrapped():
-            self.assertEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
-                             + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2)
+            self.assertAlmostEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
+                             + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2, delta=1)
             self.assertLessEqual(dialog.color_info_button.parentWidget().height(), dialog.settings_panel.height())
             color_label = next(label for label in dialog.settings_panel.findChildren(QLabel)
-                               if label.text() == "Defizit-Einfärbung nach Mindest-Layerzeit")
+                               if label.text() == "Zeitdefizit-Einfärbung aktivieren")
             self.assertLessEqual(color_label.height(), color_label.fontMetrics().height() + 2)
             self.assertEqual(dialog.new_start_spin.parentWidget().y(), dialog.new_end_spin.parentWidget().y())
             for row, first, last, select in dialog.range_rows:
@@ -359,8 +650,9 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertGreaterEqual(canvas.y_for_z(canvas.tops[-1]), canvas.plot_rect().top() - 1)
         self.assertGreaterEqual(canvas.x_for_position(canvas._minimum_x), canvas.plot_rect().left() - 1)
         self.assertLessEqual(canvas.x_for_position(canvas._maximum_x), canvas.plot_rect().right() + 1)
-        self.assertEqual(dialog.fit_button.text(), "Objekt einpassen")
-        self.assertGreater(dialog.fit_button.y(), dialog.rotation_slider.y())
+        self.assertEqual(dialog.fit_button.text(), "Einpassen")
+        self.assertGreater(dialog.rotation_controls.y(), dialog.resolution_control.geometry().bottom())
+        self.assertEqual(dialog.fit_button.height(), dialog.xray_button.height())
         for label in dialog.preview_notes.findChildren(QLabel):
             if label.wordWrap():
                 self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
@@ -387,7 +679,9 @@ class LayerRangeUiTests(unittest.TestCase):
         fallback_limit = preferred - QSize(150, 50)
         dialog.resize(dialog.initial_size(fallback_limit))
         self._settle_layout()
-        self.assertEqual(dialog.canvas.size(), QSize(500, 500))
+        extra_toolbar_height=(dialog.preview_controls.heightForWidth(500)
+                              -dialog.preview_controls.heightForWidth(650))
+        self.assertEqual(dialog.canvas.size(), QSize(500, 500-extra_toolbar_height))
         self.assertEqual(dialog.size(), fallback_limit)
         small_limit = fallback_limit - QSize(100, 100)
         dialog.resize(dialog.initial_size(small_limit))
@@ -405,7 +699,7 @@ class LayerRangeUiTests(unittest.TestCase):
         canvas.setMinimumWidth(240)
         canvas.set_ranges(((20, 50),), selected=0)
         canvas.show()
-        self.addCleanup(canvas.close)
+        self.addCleanup(dispose_test_widget, canvas)
         previous = None
         for width in (650, 500, 400, 280, 240):
             canvas.resize(width, 500)
@@ -454,8 +748,8 @@ class LayerRangeUiTests(unittest.TestCase):
         self._settle_layout()
         self.assertGreater(dialog.settings_panel.minimumWidth(), original_width)
         self.assertEqual(dialog.settings_panel.minimumWidth(), dialog._unwrapped_settings_width())
-        self.assertEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
-                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2)
+        self.assertAlmostEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
+                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2, delta=1)
         dialog.set_ranges(tuple((layer, layer) for layer in range(1, 21, 2)))
         self._settle_layout()
         self.assertEqual(len(dialog.range_rows), 10)
@@ -467,14 +761,30 @@ class LayerRangeUiTests(unittest.TestCase):
 
     def test_legend_shows_gradient_and_caption_without_numeric_labels(self):
         texts = [label.text() for label in self.dialog.legend.findChildren(QLabel)]
-        self.assertEqual(texts, ["Layerzeit-Defizit",
-            "Ausschlussbereiche: Enthaltene Layerzeit-Defizite werden ignoriert"])
+        expected=("• In diesen Bereichen wird der Turm keine zusätzliche Layerzeit erzeugen<br>"
+                  "• Der Turm wird, wenn möglich, bis auf seinen Min.-Durchmesser schrumpfen.<br>"
+                  "• Ausnahmen: Der Standfuß und nötige Aufweitungen für nicht-ausgeschlossene Bereiche")
+        self.assertEqual(texts,["Layerzeit-Defizit","<b>Ausschlussbereiche:</b>",expected])
+        self.assertNotIn("<ul",expected)
+        self.assertIn(self.dialog.canvas.NEUTRAL_OBJECT_COLOR,self.dialog.legend.exclusion_swatch.styleSheet())
+
+    def test_legend_swatch_is_centered_on_title_and_bullets_start_below_it(self):
+        dialog=self._styled_dialog()
+        legend=dialog.legend
+        for size in (10,14):
+            legend.exclusion_title.setStyleSheet(f"font-size: {size}pt;")
+            legend.exclusion_text.setStyleSheet(f"font-size: {size}pt;")
+            self._settle_layout()
+            title=legend.exclusion_title
+            self.assertAlmostEqual(legend.exclusion_swatch.geometry().center().y(),title.geometry().center().y(),delta=1)
+            self.assertEqual(legend.exclusion_text.x(),title.x())
+            self.assertEqual(legend.exclusion_text.y(),title.geometry().bottom()+1)
 
     def test_empty_list_hint_wraps_without_affecting_preferred_width(self):
         self._styled_dialog()
         dialog = LayerRangeDialog(self.layers, object_segments(self.layers), target_time_s=10,
             target_minimum=5, target_maximum=120)
-        self.addCleanup(dialog.close)
+        self.addCleanup(dispose_test_widget, dialog)
         dialog.show()
         self._settle_layout()
         hint = dialog.rows_host.findChild(QLabel, "layerRangeEmptyHint")
@@ -531,7 +841,7 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertFalse(reset.isEnabled())
         custom = LayerRangeDialog(self.layers, object_segments(self.layers), target_time_s=15,
             target_minimum=5, target_maximum=120, target_default=12)
-        self.addCleanup(custom.close)
+        self.addCleanup(dispose_test_widget, custom)
         custom.target_reset_button.click()
         self.assertEqual(custom.target_spin.value(), 12)
 
@@ -568,13 +878,13 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertLessEqual(dialog.settings_panel.width(), dialog._preferred_pane_widths[0] + 4)
         self.assertEqual(dialog.color_start_spin.prefix(), "≤ ")
         self.assertEqual(dialog.color_full_spin.prefix(), "≥ ")
-        for spin in (dialog.target_spin, dialog.color_start_spin, dialog.color_full_spin, dialog.new_start_spin):
+        for spin in (dialog.target_spin, dialog.color_start_spin, dialog.color_full_spin):
             metrics = spin.lineEdit().fontMetrics()
             spare = self._usable_editor_width(spin) - metrics.horizontalAdvance(spin.text())
             self.assertGreaterEqual(spare, metrics.horizontalAdvance("0") - 1)
             self.assertLessEqual(spare, metrics.horizontalAdvance("0") + 2)
-        self.assertEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
-                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2)
+        self.assertAlmostEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
+                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2, delta=1)
         row, first, last, select = dialog.range_rows[0]
         remove = next(button for button in row.findChildren(QPushButton) if button.text() == "Entfernen")
         self.assertEqual(remove.y(), select.y())
@@ -582,37 +892,56 @@ class LayerRangeUiTests(unittest.TestCase):
         old_width = dialog.new_start_spin.width()
         dialog.new_start_spin.setValue(100)
         self._settle_layout()
-        self.assertGreater(dialog.new_start_spin.width(), old_width)
+        self.assertEqual(dialog.new_start_spin.width(), old_width)
         self.assertEqual(dialog.new_end_spin.parentWidget().y(), dialog.new_start_spin.parentWidget().y())
         dialog.splitter.setSizes([650, 500])
         self._settle_layout()
-        self.assertEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
-                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2)
+        self.assertAlmostEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
+                         + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2, delta=1)
         self.assertEqual(remove.y(), select.y())
         self.assertEqual(last.parentWidget().y(), first.parentWidget().y())
 
     def test_rotation_fit_shortens_then_wraps_and_preview_notes_scroll(self):
         dialog = self._styled_dialog()
         dialog.resize(1200, 800)
-        controls = dialog.rotation_controls
+        controls = dialog.preview_controls
         # Exercise each responsive stage at its exact width independently.
         stylesheet = dialog.parentWidget().styleSheet()
         controls.setParent(None)
         controls.setStyleSheet(stylesheet)
         controls.show()
-        self.addCleanup(controls.close)
+        self.addCleanup(dispose_test_widget, controls)
         self._settle_layout()
-        widths = controls._widths()
-        base = sum(widths[:4]) + 4 * 6
-        for width, text, wrapped in ((base + widths[4] + 8, "Objekt einpassen", False),
-                                     (base + widths[5] + 2, "Einpassen", False),
-                                     (max(240, base - 6), "Objekt einpassen", True)):
+        for width, xray_text, text, wrapped in (
+                (controls._horizontal_width(0), "X-Ray (Transparenz)", "Objekt einpassen", False),
+                (controls._horizontal_width(1), "X-Ray", "Objekt einpassen", False),
+                (controls._horizontal_width(2), "X-Ray", "Einpassen", False),
+                (controls.minimumSizeHint().width(), "X-Ray", "Einpassen", True)):
             controls.resize(width, controls.heightForWidth(width))
             self._settle_layout()
             self.assertEqual(dialog.fit_button.text(), text)
-            self.assertEqual(dialog.fit_button.y() > dialog.rotation_slider.y(), wrapped)
+            self.assertEqual(dialog.xray_button.text(), xray_text)
+            resolution=dialog.resolution_control
+            self.assertEqual(dialog.rotation_controls.y() > resolution.geometry().bottom(), wrapped)
+            if wrapped:
+                self.assertEqual(resolution.x(),dialog.rotation_controls.x())
+                self.assertEqual(dialog.xray_button.x(),dialog.fit_button.x())
+                self.assertEqual(dialog.xray_button.width(),dialog.fit_button.width())
+                self.assertGreater(dialog.fit_button.y(),dialog.xray_button.geometry().bottom())
+                self.assertLess(dialog.rotation_controls.geometry().right(),dialog.fit_button.x())
+                self.assertEqual(dialog.fit_button.geometry().right(),controls.width()-1)
+            else:
+                self.assertEqual(resolution.y(), dialog.rotation_controls.y())
+                self.assertLess(resolution.geometry().right(), dialog.rotation_controls.x())
+                self.assertEqual(dialog.fit_button.geometry().right(), controls.width()-1)
+            self.assertEqual(dialog.fit_button.height(),dialog.xray_button.height())
+            self.assertEqual(dialog.fit_button.geometry().bottom(),dialog.rotation_controls.geometry().bottom())
+            if not wrapped:
+                self.assertEqual(dialog.fit_button.geometry().bottom(),
+                    dialog.xray_button.mapTo(controls,QPoint()).y()+dialog.xray_button.height()-1)
+            self.assertFalse(dialog.rotation_controls.end_labels.labels[-90].isHidden())
+            self.assertFalse(dialog.rotation_controls.end_labels.labels[90].isHidden())
             self.assertGreaterEqual(controls.height(), controls.heightForWidth(controls.width()))
-            self.assertLessEqual(dialog.fit_button.geometry().right(), controls.width())
         dialog.preview_notes.setMaximumHeight(64)
         dialog.color_full_spin.setValue(2)
         dialog.color_start_spin.setValue(1.9)
@@ -747,9 +1076,9 @@ class LayerRangeUiTests(unittest.TestCase):
         QTest.mouseMove(canvas, self._point(30))
         self.assertFalse(canvas.join_hint.isHidden())
         region = canvas.range_rect((30, 40))
-        color = canvas.grab().toImage().pixelColor(round(region.left() + 4), round(region.center().y()))
-        self.assertGreater(color.red(), 190)
-        self.assertGreater(color.green(), 190)
+        color = canvas.grab().toImage().pixelColor(round(region.left()), round(region.center().y()))
+        self.assertGreater(color.green(), color.red())
+        self.assertGreater(color.green(), color.blue())
         QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=self._point(30))
         self.app.processEvents()
         self.assertTrue(canvas.join_hint.isHidden())
@@ -930,12 +1259,20 @@ class LayerRangeUiTests(unittest.TestCase):
                 dialog.color_full_spin.setValue(.7)
                 self.assertEqual(window.collect_settings(), original)
                 self.assertEqual(window._range_color_thresholds, (0, 1))
+                self.assertFalse(dialog.color_enabled_checkbox.isChecked())
+                self.assertFalse(dialog.xray_button.isChecked())
+                dialog.color_enabled_checkbox.setChecked(True)
+                dialog.xray_button.setChecked(True)
+                self.assertFalse(window._range_time_coloring_enabled)
+                self.assertFalse(window._range_xray_enabled)
                 dialog.apply_button.click()
                 self.app.processEvents()
                 self.assertIsNone(window._layer_range_dialog)
                 self.assertEqual(window.collect_settings().excluded_layer_ranges, ((10, 20),))
                 self.assertAlmostEqual(window.target_time_spin.value(), 15.1)
                 self.assertEqual(window._range_color_thresholds, (.1, .7))
+                self.assertTrue(window._range_time_coloring_enabled)
+                self.assertTrue(window._range_xray_enabled)
                 window.target_time_spin.stepDown()
                 self.assertAlmostEqual(window.target_time_spin.value(), 15)
                 accepted = window.collect_settings()
@@ -947,6 +1284,10 @@ class LayerRangeUiTests(unittest.TestCase):
                     self.assertEqual(dialog.target_spin.value(), 15)
                     self.assertEqual(dialog.color_start_spin.value(), .1)
                     self.assertEqual(dialog.color_full_spin.value(), .7)
+                    self.assertTrue(dialog.color_enabled_checkbox.isChecked())
+                    self.assertTrue(dialog.xray_button.isChecked())
+                    dialog.color_enabled_checkbox.setChecked(False)
+                    dialog.xray_button.setChecked(False)
                     dialog.target_spin.setValue(30)
                     dialog.commit_range(-1, 35, 45)
                     dialog.color_start_spin.setValue(.2)
@@ -963,6 +1304,8 @@ class LayerRangeUiTests(unittest.TestCase):
                     self.assertIsNone(window._layer_range_dialog)
                     self.assertEqual(window.collect_settings(), accepted)
                     self.assertEqual(window._range_color_thresholds, (.1, .7))
+                    self.assertTrue(window._range_time_coloring_enabled)
+                    self.assertTrue(window._range_xray_enabled)
                 window.show_layer_range_tool()
                 self.assertEqual(window._layer_range_dialog.ranges, ((10, 20),))
                 self.assertEqual(window._layer_range_dialog.color_start_spin.value(), .1)
@@ -991,7 +1334,7 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertEqual(self.dialog.ranges, ((10, 25),))
         self.assertEqual(self.dialog.result(), self.dialog.DialogCode.Accepted)
 
-    def test_automatic_drawing_top_down_names_and_rotation_reset(self):
+    def test_automatic_drawing_top_down_names_and_rotation_controls(self):
         canvas = self.dialog.canvas
         self.assertFalse(any(button.text() in ("+ Bereich zeichnen", "Bereich entfernen")
                              for button in self.dialog.findChildren(QPushButton)))
@@ -1004,10 +1347,10 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertEqual([(a.value(), b.value(), button.text()) for _, a, b, button in self.dialog.range_rows],
                          [(30, 40, "Ausschlussbereich 1"), (10, 20, "Ausschlussbereich 2")])
         self.dialog.rotation_slider.setValue(45)
-        self.assertTrue(self.dialog.rotation_reset_button.isEnabled())
-        self.dialog.rotation_reset_button.click()
+        self.assertEqual(canvas.yaw_deg, 45)
+        self.assertFalse(self.dialog.rotation_controls.findChildren(QPushButton))
+        self.dialog.rotation_slider.setValue(0)
         self.assertEqual(canvas.yaw_deg, 0)
-        self.assertFalse(self.dialog.rotation_reset_button.isEnabled())
         self.assertEqual(self.dialog.ranges, ((30, 40), (10, 20)))
         # Escape cancels one drawing gesture; the next is immediately possible.
         QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=self._point(60))
@@ -1035,7 +1378,7 @@ class LayerRangeUiTests(unittest.TestCase):
         slider.setSliderDown(False)
         slider.setValue(87)
         self.assertEqual(self.dialog.canvas.yaw_deg, 87)
-        self.assertEqual(slider.tickInterval(), 90)
+        self.assertEqual(slider.tickInterval(), 45)
 
     def test_color_reset_updates_both_limits_atomically_in_the_draft(self):
         dialog = self.dialog
@@ -1176,9 +1519,11 @@ class LayerRangeUiTests(unittest.TestCase):
     def test_dense_layers_do_not_cancel_each_other_in_heatmap(self):
         layers = tuple(make_layer(i, i * .1, .1, 10) for i in range(1, 1001))
         canvas = LayerRangeCanvas(layers, object_segments(layers))
+        canvas.set_time_coloring_enabled(True)
+        canvas.set_xray_enabled(False)
         canvas.resize(360, 360)
         canvas.show()
-        self.addCleanup(canvas.close)
+        self.addCleanup(dispose_test_widget, canvas)
         image = canvas.grab().toImage()
         x = round(canvas.plot_rect().center().x())
         top, bottom = round(canvas.y_for_z(layers[-1].z_mm)), round(canvas.y_for_z(0))
@@ -1189,7 +1534,7 @@ class LayerRangeUiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             window = MainWindow(user_settings_path=Path(temporary) / "settings.json",
                 enable_update_check=False, enable_startup_slicer_discovery=False)
-            self.addCleanup(window.close)
+            self.addCleanup(dispose_test_widget, window)
             window.source_artifact = SourceArtifact.capture(ROOT / "input/Test-STL (manifold).stl", source_kind=SourceKind.STL)
             snapshot = make_snapshot(Path(temporary) / "source.gcode", (1,) * 100)
             window.analysis_snapshot = snapshot

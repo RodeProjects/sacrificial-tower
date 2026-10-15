@@ -170,9 +170,22 @@ Links stehen die gespiegelte Mindest-Layerzeit, die beiden Farbgrenzen und
 darunter die Layerbereiche;
 rechts steht die Seitenansicht des Originalobjekts. Alle Eingaben bearbeiten
 zunächst einen Entwurf. Rechts unten übernimmt der grüne Button „Übernehmen“
-die Layerbereiche, Mindest-Layerzeit und Farbgrenzen gemeinsam. „Abbrechen“,
+die Layerbereiche, Mindest-Layerzeit, Farbgrenzen und Anzeigeoptionen gemeinsam. „Abbrechen“,
 Esc und das Schließen des Fensters verwerfen den Entwurf vollständig.
-Über der Vorschau steht derselbe **Auflösung**-Regler wie im manuellen Editor:
+Über der Vorschau stehen **Auflösung** links und **Objekt drehen** rechts
+nebeneinander. Beide verwenden die Regler- und Greifergestaltung des manuellen
+Editors mit der Beschriftung über der Leiste. Nur im Bereichseditor entfällt
+der Zusatz „(STL)“ im Auflösungstitel.
+Die bisherige Überschrift „Originalobjekt · Seitenansicht · … Layer“ und die
+Reset-Buttons der beiden Regler entfallen. Links neben der Auflösung schaltet
+„X-Ray (Transparenz)“ die Transparenz des gesamten Originalobjekts wie im manuellen
+Modus. Die neutrale Objektfarbe verwendet in beiden Editoren denselben etwas
+kräftigeren Blauton; Netzflächen, Silhouette und Legende verwenden die gemeinsame Palette.
+Im Bereichseditor ist X-Ray standardmäßig ausgeschaltet.
+Ein Doppelklick auf den Greifer stellt die Auflösung auf 75 % beziehungsweise die
+Drehung auf 0° zurück. Das gilt auch für dieselben Regler im manuellen Modus;
+Doppelklicks auf die freie Leiste lösen diesen Reset nicht aus.
+Der Auflösungsregler bietet wie im manuellen Editor:
 Standard 75%, neun Stufen von 0% (Silhouette) bis 100%. Er verändert nur die
 Darstellung. STL-Flächen und exakte Konturen werden mit der gemeinsamen manuellen
 Mesh-Aufbereitung geladen; anspruchsvolle Bilder entstehen in verwalteten,
@@ -187,6 +200,14 @@ die Pfeilbuttons ändern sie in Schritten von 0,1 Sekunden. Das Eingabefeld steh
 rechts neben dem Label „Gew. Min-Layerzeit“. Ein gleichhoher Reset-Button
 rechts vom Eingabefeld stellt den Standardwert aus den Benutzervorgaben des
 Hauptfensters wieder her und ist bei diesem Wert deaktiviert.
+„Zeitdefizit-Einfärbung aktivieren“ besitzt rechts eine Checkbox und ist zunächst
+deaktiviert. Einschalten zeigt Farbregler, Wertefelder und Farbverlaufslegende;
+Ausschalten blendet sie wieder aus.
+Die Grenzwerte bleiben für ein späteres Einschalten erhalten; währenddessen zeigt
+die Vorschau das Objekt ohne Zeitdefizitfarben in Hellblau, bei jeder Auflösungsstufe.
+X-Ray wirkt unabhängig von der Einfärbung und lässt Bereichsmarkierungen unverändert.
+Übernommene Anzeigeoptionen bleiben beim erneuten Öffnen in derselben Programmsitzung
+erhalten. Sie verändern weder Analyse noch Generierung oder gespeicherte Benutzervorgaben.
 Die linke Spalte startet mit der für alle ungekürzten Beschriftungen
 und einzeiligen Bedienelemente erforderlichen Breite, einschließlich der
 Bereichsliste und ihres Scrollbalkens.
@@ -198,8 +219,17 @@ die Vorschau; das Objekt behält dabei seine Proportionen. Ihre Bedienleiste,
 Hinweise und Legende umbrechen nach verfügbarem Platz. Die bisherige
 500-px-Mindestbreite der Vorschau entfällt. Wertefelder reservieren neben dem angezeigten Wert und
 der Einheit Platz für eine weitere Ziffer und die nötigen Text-/Cursorränder.
-Sie wachsen auch während der Eingabe und bei signalblockierten Änderungen,
-damit längere Werte nicht abgeschnitten werden.
+Die Felder für Layernummern reservieren dagegen von Anfang an Platz für die
+maximale Layernummer des aktuellen Objekts. Dadurch ändern Ziffernwechsel beim
+Verschieben oder Bearbeiten eines Bereichs weder Feld- noch Spaltenbreite und
+verschieben auch die Vorschau nicht. Schrift- und Stiländerungen sowie sonstige
+tatsächlich breitere Inhalte können die linke Spalte weiterhin anpassen.
+Alle numerischen Eingaben im Bereichseditor verwenden dieselben kompakten
+vertikalen Innenabstände: Layerfelder, Mindest-Layerzeit und Farbgrenzen.
+Text und native Pfeilbuttons bleiben vollständig sichtbar. Die zugehörigen
+Eingabe-Resets passen ihre Höhe an diese Felder an.
+Andere Wertefelder wachsen auch während der Eingabe und bei signalblockierten
+Änderungen, damit längere Werte nicht abgeschnitten werden.
 Das Werkzeug öffnet sich mit der für seine Inhalte nötigen Größe und einer
 Vorschaufläche von bevorzugt 650 × 550 px. Reicht der Bildschirmplatz dafür
 nicht, wird die Startgröße begrenzt; 500 × 500 px bleiben erhalten, wenn
@@ -229,7 +259,19 @@ weitere Bereiche auf freien Flächen angelegt werden. Neue Bereiche sind
 alternativ mit den Layereingaben und dem grünen Hinzufügen-Button möglich.
 Die Liste und die Namen „Ausschlussbereich 1/2/3 …“ sind absteigend nach Höhe geordnet: Ausschlussbereich 1
 ist der oberste Bereich. Die Modell-/Generierungsdaten bleiben aufsteigend
-normalisiert. Beim Auswählen scrollt die Liste den gesamten Bereichseintrag
+normalisiert. Jede Karte besitzt eine bündige zweigeteilte Kopfzeile ohne
+Zwischenraum oder Außenpadding: Der Bereichsbutton nimmt die verbleibende
+Breite ein, „Entfernen“ nur seine erforderliche Textbreite mit Buttonpadding.
+Die äußeren oberen Ecken sind abgerundet; die gemeinsame Naht ist gerade.
+Eine dunklere horizontale Trennlinie unter beiden Kopfbuttons sowie eine
+senkrechte Linie zwischen ihnen setzen den Kopf klar ab. Ausgewählte Karten
+verwenden im Eingabebereich einen dezenten, zum übrigen Design passenden hellblauen Hintergrund.
+Der Bereichsbutton behält auch bei Auswahl den üblichen grauen Farbverlauf.
+„Entfernen“ verwendet dieselbe rote Farbgebung wie „Abbrechen“ im Fußbereich.
+Der Abstand zu den darunterliegenden Layereingaben bleibt bestehen.
+In der Vorschau steht dagegen nur „Bereich x“ ohne Layerangabe links oben in
+der jeweiligen Auswahlfläche, auf einem leicht transparenten Texthintergrund.
+Beim Auswählen scrollt die Liste den gesamten Bereichseintrag
 in den sichtbaren Ausschnitt. Ein unveränderter Klick baut die Liste nicht neu
 auf. Notwendige Anpassungen nach Änderungen berücksichtigen die verzögerte
 Aktualisierung des Scrollbereichs durch Qt; manuelles Scrollen bleibt möglich.
@@ -244,16 +286,22 @@ Rahmen vom Fenster abgesetzt. Das Mausrad zoomt mit unveränderten Proportionen
 an der Zeigerposition, die mittlere Maustaste verschiebt die Ansicht in beiden
 Achsen. Der Drehregler oder horizontales Ziehen mit der rechten Maustaste
 dreht das Originalobjekt um seine eigene vertikale Achse. Der Drehregler zeigt
-Markierungen alle 90° und rastet beim Ziehen bei weniger als 10° Abstand an diesen Punkten
+Markierungen alle 45° und rastet beim Ziehen weiterhin bei weniger als 10° Abstand an 90°-Punkten
 ein. Andere Winkel bleiben einstellbar; die Tastatur erlaubt exakte Einzelschritte.
-Der Reset rechts
-am Regler setzt ausschließlich die Drehung auf 0° zurück. Rechts daneben steht
-„Objekt einpassen“. Bei Platzmangel schrumpft zuerst der freie Reglerraum,
-dann heißt der Button „Einpassen“. Reicht auch das nicht, steht er wieder mit
-vollständigem Text unter dem Drehregler. Der Button
+Rechts neben den Reglern steht
+„Objekt einpassen“. Bei Platzmangel schrumpft zuerst der freie Reglerraum.
+Danach heißt der linke Button nur „X-Ray“, anschließend der rechte „Einpassen“.
+Sobald die Drehleiste ihre ±90°-Beschriftungen
+nicht mehr vollständig anzeigen könnte, stehen die beiden Leisten untereinander.
+Die Buttons bilden dann rechts eine gleich breite Spalte: X-Ray neben der Auflösung
+oben, Einpassen neben der Drehleiste unten. Beide Leisten stehen links davon
+bündig übereinander. Der Einpassen-Button schließt mit der unteren Reglergruppe ab,
+hat dieselbe Höhe wie der X-Ray-Button und bleibt unmittelbar über der Vorschau. Er
 stellt den vollständigen Höhenbereich wieder her, ohne Bereiche oder Drehung zu ändern.
 Er ist nur aktiv, wenn Zoom oder Verschiebung von der eingepassten Ansicht
-abweichen. Einpassen oder Zurückzoomen zur Ausgangsansicht deaktiviert ihn wieder.
+abweichen und erscheint dann wie im manuellen Modus grün. In der eingepassten
+Ansicht bleibt er grau und deaktiviert. Einpassen oder Zurückzoomen zur
+Ausgangsansicht deaktiviert ihn wieder.
 
 Überlappende und direkt angrenzende Bereiche bilden eine gemeinsame Union.
 Beim Ziehen bleiben die numerischen Bereichszeilen zunächst stabil; erst beim
@@ -295,10 +343,28 @@ Beide Grenzen
 und die Legende aktualisieren sich im Entwurf sofort, ohne die Zielzeit oder die
 Turmberechnung zu verändern. Übernommene Ansichtseinstellungen bleiben innerhalb
 der laufenden Programmsitzung beim erneuten Öffnen und bei Quellenwechseln
-erhalten. Ausschlussbereiche liegen als transparente blaue
-Fläche darüber. Die Legende steht links unten im Vorschaubereich.
+erhalten. Bei STL-Auflösungen über 0 % nehmen die schattierten Objektflächen,
+Netzkanten und Knoten selbst die höhenabhängigen Layerfarben an. Deckende
+Layerlinien über dem Netz entfallen; Details, Öffnungen und getrennte Inseln
+bleiben sichtbar. Die Profilansichten verwenden dafür ein höhenbezogenes
+Flächenmaterial, auch bei der im Hintergrund gerasterten Detailvorschau.
+Die Topologie-Netzlinien des Originalobjekts verwenden in beiden Editoren
+kosmetische 0,5-Pixel-Stifte. Die Originalkontur bleibt davon unberührt.
+Bereichseditor und manuelle Vorschau verwenden dieselbe Objektpalette mit dezenten
+Netzkanten und Knoten nahe an der jeweiligen Flächenfarbe. Objektfarbe und
+Netzkontrast sind zentral festgelegt; Kontur und Layerfarben behalten ihre Darstellung.
+Ausschlussbereiche besitzen eine sehr leichte rote diagonale Kreuzschraffur
+im 12-Pixel-Raster sowie eine dezente transparente Auswahlfläche; dunkelblaue Rahmen und Greifer kennzeichnen
+weiterhin Auswahl und Zusammenführung. Die Schraffur gilt auch für den gerade
+gezogenen Entwurf, wird immer nach dem Objektbild darüber gezeichnet und
+verändert weder Layerzeiten noch die Defizitfarben.
+Die Legende steht links unten im Vorschaubereich.
 Sie zeigt den Farbbalken und rechts daneben „Layerzeit-Defizit“ ohne Zahlen
 unter dem Balken; die Grenzwerte stehen bei den Einstellungen.
+Der Ausschluss-Hinweis verwendet die neutrale blaue Objektfarbe als Farbmuster,
+den fetten Titel „Ausschlussbereiche:“ und darunter drei bündige Stichpunkte:
+keine zusätzliche Layerzeit, Schrumpfen bis zum Mindestdurchmesser, sofern möglich, sowie die
+Ausnahmen für Standfuß und nötige Aufweitungen zu nicht ausgeschlossenen Bereichen.
 Bedienhinweise und Legendentexte umbrechen nach verfügbarer Breite; bei
 Platzmangel werden sie über Scrollbars vollständig erreichbar gehalten.
 Die Kontur

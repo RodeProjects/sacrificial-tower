@@ -6,13 +6,16 @@ from collections import defaultdict
 from bisect import bisect_left
 import numpy as np
 from PySide6.QtCore import QPointF,QLineF,QRectF,Qt,Signal,Slot
-from PySide6.QtGui import QImage,QPicture,QPainter,QPainterPath,QPolygonF,QPen,QColor
+from PySide6.QtGui import QBrush,QLinearGradient,QImage,QPicture,QPainter,QPainterPath,QPolygonF,QPen,QColor
 from cooling_tower.gui.worker_contract import CancelableWorker
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE,ORIGINAL_OBJECT_TOPOLOGY_DARKENING
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.manual.service import check_cancel
 from cooling_tower.preview import PreviewCancelled
 from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 from cooling_tower.preview.display_mesh import SMALL_MESH_FACES,simplify_display_mesh
+
+OBJECT_TOPOLOGY_WIDTH_PX = .5
 
 
 @dataclass(frozen=True,slots=True)
@@ -76,7 +79,7 @@ def shaded_color(color,brightness):
     return QColor(*(min(255,round(channel*brightness)) for channel in (color.red(),color.green(),color.blue())))
 
 
-def surface_styles(color,brightness):
+def surface_styles(color,brightness,*,topology_darkening=ORIGINAL_OBJECT_TOPOLOGY_DARKENING):
     """Create each exact quantized fill/edge/node style once per render job."""
     channels=np.array((color.red(),color.green(),color.blue()))
     shades=np.minimum(255,np.rint(brightness[:,None]*channels)).astype(np.uint8)
@@ -84,11 +87,61 @@ def surface_styles(color,brightness):
     styles=[]
     for shade in unique:
         fill=QColor(*map(int,shade))
-        edge=cosmetic_pen(fill.darker(125),0)
-        node=cosmetic_pen(fill.darker(145),0)
+        edge=cosmetic_pen(fill.darker(topology_darkening[0]),OBJECT_TOPOLOGY_WIDTH_PX)
+        node=cosmetic_pen(fill.darker(topology_darkening[1]),OBJECT_TOPOLOGY_WIDTH_PX)
         node.setCapStyle(Qt.PenCapStyle.RoundCap)
         styles.append((fill,edge,node))
     return styles,indices
+
+
+def profile_surface_styles(reference,frame,settings,brightness,event,*,topology_darkening=ORIGINAL_OBJECT_TOPOLOGY_DARKENING):
+    """Tint the lit mesh itself by height, including its original edges/nodes.
+
+    In profile views screen height depends only on Z. A material gradient can
+    therefore retain exact layer bands without painting section lines over the
+    mesh or splitting every triangle at every original layer boundary.
+    """
+    layers=reference.context.layers
+    height=layers[-1].z_mm
+    stops=[]
+    previous=None
+    for index,layer in enumerate(layers):
+        check_cancel(event)
+        color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
+            settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+        if color != previous:
+            if index:
+                boundary=layers[index-1].z_mm/height
+                epsilon=min(1e-7,(layer.z_mm-layers[index-1].z_mm)/height/4)
+                stops.append((max(0,boundary-epsilon),previous))
+            else:boundary=0.
+            stops.append((boundary,color))
+            previous=color
+    stops.append((1.,previous))
+    points,_=frame.project(np.array([(0,0,0),(0,0,height)]))
+
+    def brush(factor=1.,darkening=100,*,backing=False):
+        gradient=QLinearGradient(0,float(points[0,1]),0,float(points[1,1]))
+        for position,color in stops:
+            shade=shaded_color(color,factor).darker(darkening)
+            if backing:
+                shade=shade.lighter(135)
+                shade.setAlpha(210)
+            gradient.setColorAt(position,shade)
+        return QBrush(gradient)
+
+    # Bound the number of gradient palettes independently of triangle count.
+    levels,indices=np.unique(np.rint(brightness*1024).astype(np.int16),return_inverse=True)
+    edge_darkening,node_darkening=topology_darkening
+    styles=[]
+    for level in levels:
+        check_cancel(event)
+        factor=float(level)/1024
+        edge=cosmetic_pen(brush(factor,edge_darkening),OBJECT_TOPOLOGY_WIDTH_PX)
+        node=cosmetic_pen(brush(factor,node_darkening),OBJECT_TOPOLOGY_WIDTH_PX)
+        node.setCapStyle(Qt.PenCapStyle.RoundCap)
+        styles.append((brush(factor),edge,node))
+    return styles,indices,brush(backing=True),cosmetic_pen(brush(darkening=125),1)
 
 
 def draw_surface(painter,polygon,color,brightness,style=None):
@@ -101,7 +154,7 @@ def draw_surface(painter,polygon,color,brightness,style=None):
     else:
         fill,edge,node=style
     painter.setBrush(fill)
-    # Width zero is Qt's intrinsic one-pixel pen.
+    # Cached object styles use half-pixel lines; the tower keeps its native pen.
     painter.setPen(edge)
     painter.drawPolygon(polygon)
     painter.setPen(node)
@@ -126,7 +179,7 @@ class RasterObjectPicture(QPicture):
         self.raster_size=(0,0)
 
 
-def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact_contour):
+def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact_contour,contour_pen=None):
     """Bound GUI replay cost to one image, independent of source face count.
 
     Rasterization stays in the worker. Original contours remain vector paths
@@ -162,7 +215,8 @@ def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact
             painter.setClipping(False)
             if exact_contour and silhouette is not None and not silhouette.isEmpty():
                 painter.setOpacity(opacity)
-                painter.strokePath(silhouette,cosmetic_pen(QColor("#429baa").darker(125),1))
+                painter.strokePath(silhouette,contour_pen if contour_pen is not None
+                    else cosmetic_pen(QColor(ORIGINAL_OBJECT_BLUE).darker(125),1))
         finally:painter.end()
         if opacity!=1:result.xray_picture=picture
     check_cancel(event)
@@ -172,7 +226,9 @@ def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact
 def silhouette_backing_color():
     # Keep the full contour visible around reduced facets without flattening
     # their shading. Object X-Ray still applies to the complete original.
-    return QColor(173,211,238,210)
+    color=QColor(ORIGINAL_OBJECT_BLUE).lighter(115)
+    color.setAlpha(210)
+    return color
 
 
 def render_silhouette_backing(reference,frame,event=None):
@@ -181,7 +237,7 @@ def render_silhouette_backing(reference,frame,event=None):
         path=original_silhouette_path(reference,frame,event)
         painter.fillPath(path,silhouette_backing_color())
         if reliable_original_contours(reference):
-            painter.strokePath(path,cosmetic_pen(QColor("#429baa").darker(125),1))
+            painter.strokePath(path,cosmetic_pen(QColor(ORIGINAL_OBJECT_BLUE).darker(125),1))
     finally:painter.end()
     return picture
 
@@ -204,13 +260,22 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
     projected,depth=frame.project(triangles)
     brightness=surface_brightness(triangles,frame)
     order=np.argsort(depth.mean(axis=1))
-    base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa")
+    base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled
+                      else getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE))
     silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
-    styles,style_indices=surface_styles(base_color,brightness)
+    backing=silhouette_backing_color()
+    contour_pen=cosmetic_pen(base_color.darker(125),1)
+    profile_colors=(settings.critical_layers_enabled and frame.pitch == 0
+                    and bool(reference.context.layers) and reference.context.layers[-1].z_mm > 0)
+    if profile_colors:
+        styles,style_indices,backing,contour_pen=profile_surface_styles(
+            reference,frame,settings,brightness,event)
+    else:
+        styles,style_indices=surface_styles(base_color,brightness)
     dense=len(reference.object_triangles)>SMALL_MESH_FACES
     show_edges=settings.object_resolution_percent>=75
     groups=defaultdict(list)
-    if settings.critical_layers_enabled:
+    if settings.critical_layers_enabled and not profile_colors:
         for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
             check_cancel(event)
             color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
@@ -227,7 +292,7 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
     def paint(painter,opacity=1,outline=True):
         painter.setOpacity(opacity)
         if silhouette is not None and not silhouette.isEmpty():
-            painter.fillPath(silhouette,silhouette_backing_color())
+            painter.fillPath(silhouette,backing)
             painter.setClipPath(silhouette)
         for i,index in enumerate(order):
             if i%512==0:check_cancel(event)
@@ -241,11 +306,16 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
         if silhouette is not None and not silhouette.isEmpty():
             painter.setClipping(False)
             if outline and reliable_original_contours(reference):
-                painter.strokePath(silhouette,cosmetic_pen(base_color.darker(125),1))
+                painter.strokePath(silhouette,contour_pen)
         check_cancel(event)
 
-    if dense and vector and len(projected):
-        return _raster_object_picture(projected,silhouette,frame,settings,paint,event,reliable_original_contours(reference))
+    # QPicture serializes material stops on brush changes. Many alternating
+    # layer colors must use the same bounded worker raster as a dense mesh.
+    complex_material=(profile_colors and bool(styles)
+        and len(styles[0][0].gradient().stops())*len(projected)>50_000)
+    if vector and len(projected) and (dense or complex_material):
+        return _raster_object_picture(projected,silhouette,frame,settings,paint,event,
+            reliable_original_contours(reference),contour_pen if profile_colors else None)
     painter=QPainter(image)
     try:
         paint(painter,.28 if not vector and frame.highlight in {"object","all"} else 1)
@@ -359,7 +429,7 @@ def render_silhouette_object(reference,frame,settings,event,image):
                     y1,y2=heights[:,1]
                     color=(LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
                         settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
-                        if settings.critical_layers_enabled else QColor("#429baa"))
+                        if settings.critical_layers_enabled else QColor(ORIGINAL_OBJECT_BLUE))
                     for left,right in zip(lower[starts],upper[ends]):
                         paths[color.rgb()].addRect(QRectF(float(left),min(y1,y2),float(right-left),abs(y2-y1)))
                 bottom=layer.z_mm
@@ -370,7 +440,8 @@ def render_silhouette_object(reference,frame,settings,event,image):
             # Reuse adjacency from preparation. Only silhouette vertices are
             # projected and recorded, rather than thousands of filled faces.
             path=original_silhouette_path(reference,frame,event)
-            painter.fillPath(path,QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled else "#429baa"))
+            painter.fillPath(path,QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled
+                                        else getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE)))
             if settings.critical_layers_enabled:
                 for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
                     check_cancel(event)
@@ -410,7 +481,8 @@ def render_spatial_toolpaths(reference, frame, settings, event, image):
             bisect_left(tops, float(segment[:, 2].mean()) - 1e-5))]
         color = (LayerRangeCanvas.layer_color(settings.color_reference_time_s, layer.total_time_s,
                     settings.gradient_start_deficit_s, settings.gradient_full_deficit_s)
-                 if settings.critical_layers_enabled else QColor(LayerRangeCanvas.OBJECT_COLOR))
+                 if settings.critical_layers_enabled
+                 else QColor(getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE)))
         groups[color.rgb()].append(QLineF(QPointF(*screen[0]), QPointF(*screen[1])))
     painter = QPainter(image)
     try:

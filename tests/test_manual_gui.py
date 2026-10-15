@@ -1814,11 +1814,29 @@ class ManualGuiTests(unittest.TestCase):
                         self.assertIn("border-bottom-color",control.styleSheet())
                         inset=control.styleSheet().split("QPushButton:pressed, QPushButton:checked {",1)[1].split("}",1)[0]
                         self.assertIn("padding: 1px 4px 0 6px",inset)
-                        self.assertIn("stop:0 #efbc75" if name=="tower" else "stop:0 #93cee0",inset)
+                        self.assertIn("stop:0 #efbc75" if name=="tower" else "stop:0 "+c.OBJECT_COLOR,inset)
             p.highlight_buttons["tower"].click();p.highlight_buttons["object"].click()
             p.reset_all()
             self.assertEqual(c.highlight,"both")
             self.assertFalse(any(button.isChecked() for button in p.highlight_buttons.values()))
+
+    def test_slider_grip_double_click_restores_manual_preview_defaults(self):
+        p=self.panel
+        for slider,value,expected in ((p.resolution_slider,3,8),(p.rotation_slider,57,0)):
+            slider.setValue(value)
+            self.app.processEvents()
+            option=QStyleOptionSlider();slider.initStyleOption(option)
+            handle=slider.style().subControlRect(QStyle.ComplexControl.CC_Slider,option,
+                                                 QStyle.SubControl.SC_SliderHandle,slider)
+            QTest.mouseClick(slider,Qt.MouseButton.LeftButton,pos=handle.center())
+            QTest.mouseDClick(slider,Qt.MouseButton.LeftButton,pos=handle.center())
+            QTest.qWait(30);self.app.processEvents()
+            self.assertEqual(slider.value(),expected)
+            self.assertFalse(slider.isSliderDown())
+        self.assertEqual(p.settings.object_resolution_percent,75)
+        self.assertEqual(p.resolution_label.text(),"75 %")
+        self.assertEqual(p.canvas.object_rotation,0)
+        self.assertEqual(p.rotation_label.text(),"0°")
 
     def test_rotation_slider_magnetically_snaps_every_45_degrees_only_while_dragged(self):
         p=self.panel;slider=p.rotation_slider

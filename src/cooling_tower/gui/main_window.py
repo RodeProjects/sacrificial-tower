@@ -789,6 +789,8 @@ class MainWindow(QMainWindow):
         self._layer_range_silhouette = None
         self._layer_range_dialog: LayerRangeDialog | None = None
         self._range_color_thresholds = (0.0, 1.0)
+        self._range_time_coloring_enabled = False
+        self._range_xray_enabled = False
         self.tower_assessment: TowerNeedAssessment | None = None
         self.profile_feasibility: ProfileFeasibilityAssessment | None = None
         self.current_gcode_path: Path | None = None
@@ -5240,19 +5242,22 @@ class MainWindow(QMainWindow):
                 for installation in result.installations
                 if installation.verified and installation.can_slice
             )
-            preferred_key = (
-                (previous_key if getattr(self, "_profile_rescan_selections", None)
-                 and any(item.identity_key == previous_key for item in verified_installations) else None)
-                or result.last_used_key
-                or (
-                    previous_key
-                    if any(
-                        installation.identity_key == previous_key
-                        for installation in verified_installations
+            available_keys = {
+                item.identity_key for item in verified_installations
+            }
+            preferred_key = next(
+                (
+                    key
+                    for key in (
+                        previous_key
+                        if getattr(self, "_profile_rescan_selections", None)
+                        else None,
+                        result.recommended_key,
+                        result.last_used_key,
                     )
-                    else None
-                )
-                or result.recommended_key
+                    if key in available_keys
+                ),
+                None,
             )
             show_last_used_suffix = len(verified_installations) > 1
             for index, installation in enumerate(verified_installations):
@@ -11761,6 +11766,8 @@ class MainWindow(QMainWindow):
             ranges=self._excluded_layer_ranges,
             gradient_start_deficit_s=self._range_color_thresholds[0],
             gradient_full_deficit_s=self._range_color_thresholds[1],
+            time_coloring_enabled=self._range_time_coloring_enabled,
+            xray_enabled=self._range_xray_enabled,
             silhouette=silhouette,
             source_artifact=self.source_artifact,
             render_manager=self.background_job_manager,
@@ -11789,6 +11796,8 @@ class MainWindow(QMainWindow):
         ranges_changed = ranges != self._excluded_layer_ranges
         self._excluded_layer_ranges = ranges
         self._range_color_thresholds = (dialog.color_start_spin.value(), dialog.color_full_spin.value())
+        self._range_time_coloring_enabled = dialog.color_enabled_checkbox.isChecked()
+        self._range_xray_enabled = dialog.xray_button.isChecked()
         # The normal target signal refreshes validation and modified-state UI.
         # All accepted values are already installed before that signal runs.
         self.target_time_spin.setValue(target_time)

@@ -72,7 +72,8 @@ class OriginalObjectView(QObject):
             context=SimpleNamespace(key=getattr(artifact, "original_sha256", None), layers=canvas.layers),
             silhouette=canvas._silhouette,
             source_data=SimpleNamespace(object_segments=canvas._segments),
-            object_triangles=None, object_silhouette=None)
+            object_triangles=None, object_silhouette=None,
+            object_color=canvas.NEUTRAL_OBJECT_COLOR)
         self.settings = replace(ManualSettings(), critical_layers_enabled=True)
         self.cache = OrderedDict()
         self.job_id = None
@@ -94,7 +95,7 @@ class OriginalObjectView(QObject):
     def key(self):
         return (self.canvas.yaw_deg, self.canvas.target_time_s,
                 self.canvas.gradient_start_deficit_s, self.canvas.gradient_full_deficit_s,
-                self.canvas.object_resolution_percent)
+                self.canvas.object_resolution_percent, self.canvas.time_coloring_enabled)
 
     def frame(self):
         center = tuple(self.reference.silhouette.center_xy)
@@ -117,7 +118,12 @@ class OriginalObjectView(QObject):
         painter.save()
         painter.translate(self.canvas.x_for_position(0), self.canvas.y_for_z(0))
         painter.scale(self.canvas._scale(), self.canvas._scale())
-        painter.drawPicture(0, 0, picture)
+        xray = getattr(picture, "xray_picture", None)
+        if self.canvas.xray_enabled and xray is not None:
+            painter.drawPicture(0, 0, xray)
+        else:
+            painter.setOpacity(.28 if self.canvas.xray_enabled else 1)
+            painter.drawPicture(0, 0, picture)
         painter.restore()
         return True
 
@@ -131,7 +137,8 @@ class OriginalObjectView(QObject):
         self.request_id = next(_VIEW_REQUEST_IDS)
         self.active_key = key
         settings = replace(self.settings, object_resolution_percent=key[4], color_reference_time_s=key[1],
-                           gradient_start_deficit_s=key[2], gradient_full_deficit_s=key[3])
+                           gradient_start_deficit_s=key[2], gradient_full_deficit_s=key[3],
+                           critical_layers_enabled=key[5])
         worker = ManualViewWorker(self.request_id, self.reference, self.frame(), settings, key)
         worker.succeeded.connect(self._rendered)
         worker.failed.connect(self._failed)

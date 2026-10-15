@@ -191,6 +191,13 @@ Bestätigung bindet Profil-IDs, effektive Werte, Slicerpfad und -version an Hash
 Größe, Änderungszeitpunkt und Pfad der konkreten Quelle. Jede Änderung hebt die
 Bestätigung und alle davon abhängigen Resultate auf.
 
+Bei der Slicer-Vorauswahl hat die zuletzt im Programm explizit gewählte,
+weiterhin verfügbare Installation Vorrang. Ohne gültige gespeicherte Auswahl
+folgt der anhand lokaler Nutzungsmarker zuletzt verwendete Slicer; fehlt auch
+diese Information, wird der erste verwendbare Eintrag der Liste ausgewählt.
+Die Kennzeichnung „zuletzt verwendet“ beschreibt weiterhin ausschließlich die
+externen Nutzungsmarker, unabhängig von der tatsächlich vorausgewählten Installation.
+
 Explizit ausgewählte oder bestätigte Maschinen-, Prozess- und Filamentprofile
 werden je konkreter Slicerinstallation in `slicer_settings.json` gespeichert.
 Beim nächsten Start wird zuerst der bisherige Profilpfad und nach einem

@@ -4,6 +4,30 @@ import math
 from PySide6.QtCore import QSize,Qt,Signal,QSignalBlocker
 from PySide6.QtGui import QColor,QFont,QFontMetrics
 from PySide6.QtWidgets import QWidget,QLabel,QPushButton,QButtonGroup,QVBoxLayout,QHBoxLayout,QSizePolicy,QLayout
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE
+
+
+def xray_button_style(choice):
+    """Share the manual editor's raised/inset X-Ray treatment."""
+    light,dark,selected_light,selected_dark,accent = {
+        "tower": ("#fff6eb","#f5ddbc","#ffecd1","#efbc75","#a85d18"),
+        "object": ("#f0f8fb","#cce5ee","#e0f6fc",ORIGINAL_OBJECT_BLUE,"#216d86"),
+    }[choice]
+    gradient=lambda start,end:f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {start}, stop:1 {end})"
+    raised_light=QColor(light).lighter(104).name()
+    raised_dark=QColor(dark).darker(120).name()
+    inset_dark=QColor(selected_dark).darker(125).name()
+    return (
+        f"QPushButton {{ background: {gradient(light,dark)}; font-size: 8pt; padding: 0 5px; "
+        "min-height: 0; border: 1px solid #a3b1c0; border-radius: 3px; color: #536980; } "
+        f"QPushButton {{ border-top-color: {raised_light}; border-left-color: {raised_light}; "
+        f"border-bottom-color: {raised_dark}; border-right-color: {raised_dark}; }} "
+        f"QPushButton:hover {{ color: {accent}; }} "
+        f"QPushButton:pressed, QPushButton:checked {{ background: {gradient(selected_dark,selected_light)}; "
+        f"border-top-color: {inset_dark}; border-left-color: {inset_dark}; "
+        f"border-bottom-color: {selected_light}; border-right-color: {selected_light}; padding: 1px 4px 0 6px; }} "
+        f"QPushButton:checked {{ background: {gradient(selected_dark,selected_light)}; "
+        f"color: {accent}; font-weight: bold; }}")
 
 
 class XRayTitle(QLabel):
@@ -52,26 +76,10 @@ class XRayControls(QWidget):
         self.group=QButtonGroup(self)
         self.group.setExclusive(False)
         self.buttons={}
-        for choice,text,light,dark,selected_light,selected_dark,accent in (
-                ("tower","Turm","#fff6eb","#f5ddbc","#ffecd1","#efbc75","#a85d18"),
-                ("object","STL","#f0f8fb","#cce5ee","#e0f6fc","#93cee0","#216d86")):
+        for choice,text in (("tower","Turm"),("object","STL")):
             button=QPushButton(text)
             button.setCheckable(True)
-            gradient=lambda start,end:f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {start}, stop:1 {end})"
-            raised_light=QColor(light).lighter(104).name()
-            raised_dark=QColor(dark).darker(120).name()
-            inset_dark=QColor(selected_dark).darker(125).name()
-            button.setStyleSheet(
-                f"QPushButton {{ background: {gradient(light,dark)}; font-size: 8pt; padding: 0 5px; "
-                "min-height: 0; border: 1px solid #a3b1c0; border-radius: 3px; color: #536980; } "
-                f"QPushButton {{ border-top-color: {raised_light}; border-left-color: {raised_light}; "
-                f"border-bottom-color: {raised_dark}; border-right-color: {raised_dark}; }} "
-                f"QPushButton:hover {{ color: {accent}; }} "
-                f"QPushButton:pressed, QPushButton:checked {{ background: {gradient(selected_dark,selected_light)}; "
-                f"border-top-color: {inset_dark}; border-left-color: {inset_dark}; "
-                f"border-bottom-color: {selected_light}; border-right-color: {selected_light}; padding: 1px 4px 0 6px; }} "
-                f"QPushButton:checked {{ background: {gradient(selected_dark,selected_light)}; "
-                f"color: {accent}; font-weight: bold; }}")
+            button.setStyleSheet(xray_button_style(choice))
             button.setToolTip({"tower":"Transparenz des Turms ein-/ausschalten",
                                "object":"Transparenz des Original-STL ein-/ausschalten"}[choice])
             button.toggled.connect(self._emit_choice)

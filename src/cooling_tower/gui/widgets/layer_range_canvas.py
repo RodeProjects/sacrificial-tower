@@ -8,8 +8,9 @@ import math
 import numpy as np
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE
 
 from cooling_tower.models.layer_ranges import LayerRange
 
@@ -25,11 +26,13 @@ class LayerRangeCanvas(QWidget):
     BACKGROUND_COLOR = "#e6ecf2"
     BORDER_COLOR = "#9eafbf"
     SELECTION_COLOR = "#c6ddee"
-    SELECTION_BORDER_COLOR = "#6f9fc4"
+    SELECTION_BORDER_COLOR = "#245783"
     SELECTION_TEXT_COLOR = "#245d88"
     JOIN_COLOR = "#c9e8d6"
     JOIN_BORDER_COLOR = "#4f9b73"
     JOIN_TEXT_COLOR = "#176b45"
+    EXCLUDED_HATCH_COLOR = QColor(180, 35, 24, 40)
+    NEUTRAL_OBJECT_COLOR = ORIGINAL_OBJECT_BLUE
 
     def __init__(self, layers, segments, parent=None, *, silhouette=None):
         super().__init__(parent)
@@ -44,6 +47,8 @@ class LayerRangeCanvas(QWidget):
         self.ranges: tuple[LayerRange, ...] = ()
         self.selected = -1
         self.target_time_s = 10.0
+        self.time_coloring_enabled = False
+        self.xray_enabled = False
         self.gradient_start_deficit_s = 0.0
         self.gradient_full_deficit_s = 1.0
         self.zoom = 1.0
@@ -62,6 +67,14 @@ class LayerRangeCanvas(QWidget):
         )
         self.join_hint.hide()
         self._background = None
+        hatch = QPixmap(12, 12)
+        hatch.fill(Qt.GlobalColor.transparent)
+        hatch_painter = QPainter(hatch)
+        hatch_painter.setPen(QPen(self.EXCLUDED_HATCH_COLOR, 1))
+        hatch_painter.drawLine(0, 0, 11, 11)
+        hatch_painter.drawLine(0, 11, 11, 0)
+        hatch_painter.end()
+        self._excluded_hatch_brush = QBrush(hatch)
         self.object_resolution_percent = 75
         self.object_view = None
         self._segments = tuple(segments)
@@ -142,6 +155,16 @@ class LayerRangeCanvas(QWidget):
         if percent not in OBJECT_RESOLUTION_STAGES:
             raise ValueError("Unbekannte Vorschauauflösung.")
         self.object_resolution_percent = percent
+        self._background = None
+        self.update()
+
+    def set_time_coloring_enabled(self, enabled):
+        self.time_coloring_enabled = bool(enabled)
+        self._background = None
+        self.update()
+
+    def set_xray_enabled(self, enabled):
+        self.xray_enabled = bool(enabled)
         self._background = None
         self.update()
 
@@ -294,11 +317,13 @@ class LayerRangeCanvas(QWidget):
             height = max(0.7, self.y_for_z(self.bottoms[position]) - y)
             if y > self.height() or y + height < 0:
                 continue
-            color = self.layer_color(self.target_time_s, self.layers[position].total_time_s,
+            color = (self.layer_color(self.target_time_s, self.layers[position].total_time_s,
                                      self.gradient_start_deficit_s, self.gradient_full_deficit_s)
+                     if self.time_coloring_enabled else QColor(self.NEUTRAL_OBJECT_COLOR))
             for a, b in intervals:
                 paths[color.rgb()].addRect(QRectF(self.x_for_position(a), y, max(0.7, self.x_for_position(b) - self.x_for_position(a)), height))
         painter.setPen(Qt.PenStyle.NoPen)
+        painter.setOpacity(.28 if self.xray_enabled else 1)
         for color, path in paths.items():
             # Dense layers overlap by a fraction of a pixel. Odd-even filling
             # would punch stripes out of neighboring rectangles of one color.
@@ -328,8 +353,10 @@ class LayerRangeCanvas(QWidget):
             joining = index in self._joining_indices
             border_color = self.JOIN_BORDER_COLOR if joining else self.SELECTION_BORDER_COLOR
             fill_color = QColor(self.JOIN_COLOR if joining else self.SELECTION_COLOR)
-            fill_color.setAlpha(160 if joining or selected else 125)
+            fill_color.setAlpha(45 if joining or selected else 25)
             painter.fillRect(rect, fill_color)
+            # Always paint the hatch over the finished object, including cached meshes.
+            painter.fillRect(rect, self._excluded_hatch_brush)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(border_color), 2 if selected or joining else 1))
             painter.drawRect(rect)
@@ -348,15 +375,12 @@ class LayerRangeCanvas(QWidget):
                 painter.drawLine(grip.center() + QPointF(-7, 0), grip.center() + QPointF(7, 0))
                 painter.setPen(QPen(QColor(border_color), 1))
             if selected:
-                label = f"Ausschlussbereich {index + 1} · Layer {span[0]}–{span[1]}"
+                label = f"Bereich {index + 1}"
                 label_width = min(self.fontMetrics().horizontalAdvance(label) + 20, rect.width() - 12)
-                label_height = 22
-                if self.fontMetrics().horizontalAdvance(label) + 20 > label_width:
-                    label = f"Ausschlussbereich {index + 1}\nLayer {span[0]}–{span[1]}"
-                    label_height = self.fontMetrics().height() * 2 + 6
-                label_y = min(self.height() - label_height - 2, max(4, rect.center().y() - label_height / 2))
+                label_height = self.fontMetrics().height() + 6
+                label_y = min(self.height() - label_height - 2, max(4, rect.top() + 6))
                 label_rect = QRectF(rect.left() + 6, label_y, label_width, label_height)
-                painter.fillRect(label_rect, QColor(255, 255, 255, 235))
+                painter.fillRect(label_rect, QColor(255, 255, 255, 195))
                 painter.setPen(QColor(self.JOIN_TEXT_COLOR if joining else self.SELECTION_TEXT_COLOR))
                 painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
                 delete_rect = self.delete_rect(span)

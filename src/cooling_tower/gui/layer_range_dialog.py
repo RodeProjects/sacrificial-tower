@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QLocale, QRect, QSize, QSignalBlocker, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtCore import QEvent, QLocale, QPoint, QRect, QSize, QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOptionFrame, QStyleOptionSpinBox,
-    QSlider, QSplitter, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOptionFrame, QStyleOptionSpinBox,
+    QSplitter, QVBoxLayout, QWidget,
 )
 
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
@@ -12,6 +12,8 @@ from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 from cooling_tower.gui.widgets.wheel_safe_inputs import WheelSafeDoubleSpinBox, WheelSafeSpinBox
 from cooling_tower.gui.widgets.wrapping_layout import WrappingLayout
 from cooling_tower.gui.widgets.deficit_range_slider import DeficitRangeSlider, round_deficit
+from cooling_tower.gui.widgets.manual_resolution_control import RotationSlider, RotationEndLabels
+from cooling_tower.gui.widgets.manual_xray_controls import xray_button_style
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.texts import SETTING_INFO_TEXTS
 from cooling_tower.models.layer_ranges import normalize_layer_ranges
@@ -19,10 +21,11 @@ from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 
 
 class _CompactSpin:
-    """Reserve only the visible value plus room for one additional digit."""
+    """Reserve a value sample plus room for one additional digit."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.setProperty("rangeCompactInput", True)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.valueChanged.connect(lambda _value: self.updateGeometry())
         # Track uncommitted typed text as well as the numeric value.
@@ -51,10 +54,13 @@ class _CompactSpin:
         margins = line_edit.textMargins()
         # Include native text insets and caret space, as well as one spare digit.
         overhead = 1000 - editor.width() + 1000 - contents.width() + margins.left() + margins.right() + 4
-        text = line_edit.displayText()
+        text = self._width_sample()
         text_width = max(metrics.horizontalAdvance(text), metrics.boundingRect(text).width())
         hint.setWidth(overhead + text_width + metrics.horizontalAdvance("0"))
         return hint
+
+    def _width_sample(self):
+        return self.lineEdit().displayText()
 
     def minimumSizeHint(self):
         return self.sizeHint()
@@ -65,7 +71,12 @@ class _CompactDoubleSpin(_CompactSpin, WheelSafeDoubleSpinBox):
 
 
 class _CompactLayerSpin(_CompactSpin, WheelSafeSpinBox):
-    pass
+    def _width_sample(self):
+        # Layer edits share a fixed digit budget for this object's full range.
+        # Font/style changes still remeasure it; moving a range does not.
+        metrics = self.lineEdit().fontMetrics()
+        digit = max("0123456789", key=metrics.horizontalAdvance)
+        return digit * len(str(self.maximum()))
 
 
 class _DeficitSpin(_CompactDoubleSpin):
@@ -82,12 +93,29 @@ class _DeficitSpin(_CompactDoubleSpin):
 class _InputResetButton(QPushButton):
     def __init__(self, editor):
         super().__init__("↺")
+        self.setProperty("rangeCompactReset", True)
         self.editor = editor
         self.setFixedWidth(METRICS.reset_button_size_px)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def sizeHint(self):
         return QSize(METRICS.reset_button_size_px, self.editor.sizeHint().height())
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+
+class _XRayButton(QPushButton):
+    FULL_TEXT = "X-Ray (Transparenz)"
+    SHORT_TEXT = "X-Ray"
+
+    def width_for_text(self, text):
+        bold = QFont(self.font())
+        bold.setBold(True)
+        return QFontMetrics(bold).horizontalAdvance(text) + 14
+
+    def sizeHint(self):
+        return QSize(self.width_for_text(self.text()), METRICS.form_control_height_px)
 
     def minimumSizeHint(self):
         return self.sizeHint()
@@ -109,39 +137,90 @@ class DeficitGradient(QWidget):
 
 
 class _RotationControls(QWidget):
-    """Shrink slider space, shorten Fit, then move its full label below."""
+    """Use the manual editor's track, grip and caption layout."""
 
-    def __init__(self, slider, angle, reset, fit):
+    def __init__(self, slider, angle):
         super().__init__()
-        self.controls = (QLabel("Objekt drehen", self), slider, angle, reset, fit)
-        for widget in self.controls:
+        self.angle = angle
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(1)
+        self.title = QLabel("Objekt drehen")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setStyleSheet("font-size: 8pt; padding: 0;")
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(3)
+        header.addWidget(self.title, 1)
+        angle.setMinimumWidth(angle.fontMetrics().horizontalAdvance("-180°"))
+        header.addSpacing(angle.minimumWidth() + 3)
+        column.addLayout(header)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(3)
+        slider_host = QWidget()
+        slider_column = QVBoxLayout(slider_host)
+        slider_column.setContentsMargins(0, 0, 0, 0)
+        slider_column.setSpacing(0)
+        self.end_labels = RotationEndLabels(slider)
+        slider_column.addWidget(self.end_labels)
+        slider_column.addWidget(slider)
+        row.addWidget(slider_host, 1)
+        row.addWidget(angle, 0, Qt.AlignmentFlag.AlignVCenter)
+        column.addLayout(row)
+
+    def quarter_label_width(self):
+        row = self.layout().itemAt(1).layout()
+        return max(self.minimumSizeHint().width(),
+                   self.end_labels.minimum_width_for_step(90)
+                   + max(self.angle.minimumWidth(), self.angle.sizeHint().width())
+                   + row.spacing())
+
+
+class _PreviewControls(QWidget):
+    """Shorten captions before stacking the buttons beside two aligned sliders."""
+
+    GAP = 8
+
+    def __init__(self, xray, resolution, rotation, fit):
+        super().__init__()
+        self.xray, self.resolution, self.rotation, self.fit = xray, resolution, rotation, fit
+        for widget in (xray, resolution, rotation, fit):
             widget.setParent(self)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
 
     def _widths(self):
-        label, slider, angle, reset, fit = self.controls
+        fit = self.fit
         fit_padding = fit.sizeHint().width() - fit.fontMetrics().horizontalAdvance(fit.text())
-        return (label.sizeHint().width(), 80, angle.sizeHint().width(), reset.width(),
+        return (self.resolution.minimumSizeHint().width(), self.rotation.quarter_label_width(),
+                self.xray.width_for_text(self.xray.FULL_TEXT), self.xray.width_for_text(self.xray.SHORT_TEXT),
                 fit.fontMetrics().horizontalAdvance("Objekt einpassen") + fit_padding,
                 fit.fontMetrics().horizontalAdvance("Einpassen") + fit_padding)
 
+    def _horizontal_width(self, mode):
+        resolution, rotation, xray_full, xray_short, fit_full, fit_short = self._widths()
+        return (resolution + rotation + (xray_full if mode == 0 else xray_short)
+                + (fit_full if mode < 2 else fit_short) + 3 * self.GAP)
+
     def _mode(self, width):
-        widths = self._widths()
-        base = sum(widths[:4]) + 4 * 6
-        return 0 if width >= base + widths[4] else 1 if width >= base + widths[5] else 2
+        return next((mode for mode in range(3) if width >= self._horizontal_width(mode)), 3)
 
     def sizeHint(self):
-        widths = self._widths()
-        return QSize(sum(widths[:5]) + 4 * 6, max(w.sizeHint().height() for w in self.controls))
+        return QSize(self._horizontal_width(0), self._row_height())
 
     def minimumSizeHint(self):
-        return QSize(sum(self._widths()[:4]) + 3 * 6, self.sizeHint().height())
+        widths = self._widths()
+        return QSize(max(widths[:2]) + max(widths[3], widths[5]) + self.GAP, self._row_height())
+
+    def _row_height(self):
+        return max(self.resolution.sizeHint().height(), self.rotation.sizeHint().height(), self.fit.height())
 
     def heightForWidth(self, width):
-        height = self.sizeHint().height()
-        return height * 2 + 6 if self._mode(width) == 2 else height
+        height = self._row_height()
+        return height * 2 + self.GAP if self._mode(width) == 3 else height
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -150,28 +229,53 @@ class _RotationControls(QWidget):
     def _arrange(self):
         widths = self._widths()
         mode = self._mode(self.width())
-        label, slider, angle, reset, fit = self.controls
-        fit.setText("Einpassen" if mode == 1 else "Objekt einpassen")
-        row = self.controls[:4] if mode == 2 else self.controls
-        actual = list(widths[:4]) + ([widths[5] if mode == 1 else widths[4]] if mode != 2 else [])
-        actual[1] += max(0, self.width() - sum(actual) - (len(row) - 1) * 6)
-        height = self.sizeHint().height()
-        x = 0
-        for widget, width in zip(row, actual):
-            widget_height = widget.sizeHint().height()
-            widget.setGeometry(QRect(x, (height - widget_height) // 2, width, widget_height))
-            x += width + 6
-        if mode == 2:
-            fit.setGeometry(QRect(self.width() - widths[4], height + 6, widths[4], fit.height()))
+        xray, fit = self.xray, self.fit
+        xray.setText(xray.FULL_TEXT if mode == 0 else xray.SHORT_TEXT)
+        fit.setText("Objekt einpassen" if mode < 2 else "Einpassen")
+        xray_width = widths[2] if mode == 0 else widths[3]
+        fit_width = widths[4] if mode < 2 else widths[5]
+        height = self._row_height()
+        if mode == 3:
+            button_width = max(xray_width, fit_width)
+            button_x = self.width() - button_width
+            slider_width = button_x - self.GAP
+            self.resolution.setGeometry(0, 0, slider_width, height)
+            self.rotation.setGeometry(0, height + self.GAP, slider_width, height)
+            xray.setGeometry(button_x, height - xray.height(), button_width, xray.height())
+            fit.setGeometry(button_x, height * 2 + self.GAP - fit.height(), button_width, fit.height())
+        else:
+            available = self.width() - xray_width - fit_width - 3 * self.GAP
+            extra = max(0, available - sum(widths[:2]))
+            resolution_width = widths[0] + extra // 3
+            resolution_x = xray_width + self.GAP
+            self.resolution.setGeometry(resolution_x, 0, resolution_width, height)
+            self.rotation.setGeometry(resolution_x + resolution_width + self.GAP, 0, available - resolution_width, height)
+            xray.setGeometry(0, height - xray.height(), xray_width, xray.height())
+            fit.setGeometry(self.width() - fit_width, height - fit.height(), fit_width, fit.height())
+        self.resolution.layout().activate()
+        self.rotation.layout().activate()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange) and hasattr(self, "fit"):
+            self.updateGeometry()
+            self._arrange()
 
 
 class LayerTimeLegend(QWidget):
+    EXCLUSION_NOTES = (
+        "In diesen Bereichen wird der Turm keine zusätzliche Layerzeit erzeugen",
+        "Der Turm wird, wenn möglich, bis auf seinen Min.-Durchmesser schrumpfen.",
+        "Ausnahmen: Der Standfuß und nötige Aufweitungen für nicht-ausgeschlossene Bereiche",
+    )
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        header = WrappingLayout()
+        self.color_key = QWidget()
+        header = WrappingLayout(self.color_key)
         scale = QWidget()
         scale.setFixedWidth(170)
         scale_layout = QVBoxLayout(scale)
@@ -179,15 +283,22 @@ class LayerTimeLegend(QWidget):
         scale_layout.addWidget(DeficitGradient())
         header.addWidget(scale)
         header.addWidget(QLabel("Layerzeit-Defizit"))
-        layout.addLayout(header)
-        exclusions = QHBoxLayout()
-        swatch = QFrame()
-        swatch.setFixedSize(16, 12)
-        swatch.setStyleSheet(f"background: {LayerRangeCanvas.SELECTION_COLOR};")
-        text = QLabel("Ausschlussbereiche: Enthaltene Layerzeit-Defizite werden ignoriert")
-        text.setWordWrap(True)
-        exclusions.addWidget(swatch, 0, Qt.AlignmentFlag.AlignVCenter)
-        exclusions.addWidget(text, 1)
+        layout.addWidget(self.color_key)
+        exclusions = QGridLayout()
+        exclusions.setHorizontalSpacing(6)
+        exclusions.setVerticalSpacing(0)
+        exclusions.setColumnStretch(1, 1)
+        self.exclusion_swatch = QFrame()
+        self.exclusion_swatch.setFixedSize(16, 12)
+        self.exclusion_swatch.setStyleSheet(f"background: {LayerRangeCanvas.NEUTRAL_OBJECT_COLOR};")
+        self.exclusion_title = QLabel("<b>Ausschlussbereiche:</b>")
+        self.exclusion_text = QLabel("<br>".join("• " + note for note in self.EXCLUSION_NOTES))
+        self.exclusion_text.setTextFormat(Qt.TextFormat.RichText)
+        self.exclusion_text.setWordWrap(True)
+        self.exclusion_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        exclusions.addWidget(self.exclusion_swatch, 0, 0, Qt.AlignmentFlag.AlignVCenter)
+        exclusions.addWidget(self.exclusion_title, 0, 1, Qt.AlignmentFlag.AlignVCenter)
+        exclusions.addWidget(self.exclusion_text, 1, 1)
         layout.addLayout(exclusions)
         self.set_thresholds(0.0, 1.0)
 
@@ -200,6 +311,13 @@ class LayerTimeLegend(QWidget):
         self.setAccessibleName(f"Legende: Grün bis {self._number(start)} Sekunden Defizit, Rot ab {self._number(full)} Sekunden Defizit; transparente blaue Flächen sind Ausschlussbereiche")
         self.update()
 
+    def set_time_coloring_enabled(self, enabled):
+        self.color_key.setVisible(enabled)
+        self.setAccessibleName(
+            f"Legende: Grün bis {self._number(self.start_deficit_s)} Sekunden Defizit, "
+            f"Rot ab {self._number(self.full_deficit_s)} Sekunden Defizit; Ausschlussbereiche sind dunkelblau umrahmt"
+            if enabled else "Legende: Blaues Originalobjekt; Ausschlussbereiche sind dunkelblau umrahmt")
+
 
 class LayerRangeDialog(QDialog):
     ranges_changed = Signal(object)
@@ -209,6 +327,7 @@ class LayerRangeDialog(QDialog):
     def __init__(self, layers, segments, *, target_time_s, target_minimum,
                  target_maximum, target_decimals=2, ranges=(),
                  gradient_start_deficit_s=0.0, gradient_full_deficit_s=1.0,
+                 time_coloring_enabled=False, xray_enabled=False,
                  silhouette=None, target_time_hint=None, target_default=None,
                  source_artifact=None, render_manager=None, parent=None):
         super().__init__(parent)
@@ -282,18 +401,24 @@ class LayerRangeDialog(QDialog):
         color_header = QHBoxLayout()
         color_header.setSpacing(6)
         self.color_info_button = self._info_button(
-            "• Defizit: gewünschte Mindest-Layerzeit minus gemessene Layerzeit.\n"
-            "• Grün bis: Bis zu dieser Unterschreitung bleibt das Objekt grün.\n"
-            "• Rot ab: Ab dieser Unterschreitung ist das Objekt vollständig rot.\n"
-            "• Die zwei Slider-Greifer und die Wertefelder steuern dieselben Grenzen von 0 bis 2 Sekunden.\n"
-            "• Dazwischen verläuft die Farbe von Grün zu Rot. Die Grenzen ändern nur die Darstellung.",
-            "Defizit-Einfärbung nach Mindest-Layerzeit")
+            "• Zeigt, wie viele Sekunden einem Layer zur gewünschten Mindest-Layerzeit fehlen.\n"
+            "• Zwei Grenzen bestimmen den Übergang von Grün (geringes Defizit) zu Rot (hohes Defizit).\n"
+            "• Grenzen per Greifer oder Wertefeld einstellen (0–2 s).\n"
+            "• Ändert nur die Vorschaufarben, nicht die Turmberechnung.",
+            "Zeitdefizit-Einfärbung aktivieren")
         color_header.addWidget(self.color_info_button)
-        color_label = QLabel("Defizit-Einfärbung nach Mindest-Layerzeit")
+        color_label = QLabel("Zeitdefizit-Einfärbung aktivieren")
         color_label.setWordWrap(True)
         color_header.addWidget(color_label, 1)
+        self.color_enabled_checkbox = QCheckBox()
+        self.color_enabled_checkbox.setAccessibleName(color_label.text())
+        self.color_enabled_checkbox.setChecked(time_coloring_enabled)
+        color_label.setBuddy(self.color_enabled_checkbox)
+        color_header.addWidget(self.color_enabled_checkbox)
         left.addLayout(color_header)
-        color_limits = QVBoxLayout()
+        self.color_settings = QWidget()
+        color_limits = QVBoxLayout(self.color_settings)
+        color_limits.setContentsMargins(0, 0, 0, 0)
         color_limits.setSpacing(3)
         scale_layout = QHBoxLayout()
         scale_layout.setSpacing(6)
@@ -321,7 +446,7 @@ class LayerRangeDialog(QDialog):
         self.color_reset_button.setAccessibleName("Defizitgrenzen zurücksetzen")
         limit_inputs.addWidget(self.color_reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
         color_limits.addLayout(limit_inputs)
-        left.addLayout(color_limits)
+        left.addWidget(self.color_settings)
         self.color_start_spin.setToolTip("Bis zu diesem Layerzeit-Defizit bleibt das Objekt grün. Danach beginnt der Farbverlauf zu Rot.")
         self.color_full_spin.setToolTip("Ab diesem Layerzeit-Defizit ist das Objekt vollständig rot. Der Wert muss größer als der Beginn des Farbverlaufs sein.")
         divider = QFrame()
@@ -369,43 +494,47 @@ class LayerRangeDialog(QDialog):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(14, 0, 0, 0)
         right_layout.setSpacing(8)
-        info = QLabel(f"Originalobjekt · Seitenansicht · {self.layer_count} Layer")
-        info.setObjectName("embeddedPreviewTitle")
-        info.setWordWrap(True)
-        right_layout.addWidget(info)
         self.fit_button = QPushButton("Objekt einpassen")
-        self._compact_button(self.fit_button)
+        self.fit_button.setObjectName("layerRangeFitButton")
+        self.fit_button.setProperty("needsFit", False)
+        self.fit_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.fit_button.setAutoDefault(False)
         self.fit_button.setEnabled(False)
+        self.fit_button.setFixedHeight(METRICS.form_control_height_px)
         self.canvas = LayerRangeCanvas(layers, segments, silhouette=silhouette)
+        self.canvas.set_time_coloring_enabled(time_coloring_enabled)
+        self.canvas.set_xray_enabled(xray_enabled)
+        self.xray_button = _XRayButton(_XRayButton.FULL_TEXT)
+        self.xray_button.setAccessibleName(_XRayButton.FULL_TEXT)
+        self.xray_button.setObjectName("layerRangeXRayButton")
+        self.xray_button.setAutoDefault(False)
+        self.xray_button.setCheckable(True)
+        self.xray_button.setChecked(xray_enabled)
+        self.xray_button.setStyleSheet(xray_button_style("object"))
+        self.xray_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.xray_button.setFixedHeight(METRICS.form_control_height_px)
+        self.xray_button.setToolTip("Transparenz des Originalobjekts ein-/ausschalten")
+        self.xray_button.toggled.connect(self.canvas.set_xray_enabled)
         from cooling_tower.gui.widgets.object_resolution_control import ObjectResolutionControl
-        self.resolution_control = ObjectResolutionControl()
+        self.resolution_control = ObjectResolutionControl(title="Auflösung", show_reset=False)
         self.resolution_slider = self.resolution_control.resolution_slider
         self.resolution_label = self.resolution_control.resolution_label
-        self.resolution_reset = self.resolution_control.resolution_reset
         self.resolution_control.percent_changed.connect(self.canvas.set_resolution)
-        right_layout.addWidget(self.resolution_control)
         if source_artifact is not None and render_manager is not None and silhouette is not None:
             self.canvas.prepare_object_view(source_artifact, render_manager)
             self.finished.connect(lambda _: self.canvas.object_view.close())
         self.canvas.setMinimumWidth(240)
-        self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rotation_slider = RotationSlider()
+        self.rotation_slider.setMinimumWidth(50)
         self.rotation_slider.setRange(-180, 180)
-        self.rotation_slider.setTickInterval(90)
-        self.rotation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.rotation_slider.setTickInterval(45)
         self.rotation_slider.setAccessibleName("Originalobjekt um seine vertikale Achse drehen")
-        self.rotation_slider.setToolTip("Beim Ziehen rastet der Regler alle 90° ein. Alternativ mit der rechten Maustaste horizontal in der Vorschau ziehen")
+        self.rotation_slider.setToolTip("Beim Ziehen rastet der Regler alle 90° ein. Alternativ mit der rechten Maustaste horizontal in der Vorschau ziehen\nDoppelklick auf den Greifer: 0° wiederherstellen.")
         self.rotation_label = QLabel("0°")
-        self.rotation_reset_button = QPushButton("↺")
-        self.rotation_reset_button.setObjectName("settingResetButton")
-        self.rotation_reset_button.setFixedSize(METRICS.reset_button_size_px, METRICS.reset_button_size_px)
-        self.rotation_reset_button.setAutoDefault(False)
-        self.rotation_reset_button.setEnabled(False)
-        self.rotation_reset_button.setToolTip("Objektdrehung auf 0° zurücksetzen")
-        self.rotation_reset_button.setAccessibleName("Objektdrehung zurücksetzen")
-        self.rotation_controls = _RotationControls(self.rotation_slider, self.rotation_label,
-                                                  self.rotation_reset_button, self.fit_button)
-        right_layout.addWidget(self.rotation_controls)
+        self.rotation_controls = _RotationControls(self.rotation_slider, self.rotation_label)
+        self.preview_controls = _PreviewControls(self.xray_button, self.resolution_control,
+                                                 self.rotation_controls, self.fit_button)
+        right_layout.addWidget(self.preview_controls)
         self.canvas.set_target_time(target_time_s)
         self.canvas.set_color_thresholds(self.color_start_spin.value(), self.color_full_spin.value())
         right_layout.addWidget(self.canvas, 1)
@@ -466,14 +595,15 @@ class LayerRangeDialog(QDialog):
         self.color_reset_button.clicked.connect(self._reset_color_thresholds)
         self.add_button.clicked.connect(self._add_range)
         self.fit_button.clicked.connect(self.canvas.fit_object)
-        self.canvas.fit_available_changed.connect(self.fit_button.setEnabled)
+        self.canvas.fit_available_changed.connect(self._fit_available_changed)
         self.canvas.range_committed.connect(self.commit_range)
         self.canvas.remove_requested.connect(self.remove_range)
         self.canvas.selection_changed.connect(self.select_range)
         self.rotation_slider.valueChanged.connect(self._slider_rotation_changed)
-        self.rotation_reset_button.clicked.connect(lambda: self.canvas.set_rotation(0))
         self.canvas.rotation_changed.connect(self._rotation_changed)
         self._refresh_color_reset()
+        self.color_enabled_checkbox.toggled.connect(self._time_coloring_toggled)
+        self._time_coloring_toggled(time_coloring_enabled)
         self._rebuild_rows()
         self._sync_selection()
         self._preferred_pane_widths = (self._unwrapped_settings_width(), 650 + 14)
@@ -514,7 +644,8 @@ class LayerRangeDialog(QDialog):
     def _settings_content_signature(self):
         # Avoid remeasuring unchanged labels: temporarily disabling word wrap
         # during measurement itself queues another Qt layout request.
-        return tuple((widget.text(), widget.font().toString(), widget.sizeHint().width())
+        return tuple(("layer-number" if isinstance(widget, _CompactLayerSpin) else widget.text(),
+                      widget.font().toString(), widget.sizeHint().width())
                      for widget in self.settings_panel.findChildren(QWidget)
                      if isinstance(widget, (QLabel, QPushButton, _CompactSpin))
                      and widget.objectName() != "layerRangeEmptyHint")
@@ -596,12 +727,15 @@ class LayerRangeDialog(QDialog):
         with QSignalBlocker(self.rotation_slider):
             self.rotation_slider.setValue(angle)
         self.rotation_label.setText(f"{angle}°")
-        self.rotation_controls.updateGeometry()
-        self.rotation_controls._arrange()
-        self.rotation_reset_button.setEnabled(angle != 0)
-        self.rotation_reset_button.setProperty("modified", angle != 0)
-        self.rotation_reset_button.style().unpolish(self.rotation_reset_button)
-        self.rotation_reset_button.style().polish(self.rotation_reset_button)
+        self.preview_controls.updateGeometry()
+        self.preview_controls._arrange()
+
+    def _fit_available_changed(self, available):
+        self.fit_button.setEnabled(available)
+        self.fit_button.setProperty("needsFit", available)
+        self.fit_button.style().unpolish(self.fit_button)
+        self.fit_button.style().polish(self.fit_button)
+        self.fit_button.update()
 
     def _slider_rotation_changed(self, angle):
         if self.rotation_slider.isSliderDown():
@@ -661,10 +795,17 @@ class LayerRangeDialog(QDialog):
         start, full = self.color_start_spin.value(), self.color_full_spin.value()
         self.canvas.set_color_thresholds(start, full)
         self.legend.set_thresholds(start, full)
+        self.legend.set_time_coloring_enabled(self.color_enabled_checkbox.isChecked())
         self.color_gradient.set_thresholds(start, full)
         self._refresh_color_labels()
         self._refresh_color_reset()
         self.color_thresholds_changed.emit(start, full)
+
+    def _time_coloring_toggled(self, enabled):
+        self.color_settings.setVisible(enabled)
+        self.canvas.set_time_coloring_enabled(enabled)
+        self.legend.set_time_coloring_enabled(enabled)
+        self.preview_notes.updateGeometry()
 
     def _refresh_color_labels(self):
         self.color_start_label.setText(f"{self.color_start_spin.value():.1f} s".replace(".", ","))
@@ -800,27 +941,37 @@ class LayerRangeDialog(QDialog):
             row.setObjectName("layerRangeRow")
             row.setProperty("selected", index == self.selected)
             box = QVBoxLayout(row)
-            box.setContentsMargins(10, 8, 10, 8)
-            header = WrappingLayout()
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(0)
+            header = QHBoxLayout()
+            header.setContentsMargins(0, 0, 0, 0)
+            header.setSpacing(0)
             select = QPushButton(f"Ausschlussbereich {index + 1}")
+            select.setObjectName("layerRangeSelectButton")
             self._compact_button(select)
             select.setAutoDefault(False)
             select.setCheckable(True)
             select.setChecked(index == self.selected)
             select.clicked.connect(lambda checked=False, i=index: self.select_range(i))
             select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            header.addWidget(select)
+            header.addWidget(select, 1)
             remove = self._button("Entfernen", "remove")
+            remove.setObjectName("layerRangeRemoveButton")
+            remove.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             remove.setAccessibleName(f"Ausschlussbereich {index + 1} entfernen")
             remove.clicked.connect(lambda checked=False, i=index: self.remove_range(i))
             header.addWidget(remove)
             box.addLayout(header)
-            editors = WrappingLayout()
+            editors_host = QWidget()
+            editors = QHBoxLayout(editors_host)
+            editors.setContentsMargins(10, 8, 10, 8)
+            editors.setSpacing(6)
             first = self._layer_spin(start, f"Ausschlussbereich {index + 1}: erster Layer")
             last = self._layer_spin(end, f"Ausschlussbereich {index + 1}: letzter Layer")
             for label, spin in (("Von Layer", first), ("bis", last)):
                 editors.addWidget(self._input_group(label, spin))
-            box.addLayout(editors)
+            editors.addStretch(1)
+            box.addWidget(editors_host)
             for spin in (first, last):
                 spin.editingFinished.connect(lambda r=row: self._commit_row(r))
             self.rows_layout.addWidget(row)

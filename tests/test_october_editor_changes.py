@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionSlider
 from cooling_tower.gui.main_window import MainWindow, _PROFILE_CONTENT_ROLE
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.layer_range_dialog import LayerRangeDialog
@@ -199,8 +199,15 @@ class EditorChangesTests(unittest.TestCase):
         self.assertEqual(view.request_id, count)
         dialog.resolution_slider.setValue(1)
         self.assertEqual(dialog.canvas.object_resolution_percent, 0)
-        self.assertTrue(dialog.resolution_reset.isEnabled())
-        dialog.resolution_reset.click()
+        self.assertIsNone(dialog.resolution_control.resolution_reset)
+        slider = dialog.resolution_slider
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        handle = slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, option,
+            QStyle.SubControl.SC_SliderHandle, slider)
+        QTest.mouseClick(slider, Qt.MouseButton.LeftButton, pos=handle.center())
+        QTest.mouseDClick(slider, Qt.MouseButton.LeftButton, pos=handle.center())
         self.assertEqual(dialog.canvas.object_resolution_percent, 75)
         self.assertTrue(request.original_source_is_current())
         dialog.reject()
