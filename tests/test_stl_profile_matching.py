@@ -759,14 +759,20 @@ class StlProfileMatchingTests(unittest.TestCase):
                 window.profile_diagnostics.toPlainText(),
             )
             self.assertTrue(window.profile_effective_summary_label.isHidden())
-            deadline = time.monotonic() + 10
+            # Allow delayed worker signals in the full GUI suite, but surface
+            # an explicit analysis failure immediately.
+            deadline = time.monotonic() + 30
             while (
                 window.source_preslice_result is None
+                and not window._analysis_failed
                 and time.monotonic() < deadline
             ):
                 app.processEvents()
                 QTest.qWait(10)
-            self.assertIsNotNone(window.source_preslice_result)
+            self.assertIsNotNone(
+                window.source_preslice_result,
+                window.profile_diagnostics.toPlainText(),
+            )
             self.assertIs(window.workflow.stage, WorkflowStage.READY)
             self.assertEqual(
                 [

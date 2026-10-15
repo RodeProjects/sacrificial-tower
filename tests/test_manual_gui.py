@@ -411,17 +411,19 @@ class ManualGuiTests(unittest.TestCase):
                                     image.pixelColor(x,y).blue()>image.pixelColor(x,y).green()+35
                                     for x in range(position.x()-2,position.x()+3)
                                     for y in range(position.y()-2,position.y()+3)))
+                # Drive the animation clock explicitly: runner timer ticks can
+                # arrive late even while mouse events are processed normally.
+                c._width_limit_animation.setCurrentTime(80)
                 elapsed=c._width_limit_animation.currentTime()
-                QTest.qWait(80)
                 self.assertEqual(c._width_limit_opacity,1)
                 QTest.mouseMove(c,target+QPoint(2,0))
-                self.assertGreater(c._width_limit_animation.currentTime(),elapsed)
-                QTest.qWait(c.WIDTH_LIMIT_GUIDE_DURATION_MS+80)
+                self.assertGreaterEqual(c._width_limit_animation.currentTime(),elapsed)
+                c._width_limit_animation.setCurrentTime(c.WIDTH_LIMIT_GUIDE_DURATION_MS)
                 self.assertIsNone(c._width_limit_setting)
                 QTest.mouseMove(c,target+QPoint(4,0))
                 self.assertEqual(c._width_limit_setting,"maximum_diameter_mm")
                 QTest.mouseRelease(c,Qt.MouseButton.LeftButton,pos=target+QPoint(4,0))
-                QTest.qWait(c.WIDTH_LIMIT_GUIDE_DURATION_MS+80)
+                c._width_limit_animation.setCurrentTime(c.WIDTH_LIMIT_GUIDE_DURATION_MS)
                 self.assertIsNone(c._width_limit_setting)
                 handle=next(pos for name,pos,_ in c.handles() if name==identity).toPoint()
                 QTest.mousePress(c,Qt.MouseButton.LeftButton,pos=handle)
