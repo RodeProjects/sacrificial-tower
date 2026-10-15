@@ -1,0 +1,81 @@
+"""Bounded original-object preview sampling from an actual joint slice."""
+from __future__ import annotations
+
+import math
+from pathlib import Path
+from threading import Event
+
+from cooling_tower.gcode.parser import MachineStateTracker, iter_parsed_gcode_lines
+from cooling_tower.models import OccupiedBounds
+from cooling_tower.preview.toolpath import (
+    DepositionToolpathAnalysis, DepositionToolpathCollector, PreviewCancelled,
+)
+
+
+def analyze_joint_source_toolpaths(
+    gcode_path: Path,
+    *,
+    tower_center_xy_mm: tuple[float, float],
+    expected_layer_count: int,
+    maximum_segments: int = 60_000,
+    cancellation_event: Event | None = None,
+) -> DepositionToolpathAnalysis:
+    """Keep the source's real walls, infill and supports; omit tower/purge.
+
+    Orca-family names identify the two project objects directly. Bambu's
+    numeric labels are resolved from their exact deposition bounds, using the
+    same unambiguous nearest-object rule as the joint infill verification.
+    Machine state always consumes every line, including excluded objects.
+    """
+    tracker = MachineStateTracker()
+    collectors: dict[str | int, DepositionToolpathCollector] = {}
+    active: str | int | None = None
+    try:
+        for parsed in iter_parsed_gcode_lines(gcode_path):
+            if parsed.number % 2_000 == 0 and cancellation_event is not None and cancellation_event.is_set():
+                raise PreviewCancelled()
+            comment = (parsed.comment or "").strip().casefold()
+            if parsed.command == "EXCLUDE_OBJECT_START":
+                active = None if "cooling_tower" in parsed.code_text.casefold() else "source"
+            elif parsed.command == "EXCLUDE_OBJECT_END" or comment.startswith("stop printing object"):
+                active = None
+            elif comment.startswith("printing object "):
+                active = None if "cooling_tower" in comment else "source"
+            elif comment.startswith("start printing object, unique label id:"):
+                label = comment.partition(":")[2].strip()
+                active = int(label) if label.isdigit() else None
+            event = tracker.process_line(parsed)
+            if active is not None:
+                if active not in collectors:
+                    collectors[active] = DepositionToolpathCollector(maximum_segments=maximum_segments)
+                collectors[active].consume(parsed, event)
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise PreviewCancelled()
+        analyses = {key: collector.finish(expected_layer_count=expected_layer_count)
+                    for key, collector in collectors.items()}
+        labels = {key: data for key, data in analyses.items()
+                  if isinstance(key, int) and data.occupied_bounds is not None}
+        if labels:
+            x, y = tower_center_xy_mm
+            ranked = sorted((math.hypot(max(b.minimum_x_mm-x, 0, x-b.maximum_x_mm),
+                                       max(b.minimum_y_mm-y, 0, y-b.maximum_y_mm)), key)
+                            for key, data in labels.items() if (b := data.occupied_bounds) is not None)
+            if len(ranked) < 2 or ranked[0][0]+1 >= ranked[1][0]:
+                raise ValueError("Originalobjekt und Kühlturm sind im gemeinsamen Vorschau-G-Code nicht eindeutig zuzuordnen.")
+            del analyses[ranked[0][1]]
+        sources = [data for data in analyses.values() if data.object_segments]
+        if not sources:
+            raise ValueError("Der gemeinsame Vorschau-G-Code enthält keine erkennbaren Werkzeugpfade des Originalobjekts.")
+        segments = tuple(segment for data in sources for segment in data.object_segments)
+        if len(segments) > maximum_segments:
+            step = len(segments)/maximum_segments
+            segments = tuple(segments[int(i*step)] for i in range(maximum_segments))
+        bounds = [data.occupied_bounds for data in sources if data.occupied_bounds is not None]
+        return DepositionToolpathAnalysis(
+            segments, sum(data.source_segment_count for data in sources),
+            OccupiedBounds(min(b.minimum_x_mm for b in bounds), max(b.maximum_x_mm for b in bounds),
+                           min(b.minimum_y_mm for b in bounds), max(b.maximum_y_mm for b in bounds)),
+        )
+    finally:
+        for collector in collectors.values():
+            collector.close()

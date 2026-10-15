@@ -17,6 +17,23 @@ abgebrochenen Hintergrundjobs eine inzwischen neu gewählte Quelle übernimmt.
 
 ## Quellen- und Analysekontext
 
+### Profilauswahl bei erneuter Erkennung
+
+„Slicer und Profile erneut erkennen“ erhält die aktuelle Auswahl des Slicers
+und prüft jede Profilrolle getrennt. Eine Auswahl wird wiederhergestellt, wenn
+Kennung, Pfad und Inhaltsfingerabdruck einschließlich wirksamer geerbter Werte
+übereinstimmen. Geänderte oder nicht mehr gefundene Profile fallen auf die erste
+wählbare Option ihrer neu geladenen Liste zurück. Die Profilauswahl muss nach
+dem Neuladen erneut bestätigt werden. Diese Sitzungsauswahl hat bei einer
+expliziten erneuten Erkennung Vorrang vor gespeicherten aktiven Slicer-Presets.
+
+Die Vorbereitung erklärt oberhalb der Profilfelder, dass dieselben gespeicherten
+globalen Profileinstellungen wie beim tatsächlichen Objektdruck gewählt werden
+sollen. Der Profilfilter besitzt einen eigenen Hover-Hinweis; „Filter deaktivieren
+/ alle Profile anzeigen“ lädt die vollständige erkannte Auswahl. Nur das
+Kontrollkästchen reagiert auf Mausklick und Hover; der Funktionstext bleibt
+passiv. Die übliche Tastaturbedienung des fokussierten Kästchens bleibt erhalten.
+
 `SourceArtifact` beschreibt ausschließlich die unveränderte Benutzereingabe:
 
 - Art, absolut aufgelöster Pfad, Größe und Änderungszeitpunkt,

@@ -37,6 +37,7 @@ class GenerationSettings:
     minimum_object_tower_distance_mm: float
     simulate_full_tower_infill: bool
     simulate_tower_without_supports: bool
+    simulate_source_supports: bool
 
     minimum_base_radius_mm: float
     _legacy_base_height_mm: float = field(repr=False, compare=False)
@@ -78,6 +79,7 @@ class GenerationSettings:
         minimum_object_tower_distance_mm: float = GENERATION_DEFAULTS["minimum_object_tower_distance_mm"],
         simulate_full_tower_infill: bool = GENERATION_DEFAULTS["simulate_full_tower_infill"],
         simulate_tower_without_supports: bool = GENERATION_DEFAULTS["simulate_tower_without_supports"],
+        simulate_source_supports: bool = False,
         minimum_base_radius_mm: float = GENERATION_DEFAULTS["minimum_base_radius_mm"],
         base_margin_mm: float = GENERATION_DEFAULTS["base_margin_mm"],
         base_height_factor: float = GENERATION_DEFAULTS["base_height_factor"],
@@ -121,6 +123,7 @@ class GenerationSettings:
             "minimum_object_tower_distance_mm": minimum_object_tower_distance_mm,
             "simulate_full_tower_infill": simulate_full_tower_infill,
             "simulate_tower_without_supports": simulate_tower_without_supports,
+            "simulate_source_supports": simulate_source_supports,
             "minimum_base_radius_mm": minimum_base_radius_mm,
             "base_margin_mm": base_margin_mm,
             "base_height_factor": base_height_factor,
@@ -177,7 +180,7 @@ class GenerationSettings:
             item.name: getattr(self, item.name)
             for item in fields(self)
             if not item.name.startswith("_legacy_")
-            and (include_object_settings or item.name != "excluded_layer_ranges")
+            and (include_object_settings or item.name not in {"excluded_layer_ranges", "simulate_source_supports"})
         }
 
     @classmethod

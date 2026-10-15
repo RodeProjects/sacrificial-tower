@@ -80,7 +80,9 @@ class ManualRequest(PreviewRequest):
         return {key: value for key, value in source.items() if key in
                 {"source", "original_source", "gcode_origin", "analysis_gcode_sha256", "analysis_file_size",
                  "analysis_modified_ns", "slicer_identity_key", "profile_fingerprint", "supports_simulated", "draft_shield_simulated"}} | {
-                     "manual_request_schema_version": 2,
+                     "manual_request_schema_version": 3,
+                     "simulations": {"full_tower_infill": self.settings.simulate_full_tower_infill,
+                                     "source_supports": self.settings.simulate_source_supports},
                      "geometry": self.draft.artifact_payload() if self.draft else None,
                      "effective_profile": dict(self.effective_profile.effective_values),
                      "profile_source_hashes": self.profile_source_hashes}
@@ -224,13 +226,17 @@ class ManualGenerationService:
             lightweight_factory = None if getattr(adapter, "prefer_native_joint_project", False) else getattr(adapter, "prepare_joint_slice_input", None)
             artifact = request.source_artifact
             joint = artifact is not None and artifact.source_kind.value == "stl" and callable(project_factory)
+            if request.settings.simulate_source_supports and not joint:
+                raise ValueError("Objektspezifische STL-Stützen benötigen einen gemeinsamen Slice mit einem unterstützten Slicer.")
             warnings = []
             if not joint:
                 warnings.append("Separater Turm-Slice: Die Zeitbewertung ist eine Prognose zum Original-G-Code, keine gemeinsame Verifikation.")
                 if artifact is not None and artifact.source_kind.value == "stl":
                     warnings.append("Dieser Adapter kann kein geprüftes natives gemeinsames Projekt erzeugen.")
             with protect_profile_sources(request.effective_profile):
-                copied, overrides = build_calibration_profile(request.effective_profile, root / "profiles")
+                copied, overrides = build_calibration_profile(
+                    request.effective_profile, root / "profiles",
+                    simulate_full_tower_infill=request.settings.simulate_full_tower_infill and not joint)
                 if copied.installation.adapter_id in {"orca_slicer", "bambu_studio", "anycubic_slicer_next"}:
                     assert_profile_copies_are_isolated(request.effective_profile, copied, root / "profiles")
                 project = None
@@ -244,13 +250,15 @@ class ManualGenerationService:
                     notify(35, "Festes gemeinsames Objekt-/Turm-Projekt wird aufgebaut …")
                     if callable(lightweight_factory):
                         product = lightweight_factory(project_request, artifact.original_path, stl, root / "assemble.json",
-                                                       occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=False)
+                                                       occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=request.settings.simulate_full_tower_infill,
+                                                       **({"source_supports_enabled": True} if request.settings.simulate_source_supports else {}))
                         slice_model = Path(product.slice_input_path)
                         use_assemble = True
                     else:
                         project = root / "object_with_manual_tower.3mf"
                         product = project_factory(project_request, artifact.original_path, stl, project,
-                                                  occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=False)
+                                                  occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=request.settings.simulate_full_tower_infill,
+                                                       **({"source_supports_enabled": True} if request.settings.simulate_source_supports else {}))
                         native_input = getattr(product, "slice_input_path", None)
                         slice_model = Path(native_input) if native_input is not None and not getattr(adapter, "prefer_native_joint_project", False) else project
                         use_assemble = native_input is not None and slice_model != project
@@ -271,7 +279,10 @@ class ManualGenerationService:
                 analysis = _CancelableAnalysis(self.analysis_service, cancellation_event)
                 evaluator = SliceEvaluator(analysis)
                 layers = tuple(request.snapshot.layers) if joint else tuple(l for l in request.snapshot.layers if l.z_mm <= request.draft.height_mm+1e-6)
-                evaluation = evaluator.evaluate(sliced, layers)
+                evaluation = evaluator.evaluate(
+                    sliced, layers,
+                    validate_tower_full_infill=joint and request.settings.simulate_full_tower_infill,
+                    tower_center_xy_mm=(placement.center_x_mm, placement.center_y_mm))
                 actual_layers = analysis.snapshot.layers
                 tops = tuple(l.z_mm for l in actual_layers)
                 # Reject unsafe nearest-neighbour guesses, especially variable layers.
@@ -291,14 +302,13 @@ class ManualGenerationService:
                     rows.extend((l.index, l.z_mm, l.total_time_s)
                                 for l in actual_layers if round(l.z_mm,6) not in known)
                 warnings.extend(evaluation.diagnostics)
-                if evaluation.metadata_source == "gcode":
-                    warnings.append("Layerzeiten stammen aus der bestehenden G-Code-Zeitanalyse; native Slicer-Layerzeiten sind nicht verfügbar.")
                 if joint and project is None:
                     check_cancel(cancellation_event)
                     notify(90, "Geprüftes natives 3MF der identischen Anordnung wird erhalten …")
                     project = root / "object_with_manual_tower.3mf"
                     project_factory(project_request, artifact.original_path, stl, project,
-                                    occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=False)
+                                    occupied=request.context.occupied_bounds, placement=placement, tower_full_infill=request.settings.simulate_full_tower_infill,
+                                                       **({"source_supports_enabled": True} if request.settings.simulate_source_supports else {}))
             check_cancel(cancellation_event)
             if artifact_hash != sha256_file(stl):
                 raise ValueError("Die manuelle Geometrie wurde während der Prüfung verändert.")

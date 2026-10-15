@@ -62,6 +62,8 @@ class LayerRangeCanvas(QWidget):
         )
         self.join_hint.hide()
         self._background = None
+        self.object_resolution_percent = 75
+        self.object_view = None
         self._segments = tuple(segments)
         self._silhouette = silhouette
         self.yaw_deg = 0
@@ -134,6 +136,18 @@ class LayerRangeCanvas(QWidget):
         self.target_time_s = value
         self._background = None
         self.update()
+
+    def set_resolution(self, percent):
+        from cooling_tower.manual.geometry import OBJECT_RESOLUTION_STAGES
+        if percent not in OBJECT_RESOLUTION_STAGES:
+            raise ValueError("Unbekannte Vorschauauflösung.")
+        self.object_resolution_percent = percent
+        self._background = None
+        self.update()
+
+    def prepare_object_view(self, artifact, manager):
+        from cooling_tower.gui.object_view import OriginalObjectView
+        self.object_view = OriginalObjectView(self, artifact, manager)
 
     def set_color_thresholds(self, start, full):
         if not math.isfinite(start) or not math.isfinite(full) or not 0 <= start < full:
@@ -270,6 +284,10 @@ class LayerRangeCanvas(QWidget):
                 painter.drawText(QRectF(0, y - 10, rect.left() - axis_gap, 20), Qt.AlignmentFlag.AlignRight, str(position + 1))
         painter.drawText(self.layer_title_rect(), "Layer")
         painter.setClipRect(QRectF(rect.left(), 0, rect.width(), self.height()))
+        if self.object_view is not None and self.object_view.draw(painter):
+            painter.end()
+            self._background = pixmap
+            return
         paths = defaultdict(QPainterPath)
         for position, intervals in enumerate(self._intervals):
             y = self.y_for_z(self.tops[position])

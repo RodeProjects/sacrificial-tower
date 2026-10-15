@@ -2579,7 +2579,10 @@ QCheckBox#simulateTowerWithoutSupports:hover,
 QCheckBox#simulateTowerWithoutSupports:pressed,
 QCheckBox#showSettingLimits,
 QCheckBox#showSettingLimits:hover,
-QCheckBox#showSettingLimits:pressed {
+QCheckBox#showSettingLimits:pressed,
+QCheckBox#showAllProfilesCheckBox,
+QCheckBox#showAllProfilesCheckBox:hover,
+QCheckBox#showAllProfilesCheckBox:pressed {
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 4px 7px 4px 0;
@@ -2590,57 +2593,18 @@ QCheckBox#showSettingLimits:hover {
     color: #0f5d91;
     background: #f1f7fb;
 }
-QCheckBox#simulateFullTowerInfill::indicator,
-QCheckBox#simulateTowerWithoutSupports::indicator,
-QCheckBox#showSettingLimits::indicator {
-    width: 16px;
-    height: 16px;
-}
-
 QCheckBox#showAllProfilesCheckBox,
 QCheckBox#showAllProfilesCheckBox:hover,
 QCheckBox#showAllProfilesCheckBox:pressed {
-    color: #21384f;
+    color: #152536;
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    padding: 3px 6px;
 }
-QCheckBox#showAllProfilesCheckBox:hover {
-    color: #0f5d91;
-    background: #e5f0f8;
-}
-QCheckBox#showAllProfilesCheckBox:pressed {
-    color: #0f5d91;
-    background: #d8e8f3;
-}
+QCheckBox#simulateFullTowerInfill::indicator,
+QCheckBox#simulateTowerWithoutSupports::indicator,
+QCheckBox#showSettingLimits::indicator,
 QCheckBox#showAllProfilesCheckBox::indicator {
     width: 16px;
     height: 16px;
-    background: #ffffff;
-    border: 1px solid #71879a;
-    border-radius: 3px;
-}
-QCheckBox#showAllProfilesCheckBox::indicator:hover {
-    background: #ffffff;
-    border-color: #1769aa;
-}
-QCheckBox#showAllProfilesCheckBox::indicator:pressed {
-    background: #eef5fa;
-    border-color: #105784;
-}
-QCheckBox#showAllProfilesCheckBox::indicator:checked {
-    image: url("__CHECKBOX_CHECK_ICON__");
-    background: #1769aa;
-    border-color: #105784;
-}
-QCheckBox#showAllProfilesCheckBox::indicator:checked:hover {
-    background: #105b93;
-    border-color: #0d4c7e;
-}
-QCheckBox#showAllProfilesCheckBox::indicator:checked:pressed {
-    background: #0d4c7e;
-    border-color: #093c64;
 }
 
 QCheckBox#automaticBaseWidth,

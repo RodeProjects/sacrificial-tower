@@ -8,8 +8,8 @@ from bisect import bisect_left
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QLineF, QSize, Qt, Signal,QTimer,Slot,QVariantAnimation
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPicture, QPolygonF,QImage,QBrush,QLinearGradient
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPicture, QPolygonF,QImage,QBrush,QLinearGradient,QIcon,QPixmap
+from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout
 
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.gui.widgets.manual_view_controls import ManualViewControls
@@ -20,6 +20,29 @@ from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS
 from cooling_tower.gui.manual_view_worker import (SpatialFrame,ManualViewWorker,render_spatial_object,rotate_object,
                                                 cosmetic_pen,surface_brightness,draw_surface,render_silhouette_backing)
+
+
+def history_arrow_icon(redo=False):
+    """Draw a familiar curved arrow without depending on a symbol font."""
+    pixmap = QPixmap(20, 20)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if redo:
+        painter.translate(20, 0)
+        painter.scale(-1, 1)
+    color = QColor("#284f70")
+    painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    path = QPainterPath(QPointF(16, 16))
+    path.lineTo(16, 12)
+    path.quadTo(16, 7, 11, 7)
+    path.lineTo(5, 7)
+    painter.drawPath(path)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawPolygon(QPolygonF([QPointF(3, 7), QPointF(8, 2), QPointF(8, 12)]))
+    painter.end()
+    return QIcon(pixmap)
 
 
 class ManualCanvas(QWidget):
@@ -57,6 +80,24 @@ class ManualCanvas(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setAccessibleName("Manuelles Turmprofil: Greifer ziehen, Profil doppelklicken, Mausrad zoomt")
+        self.history_controls = QWidget(self)
+        history_layout = QHBoxLayout(self.history_controls)
+        history_layout.setContentsMargins(0, 0, 0, 0)
+        history_layout.setSpacing(4)
+        self.undo_button = QPushButton()
+        self.redo_button = QPushButton()
+        self.undo_button.setIcon(history_arrow_icon())
+        self.redo_button.setIcon(history_arrow_icon(redo=True))
+        for button, label in ((self.undo_button, "Letzte Aktion rückgängig machen (Strg+Z)"),
+                              (self.redo_button, "Aktion wiederholen (Strg+Y)")):
+            button.setFixedSize(28, 26)
+            button.setIconSize(QSize(18, 18))
+            button.setStyleSheet("QPushButton { padding: 0px; min-height: 0px; min-width: 0px; }")
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.setEnabled(False)
+            history_layout.addWidget(button)
+        self.history_controls.setGeometry(8, 8, 60, 26)
         self.draft = self.reference = None
         self.selected = ""
         self.point_editor = None
@@ -903,7 +944,7 @@ class ManualCanvas(QWidget):
         painter.setPen(QColor("#526274"))
         caption = self.caption_text()
         if self.caption_visible():
-            painter.drawText(QRectF(12,8,self.width()-24,36),Qt.TextFlag.TextWordWrap,caption)
+            painter.drawText(self.caption_rect(), Qt.AlignmentFlag.AlignVCenter, caption)
         painter.end()
         if self.point_editor is not None:self.point_editor.reposition()
 
@@ -917,9 +958,12 @@ class ManualCanvas(QWidget):
         return caption
 
     def caption_visible(self):
-        bounds = self.fontMetrics().boundingRect(QRectF(12,8,self.width()-24,36).toRect(),
-                                                Qt.TextFlag.TextWordWrap,self.caption_text())
-        return not bounds.intersects(self.view_controls.geometry())
+        return self.fontMetrics().horizontalAdvance(self.caption_text()) <= self.caption_rect().width()
+
+    def caption_rect(self):
+        left = self.history_controls.geometry().right() + 8
+        right = self.width()-8 if self.view_controls.y() > self.history_controls.geometry().bottom() else self.view_controls.x()-8
+        return QRectF(left, 8, max(0, right-left), 26)
 
     def _axis_projection(self):
         if self.view in {"side","front"}:
@@ -1127,6 +1171,27 @@ class ManualCanvas(QWidget):
 
     def horizontal_drag_snaps(self):
         return self._drag_width_active and self._drag is not None and self._drag[0] == "edit"
+
+    def neighbor_diameter_snaps(self, identity, diameter):
+        """Nearby radial positions of the two direct profile neighbours only."""
+        draft = self._drag_origin_draft or self.draft
+        if draft is None or identity.startswith("control:"):
+            return ()
+        index = next((i for i, point in enumerate(draft.points) if point.identity == identity), None)
+        if index is None:
+            return ()
+        scale = self.transform()[0]
+        nearby = []
+        for neighbor in draft.points[max(0,index-1):index+2]:
+            if neighbor.identity == identity:
+                continue
+            if identity == "base" and neighbor.identity == "top" and draft.top_follows_base and len(draft.points) == 3:
+                # This endpoint already follows every radial base move.
+                continue
+            distance_px = abs(neighbor.position.diameter_mm-diameter)*scale/2
+            if distance_px <= 8:
+                nearby.append((distance_px, neighbor.identity, neighbor.position.diameter_mm))
+        return tuple((key, value) for _, key, value in sorted(nearby))
 
     def constrained_drag_origin(self):
         return self._drag_origin_draft if self._drag_axis is not None and self._drag is not None else None

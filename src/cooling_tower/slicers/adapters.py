@@ -223,6 +223,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         placement: object,
         tower_full_infill: bool,
         tower_supports_disabled: bool = False,
+        source_supports_enabled: bool = False,
     ) -> object:
         """Let the CLI create native metadata, then lock app-chosen positions."""
 
@@ -295,6 +296,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 placement=placement,
                 tower_full_infill=tower_full_infill,
                 tower_supports_disabled=tower_supports_disabled,
+                source_supports_enabled=source_supports_enabled,
             )
         finally:
             self.cleanup_prepared_slice(prepared)
@@ -439,6 +441,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         placement: object,
         tower_full_infill: bool,
         tower_supports_disabled: bool = False,
+        source_supports_enabled: bool = False,
     ) -> object:
         """Create only Bambu's direct fixed-position candidate assembly."""
 
@@ -478,6 +481,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
                             "pos_x": [arrangement.source_translation_mm[0]],
                             "pos_y": [arrangement.source_translation_mm[1]],
                             "pos_z": [arrangement.source_translation_mm[2]],
+                            **({"print_params": {"enable_support": "1"}} if source_supports_enabled else {}),
                         },
                         {
                             "path": str(Path(tower_model_path).resolve()),
@@ -517,6 +521,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         placement: object,
         tower_full_infill: bool,
         tower_supports_disabled: bool = False,
+        source_supports_enabled: bool = False,
     ) -> object:
         """Create the export 3MF plus Bambu's reliable direct joint-slice input."""
 
@@ -529,6 +534,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             placement=placement,
             tower_full_infill=tower_full_infill,
             tower_supports_disabled=tower_supports_disabled,
+            source_supports_enabled=source_supports_enabled,
         )
         destination_path = Path(destination).resolve()
         from cooling_tower.calibration.joint_project import (
@@ -552,6 +558,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             placement=placement,
             tower_full_infill=tower_full_infill,
             tower_supports_disabled=tower_supports_disabled,
+            source_supports_enabled=source_supports_enabled,
         )
         return replace(result, slice_input_path=slice_input.slice_input_path)
 

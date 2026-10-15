@@ -107,7 +107,8 @@ class ManualPreviewInformation(QWidget):
                  ["Linke Maustaste: Ansicht drehen"])
         if view in {"side","front"}:
             items.insert(1,"Shift + Ziehen: Punkt nur waagerecht/senkrecht verschieben")
-        items += ["Mittlere Maustaste + Ziehen: Ansicht verschieben","Mausrad: Zoom"]
+        items += ["Strg+Z: rückgängig · Strg+Y: wiederholen",
+                  "Mittlere Maustaste + Ziehen: Ansicht verschieben","Mausrad: Zoom"]
         self.instructions.setText('\n'.join(f"• {item}" for item in items))
 
     def _set_legend_columns(self,width):

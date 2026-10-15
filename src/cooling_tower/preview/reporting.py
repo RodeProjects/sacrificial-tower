@@ -814,6 +814,20 @@ def build_user_report(
         )
     )
     lines.extend(f"- {warning}" for warning in user_warnings)
+    if request.settings.simulate_source_supports:
+        lines.append(
+            "- Stützen für das Original-STL wurden objektspezifisch simuliert. "
+            "Die exportierte 3MF aktiviert sie nur für das Originalobjekt."
+            if project_path is not None else
+            "- Stützen für das Original-STL wurden simuliert. Ohne gemeinsame 3MF "
+            "müssen sie im Zielprojekt für das Originalobjekt aktiviert werden."
+        )
+    if request.settings.simulate_full_tower_infill:
+        lines.append(
+            "- 100% Turmfüllung wurde simuliert und in der 3MF nur für den Kühlturm gesetzt."
+            if project_path is not None else
+            "- 100% Turmfüllung wurde simuliert. Beim STL-Import die Turmfüllung auf 100% setzen."
+        )
     if request.settings.simulate_tower_without_supports:
         lines.append(
             "- Deaktivierte Turmstützen wurden simuliert. Die exportierte 3MF "

@@ -319,7 +319,7 @@ class ManualGeometryTests(unittest.TestCase):
         with self.assertRaises(GeometryError): set_curve(d,1,control=1,position=Coordinate(3,101))
         with self.assertRaises(GeometryError): set_curve(d,1,control=1,position=d.curves[1].start)
 
-    def test_foot_controls_and_complete_curve_obey_minimum_diameter(self):
+    def test_foot_curve_obeys_minimum_while_controls_can_cross_it(self):
         for base_diameter in (5,20):
             d=move_point(draft(),"base",diameter_mm=base_diameter)
             for n in (1,2):
@@ -328,10 +328,16 @@ class ManualGeometryTests(unittest.TestCase):
                     boundary=Coordinate(d.settings.minimum_diameter_mm/2,control.z_mm)
                     valid=set_curve(d,0,control=n,position=boundary)
                     self.assertGreaterEqual(min(valid.curves[0].radius_extrema()),boundary.radius_mm-1e-9)
-                    with self.assertRaises(GeometryError) as caught:
-                        set_curve(d,0,control=n,position=Coordinate(boundary.radius_mm-.1,control.z_mm))
-                    self.assertEqual(caught.exception.setting,"minimum_diameter_mm")
-                    self.assertIn("minimum_diameter_mm",caught.exception.limits)
+                    destination=Coordinate(boundary.radius_mm-.1,control.z_mm)
+                    if base_diameter == 20:
+                        valid=set_curve(d,0,control=n,position=destination)
+                        self.assertLess(getattr(valid.curves[0],f"control{n}").radius_mm,boundary.radius_mm)
+                        self.assertGreaterEqual(min(valid.curves[0].radius_extrema()),boundary.radius_mm-1e-9)
+                    else:
+                        with self.assertRaises(GeometryError) as caught:
+                            set_curve(d,0,control=n,position=destination)
+                        self.assertEqual(caught.exception.setting,"minimum_diameter_mm")
+                        self.assertIn("minimum_diameter_mm",caught.exception.limits)
 
     def test_exact_slope_extrema_not_endpoint_chords(self):
         curve = Cubic(Coordinate(2,0),Coordinate(2,1),Coordinate(20,2),Coordinate(20,3))

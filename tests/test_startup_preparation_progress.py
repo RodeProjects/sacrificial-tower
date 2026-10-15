@@ -345,7 +345,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
             window.deleteLater()
             self.app.processEvents()
 
-    def test_explicit_rediscovery_ignores_stale_remembered_profile_choice(self) -> None:
+    def test_explicit_rediscovery_retains_unchanged_current_profile_choice(self) -> None:
         discovery = SlicerDiscoveryResult(
             installations=(self.installation,),
             recommended_key=self.installation.identity_key,
@@ -361,7 +361,9 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 ("filament", self.records["filament_alt"]),
             )
         }
-        profile_service = StartupProfileService(self.catalog)
+        catalog = replace(self.catalog, content_fingerprints={str(record.path): record.profile_id
+                          for record in self.records.values()})
+        profile_service = StartupProfileService(catalog)
         window = MainWindow(
             user_settings_path=self.root / "rediscovery-settings.json",
             slicer_service=slicer_service,
@@ -370,7 +372,8 @@ class StartupPreparationProgressTests(unittest.TestCase):
             enable_startup_slicer_discovery=True,
         )
         try:
-            self._wait_until(lambda: profile_service.catalog_calls == 1)
+            self._wait_until(lambda: profile_service.catalog_calls == 1 and window.profile_catalog is not None
+                             and not window.background_job_manager.has_active(JobKind.PROFILE_MATCH))
             self.assertEqual(profile_service.prefer_active_presets, [False])
             remembered_calls = len(slicer_service.remembered_identity_keys)
 
@@ -384,7 +387,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
 
             self.assertEqual(
                 profile_service.prefer_active_presets,
-                [False, True],
+                [False, False],
             )
             self.assertEqual(
                 len(slicer_service.remembered_identity_keys),
@@ -394,7 +397,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window._profile_combo_reference(
                     window.filament_profile_combo
                 ).profile_id,
-                self.records["filament"].profile_id,
+                self.records["filament_alt"].profile_id,
             )
         finally:
             window.close()

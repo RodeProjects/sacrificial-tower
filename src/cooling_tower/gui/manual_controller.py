@@ -63,7 +63,8 @@ class ManualGenerationController(QObject):
             raise ValueError("Zuerst Quelle, Slicer und Druckprofile vollständig vorbereiten und bestätigen.")
         profile = result.selected.effective_profile
         if w.source_preslice_result is not None:
-            if getattr(w.source_preslice_result,"supports_simulated",False):
+            if (getattr(w.source_preslice_result,"supports_simulated",False)
+                    and not (draft is not None and self.panel.source_supports_checkbox.isChecked())):
                 from cooling_tower.slicers.support_simulation import with_simulated_supports
                 profile = with_simulated_supports(profile)
             if getattr(w.source_preslice_result,"draft_shield_simulated",False):
@@ -75,7 +76,9 @@ class ManualGenerationController(QObject):
         export_settings = GenerationSettings(minimum_outer_diameter_mm=settings.minimum_diameter_mm,
                                              maximum_outer_diameter_mm=settings.maximum_diameter_mm,
                                              automatic_base_width=False,manual_base_width_mm=settings.foot_diameter_mm,
-                                             simulate_full_tower_infill=False,simulate_tower_without_supports=False,
+                                             simulate_full_tower_infill=draft is not None and self.panel.full_infill_checkbox.isChecked(),
+                                             simulate_source_supports=draft is not None and self.panel.source_supports_checkbox.isChecked(),
+                                             simulate_tower_without_supports=False,
                                              excluded_layer_ranges=())
         return ManualRequest(snapshot=w.analysis_snapshot,settings=export_settings,output_mode=OutputMode.STL,
                              calibration_config=CalibrationConfig(maximum_iterations=1),

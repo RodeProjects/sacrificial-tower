@@ -13,6 +13,19 @@ SUPPORT_KEYS = {
     "cura": "support_enable",
 }
 
+OBJECT_SUPPORT_ADAPTERS = frozenset({"anycubic_slicer_next", "orca_slicer", "bambu_studio"})
+
+
+def global_supports_disabled(profile: EffectiveProfile) -> bool:
+    """Offer object support simulation only for a recognized disabled value."""
+    key = SUPPORT_KEYS.get(getattr(getattr(profile, "installation", None), "adapter_id", None))
+    if key is None:
+        return False
+    value = getattr(profile, "effective_values", {}).get(key)
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return value is not None and str(value).strip().casefold() in {"0", "false", "no"}
+
 
 def with_simulated_supports(profile: EffectiveProfile) -> EffectiveProfile:
     key = SUPPORT_KEYS[profile.installation.adapter_id]

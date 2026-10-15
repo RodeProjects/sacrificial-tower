@@ -518,6 +518,8 @@ class ProfileMatchingService:
             "filament", filament_options
         )
         return ProfileCatalog(
+            content_fingerprints={str(item.record.path): item.fingerprint_sha256
+                                  for item in resolved if item.valid and item.fingerprint_sha256},
             execution_slicer=installation,
             inventory_fingerprint=inventory.fingerprint_sha256,
             machine_options=machine_options,

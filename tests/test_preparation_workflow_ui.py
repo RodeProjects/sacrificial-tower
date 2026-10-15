@@ -640,10 +640,12 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertEqual(
                 gap(
                     window.preparation_slicer_requirements,
-                    window.preparation_slicer_divider,
+                    window.preparation_slicer_info_divider,
                 ),
                 expected_gap,
             )
+            self.assertEqual(gap(window.preparation_slicer_info_divider, window.preparation_profile_hint), expected_gap)
+            self.assertEqual(gap(window.preparation_profile_hint, window.preparation_slicer_divider), expected_gap)
             self.assertEqual(
                 gap(window.preparation_slicer_divider, window.slicer_columns),
                 expected_gap,

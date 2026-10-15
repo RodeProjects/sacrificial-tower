@@ -116,6 +116,7 @@ class _DeferredJointProjectExport:
     placement: object
     tower_full_infill: bool
     tower_supports_disabled: bool = False
+    source_supports_enabled: bool = False
 
 
 class CalibrationService:
@@ -179,6 +180,12 @@ class CalibrationService:
             }
             else None
         )
+        if settings.simulate_source_supports and (joint_source_stl is None or not config.perform_joint_final_slice):
+            return self._failure(
+                config, CalibrationState.UNSUPPORTED, source_hash,
+                CalibrationFailureCode.GEOMETRY_INVALID,
+                "Objektspezifische STL-Stützen benötigen einen gemeinsamen Slice mit einem unterstützten Slicer.",
+            )
         seed_stl = (
             Path(seed_stl_path).resolve()
             if seed_stl_path is not None else None
@@ -632,6 +639,8 @@ class CalibrationService:
                                 ),
                                 **({"tower_supports_disabled": True}
                                    if settings.simulate_tower_without_supports else {}),
+                                **({"source_supports_enabled": True}
+                                   if settings.simulate_source_supports else {}),
                             )
                             slice_model_path = Path(
                                 getattr(slice_input, "slice_input_path")
@@ -655,6 +664,7 @@ class CalibrationService:
                                 tower_supports_disabled=(
                                     settings.simulate_tower_without_supports
                                 ),
+                                source_supports_enabled=settings.simulate_source_supports,
                             )
                         elif callable(project_factory):
                             candidate_project = iteration_root / (
@@ -672,6 +682,8 @@ class CalibrationService:
                                 ),
                                 **({"tower_supports_disabled": True}
                                    if settings.simulate_tower_without_supports else {}),
+                                **({"source_supports_enabled": True}
+                                   if settings.simulate_source_supports else {}),
                             )
                             native_slice_input = getattr(
                                 project_result, "slice_input_path", None
@@ -695,6 +707,7 @@ class CalibrationService:
                                 tower_supports_disabled=(
                                     settings.simulate_tower_without_supports
                                 ),
+                                source_supports_enabled=settings.simulate_source_supports,
                             )
                     except JointProjectError as error:
                         if (
@@ -1558,6 +1571,8 @@ class CalibrationService:
                         ),
                         **({"tower_supports_disabled": True}
                            if deferred_project.tower_supports_disabled else {}),
+                        **({"source_supports_enabled": True}
+                           if deferred_project.source_supports_enabled else {}),
                     )
                     candidate_project = Path(
                         getattr(project_result, "path", final_project)

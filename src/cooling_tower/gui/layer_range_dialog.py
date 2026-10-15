@@ -209,7 +209,8 @@ class LayerRangeDialog(QDialog):
     def __init__(self, layers, segments, *, target_time_s, target_minimum,
                  target_maximum, target_decimals=2, ranges=(),
                  gradient_start_deficit_s=0.0, gradient_full_deficit_s=1.0,
-                 silhouette=None, target_time_hint=None, target_default=None, parent=None):
+                 silhouette=None, target_time_hint=None, target_default=None,
+                 source_artifact=None, render_manager=None, parent=None):
         super().__init__(parent)
         self.setObjectName("layerRangeDialog")
         self.setWindowTitle("Bereichseditor · Aufweitung ausschließen")
@@ -377,6 +378,16 @@ class LayerRangeDialog(QDialog):
         self.fit_button.setAutoDefault(False)
         self.fit_button.setEnabled(False)
         self.canvas = LayerRangeCanvas(layers, segments, silhouette=silhouette)
+        from cooling_tower.gui.widgets.object_resolution_control import ObjectResolutionControl
+        self.resolution_control = ObjectResolutionControl()
+        self.resolution_slider = self.resolution_control.resolution_slider
+        self.resolution_label = self.resolution_control.resolution_label
+        self.resolution_reset = self.resolution_control.resolution_reset
+        self.resolution_control.percent_changed.connect(self.canvas.set_resolution)
+        right_layout.addWidget(self.resolution_control)
+        if source_artifact is not None and render_manager is not None and silhouette is not None:
+            self.canvas.prepare_object_view(source_artifact, render_manager)
+            self.finished.connect(lambda _: self.canvas.object_view.close())
         self.canvas.setMinimumWidth(240)
         self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
         self.rotation_slider.setRange(-180, 180)

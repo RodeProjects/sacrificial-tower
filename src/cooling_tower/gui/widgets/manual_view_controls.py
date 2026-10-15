@@ -72,7 +72,10 @@ class ManualViewControls(QWidget):
             self.grid.setColumnStretch(column,1 if self.rows == 2 else 0)
         width = natural if self.rows == 1 else available
         height = self.button_height*self.rows+self.grid.spacing()*(self.rows-1)
-        self.setGeometry(self.parentWidget().width()-8-width,8,width,height)
+        x = self.parentWidget().width()-8-width
+        history = getattr(self.parentWidget(), "history_controls", None)
+        y = history.geometry().bottom()+8 if history is not None and x <= history.geometry().right()+8 else 8
+        self.setGeometry(x,y,width,height)
         self.grid.activate()
         self.raise_()
         self.parentWidget().update()

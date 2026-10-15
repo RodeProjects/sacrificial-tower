@@ -147,6 +147,7 @@ class PreviewExportService:
         return PreviewExportResult(
             full_tower_infill_simulated=request.settings.simulate_full_tower_infill,
             tower_supports_disabled_simulated=request.settings.simulate_tower_without_supports,
+            source_supports_simulated=request.settings.simulate_source_supports,
             supports_simulated=bool(getattr(request.effective_profile, "supports_simulated", False)),
             draft_shield_simulated=bool(getattr(request.effective_profile, "draft_shield_simulated", False)),
             output_mode=preview.output_mode,

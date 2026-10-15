@@ -134,6 +134,7 @@ class GenerationPanel(QWidget):
         self.result_label.setText("Gemeinsame Prüfung ausstehend")
         self._running = True
         self._completed, self._maximum = completed, maximum
+        self.image_progress.set_display_complete(False)
         self.image_progress.set_fill(0.0)
         self.result_widget.hide()
         self.continue_button.hide()
@@ -147,6 +148,7 @@ class GenerationPanel(QWidget):
 
     def start_slice(self, completed, maximum):
         self._running = True
+        self.image_progress.set_display_complete(False)
         self._completed, self._maximum = completed, maximum
         self.title_label.setText("Kühlturm wird generiert …")
         self.counter_label.setText(f"{completed} von {maximum} gemeinsamen Slices abgeschlossen · Slice {completed + 1} läuft")
@@ -199,7 +201,7 @@ class GenerationPanel(QWidget):
         self._has_result = has_result
         self.title_label.setText("Generierung gestoppt" if paused else "Kühlturm fertig generiert")
         self.counter_label.setText(status_text or f"{self._completed} von {self._maximum} gemeinsamen Slices abgeschlossen")
-        self.image_progress.set_fill(self._completed / max(1, self._maximum))
+        self.image_progress.set_display_complete(True)
         self.result_widget.setVisible(has_result)
         if not has_result:
             self.hide()
@@ -211,6 +213,7 @@ class GenerationPanel(QWidget):
 
     def resume_waiting(self):
         self._running = True
+        self.image_progress.set_display_complete(False)
         self.title_label.setText("Kühlturm wird generiert …")
         self.counter_label.setText(f"{self._completed} von {self._maximum} gemeinsamen Slices abgeschlossen · Fortsetzung wird vorbereitet")
         self.result_widget.show()
@@ -233,6 +236,7 @@ class GenerationPanel(QWidget):
         """Keep safe result controls; the caller reports the error in the footer."""
         self._running = False
         self._has_result = retain_result
+        self.image_progress.set_display_complete(True)
         self.title_label.setText("Generierung nicht abgeschlossen")
         self.result_widget.setVisible(self._has_result)
         self.accept_button.hide()

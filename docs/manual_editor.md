@@ -27,6 +27,30 @@ betroffenen Ergebnisse beider Methoden und den manuellen Kontext. Laufende
 Generierungen und Exporte sperren den Methodenwechsel. Beim Schließen werden
 die temporären Ergebnisdateien beider Sitzungen freigegeben.
 
+### Rückgängig und Wiederholen
+
+`Strg+Z` und `Strg+Y` sowie die beiden Pfeilbuttons links oben in der Vorschau
+stellen vorherige Bearbeitungsstände wieder her. Zusammenhängendes Ziehen zählt
+als eine Aktion; neue Änderungen nach einem Rückgängigmachen verwerfen den
+Wiederholungszweig. Die Historie hält höchstens 100 Aktionen pro Objektkontext
+und enthält Profilform, Auswahl und die zugehörigen Resetwerte. Sie wird nicht
+gespeichert und während einer Generierung oder eines Exports gesperrt.
+Der Ansichtstext beginnt rechts neben den Pfeilen und erscheint nur, wenn er
+vollständig neben die Ansichtsbuttons passt.
+
+### Objektspezifische Simulationen
+
+Unter „Turm und Standfuß“ steht **100% Turmfüllung simulieren** mit derselben
+Erklärung wie im automatischen Modus. Die Form bleibt unverändert; der gemeinsame
+Prüfslice und das exportierte 3MF verwenden nur für den Turm 100% Füllung und
+das passende Füllmuster. Die Übernahme wird zusätzlich im erzeugten G-Code
+geprüft. **Stützen für STL-Objekt simulieren** ist bei erkannten deaktivierten
+globalen Stützen verfügbar; ihre gemeinsame Bedeutung und die Grenzen der
+Vorschau stehen in [Turmgeometrie](tower_geometry.md#objektspezifische-stützen-für-das-original-stl).
+Beide manuellen Optionen starten deaktiviert, gelten für die Sitzung und gehören
+zur Ergebnisidentität. Sie verändern weder gespeicherte Slicerprofile noch die
+manuelle Objektvorschau. „Alles zurücksetzen“ deaktiviert beide Optionen.
+
 Allgemeine Bedienhinweise und Fehlermeldungen
 stehen links in der Fußleiste. Nach dem Vorbereiten lautet der Bedienhinweis
 „Turmprofil doppelklicken, um freie Punkte hinzuzufügen.“
@@ -79,6 +103,12 @@ Sperre auch beim Achsenwechsel oder Erreichen einer Geometriegrenze. Die
 bewegliche Achse verwendet weiterhin ihre normalen Raster- und Grenzregeln.
 Die Funktion gilt in beiden manuellen Methoden; die bereits auf eine Achse
 begrenzten Breiten-/Höhengreifer behalten ihr Verhalten.
+Beim horizontalen Ziehen eines Profilpunkts rasten dessen Durchmesser innerhalb
+von 8 Bildschirmpixeln an den Durchmessern seiner direkten Profilnachbarn ein.
+Das gilt für feste und freie Nachbarn, auch außerhalb des 0,1-mm-Rasters.
+Bézieranker und nicht direkt benachbarte Punkte sind keine Fangziele.
+Die unterschiedlichen Z-Höhen bleiben erhalten; alle bestehenden Form-,
+Höhenabstands- und Platzierungsgrenzen gelten auch beim Einrasten.
 Beim Laden eines Originalobjekts berechnet die gemeinsame Funktion
 `tower/base_calculator.py` den anfänglichen Fuß-Außendurchmesser aus dessen
 vollständiger analysierter Höhe: 0,21 mm je Millimeter Objekthöhe, begrenzt auf
@@ -451,9 +481,11 @@ Weitere Mausbewegungen verlängern diesen Impuls nicht; nach dessen Ende
 blendet ein erneuter Versuch in Richtung der Grenze ihn wieder sofort ein.
 Die Markierung erneuert keine Originalflächen und verwendet das fertige Originalbild weiter.
 Auch Grenzversuche mit Béziergriffen blenden die betroffenen Linien ein.
-Die Mindestgrenze gilt ebenfalls für die gesamte Fußkurve und beide
-Fußkurven-Kontrollgriffe. Ihre Anker stoppen beim Mindest-Turmdurchmesser;
-ein Unterschreitungsversuch zeigt beide symmetrischen Grenzlinien.
+Die Mindestgrenze gilt ebenfalls für die gesamte Fußkurve. Bézier-Kontrollgriffe
+dürfen die Durchmessergrenzen überschreiten, solange die vollständige Kurve
+einschließlich ihrer analytisch ermittelten Extrema innerhalb der Grenzen bleibt.
+Erst eine tatsächlich unzulässige Turmform stoppt die Bewegung und zeigt die
+symmetrischen Grenzlinien.
 Bei gekoppelten Tangenten werden alle verletzten Durchmessergrenzen der
 versuchten vollständigen Form angezeigt. Unzulässige Kontrollgriffhöhen zeigen
 die erreichte Grenze als horizontale Linie. Zeitverlauf und gültiges Abfangen
@@ -923,8 +955,16 @@ Layer werden nur bei sicherer Z-Übereinstimmung zugeordnet. Der maximale
 Höhenabstand beträgt `max(0,005 mm, min(0,03 mm, 0,15 * Layerhöhe))`.
 Unsichere Zuordnungen, insbesondere bei variablen Layern, brechen die Bewertung
 mit konkreter Schichtangabe ab. Die bestehenden Analyse-/Zeitquellen werden
-verwendet; fehlende native Layerzeiten, etwa im Bambu-Pfad, werden wahrheitsgemäß
-als G-Code-basierte Auswertung bezeichnet. Bei einem kürzeren manuellen Turm
+verwendet; die tatsächliche Zeitquelle (`gcode`, Slicer-Metadaten oder native
+Slicer-Zeitmarken) bleibt im technischen Bericht erhalten. Das reguläre Fehlen
+nativer Einzel-Layerzeiten, etwa im Bambu-CLI-Pfad, erzeugt keine zusätzliche
+Ergebniswarnung. Der gemeinsame Slice liefert die wirklichen gemeinsamen
+Druckbahnen; ihre Zeiten werden aus Bewegungen und Beschleunigungen berechnet,
+nicht während eines realen Drucks gemessen. Auch native Slicer-Zeiten sind
+Schätzungen nach dem jeweiligen Slicer-Modell. Die Anzahl der gemeinsamen
+Slices verbessert die Formanpassung, begründet aber keine Genauigkeitsgarantie
+für die reale Druckdauer. Konkrete Analyseabweichungen bleiben sichtbar.
+Bei einem kürzeren manuellen Turm
 bleiben die ursprünglichen Layerzeiten oberhalb des Turms im Ergebnis enthalten.
 Zusätzliche tatsächlich geslicete gemeinsame Schichten werden ebenfalls erfasst.
 

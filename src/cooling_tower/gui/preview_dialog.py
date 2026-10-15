@@ -362,6 +362,10 @@ class PreviewDialog(QDialog):
         if self.state is not PreviewState.BUILDING:
             return
         self._intermediate_scene_active = True
+        self.state_label.setText("✓ Vorschau des aktuellen gemeinsamen Slices · Generierung läuft")
+        self.state_label.setProperty("state", "building")
+        self.state_label.show()
+        self._refresh_state_style()
         self.canvas.set_scene(scene)
         self.tower_legend.setVisible(bool(scene.tower_segments))
         self.canvas.side_view()
@@ -663,7 +667,9 @@ class PreviewDialog(QDialog):
                 self._scene_before_build is not None
                 and self._scene_before_build.tower_segments
             )
-            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: "⚠ Veraltet" if retained_tower else "◷ Wird erstellt", PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
+            building_caption = ("✓ Aktuell" if self._intermediate_scene_active
+                                else "⚠ Veraltet" if retained_tower else "◷ Wird erstellt")
+            captions = {PreviewState.CURRENT: "✓ Aktuell", PreviewState.STALE: "⚠ Veraltet", PreviewState.BUILDING: building_caption, PreviewState.FAILED: "✕ Fehlgeschlagen", PreviewState.EMPTY: ""}
             self.state_label.setText(captions.get(self.state, full_text))
             self.state_label.setVisible(
                 self.state not in {PreviewState.EMPTY, PreviewState.FAILED}

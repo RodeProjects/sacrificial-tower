@@ -6,7 +6,7 @@ from functools import partial
 import math
 
 from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLayout, QLabel, QPushButton, QSizePolicy,
                               QCheckBox, QScrollArea, QSplitter, QSlider)
 
@@ -70,6 +70,11 @@ class ManualGenerationPanel(QWidget):
         self._busy = False
         self._interaction_feedback = set()
         self._syncing = False
+        self._undo_stack = []
+        self._redo_stack = []
+        self._history_restoring = False
+        self._interaction_origin = None
+        self._committed_state = None
         self._point_defaults = {}
         self._control_defaults = {}
         self._settings_collapsed = False
@@ -124,6 +129,17 @@ class ManualGenerationPanel(QWidget):
                     card.content_layout.addWidget(box)
                 card.content_layout.addWidget(self._numeric(name))
             if title == "Turm und Standfuß":
+                from cooling_tower.gui.widgets.simulation_option import SimulationOption
+                from cooling_tower.gui.texts import FULL_INFILL_HINT_HTML, FULL_INFILL_HINT_ACCESSIBLE, SOURCE_SUPPORT_HINT_HTML
+                self.full_infill_option = SimulationOption("100% Turmfüllung simulieren", FULL_INFILL_HINT_HTML,
+                                                          accessible_hint=FULL_INFILL_HINT_ACCESSIBLE)
+                self.full_infill_checkbox = self.full_infill_option.checkbox
+                self.source_support_option = SimulationOption("Stützen für STL-Objekt simulieren", SOURCE_SUPPORT_HINT_HTML)
+                self.source_supports_checkbox = self.source_support_option.checkbox
+                self.source_support_option.hide()
+                for option in (self.full_infill_option, self.source_support_option):
+                    card.content_layout.addWidget(option)
+                    option.checkbox.toggled.connect(lambda _: self.draft_changed.emit(self.draft))
                 self.height_note = QLabel()
                 self.height_note.setWordWrap(True)
                 card.content_layout.addWidget(self.height_note)
@@ -170,79 +186,15 @@ class ManualGenerationPanel(QWidget):
         self.highlight_group = self.highlight_host.group
         self.highlight_buttons = self.highlight_host.buttons
         self.highlight_host.choice_changed.connect(lambda choice:self.canvas.set_highlight(choice))
-        self.resolution_host = QWidget()
-        self.resolution_host.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
-        resolution_group = QVBoxLayout(self.resolution_host)
-        resolution_group.setContentsMargins(0,0,0,0)
-        resolution_group.setSpacing(1)
-        self.resolution_heading = ResolutionHeading()
-        self.resolution_title = self.resolution_heading.title
-        resolution_header = QHBoxLayout()
-        resolution_header.setSpacing(3)
-        resolution_header.addWidget(self.resolution_heading,1)
-        resolution_group.addLayout(resolution_header)
-        resolution = QHBoxLayout()
-        resolution.setContentsMargins(0,0,0,0)
-        resolution.setSpacing(3)
-        slider_host=QWidget()
-        slider_column=QVBoxLayout(slider_host)
-        slider_column.setContentsMargins(0,0,0,0)
-        slider_column.setSpacing(0)
-        self.resolution_end_labels=ResolutionEndLabels()
-        slider_column.addWidget(self.resolution_end_labels)
-        self.resolution_slider = ResolutionSlider()
-        self.resolution_slider.setFixedHeight(20)
-        self.resolution_slider.setMinimumWidth(65)
-        self.resolution_slider.setToolTip("Performance → Optik:\n"+", ".join(map(str,OBJECT_RESOLUTION_STAGES))+" %.\n"
-            "0 %: hochauflösende Silhouette.\n"
-            "Über 0 %: automatische Netzqualität mit geschützter Mindestqualität.\n"
-            "Der Wert gewichtet Performance und Optik, nicht den Anteil der Flächen.\n"
-            "Analyse und Druckdaten bleiben gleich.")
-        self.resolution_slider.setRange(1,len(OBJECT_RESOLUTION_STAGES))
-        self.resolution_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.resolution_slider.setTickInterval(1)
-        self.resolution_slider.setSingleStep(1)
-        # Stop positions follow the slider stages; colors follow their real
-        # percentages, keeping the many low-resolution stages predominantly green.
-        colors = (QColor("#41a878"),QColor("#e5bf48"),QColor("#e5484d"))
-        stops = []
-        for index,percent in enumerate(OBJECT_RESOLUTION_STAGES):
-            if percent == 0:
-                stops.append("stop:0 #8dc9f4")
-                continue
-            first,last = colors[:2] if percent <= 50 else colors[1:]
-            fraction = percent/50 if percent <= 50 else (percent-50)/50
-            rgb = [round(a+(b-a)*fraction) for a,b in zip(first.getRgb()[:3],last.getRgb()[:3])]
-            stops.append(f"stop:{index/(len(OBJECT_RESOLUTION_STAGES)-1):.6f} {QColor(*rgb).name()}")
-        self.resolution_slider.setStyleSheet(
-            "QSlider::groove:horizontal { height: 4px; border: 1px solid #000000; border-radius: 2px; "
-            +SLIDER_GROOVE_OFFSET_STYLE+
-            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "+", ".join(stops)+"); } "
-            "QSlider::sub-page:horizontal, QSlider::add-page:horizontal { background: transparent; border: none; } "
-            +slider_handle_style(4))
-        self.resolution_slider.valueChanged.connect(lambda value:self.change_setting("object_resolution_percent",OBJECT_RESOLUTION_STAGES[value-1]))
-        slider_column.addWidget(self.resolution_slider)
-        resolution.addWidget(slider_host,1)
-        self.resolution_label = QLabel()
-        self.resolution_label.setStyleSheet(SLIDER_VALUE_STYLE)
-        self.resolution_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.resolution_label.setMinimumWidth(self.resolution_label.fontMetrics().horizontalAdvance("100 %"))
-        resolution_group.addLayout(resolution)
-        value_host=QWidget()
-        value_column=QVBoxLayout(value_host)
-        value_column.setContentsMargins(0,0,0,0)
-        value_column.setSpacing(0)
-        value_column.addSpacing(self.resolution_end_labels.height())
-        value_column.addWidget(self.resolution_label,1)
-        resolution.addWidget(value_host)
-        self.resolution_reset = QPushButton("↺")
-        self.resolution_reset.setObjectName("settingResetButton")
-        self.resolution_reset.setFixedSize(METRICS.reset_button_size_px,METRICS.reset_button_size_px)
-        self.resolution_reset.setAccessibleName("Auflösung des Originalobjekts zurücksetzen")
-        self.resolution_reset.setToolTip("Standardauflösung des Originalobjekts wiederherstellen")
-        self.resolution_reset.clicked.connect(lambda:self.change_setting("object_resolution_percent",self.default_value("object_resolution_percent")))
-        resolution.addWidget(self.resolution_reset)
-        resolution_header.addSpacing(self.resolution_label.minimumWidth()+self.resolution_reset.width()+6)
+        from cooling_tower.gui.widgets.object_resolution_control import ObjectResolutionControl
+        self.resolution_host = ObjectResolutionControl()
+        self.resolution_heading = self.resolution_host.resolution_heading
+        self.resolution_title = self.resolution_host.resolution_title
+        self.resolution_end_labels = self.resolution_host.resolution_end_labels
+        self.resolution_slider = self.resolution_host.resolution_slider
+        self.resolution_label = self.resolution_host.resolution_label
+        self.resolution_reset = self.resolution_host.resolution_reset
+        self.resolution_host.percent_changed.connect(lambda percent:self.change_setting("object_resolution_percent",percent))
         self.rotation_host = QWidget()
         self.rotation_host.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
         rotation_group = QVBoxLayout(self.rotation_host)
@@ -290,6 +242,13 @@ class ManualGenerationPanel(QWidget):
         self.preview_tools = PreviewToolsRow(self.highlight_host,self.resolution_host,self.rotation_host)
         preview_layout.addWidget(self.preview_tools)
         self.canvas = ManualCanvas()
+        self.canvas.undo_button.clicked.connect(self.undo)
+        self.canvas.redo_button.clicked.connect(self.redo)
+        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        for shortcut, action in ((self.undo_shortcut, self.undo), (self.redo_shortcut, self.redo)):
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(action)
         self.point_editor = ManualPointEditor(self.canvas,self._validate_point_value,self._apply_point_value)
         self.canvas.point_editor = self.point_editor
         self.canvas.view_state_changed.connect(lambda:self.reset_button.setEnabled(self.can_reset_all()))
@@ -420,6 +379,11 @@ class ManualGenerationPanel(QWidget):
         return value if value is not None else 25 if name == "circle_segments" else 0.1
 
     def initialize(self,reference,settings=None):
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._interaction_origin = None
+        self._committed_state = None
+        self.draft = None
         self.reference = reference
         self.selected = self.canvas.selected = ""
         s = settings or self.settings
@@ -447,6 +411,11 @@ class ManualGenerationPanel(QWidget):
         self.commit(draft)
 
     def commit(self,draft):
+        if self.draft is not None and draft != self.draft and not self._history_restoring:
+            if self._interaction_origin is None:
+                self._undo_stack.append(self._committed_state or self._editor_state())
+                del self._undo_stack[:-100]
+            self._redo_stack.clear()
         if (self.initial is not None and self.draft is not None and
                 self.draft.context_key == draft.context_key and
                 draft.foot_diameter_mm > self.draft.settings.maximum_foot_diameter_mm and
@@ -458,6 +427,37 @@ class ManualGenerationPanel(QWidget):
         self._sync()
         self.generate_button.setEnabled(not self._busy)
         self.draft_changed.emit(draft)
+        self._committed_state = self._editor_state()
+        self._refresh_history_actions()
+
+    def _editor_state(self):
+        return (self.draft, self.selected, self.initial, dict(self._point_defaults),
+                dict(self._control_defaults), self.canvas._revealed_control_anchor)
+
+    def _refresh_history_actions(self):
+        self.canvas.undo_button.setEnabled(bool(self._undo_stack) and not self._busy)
+        self.canvas.redo_button.setEnabled(bool(self._redo_stack) and not self._busy)
+
+    def _restore_history(self, source, destination):
+        if self._busy or self.draft is None or not source:
+            return
+        destination.append(self._editor_state())
+        draft, selected, initial, points, controls, revealed = source.pop()
+        self._history_restoring = True
+        try:
+            self.selected = self.canvas.selected = selected
+            self.initial = initial
+            self._point_defaults, self._control_defaults = dict(points), dict(controls)
+            self.canvas._revealed_control_anchor = revealed
+            self.commit(draft)
+        finally:
+            self._history_restoring = False
+
+    def undo(self):
+        self._restore_history(self._undo_stack, self._redo_stack)
+
+    def redo(self):
+        self._restore_history(self._redo_stack, self._undo_stack)
 
     def _sync(self):
         self._syncing = True
@@ -733,6 +733,19 @@ class ManualGenerationPanel(QWidget):
         if diameter_snap:
             diameter = round(diameter*10)/10
         old = self.canvas.constrained_drag_origin() or self.draft
+        if diameter_snap and identity not in {"foot_height","top"}:
+            for neighbor_id, neighbor_diameter in self.canvas.neighbor_diameter_snaps(actual,diameter):
+                try:
+                    snapped = self._checked(move_point(old,actual,diameter_mm=neighbor_diameter,z_mm=z))
+                except GeometryError:
+                    continue
+                neighbor = next(point for point in snapped.points if point.identity == neighbor_id)
+                # Following endpoints can themselves move with the edited
+                # point. Only snap if the accepted geometry really aligns.
+                if math.isclose(neighbor.position.diameter_mm,neighbor_diameter,abs_tol=1e-8):
+                    self.status_label.clear()
+                    self.commit(snapped)
+                    return None
         candidate,error = self._edit_coordinate(
             old, lambda d: next(point.position for point in d.points if point.identity == actual),
             Coordinate(diameter/2,z),
@@ -876,6 +889,9 @@ class ManualGenerationPanel(QWidget):
             self.feedback(e,"points")
             return
         self.initial = draft
+        for checkbox in (self.full_infill_checkbox, self.source_supports_checkbox):
+            with QSignalBlocker(checkbox):
+                checkbox.setChecked(False)
         self._restore_form(draft)
         self.reset_rotation()
         self.canvas.set_highlight("both")
@@ -886,7 +902,8 @@ class ManualGenerationPanel(QWidget):
                    object_resolution_percent=self.default_value("object_resolution_percent")))
                    if self.initial is not None else None)
         return (not self._busy and self.draft is not None and self.initial is not None and
-                (self.draft != initial or self.canvas.object_rotation%360 != 0 or
+                (self.full_infill_checkbox.isChecked() or self.source_supports_checkbox.isChecked() or
+                 self.draft != initial or self.canvas.object_rotation%360 != 0 or
                  self.rotation_slider.value() != 0 or self.canvas.highlight != "both" or
                  self.canvas.zoom != 1 or self.canvas.pan != QPointF() or
                  (self.canvas.view == "free" and (self.canvas.yaw_deg,self.canvas.pitch_deg) != (-35,25))))
@@ -949,8 +966,20 @@ class ManualGenerationPanel(QWidget):
             self._interaction_feedback.add(name)
             row.set_error(str(error))
 
-    def _begin_interaction(self): self._interaction_feedback.clear()
-    def _end_interaction(self): self._interaction_feedback.clear(); self._sync()
+    def _begin_interaction(self):
+        self._interaction_feedback.clear()
+        if self.draft is not None and self._interaction_origin is None:
+            self._interaction_origin = self._editor_state()
+
+    def _end_interaction(self):
+        self._interaction_feedback.clear()
+        if self._interaction_origin is not None:
+            if self._interaction_origin[0] != self.draft:
+                self._undo_stack.append(self._interaction_origin)
+                del self._undo_stack[:-100]
+            self._interaction_origin = None
+        self._sync()
+        self._refresh_history_actions()
 
     def _queue_rotation(self,angle):
         if self.rotation_slider.isSliderDown():
@@ -1004,6 +1033,7 @@ class ManualGenerationPanel(QWidget):
 
     def set_busy(self,busy,cancelling=False,exporting=False):
         self._busy = busy
+        self._refresh_history_actions()
         self.resolution_slider.setEnabled(not busy and self.reference is not None)
         self._refresh_resolution_reset()
         self.settings_content.setEnabled(not busy and self.reference is not None)

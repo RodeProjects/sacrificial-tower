@@ -88,6 +88,7 @@ class TowerImageProgress(QWidget):
         self.setObjectName("towerImageProgress")
         self._pixmap = QPixmap(str(image_path))
         self._fill = 0.0
+        self._display_complete = False
         self._pulse = 0.0
         self._pulse_after_fill = False
         # The unpulsed artwork occupies roughly 209 x 240 px. The widget keeps
@@ -108,6 +109,12 @@ class TowerImageProgress(QWidget):
 
     def set_fill(self, value: float) -> None:
         self._fill = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    def set_display_complete(self, complete: bool) -> None:
+        self._display_complete = complete
+        if complete:
+            self._fill_animation.stop()
         self.update()
 
     def animate_fill(
@@ -184,8 +191,9 @@ class TowerImageProgress(QWidget):
             painter.drawPixmap(glow, self._pixmap, QRectF(self._pixmap.rect()))
         painter.setOpacity(0.2 + 0.08 * self._pulse)
         painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
-        if self._fill > 0.0:
-            filled_height = target.height() * self._fill
+        displayed_fill = 1.0 if self._display_complete else self._fill
+        if displayed_fill > 0.0:
+            filled_height = target.height() * displayed_fill
             painter.save()
             painter.setClipRect(
                 QRectF(

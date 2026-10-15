@@ -41,6 +41,7 @@ from cooling_tower.preview.toolpath import (
     PreviewCancelled,
     analyze_deposition_toolpaths,
 )
+from cooling_tower.preview.joint_source_toolpath import analyze_joint_source_toolpaths
 
 
 ProgressCallback = Callable[[int, str], None]
@@ -344,6 +345,33 @@ class PreviewService:
             )
             object_segments = source_data.object_segments
             source_segment_count = source_data.source_segment_count
+            joint_source_key = None
+
+            def use_joint_source(iteration: object, placement: TowerPlacement, retained_gcode: Path | None = None) -> None:
+                nonlocal object_segments, source_segment_count, joint_source_key
+                if not request.settings.simulate_source_supports or iteration is None:
+                    return
+                # Calibration removes its temporary iteration directory after
+                # retaining the selected result. Reuse already sampled paths
+                # before touching that obsolete path, or read the retained copy.
+                key = (getattr(iteration, "number", id(iteration)), placement.center_x_mm, placement.center_y_mm)
+                if key == joint_source_key:
+                    return
+                path = (retained_gcode or getattr(iteration, "final_combined_gcode_path", None)
+                        or getattr(getattr(iteration, "evaluation", None), "gcode_path", None))
+                if path is None:
+                    return
+                path = Path(path)
+                notify(-1, "Originalobjekt mit simulierten Stützen wird für die Vorschau aufbereitet …")
+                data = analyze_joint_source_toolpaths(
+                    path, tower_center_xy_mm=(placement.center_x_mm, placement.center_y_mm),
+                    expected_layer_count=request.snapshot.layer_count,
+                    maximum_segments=request.maximum_object_segments,
+                    cancellation_event=cancellation_event,
+                )
+                object_segments = data.object_segments
+                source_segment_count = data.source_segment_count
+                joint_source_key = key
 
             def report_joint_progress(progress: object) -> None:
                 if joint_scene_callback is not None:
@@ -355,6 +383,7 @@ class PreviewService:
                     if candidate_profile is not None and candidate_placement is not None:
                         points = tuple(getattr(candidate_profile, "points", ()))
                         if points:
+                            use_joint_source(getattr(progress, "best_iteration", None), candidate_placement)
                             joint_scene_callback(PreviewScene(
                                 object_segments=object_segments,
                                 tower_segments=_tower_wireframe(
@@ -560,6 +589,9 @@ class PreviewService:
                 except GCodeIntegrationError as error:
                     raise PreviewBuildError(str(error)) from error
             notify(90, "Vorschau wird aufgebaut …")
+            if joint_sliced:
+                use_joint_source(getattr(calibration, "best_iteration", None), placement,
+                                 getattr(calibration, "gcode_path", None))
             tower_segments = _tower_wireframe(profile, placement)
             tower_height = max(
                 float(getattr(point, "z_mm"))

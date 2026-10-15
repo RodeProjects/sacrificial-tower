@@ -1584,7 +1584,9 @@ class ManualGuiTests(unittest.TestCase):
             c.resize(width,500);controls.relayout()
             self.assertEqual(controls.rows,rows)
             self.assertEqual(controls.geometry().right(),c.width()-9)
-            self.assertEqual(controls.y(),8)
+            expected_y = p.canvas.history_controls.geometry().bottom()+8 if controls.x() <= p.canvas.history_controls.geometry().right()+8 else 8
+            self.assertEqual(controls.y(),expected_y)
+            self.assertFalse(controls.geometry().intersects(p.canvas.history_controls.geometry()))
             for i,button in enumerate(controls.buttons):
                 index=controls.grid.indexOf(button)
                 expected=(0,i) if rows==1 else divmod(i,3)

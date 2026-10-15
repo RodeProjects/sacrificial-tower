@@ -493,6 +493,9 @@ wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwalt
 Der Reset im Hauptfenster lässt sie unverändert; der allgemeine Reset setzt sie
 zurück. Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
 „Deaktivierte Turmstützen simulieren“. Die
+bei global deaktivierten Stützen angebotene Option „Stützen für STL-Objekt
+simulieren“ folgt darunter; ihre Wirkungsweise steht in
+[Turmgeometrie](tower_geometry.md#objektspezifische-stützen-für-das-original-stl). Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
 Die äußeren Automatikbereiche „Turmeinstellungen“ und „Generierung und Vorschau“

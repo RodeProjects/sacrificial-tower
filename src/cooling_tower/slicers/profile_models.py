@@ -146,6 +146,7 @@ class ProfileCatalog:
     selected_machine: ProfileSelectionReference | None = None
     selected_process: ProfileSelectionReference | None = None
     selected_filament: ProfileSelectionReference | None = None
+    content_fingerprints: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:

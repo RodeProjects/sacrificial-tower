@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QRect,
     QSize,
+    QSignalBlocker,
     QTimer,
     Qt,
     Signal,
@@ -81,6 +82,8 @@ from cooling_tower.gui.background_jobs import (
     JobKind,
 )
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.profile_preparation_hint import ProfilePreparationHint
+from cooling_tower.gui.widgets.indicator_only_checkbox import IndicatorOnlyCheckBox
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
 from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_session import GenerationMode, GenerationSession
@@ -121,6 +124,9 @@ from cooling_tower.gui.support_report_dialog import SupportReportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
     SETTING_INFO_TEXTS,
+    FULL_INFILL_HINT_HTML,
+    FULL_INFILL_HINT_ACCESSIBLE,
+    SOURCE_SUPPORT_HINT_HTML,
 )
 from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
 from cooling_tower.gui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
@@ -231,6 +237,7 @@ _LOCKED_SLICER_STEP_TOOLTIP = (
 )
 
 _PROFILE_SELECTION_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+_PROFILE_CONTENT_ROLE = _PROFILE_SELECTION_ROLE + 1
 DEFAULT_MAXIMUM_SEPARATE_SLICES = 6
 GENERATION_PHASE_FADE_OUT_MS = 180
 GENERATION_PHASE_FADE_IN_MS = 220
@@ -271,49 +278,6 @@ SETTING_UNITS = {
     "local_reference_window": "Layer",
 }
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
-
-FULL_INFILL_HINT_HTML = """
-<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was macht diese Funktion?</b></p>
-<p style="margin-top:0; margin-bottom:10px;">
-&#8226; <b>Aktiviert:</b> In der temporären Slicerprofilkopie wird für den Turm 100% Füllung eingestellt.<br>
-&#8226; <b>Deaktiviert:</b> Für Berechnung und Slice gelten die Füllungswerte des gewählten Slicerprofils.</p>
-<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Sollte ich diese Einstellung aktivieren?</b></p>
-<p style="margin-top:0; margin-bottom:10px;">Das hängt teilweise davon ab, ob Ihr Drucker ein Bettschubser oder ein CoreXY-Drucker ist.</p>
-<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Welchen Druckertyp habe ich?</b></p>
-<p style="margin-top:0; margin-bottom:8px;">
-&#8226; <b>Bettschubser:</b> Das Druckbett bewegt das Modell horizontal vor und zurück.<br>
-&#8226; <b>CoreXY:</b> Der Druckkopf übernimmt die horizontalen X/Y-Bewegungen; das Bett fährt dabei nicht hin und her.</p>
-<p align="center" style="margin-top:0; margin-bottom:0px;"><b>Vor- und Nachteile dieser Funktion:</b></p>
-<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:6px; margin-bottom:0px;">
-  <tr>
-    <th align="left" style="padding:4px 12px 4px 0;"><u>Druckertyp</u></th>
-    <th align="left" style="padding:4px 12px;"><u>Aktiviert: Vorteil / Nachteil</u></th>
-    <th align="left" style="padding:4px 12px;"><u>Deaktiviert: Vorteil / Nachteil</u></th>
-  </tr>
-  <tr>
-    <td valign="top" style="padding:4px 12px 4px 0;"><b>Bettschubser</b></td>
-    <td valign="top" style="padding:4px 12px;"><b>Aktivierung empfohlen.</b><br>+ Schmalerer Turm<br>+ Weniger Schwingungen<br>- Mehr Material</td>
-    <td valign="top" style="padding:4px 12px;">+ Weniger Material<br>- Breiterer Turm<br>- Kann stärker schwingen.</td>
-  </tr>
-  <tr>
-    <td valign="top" style="padding:4px 12px 4px 0;"><b>CoreXY</b></td>
-    <td valign="top" style="padding:4px 12px;">+ Schmalerer Turm<br/>- Mehr Material</td>
-    <td valign="top" style="padding:4px 12px;">+ Weniger Material<br/>- Breiterer Turm</td>
-  </tr>
-</table>
-<p>* Die 100%-Füllung gilt nur für den Kühlturm. Zur Generierung werden temporäre Profilkopien verwendet; im exportierten 3MF wird die Füllung objektspezifisch gesetzt. Die Originalprofile bleiben unverändert.</p>
-""".strip()
-
-FULL_INFILL_HINT_ACCESSIBLE = (
-    "Sollte ich diese Einstellung aktivieren? Das hängt vom Druckertyp ab. "
-    "Beim Bettschubser bewegt das Bett das Modell horizontal; die Aktivierung "
-    "ist empfohlen, weil der Turm gleich breit bleibt oder schmaler und "
-    "stabiler wird und weniger schwingt. "
-    "Sie benötigt etwas mehr Material. Bei CoreXY bewegt der Druckkopf sich "
-    "horizontal; die Aktivierung ist meist optional. Deaktiviert braucht der "
-    "Turm meist weniger Material, kann aber breiter sein. Die volle Füllung "
-    "betrifft nur den Kühlturm."
-)
 
 def _automatic_base_hint() -> tuple[str, str]:
     rate = f"{BASE_WIDTH_PER_OBJECT_HEIGHT:g}".replace(".", ",")
@@ -1614,7 +1578,9 @@ class MainWindow(QMainWindow):
             label.setBuddy(combo)
             slicer_selectors_layout.addWidget(label)
             slicer_selectors_layout.addWidget(combo)
-        self.show_all_profiles_checkbox = QCheckBox("Alle Profile anzeigen")
+        self.show_all_profiles_checkbox = IndicatorOnlyCheckBox("Filter deaktivieren / alle Profile anzeigen")
+        self.show_all_profiles_checkbox.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.show_all_profiles_checkbox.setSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Preferred)
         self.show_all_profiles_checkbox.setObjectName(
             "showAllProfilesCheckBox"
         )
@@ -1630,12 +1596,22 @@ class MainWindow(QMainWindow):
         # These asymmetric row insets produce the same effective 10 px gap
         # above and below as between every title and its dropdown.
         show_all_profiles_row_layout.setContentsMargins(0, 8, 0, 4)
-        show_all_profiles_row_layout.setSpacing(0)
+        show_all_profiles_row_layout.setSpacing(METRICS.setting_info_text_gap_px)
+        self.show_all_profiles_info_button = InfoToolButton(
+            "<p>Die Profile werden standardmäßig gefiltert angezeigt.</p>"
+            "<p>Ist dein Profil versehentlich mit rausgefiltert worden, aktiviere diese Option.</p>"
+            "<p>Dies deaktiviert alle Filter und zeigt alle erkannten Profile an.</p>",
+            self.show_all_profiles_row, accessible_name="Informationen zum Profilfilter",
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        show_all_profiles_row_layout.addWidget(self.show_all_profiles_info_button)
         show_all_profiles_row_layout.addWidget(
             self.show_all_profiles_checkbox,
             0,
             Qt.AlignmentFlag.AlignLeft,
         )
+        show_all_profiles_row_layout.addStretch(1)
         slicer_selectors_layout.addWidget(self.show_all_profiles_row)
 
         self.slicer_columns_divider = QFrame()
@@ -2124,7 +2100,7 @@ class MainWindow(QMainWindow):
         ):
             requirements_layout.setContentsMargins(0, 0, 0, 0)
             requirements_layout.setHorizontalSpacing(8)
-            requirements_layout.setVerticalSpacing(3)
+            requirements_layout.setVerticalSpacing(0)
             requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_requirement_rows: dict[str, tuple[QLabel, QLabel]] = {}
         source_requirement_texts = (
@@ -2178,7 +2154,13 @@ class MainWindow(QMainWindow):
         source_layout.insertWidget(0, self.preparation_source_requirements)
         source_layout.insertWidget(1, self.preparation_source_divider)
         slicer_layout.insertWidget(0, self.preparation_slicer_requirements)
-        slicer_layout.insertWidget(1, self.preparation_slicer_divider)
+        self.preparation_slicer_info_divider = QFrame()
+        self.preparation_slicer_info_divider.setObjectName("preparationContentDivider")
+        self.preparation_slicer_info_divider.setFixedHeight(1)
+        self.preparation_profile_hint = ProfilePreparationHint()
+        slicer_layout.insertWidget(1, self.preparation_slicer_info_divider)
+        slicer_layout.insertWidget(2, self.preparation_profile_hint)
+        slicer_layout.insertWidget(3, self.preparation_slicer_divider)
         self.preparation_step_selectors: list[_PreparationStepSelector] = []
         self.preparation_step_selector_containers: list[QWidget] = []
         self.preparation_step_selector_icons: list[QLabel] = []
@@ -2502,6 +2484,15 @@ class MainWindow(QMainWindow):
         support_layout.addWidget(self.simulate_tower_without_supports_checkbox)
         support_layout.addStretch(1)
         timing_layout.addWidget(support_row)
+        from cooling_tower.gui.widgets.simulation_option import SimulationOption
+        self.source_support_option = SimulationOption("Stützen für STL-Objekt simulieren", SOURCE_SUPPORT_HINT_HTML)
+        self.simulate_source_supports_checkbox = self.source_support_option.checkbox
+        self.simulate_source_supports_checkbox.setObjectName("simulateSourceSupports")
+        self.source_support_option.hide()
+        self.simulate_source_supports_checkbox.toggled.connect(
+            lambda _: self._invalidate_preview("Die objektspezifischen STL-Stützen wurden geändert.")
+        )
+        timing_layout.addWidget(self.source_support_option)
         self.tower_need_label = QLabel(
             "Bitte zuerst eine STL-Datei auswählen."
         )
@@ -4809,7 +4800,9 @@ class MainWindow(QMainWindow):
                 "automatisch aufrufbaren Slicer mit vollständigen Profilen."
             )
         effective_profile = result.selected.effective_profile
-        if self.source_preslice_result is not None and getattr(self.source_preslice_result, "supports_simulated", False):
+        if (self.source_preslice_result is not None
+                and getattr(self.source_preslice_result, "supports_simulated", False)
+                and not self.simulate_source_supports_checkbox.isChecked()):
             effective_profile = with_simulated_supports(effective_profile)
         if self.source_preslice_result is not None and getattr(
             self.source_preslice_result, "draft_shield_simulated", False
@@ -4909,6 +4902,21 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
+        from cooling_tower.slicers.support_simulation import global_supports_disabled, OBJECT_SUPPORT_ADAPTERS
+        result = self.profile_match_result
+        profile = getattr(getattr(result, "selected", None), "effective_profile", None)
+        supports_available = profile is not None and global_supports_disabled(profile)
+        self.source_support_option.setVisible(supports_available)
+        self.manual_generation_panel.source_support_option.setVisible(supports_available)
+        supports_compatible = supports_available and profile.installation.adapter_id in OBJECT_SUPPORT_ADAPTERS
+        for option in (self.source_support_option, self.manual_generation_panel.source_support_option):
+            option.checkbox.setEnabled(supports_compatible)
+            option.checkbox.setToolTip("" if supports_compatible else
+                                      "Der gewählte Slicer unterstützt hier keinen gemeinsamen Slice mit objektspezifischen 3MF-Stützen.")
+        if not supports_compatible:
+            for checkbox in (self.simulate_source_supports_checkbox, self.manual_generation_panel.source_supports_checkbox):
+                with QSignalBlocker(checkbox):
+                    checkbox.setChecked(False)
         self._refresh_workflow_navigation_actions()
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.refresh()
@@ -5101,6 +5109,14 @@ class MainWindow(QMainWindow):
             if self._profile_matching_context() is not None:
                 self.start_profile_matching()
             return
+        if force and manual_path is None and not getattr(self, "_profile_rescan_selections", None):
+            self._profile_rescan_slicer_key = self.slicer_combo.currentData()
+            self._profile_rescan_selections = {
+                role: (self._profile_combo_reference(combo), combo.currentData(_PROFILE_CONTENT_ROLE))
+                for role, combo in (("machine", self.machine_profile_combo),
+                                    ("process", self.process_profile_combo),
+                                    ("filament", self.filament_profile_combo))
+            }
         if self.background_job_manager.has_active(
             JobKind.SLICER_DISCOVERY
         ) or self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
@@ -5222,7 +5238,9 @@ class MainWindow(QMainWindow):
                 if installation.verified and installation.can_slice
             )
             preferred_key = (
-                result.last_used_key
+                (previous_key if getattr(self, "_profile_rescan_selections", None)
+                 and any(item.identity_key == previous_key for item in verified_installations) else None)
+                or result.last_used_key
                 or (
                     previous_key
                     if any(
@@ -5329,7 +5347,11 @@ class MainWindow(QMainWindow):
             self._update_preparation_requirements()
             self.start_profile_catalog_loading(
                 force_inventory=self._force_profile_catalog_after_discovery,
-                prefer_active_presets=True,
+                selected_profile_ids={role: selection[0] for role, selection in
+                                      getattr(self, "_profile_rescan_selections", {}).items()
+                                      if selection[0] is not None}
+                if selected.identity_key == getattr(self, "_profile_rescan_slicer_key", None) else None,
+                prefer_active_presets=not bool(getattr(self, "_profile_rescan_selections", None)),
                 restore_remembered_profiles=(
                     not self._force_profile_catalog_after_discovery
                 ),
@@ -5981,6 +6003,39 @@ class MainWindow(QMainWindow):
         ):
             return
         previous_confirmation = self.profile_catalog_confirmation
+        retained = getattr(self, "_profile_rescan_selections", {})
+        if retained and installation.identity_key == getattr(self, "_profile_rescan_slicer_key", None):
+            filtering_machine = catalog.selected_machine
+            replacements = {}
+            for role in ("machine", "process", "filament"):
+                reference, fingerprint = retained.get(role, (None, None))
+                records = getattr(catalog, role + "_options")
+                restored = next((record for record in records if reference is not None
+                                 and record.path == reference.path and record.profile_id == reference.profile_id
+                                 and fingerprint is not None
+                                 and catalog.content_fingerprints.get(str(record.path)) == fingerprint), None)
+                chosen = restored or next((record for _, group in self._profile_option_groups(records) for record in group), None)
+                replacements["selected_" + role] = ProfileSelectionReference(chosen.profile_id, chosen.path) if chosen else None
+            catalog = replace(catalog, **replacements)
+            if catalog.selected_machine is not None and catalog.selected_machine != filtering_machine:
+                # A changed/removed machine can fall back to another printer.
+                # Rebuild dependent choices for that printer before installing
+                # any combos, retaining unchanged roles only if still available.
+                self._profile_rescan_selections = {
+                    **retained,
+                    "machine": (catalog.selected_machine,
+                                catalog.content_fingerprints.get(str(catalog.selected_machine.path))),
+                }
+                self._profile_catalog_preserve_selection_requests.pop(request_id, None)
+                self.start_profile_catalog_loading(
+                    selected_machine=catalog.selected_machine,
+                    selected_profile_ids={role: selection[0] for role, selection in
+                                          self._profile_rescan_selections.items() if selection[0] is not None},
+                    restore_remembered_profiles=False,
+                    match_source_after_loading=match_source_after_loading,
+                )
+                return
+        self._profile_rescan_selections = {}
         self.profile_catalog = catalog
         if (
             previous_confirmation is None
@@ -6689,6 +6744,8 @@ class MainWindow(QMainWindow):
                             profile_path,
                             Qt.ItemDataRole.ToolTipRole,
                         )
+                        fingerprints = getattr(result, "content_fingerprints", None) or getattr(self.profile_catalog, "content_fingerprints", {})
+                        combo.setItemData(index, fingerprints.get(profile_path), _PROFILE_CONTENT_ROLE)
                         combo.setItemData(
                             index,
                             ProfileSelectionReference(
@@ -7772,6 +7829,12 @@ class MainWindow(QMainWindow):
                         ),
                     )
         elif finished_kind in {"preview", "prediction", "export"}:
+            if (finished_kind == "preview" and getattr(self, "_restart_preview_after_release", False)
+                    and not self.background_job_manager.has_active(JobKind.PREVIEW)):
+                self._restart_preview_after_release = False
+                self._finish_generation_cancelled()
+                QTimer.singleShot(0, self, self.start_preview)
+                return
             if finished_kind in {"preview", "export"}:
                 self.progress_bar.setRange(0, 100)
             if finished_kind == "export":
@@ -9869,6 +9932,7 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def _prepare_for_replaced_source(self, reason: str) -> None:
+        self._restart_preview_after_release = False
         self._last_changed_setting_name = None
         self._workflow_error_message = None
         self._discard_source_preslice("source_replaced")
@@ -11690,6 +11754,8 @@ class MainWindow(QMainWindow):
             gradient_start_deficit_s=self._range_color_thresholds[0],
             gradient_full_deficit_s=self._range_color_thresholds[1],
             silhouette=silhouette,
+            source_artifact=self.source_artifact,
+            render_manager=self.background_job_manager,
             target_time_hint=self._setting_widgets["target_layer_time_s"].info_button.toolTip(),
             target_default=self.settings_store.load_defaults().target_layer_time_s,
             parent=self,
@@ -11740,6 +11806,7 @@ class MainWindow(QMainWindow):
                 self.full_infill_checkbox.isChecked()
             ),
             simulate_tower_without_supports=self.simulate_tower_without_supports_checkbox.isChecked(),
+            simulate_source_supports=self.simulate_source_supports_checkbox.isChecked(),
             minimum_base_radius_mm=self.minimum_base_spin.value(),
             base_margin_mm=self.base_margin_spin.value(),
             base_height_factor=self.base_height_factor_spin.value(),
@@ -12613,6 +12680,8 @@ class MainWindow(QMainWindow):
             simulations.append("Turmfüllung: 100 %")
         if request.settings.simulate_tower_without_supports:
             simulations.append("Turmstützen: deaktiviert")
+        if request.settings.simulate_source_supports:
+            simulations.append("STL-Objektstützen: aktiviert")
         if getattr(request.effective_profile, "supports_simulated", False):
             simulations.append("Stützen: aktiviert")
         if getattr(request.effective_profile, "draft_shield_simulated", False):
@@ -13028,6 +13097,15 @@ class MainWindow(QMainWindow):
     def _on_generation_button_clicked(self) -> None:
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.primary_action()
+            return
+        if self._joint_generation_paused and self.preview_state is PreviewState.STALE:
+            if self.background_job_manager.has_active(JobKind.PREVIEW):
+                self._restart_preview_after_release = True
+                self.background_job_manager.cancel_jobs(JobKind.PREVIEW, reason="preview_update_requested")
+                self.preview_button.setEnabled(False)
+            else:
+                self._finish_generation_cancelled()
+                self.start_preview()
             return
         if self.background_job_manager.has_active(JobKind.PREVIEW):
             self.cancel_generation()
@@ -13553,7 +13631,8 @@ class MainWindow(QMainWindow):
         accepting = False
         cancelling = (
             controller.job_id is not None and controller.operation != "export"
-            if manual else self.preview_state is PreviewState.BUILDING or self._joint_generation_paused
+            if manual else self.preview_state is PreviewState.BUILDING or (
+                self._joint_generation_paused and self.preview_state is PreviewState.CURRENT)
         )
         cancel_requested = controller.cancelled if manual else self._preview_cancel_requested
         for widget in (self.preview_action_control, self.preview_button):

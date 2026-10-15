@@ -172,6 +172,14 @@ rechts steht die Seitenansicht des Originalobjekts. Alle Eingaben bearbeiten
 zunächst einen Entwurf. Rechts unten übernimmt der grüne Button „Übernehmen“
 die Layerbereiche, Mindest-Layerzeit und Farbgrenzen gemeinsam. „Abbrechen“,
 Esc und das Schließen des Fensters verwerfen den Entwurf vollständig.
+Über der Vorschau steht derselbe **Auflösung**-Regler wie im manuellen Editor:
+Standard 75%, neun Stufen von 0% (Silhouette) bis 100%. Er verändert nur die
+Darstellung. STL-Flächen und exakte Konturen werden mit der gemeinsamen manuellen
+Mesh-Aufbereitung geladen; anspruchsvolle Bilder entstehen in verwalteten,
+abbrechbaren Hintergrundjobs. Eine begrenzte Bildablage und normalisierte
+Bildkoordinaten vermeiden neue Mesh-Berechnungen beim Zoomen und Verschieben.
+Bis ein neues Bild bereitsteht, bleibt die vollständige Layersilhouette sichtbar.
+Die Auflösung wird beim Öffnen des Bereichseditors auf 75% gesetzt.
 Das Hauptfenster bleibt während der Bearbeitung gesperrt, damit sich der
 zugrunde liegende Zustand nicht parallel ändern kann. Die Mindest-Layerzeit
 startet mit dem Wert des Hauptfensters und wird beim Übernehmen dort aktualisiert;
@@ -531,7 +539,76 @@ alle vier Ansichtsbuttons funktionieren auch ohne Turmgeometrie. Änderungen
 an Turmeinstellungen kennzeichnen diese reine Originalobjektansicht nicht als
 veraltet; die Veraltet-Anzeige gilt erst für Szenen mit Kühlturm.
 
+### Objektspezifische Stützen für das Original-STL
+
+Ist die globale Stützeneinstellung im bestätigten Prozessprofil eindeutig
+deaktiviert, wird in beiden Methoden **Stützen für STL-Objekt simulieren**
+angeboten. Die Option startet deaktiviert und wird nicht als globale
+Benutzervoreinstellung gespeichert. Im automatischen Modus steht sie unter
+„Deaktivierte Turmstützen simulieren“, manuell unter „Turm und Standfuß“.
+Der gemeinsame objektspezifische 3MF-Pfad ist für Orca Slicer, Bambu Studio und
+Anycubic Slicer Next verfügbar. Bei anderen Adaptern bleibt die angebotene Option
+mit einer Erklärung deaktiviert; ein nicht unterstützter API-Auftrag wird
+abgewiesen, statt die Simulation stillschweigend zu ignorieren.
+
+`GenerationSettings.simulate_source_supports` wird nur in objektbezogene
+Signaturen aufgenommen. Gemeinsame Slices und der exportierte native 3MF-Container
+setzen `enable_support=1` ausschließlich am Originalobjekt. Die globale
+Stützeneinstellung und sämtliche weiteren Stützenparameter bleiben erhalten;
+Turmfüllung und Turmstützen werden unabhängig am Turm gesetzt. Bambu erhält
+dieselbe Einstellung zusätzlich im objektspezifischen `print_params` der
+temporären Assembly. Auch der verzögert erstellte automatische Endexport trägt
+diesen Wert weiter. Native Projektvalidierung prüft die Übernahme am richtigen
+Objekt. Slicer-Originale werden ausschließlich gelesen.
+Wurde zuvor bereits der Pre-Slice nach einem Fehler mit simulierten Stützen
+wiederholt, ersetzt die aktive neue Option dessen globale Weitergabe im
+Generierungsauftrag durch die objektspezifische Aktivierung. Damit schaltet sie
+keine zusätzlichen Turmstützen ein; das vorbereitete Original bleibt erhalten.
+
+Die vorbereitete Originalanalyse und die manuelle Vorschau bleiben unverändert.
+Bei aktiver Objektstützensimulation liest die automatische Vorschau die
+Originalbahnen einschließlich der Stützen aus dem tatsächlichen gemeinsamen
+G-Code des besten Kandidaten. Benannte Objektblöcke trennen Original und Turm;
+Bambus numerische Objektkennungen werden anhand ihrer exakten Druckbahngrenzen
+und der bestätigten Turmposition eindeutig zugeordnet. Ein mehrdeutiger
+G-Code wird nicht als korrekte Stützenvorschau ausgegeben. Die Aufbereitung
+verwendet begrenzte Segmentstichproben und erfolgt im vorhandenen Worker nur
+einmal je geändertem besten Kandidaten; finale Ansicht und Zwischenvorschau
+verwenden dieselben Daten. Der vorbereitete Originalcache bleibt erhalten.
+Die gemeinsame Zeitbewertung berücksichtigt dadurch auch die tatsächlich
+erzeugten Stützbahnen. Zur Berechnung und Aussagekraft dieser Zeiten siehe
+[gemeinsamer Prüfslice](manual_editor.md#ein-unveränderter-prüfslice).
+
+Beim Aktualisieren eines vorzeitig übernommenen Ergebnisses werden Fortsetzung
+und Export gesperrt und die Hauptaktion heißt „Kühlturm aktualisieren“. Sie
+verwirft den alten Stand und beginnt mit den aktuellen Einstellungen neu.
+Werden die Einstellungen exakt wiederhergestellt, gelten wieder die bisherigen
+Aktionen. Sobald ein neuer gemeinsamer Slice sichtbar ist, wird dessen Vorschau
+als aktuell angezeigt; Export bleibt bis zur Ergebnisübernahme gesperrt.
+Außerhalb einer Generierung erscheint das Turm-Fortschrittsbild vollständig,
+während sein letzter interner Fortschrittswert für die Fortsetzung erhalten bleibt.
+
 ## Prüfungen
+
+`test_october_editor_changes.py` deckt die unabhängige Wiederherstellung der
+Profilrollen, Historienschritte und Wiederholungszweige, schmale Vorschauleisten,
+den sicheren Neustart eines übernommenen Ergebnisses, die aktuelle gemeinsame
+Vorschau sowie objektspezifische Stützen und Turmfüllung einschließlich des
+verzögerten automatischen Endexports ab. `test_real_object_simulations.py`
+prüft bei `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` beide installierten nativen
+Adapter in getrennten Prozessen, einschließlich G-Code-Nachweis der Turmfüllung,
+3MF-Metadaten, getrennten Original-/Stützbahnen für die Vorschau und unveränderten
+Quellen/Profilen. `test_profile_and_preview_refinements.py` prüft zusätzlich
+Nachbar-Snapping einschließlich Mausziehen und Undo, responsive Profilhinweise,
+die tatsächlichen Stützbahnen in Zwischen- und Endansicht sowie die sichere
+Übergabe nach Entfernen des temporären Slice-Verzeichnisses. Die technische
+Zeitquelle bleibt trotz entfallener pauschaler Ergebniswarnung erhalten.
+
+Die lokale native Abnahme am **15.10.2026** bestand für Bambu Studio und Anycubic
+Slicer Next mit 990 Original-Layern und 60.000 Vorschausegmenten. Artefakte und
+Messdaten liegen unter `.tmp/manual_acceptance_bambu_simulations/` und
+`.tmp/manual_acceptance_anycubic_simulations/`. Das belegt diese beiden lokalen
+Slicerversionen und Profile; es ist keine Abnahme anderer Adapter oder Profile.
 
 `test_generation_refinements.py` prüft vorzeitiges Ende, variable Layerhöhen,
 Begrenzung auf Objekthöhe, zukünftige Bedarfsspitzen, konkave Kurven, Winkelgrenzen sowie

@@ -250,8 +250,7 @@ def violated_width_limits(draft):
             continue
         radii=curve.radius_extrema()
         minimum=settings.minimum_diameter_mm/2
-        foot_controls=(curve.control1.radius_mm,curve.control2.radius_mm) if i==0 else ()
-        if min(radii)<=0 or min((*radii,*foot_controls))<minimum-EPS:
+        if min(radii)<=0 or min(radii)<minimum-EPS:
             limits.append("minimum_diameter_mm")
         maximum=(settings.maximum_foot_diameter_mm if i==0 else settings.maximum_diameter_mm)/2
         if max(radii)>maximum+EPS:
@@ -295,8 +294,7 @@ def validate(draft):
         radii = c.radius_extrema()
         minimum = s.minimum_diameter_mm / 2
         maximum = (s.maximum_foot_diameter_mm if i == 0 else s.maximum_diameter_mm) / 2
-        foot_controls = (c.control1.radius_mm,c.control2.radius_mm) if i == 0 else ()
-        if min(radii) <= 0 or min((*radii,*foot_controls)) < minimum-EPS:
+        if min(radii) <= 0 or min(radii) < minimum-EPS:
             raise GeometryError("minimum_diameter_mm", "Die vollständige Kurve unterschreitet den Mindestdurchmesser.",limits=violated_width_limits(draft))
         if max(radii) > maximum+EPS:
             raise GeometryError("maximum_foot_diameter_mm" if i == 0 else "maximum_diameter_mm", "Die vollständige Kurve überschreitet den Maximaldurchmesser.",limits=violated_width_limits(draft))
@@ -347,7 +345,7 @@ def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diam
 
 
 def set_minimum_diameter(draft, diameter_mm):
-    """Raise every radial anchor to the minimum without expanding either maximum.
+    """Raise an undersized form without expanding either maximum.
 
     Call with the press-time draft for a reversible drag preview. Profile points
     above the boundary and all heights stay unchanged. Linear controls and
@@ -356,9 +354,10 @@ def set_minimum_diameter(draft, diameter_mm):
     settings = replace(draft.settings, minimum_diameter_mm=diameter_mm)
     validate_settings(settings)
     minimum = diameter_mm / 2
-    if all(position.radius_mm >= minimum for curve in draft.curves
-           for position in (curve.start,curve.control1,curve.control2,curve.end)):
+    try:
         return validate(replace(draft,settings=settings))
+    except GeometryError:
+        pass
     def clamped(position):
         return replace(position, radius_mm=max(minimum, position.radius_mm))
     points = tuple(replace(point, position=clamped(point.position)) for point in draft.points)
