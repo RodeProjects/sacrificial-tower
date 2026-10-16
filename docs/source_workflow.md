@@ -1,15 +1,27 @@
-# Quellenworkflow für STL und G-Code
+# Quellenworkflow: STL vorbereiten und G-Code analysieren
+
+## Inhalt
+
+- [Unterstützte Eingaben](#unterstützte-eingaben)
+- [Quellen- und Analysekontext](#quellen--und-analysekontext)
+- [STL-Prüfung](#stl-prüfung)
+- [Slicer- und Profilbestätigung](#slicer--und-profilbestätigung)
+- [Isolierter STL-Pre-Slice](#isolierter-stl-pre-slice)
+- [Cache und Invalidierung](#cache-und-invalidierung)
+- [Persistenz, Berichte und Datenschutz](#persistenz-berichte-und-datenschutz)
+- [Tests und reale Abnahme](#tests-und-reale-abnahme)
+
 
 ## Unterstützte Eingaben
 
 Die GUI besitzt genau einen Datei-/Drop-Bereich und akzeptiert jeweils eine
-Datei mit der Endung `.gcode` oder `.stl`. Die Endung dient nur als erster
-Routinghinweis. `SourceRecognitionService` liest einen begrenzten Dateianfang
+STL-Datei mit der Endung `.stl`. Vorhandenen G-Code verarbeitet die separate CLI;
+er ist keine aktuelle GUI-Eingabe. Die Endung dient nur als erster Routinghinweis.
+`recognize_source` liest einen begrenzten Dateianfang
 und prüft anschließend das erwartete Format. Leere, beschädigte oder lediglich
 umbenannte Dateien werden nicht an die Fachpipeline weitergereicht.
 
-`Andere Datei auswählen`, `G-Code neu einlesen` beziehungsweise `STL neu
-einlesen` und `G-Code entfernen` beziehungsweise `STL entfernen` invalidieren
+`Andere Datei auswählen`, `STL neu einlesen` und `STL entfernen` invalidieren
 sämtliche abhängigen Analyse-, Profil-, Pre-Slice-, Prognose- und
 Vorschauergebnisse. Ein
 monotoner Request-Bezeichner verhindert, dass ein verspätetes Ergebnis eines
@@ -46,13 +58,12 @@ passiv. Die übliche Tastaturbedienung des fokussierten Kästchens bleibt erhalt
 - Art, absolut aufgelöster Pfad, Größe und Änderungszeitpunkt,
 - SHA-256 der vollständig gelesenen Datei.
 
-`PreparedAnalysisSource` trennt davon den tatsächlich analysierten G-Code. Bei
-einem Benutzer-G-Code zeigt er auf dieselbe Datei und verwendet
-`USER_SUPPLIED`. Bei einer STL zeigt er auf den isoliert erzeugten temporären
-G-Code und verwendet `GENERATED_PRESLICE`. Sliceridentität,
+`PreparedAnalysisSource` trennt davon den tatsächlich analysierten G-Code.
+Er zeigt auf den isoliert erzeugten temporären G-Code und verwendet
+`GENERATED_PRESLICE`. Sliceridentität,
 Profilfingerabdruck und `PreSliceProvenance` bleiben bis in Vorschau, Export und
-technischen Bericht erhalten. Ab diesem Übergang arbeiten beide Eingabewege
-mit demselben `GCodeAnalysisSnapshot`.
+technischen Bericht erhalten. Ab diesem Übergang verwendet die GUI einen
+`GCodeAnalysisSnapshot`; die CLI nutzt dieselbe G-Code-Analyselogik.
 
 ## STL-Prüfung
 
@@ -178,9 +189,9 @@ beim Einklappen kehrt die Überschrift in die gemeinsame Zeile zurück.
 
 ## Slicer- und Profilbestätigung
 
-Beide Eingabearten verwenden einen gemeinsamen, quellenneutralen
-`ProfileMatchingContext`. Für G-Code stehen eingebettete Metadaten und
-zeitkritische Werte als Evidenz zur Verfügung. Für STL werden ausschließlich
+Die GUI verwendet einen quellenneutralen `ProfileMatchingContext`.
+Der Fachdienst kann zusätzlich Metadaten vorhandener G-Code-Analysen auswerten;
+daraus folgt kein G-Code-Import in der GUI. Für die STL-Vorbereitung werden ausschließlich
 verifizierte Installationen, aktives beziehungsweise zuletzt bestätigtes
 Preset und das lesend inventarisierte Profilangebot verwendet. Es wird kein
 leerer oder künstlicher G-Code-Snapshot erzeugt.
@@ -272,9 +283,12 @@ nicht überschrieben.
 
 Der technische Laufbericht enthält Quellenart und -hash, Herkunft und Hash des
 Analyse-G-Codes, Slicer und Version, bestätigte Profile, Profilfingerabdruck,
-Pre-Slice-Zeitpunkt, Dauer und Cache-Status. Supportberichte redigieren Pfade
-und übernehmen weder STL-Inhalte noch vollständige Prozessausgaben. Es findet
-keine Netzwerkübertragung des Modells statt.
+Pre-Slice-Zeitpunkt, Dauer und Cache-Status. Dieser lokale technische Laufbericht
+ist vom freiwilligen Support-ZIP zu unterscheiden: Ein Supportpaket übernimmt
+nur ausdrücklich freigegebene Felder und technische Werte, keine Originalprofile,
+Rohlogs oder freien Fehlermeldungen. Eigene Problembeschreibungen bleiben
+unverändert. Details: [Support und Diagnose](support.md). Es gibt keine automatische
+Netzwerkübertragung des Modells oder Supportpakets.
 
 ## Tests und reale Abnahme
 

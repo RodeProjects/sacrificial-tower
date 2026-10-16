@@ -49,7 +49,7 @@ if ($DevelopmentRelease) {
 } else {
     & $python (Join-Path $PSScriptRoot "check_release_readiness.py") --release
     Assert-NativeSuccess "Die Anbieter- und Vertriebsfreigabeprüfung"
-    $releaseKind = "commercial"
+    $releaseKind = "free"
 }
 
 & $gh auth status
@@ -107,7 +107,7 @@ if ($null -eq $run) {
     throw "Der gestartete Build-Workflow wurde nicht gefunden."
 }
 
-& $gh run watch $run.databaseId --repo $SourceRepository --exit-status
+& $gh run watch $run.databaseId --repo $SourceRepository --compact --exit-status --interval 15
 Assert-NativeSuccess "Der Build-Workflow"
 
 $temporaryRoot = Join-Path (
@@ -167,9 +167,9 @@ try {
     if ($DevelopmentRelease) {
         $releaseTitle = "Sacrificial Tower $version (Entwicklungsversion)"
         $releaseNotes = (
-            "Nicht für den regulären Verkauf freigegebene Entwicklungsversion " +
+            "Kostenlose Entwicklungsversion " +
             "für Tests und Evaluation. Offene Anbieter- und Vertriebsangaben " +
-            "werden vor einem kommerziellen Release nachgetragen."
+            "werden vor einer regulären kostenlosen Veröffentlichung nachgetragen."
         )
     } else {
         $releaseTitle = "Sacrificial Tower $version"

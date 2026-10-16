@@ -204,6 +204,7 @@ try {
     & $isccFull `
         '/Qp' `
         "/DAppVersion=$Version" `
+        "/DAppPublisherName=$((Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/legal_profile.json') -Raw | ConvertFrom-Json).provider_name)" `
         "/DAppIdValue=$testAppId" `
         "/DDefaultInstallDir=$installRoot" `
         "/DStandaloneUserDataDir=$userDataRoot" `

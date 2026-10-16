@@ -30,8 +30,8 @@ Ausgangsstand: 0.6.10, Commit `8634206`. Kein Commit oder Push ist beauftragt.
 ## Status
 
 Die nachfolgend aufgeführten Änderungen sind implementiert und lokal geprüft.
-Die offenen Anbieterangaben und kommerziellen Freigaben bleiben bewusst offen;
-sie erfordern tatsächliche Daten beziehungsweise belastbare Nachweise.
+Der aktuelle Anbieter- und Freigabestand steht in der [Checkliste](missing_data.md);
+offene Nachweise erfordern tatsächliche Daten und belastbare Belege.
 
 ## Durchgeführte Änderungen
 
@@ -45,7 +45,7 @@ sie erfordern tatsächliche Daten beziehungsweise belastbare Nachweise.
 | Thread-Verhalten | Worker-Empfänger explizit als Qt-Slots registriert; GUI-Zugriffe und Folgestarts bleiben im zuständigen Thread. |
 | Dependencies | 15 konkrete Windows-/Python-3.13-Wheels mit SHA-256 fixiert; frische Umgebung verwendet nur Essentials statt des vollständigen PySide6-Metapakets. CI und Build folgen derselben Lockdatei. |
 | Distribution | Expliziter Qt-Lieferumfang, Lizenzsammlung mit Herkunftsindex, drei geprüfte Quellarchive und Datei-/Binärinventar. Fremde DLLs aus dem Host-PATH werden ausgeschlossen. |
-| Rechtstexte | Proprietäre Projektkennzeichnung, Nutzungsbedingungen der Entwicklungsversion, Datenschutz- und Drittanbietertexte offline im About-Dialog; bestätigte eigene Asset-Rechte dokumentiert. |
+| Rechtstexte | Projektlizenzkennzeichnung, Nutzungsbedingungen der Entwicklungsversion, Datenschutz- und Drittanbietertexte offline im About-Dialog; bestätigte eigene Asset-Rechte dokumentiert. |
 | Fehlende Daten | Ein Anbieterprofil, automatisch daraus erzeugte Checkliste mit erwarteten Angaben und Verwendungsorten; Veröffentlichungseinstieg blockiert unvollständige Felder. |
 | Startdiagnose | Frühe Import-/DLL-Fehler schreiben ausschließlich in den eigenen Benutzerdatenordner. |
 
@@ -91,7 +91,7 @@ GitHub ausgelöst und keine Veröffentlichung vorgenommen.
 
 ## Verbleibende echte Voraussetzungen und Grenzen
 
-- Die [Checkliste fehlender Daten](missing_data.md) enthält fünf offene Felder.
+- Die [Checkliste fehlender Daten](missing_data.md) führt die aktuell offenen Nachweise auf.
   `release_legal_review` erwartet getrennte Nachweise für Rechtstexte,
   LGPL-Quell-/Binärzuordnung, Toolchain-/Runtime-Berechtigung und CRA-Einordnung.
   Eine ausgefüllte Zeichenkette ersetzt diese Prüfung nicht.
@@ -101,10 +101,10 @@ GitHub ausgelöst und keine Veröffentlichung vorgenommen.
   dokumentieren. Kostenfreie Community-Nutzung ist bedingt möglich, aber nicht
   allein durch eine vorhandene Installation bewiesen. Siehe [Dependencies](dependencies.md).
 - Der lokale Python-Patchstand 3.13.2 ist ein Prüfnachweis, keine Empfehlung für
-  den Verkauf. Für ein Release den aktuellen Sicherheitspatchstand der Reihe
+  die Veröffentlichung. Für ein Release den aktuellen Sicherheitspatchstand der Reihe
   verwenden und neu bauen; CI folgt deshalb weiterhin `3.13`.
 - Dokumentensperren koordinieren die Anwendung. Gegen nicht kooperierende externe
   Editoren bleibt ein kleines Prüf-/Ersetzungszeitfenster; unbekannte Slicerpfade
   benötigen explizite Registrierung. Die Maßnahmen sind keine Betriebssystem-Sandbox.
-- Eine verbindliche kommerzielle Freigabe, Vertrags-/Vertriebsentscheidungen und
-  eine vollständige Neuarchitektur sind mit diesen Änderungen nicht behauptet.
+- Eine verbindliche juristische Freigabe, tatsächliche Veröffentlichungsentscheidungen
+  und eine vollständige Neuarchitektur sind mit diesen Änderungen nicht behauptet.

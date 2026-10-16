@@ -37,10 +37,19 @@ def legal_profile(*, root: Path = RESOURCE_ROOT) -> dict[str, str]:
     return profile
 
 
+def _project_license(root: Path) -> str:
+    path = root / "LICENSE.md"
+    if not path.is_file():
+        path = root / "legal" / "LICENSE.md"
+    return path.read_text(encoding="utf-8")
+
+
 def render_legal_document(title: str, *, root: Path = RESOURCE_ROOT) -> str:
     filename = DOCUMENTS[title]
     profile = legal_profile(root=root)
     template = (root / "legal" / filename).read_text(encoding="utf-8")
+    if title == "Lizenzbedingungen":
+        template += "\n\n---\n\n" + _project_license(root)
     def substitute(match: re.Match[str]) -> str:
         key = match.group(1)
         if key not in profile or not isinstance(profile[key], str):
@@ -52,3 +61,25 @@ def render_legal_document(title: str, *, root: Path = RESOURCE_ROOT) -> str:
             return DEVELOPMENT_PLACEHOLDER_TEXT[key]
         return value
     return re.sub(r"\{\{([a-z_]+)\}\}", substitute, template)
+
+
+def export_legal_documents(destination: Path, *, root: Path = RESOURCE_ROOT) -> None:
+    """Write resolved copies for publication and the installer's license page.
+
+    Keep the runtime templates separate: rendering an exported terms document
+    again would otherwise append the project license twice.
+    """
+    documents = {
+        filename: render_legal_document(title, root=root)
+        for title, filename in DOCUMENTS.items()
+    }
+    documents["LICENSE.md"] = _project_license(root)
+    # Resolve everything before writing, so unknown or missing provider keys
+    # cannot leave a partly updated set of public documents.
+    destination.mkdir(parents=True, exist_ok=True)
+    for filename, content in documents.items():
+        (destination / filename).write_text(content, encoding="utf-8", newline="\n")
+    # The BOM lets Inno Setup reliably recognize German UTF-8 text.
+    (destination / "terms.txt").write_text(
+        documents["terms.md"], encoding="utf-8-sig", newline="\n"
+    )

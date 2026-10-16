@@ -11,6 +11,29 @@ diesen Mechanismus bereits. Zukünftige speicherbare Einstellungsprofile müssen
 ihn ebenfalls verwenden. Reine, jederzeit neu aufbaubare Caches dürfen ein
 einfacheres Format behalten.
 
+## Inhalt
+
+- [Speicherorte und parallele Installationen](#speicherorte-und-parallele-installationen)
+- [Garantien](#garantien)
+- [Neue Schema-Version anlegen](#neue-schema-version-anlegen)
+- [Regeln je Änderungstyp](#regeln-je-änderungstyp)
+- [Sichere Änderungen während eines Downgrades](#sichere-änderungen-während-eines-downgrades)
+- [Zukünftige Einstellungsprofile](#zukünftige-einstellungsprofile)
+- [Parallelzugriffe und aktuelle Standardwerte](#parallelzugriffe-und-aktuelle-standardwerte)
+- [Schema 11: einstellbare Layerzeit-Toleranz](#schema-11-einstellbare-layerzeit-toleranz)
+- [Schema 12: automatische Standfußhöhe](#schema-12-automatische-standfußhöhe)
+- [Schema 13: Ziel-Layerzeit und neue Standardwerte](#schema-13-ziel-layerzeit-und-neue-standardwerte)
+- [Schema 14: maximale gemeinsame Slices](#schema-14-maximale-gemeinsame-slices)
+- [Schema 15: optionale Eingabegrenzen](#schema-15-optionale-eingabegrenzen)
+- [Schema 16: automatische Geometrieparameter](#schema-16-automatische-geometrieparameter)
+- [Schema 17: Untergrenzen der Layerzeiten](#schema-17-untergrenzen-der-layerzeiten)
+- [Schema 18: Durchmessergrenzen](#schema-18-durchmessergrenzen)
+- [Schema 19: maximale getrennte Slices](#schema-19-maximale-getrennte-slices)
+- [Schema 20: Simulation ohne Turmstützen](#schema-20-simulation-ohne-turmstützen)
+- [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
+- [Getrennte manuelle Einstellungen (eigenes Schema 10)](#getrennte-manuelle-einstellungen-eigenes-schema-10)
+
+
 ## Speicherorte und parallele Installationen
 
 Unveränderliche Programmressourcen bleiben im Installations- beziehungsweise

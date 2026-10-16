@@ -74,21 +74,21 @@ und gibt ausschließlich den öffentlichen Anteil aus.
    freigegebene Zeitlimit-Ausnahme gilt der lokale Kompletttest.
 4. Veröffentlichungsart wählen und das Skript im normalen
    Windows-Benutzerkontext ausführen:
-   - Kommerziell freigegeben: `scripts/publish_update.ps1`
-   - Unverkäufliche Testversion: `scripts/publish_update.ps1 -DevelopmentRelease`
+   - Regulär kostenlos freigegeben: `scripts/publish_update.ps1`
+   - Kostenlose Entwicklungsversion: `scripts/publish_update.ps1 -DevelopmentRelease`
 
 Nach einem durch das CI-Zeitlimit abgebrochenen `Tests`-Lauf kann ein
 ausdrücklich freigegebenes Entwicklungsrelease mit
 `scripts/publish_update.ps1 -DevelopmentRelease -AllowTimedOutCI`
 veröffentlicht werden, wenn der lokale vollständige Testlauf für den
 Anwendungscode erfolgreich war. Die Ausnahme wird im Installer-Workflow
-protokolliert und ist für kommerzielle Releases nicht verfügbar. Der
+protokolliert und ist für reguläre kostenlose Veröffentlichungen nicht verfügbar. Der
 Installer-Build sowie Lieferumfangs-, Installations-, Signatur- und
 Integritätsprüfungen bleiben verpflichtend.
 
 Ein Entwicklungsrelease ist nur zulässig, solange die ausgelieferten
-Nutzungsbedingungen das Programm eindeutig als noch nicht für den regulären
-Verkauf freigegebene Entwicklungsversion kennzeichnen. Es darf ausschließlich
+Nutzungsbedingungen das Programm eindeutig als kostenlose Entwicklungsversion
+für Tests und Evaluation kennzeichnen. Es darf ausschließlich
 die bekannten Anbieter-, Vertriebs- und Abschlussnachweise zurückstellen. Name,
 Marke und Kontakt, die erfolgreiche `main`-CI oder die dokumentierte
 Zeitlimit-Ausnahme, die Lieferumfangsprüfung,
@@ -98,8 +98,8 @@ kennzeichnen die Entwicklungsversion weiterhin ausdrücklich. GitHub-Releases
 erhalten auch für Entwicklungsversionen kein Prerelease-Flag, damit die neueste
 veröffentlichte Version mit `--latest` als „Latest“ angezeigt werden kann.
 GitHub erlaubt diese Markierung nicht für Prereleases. Die Markierung als
-„Latest“ begründet keine kommerzielle Freigabe; die offenen Angaben müssen vor
-einem kommerziellen Release nachgetragen werden.
+„Latest“ begründet keine abgeschlossene Veröffentlichungsprüfung; offene Angaben
+müssen vor einer regulären kostenlosen Veröffentlichung nachgetragen werden.
 
 Das Skript startet den Workflow
 `Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den
@@ -155,7 +155,7 @@ Ein ungefährlicher Probelauf gegen ein beliebiges Repository ist möglich mit:
   -DryRun
 ```
 
-## Eigenständiger und späterer Store-Build
+## Eigenständiger und vorbereiteter Store-Build
 
 `config/distribution.json` legt den Vertriebskanal eines Builds fest:
 
@@ -190,7 +190,7 @@ Store-spezifische Variante der Distributionsdatei.
 - Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung
   beendet, ersetzt und anschließend neu geöffnet.
 
-## Zusätzliche Build- und Vertriebsprüfung ab September 2026
+## Build- und Veröffentlichungsprüfung
 
 CI verwendet die Python-Reihe 3.13 mit aktueller Patchversion. Alle Windows-Wheels
 werden über `requirements-windows.lock` einschließlich SHA-256 fixiert. Vor PyInstaller wird das versionierte Qt-
@@ -205,4 +205,4 @@ unregistrierte Vorlagenfelder vorhanden sind, wird keine Veröffentlichung
 begonnen. Alle offenen Daten stehen in [missing_data.md](missing_data.md).
 Ein interner Entwicklungsbuild bleibt mit sichtbaren Platzhaltern möglich.
 Diese maschinelle Vollständigkeitsprüfung ersetzt nicht die inhaltliche
-[Vertriebsfreigabe](commercial_release.md).
+[Veröffentlichungsprüfung](distribution.md).

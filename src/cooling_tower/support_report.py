@@ -4,10 +4,12 @@ import json
 import os
 import platform
 import re
+import stat
 import sys
 import tempfile
 import uuid
 import zipfile
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,76 +18,21 @@ from typing import Any
 
 from cooling_tower.diagnostics import DiagnosticJournal
 from cooling_tower.version import APP_NAME, APP_VERSION
+from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.support_privacy import (
+    CONTEXT_KEYS, SETTING_KEYS, SAFE_ERROR_TYPES, sanitize_technical,
+)
 
 
 SUPPORT_REPORT_DIRECTORY_NAME = "support_reports"
 MAXIMUM_JOURNAL_BYTES = 8 * 1024 * 1024
 MAXIMUM_AUXILIARY_LOG_BYTES = 512 * 1024
-MAXIMUM_EXPORTED_TEXT_LENGTH = 2048
-MAXIMUM_EXPORTED_COLLECTION_ITEMS = 100
-_EMAIL_PATTERN = re.compile(
-    r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])"
-)
-_WINDOWS_PATH_PATTERN = re.compile(
-    r"(?i)(?<![\w])(?:[A-Z]:\\|\\\\)[^\r\n\"<>|]*"
-)
-_UNIX_PATH_PATTERN = re.compile(
-    r"(?<![\w:])/(?:[^/\s\"'<>|]+/)+[^\s\"'<>|]*"
-)
-_URL_PATTERN = re.compile(
-    r"(?i)\b(?:https?|ftp|file|smb)://[^\s<>\"']+"
-)
-_IPV4_PATTERN = re.compile(
-    r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])"
-)
-_IPV6_PATTERN = re.compile(
-    r"(?i)(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])"
-)
-_MAC_PATTERN = re.compile(
-    r"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])"
-)
-_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(password|passwd|secret|api[_-]?key|private[_-]?key|"
-    r"access[_-]?token|refresh[_-]?token|authorization)\b"
-    r"(\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
-)
-_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
-_JWT_PATTERN = re.compile(
-    r"(?<![\w.-])[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\."
-    r"[A-Za-z0-9_-]{12,}(?![\w.-])"
-)
-_KNOWN_TOKEN_PATTERN = re.compile(
-    r"(?i)(?<![\w])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"
-)
-_LONG_IDENTIFIER_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])[A-Fa-f0-9]{32,}(?![A-Za-z0-9])|"
-    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{48,}(?![A-Za-z0-9_-])"
-)
-_PERSONAL_NUMBER_PATTERN = re.compile(
-    r"(?<!\d)\+?\d(?:[\s()./-]*\d){7,}(?!\d)"
-)
-_SENSITIVE_FILENAME_PATTERN = re.compile(
-    r"(?i)(?<![\w.-])[^\\/:*?\"<>|\r\n]{1,120}?\."
-    r"(?:gcode|bgcode|stl|3mf|obj|amf|step|stp|ply|ini|cfg|conf|json|yaml|"
-    r"yml|log|txt|zip)(?![\w.-])"
-)
-_TRACEBACK_FRAME_PATTERN = re.compile(
-    r'^\s*File\s+"(?P<path>[^"]+)",\s+line\s+(?P<line>\d+),\s+in\s+'
-    r"(?P<function>[A-Za-z_][\w<>]*)\s*$"
-)
-_ERROR_SUMMARY_PATTERN = re.compile(
-    r"^\s*(?P<type>[A-Za-z_][\w.]*(?:Error|Exception|Warning|Fault))"
-    r"\s*:\s*(?P<message>.*)$"
-)
-_FATAL_ERROR_PATTERN = re.compile(r"^\s*Fatal Python error:\s*(?P<message>.*)$")
-_BLOCKED_CONTEXT_KEY_PATTERN = re.compile(
-    r"(?i)(?:^|_)(?:path|paths|directory|directories|root|roots|filename|"
-    r"file_name|command|arguments|argv|password|passwd|secret|private_key|"
-    r"api_key|access_token|refresh_token|authorization|fingerprint|digest|"
-    r"content|payload|profile_values|hostname|username|email|session_id|"
-    r"report_id|job_id|request_id|parent_operation_id|process_id|thread_id|"
-    r"native_thread_id|python_thread_id|external_process_id)(?:$|_)"
-)
+MAXIMUM_TITLE_LENGTH = 500
+MAXIMUM_DESCRIPTION_LENGTH = 20_000
+MAXIMUM_JOURNAL_LINE_BYTES = 256 * 1024
+_TRACEBACK_FRAME_PATTERN = re.compile(r'^\s*File\s+"[^"]+",\s+line\s+(?P<line>\d{1,8}),\s+in\s+')
+_ERROR_SUMMARY_PATTERN = re.compile(r"^\s*(?P<type>[A-Za-z_][\w.]*(?:Error|Exception|Warning|Fault))\s*:")
+_FATAL_ERROR_PATTERN = re.compile(r"^\s*Fatal Python error:")
 
 _JOURNAL_SAFE_KEYS = frozenset(
     {
@@ -129,6 +76,9 @@ _JOURNAL_SAFE_KEYS = frozenset(
         "exclusion_count",
         "failure_reason",
         "file_size_bytes",
+        "face_count",
+        "component_count",
+        "issue_count",
         "filament_profile_count",
         "filament_profile_status",
         "finished_utc",
@@ -230,8 +180,11 @@ class SupportReportService:
         self._now_provider = now_provider or (lambda: datetime.now().astimezone())
 
     def ensure_output_directory(self) -> Path:
-        self.output_directory.mkdir(parents=True, exist_ok=True)
-        return self.output_directory.resolve()
+        directory = ensure_writable_output(self.output_directory)
+        if not directory.is_relative_to(self.user_data_root):
+            raise ValueError("Der Diagnoseordner liegt außerhalb der eigenen Benutzerdaten.")
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
 
     def create_bundle(
         self,
@@ -240,6 +193,8 @@ class SupportReportService:
         description: str,
         application_context: Mapping[str, Any] | None = None,
     ) -> SupportReportBundle:
+        if len(str(title)) > MAXIMUM_TITLE_LENGTH or len(str(description)) > MAXIMUM_DESCRIPTION_LENGTH:
+            raise ValueError("Zusammenfassung maximal 500, Beschreibung maximal 20.000 Zeichen.")
         normalized_title = " ".join(str(title).split())
         normalized_description = str(description).strip()
         if not normalized_title:
@@ -255,7 +210,6 @@ class SupportReportService:
             f"{uuid.uuid4().hex[:6].upper()}"
         )
         directory = self.ensure_output_directory()
-        target = self._available_target_path(directory, created_at)
         journal = self.diagnostic_journal
         if journal is not None:
             journal.record("support_report_bundle_started", report_id=report_id)
@@ -272,7 +226,7 @@ class SupportReportService:
             application_context=application_context or {},
         )
         manifest = {
-            "support_report_schema_version": 2,
+            "support_report_schema_version": 3,
             "report_id": report_id,
             "created_at": created_at.isoformat(),
             "program_name": APP_NAME,
@@ -283,6 +237,9 @@ class SupportReportService:
                 "user_files_included": False,
                 "structured_diagnostics_allowlisted": True,
                 "user_text_stored_verbatim": True,
+                "technical_strings_allowlisted": True,
+                "unknown_fields_omitted": True,
+                "review_before_upload_required": True,
             },
             "transmitted": False,
         }
@@ -294,7 +251,9 @@ class SupportReportService:
         )
         os.close(descriptor)
         temporary = Path(temporary_name)
+        target: Path | None = None
         try:
+            target = self._available_target_path(directory, created_at)
             with zipfile.ZipFile(
                 temporary,
                 mode="w",
@@ -316,6 +275,8 @@ class SupportReportService:
             os.replace(temporary, target)
         except Exception:
             temporary.unlink(missing_ok=True)
+            if target is not None:
+                target.unlink(missing_ok=True)
             if journal is not None:
                 journal.record(
                     "support_report_bundle_failed",
@@ -341,10 +302,15 @@ class SupportReportService:
         )
         target = directory / f"{base_name}.zip"
         suffix = 2
-        while target.exists():
-            target = directory / f"{base_name}_{suffix}.zip"
-            suffix += 1
-        return target
+        while True:
+            try:
+                descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                target = directory / f"{base_name}_{suffix}.zip"
+                suffix += 1
+            else:
+                os.close(descriptor)
+                return target
 
     @staticmethod
     def _build_user_report(
@@ -354,7 +320,7 @@ class SupportReportService:
         title: str,
         description: str,
     ) -> str:
-        timezone_name = created_at.tzname() or "lokale Zeit"
+        timezone_name = created_at.strftime("UTC%z")
         return (
             f"{APP_NAME} – Problembericht\n"
             f"{'=' * 48}\n\n"
@@ -362,6 +328,8 @@ class SupportReportService:
             f"Erstellt: {created_at:%d.%m.%Y um %H:%M:%S Uhr} "
             f"({timezone_name})\n"
             f"Programmversion: {APP_VERSION}\n\n"
+            "Vor Veröffentlichung alle Dateien prüfen. Eigene Texte sind unverändert.\n"
+            "Issues und Anhänge können öffentlich zugänglich sein.\n\n"
             f"Zusammenfassung\n"
             f"---------------\n"
             f"{title}\n\n"
@@ -385,8 +353,7 @@ class SupportReportService:
                         f"Bericht-ID: {report_id}",
                         f"Erstellt: {created_at.isoformat()}",
                         f"Programm: {APP_NAME} {APP_VERSION}",
-                        f"Betriebssystem: {platform.system()} "
-                        f"{platform.release()} ({platform.machine()})",
+                        f"Betriebssystem: {self._system_summary()}",
                         f"Python: {platform.python_version()}",
                         f"Eingefrorene Anwendung: "
                         f"{'ja' if getattr(sys, 'frozen', False) else 'nein'}",
@@ -423,24 +390,25 @@ class SupportReportService:
         ).rstrip() + "\n"
 
     def _collect_journal_entries(self) -> str:
-        entries: list[tuple[str | None, Mapping[str, Any]]] = []
+        entries: deque[tuple[str | None, Mapping[str, Any]]] = deque(maxlen=20_000)
         for path in self._journal_candidates_oldest_first():
             try:
-                lines = path.read_text(
-                    encoding="utf-8",
-                    errors="replace",
-                ).splitlines()
+                payload_bytes, _truncated = self._read_log_tail(path, MAXIMUM_JOURNAL_BYTES)
+                lines = payload_bytes.splitlines()
             except OSError:
                 continue
             for line in lines:
+                if len(line) > MAXIMUM_JOURNAL_LINE_BYTES:
+                    continue
                 try:
                     payload = json.loads(line)
-                except json.JSONDecodeError:
+                except (ValueError, UnicodeError, RecursionError):
                     continue
                 session_id = (
                     str(payload.get("session_id"))
                     if isinstance(payload, Mapping)
-                    and payload.get("session_id") is not None
+                    and isinstance(payload.get("session_id"), str)
+                    and len(payload["session_id"]) <= 128
                     else None
                 )
                 if isinstance(payload, Mapping):
@@ -449,10 +417,7 @@ class SupportReportService:
         if not entries:
             return "(kein Diagnosejournal vorhanden)"
 
-        session_order: list[str] = []
-        for session_id, _line in entries:
-            if session_id and session_id not in session_order:
-                session_order.append(session_id)
+        session_order = list(dict.fromkeys(session_id for session_id, _ in entries if session_id))
         selected_sessions = set(session_order[-2:])
         current_session = (
             self.diagnostic_journal.session_id
@@ -518,138 +483,64 @@ class SupportReportService:
         )
         return prefix + "\n".join(selected)
 
+    def _read_log_tail(self, path: Path, limit: int) -> tuple[bytes, bool]:
+        """Read only bounded, application-owned regular logs; never follow external links."""
+        resolved = path.resolve()
+        if not resolved.is_relative_to(self.log_root):
+            raise OSError("Keine eigene Protokolldatei.")
+        with resolved.open("rb") as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("Keine reguläre Protokolldatei.")
+            truncated = metadata.st_size > limit
+            handle.seek(max(0, metadata.st_size - limit))
+            payload = handle.read(limit)
+        if truncated:
+            # The tail can start in the middle of a record. Never parse a fragment.
+            payload = payload.partition(b"\n")[2]
+        return payload, truncated
+
+    @staticmethod
+    def _system_summary() -> str:
+        system = platform.system()
+        system = system if system in {"Windows", "Linux", "Darwin"} else "Unbekannt"
+        machine = platform.machine()
+        machine = machine if machine in {"AMD64", "ARM64", "x86_64", "aarch64", "x86", "i386"} else "Unbekannt"
+        release = platform.release()
+        release = release if re.fullmatch(r"[0-9.]{1,24}", release) else "<Version ausgelassen>"
+        return f"{system} {release} ({machine})"
+
     def _extract_error_summary(self, path: Path) -> str:
         try:
-            payload = path.read_bytes()
+            payload, truncated = self._read_log_tail(path, MAXIMUM_AUXILIARY_LOG_BYTES)
         except OSError:
-            return "(Datei nicht vorhanden)"
-        truncated = len(payload) > MAXIMUM_AUXILIARY_LOG_BYTES
-        if truncated:
-            payload = payload[-MAXIMUM_AUXILIARY_LOG_BYTES:]
+            return "(Datei nicht vorhanden oder nicht freigegeben)"
         safe_lines: list[str] = []
         for raw_line in payload.decode("utf-8", errors="replace").splitlines():
             frame = _TRACEBACK_FRAME_PATTERN.match(raw_line)
             if frame is not None:
-                safe_lines.append(
-                    "Traceback-Rahmen: Zeile "
-                    f"{frame.group('line')}, Funktion "
-                    f"{frame.group('function')}"
-                )
+                safe_lines.append(f"Traceback-Rahmen: Zeile {frame.group('line')}")
                 continue
             error = _ERROR_SUMMARY_PATTERN.match(raw_line)
             if error is not None:
-                safe_lines.append(f"Ausnahmetyp: {error.group('type')}")
+                kind = error.group("type")
+                safe_lines.append(f"Ausnahmetyp: {kind if kind in SAFE_ERROR_TYPES else 'Exception'}")
                 continue
-            fatal = _FATAL_ERROR_PATTERN.match(raw_line)
-            if fatal is not None:
+            if _FATAL_ERROR_PATTERN.match(raw_line):
                 safe_lines.append("Fataler Python-Fehler erkannt")
-
         if not safe_lines:
             return "(keine freigegebenen Fehlerangaben vorhanden)"
-        safe_lines = safe_lines[-200:]
-        prefix = (
-            "[älterer Dateiinhalt wurde vor der Auswertung ausgelassen]\n"
-            if truncated
-            else ""
-        )
-        return prefix + "\n".join(safe_lines)
+        prefix = "[älterer Dateiinhalt ausgelassen]\n" if truncated else ""
+        return prefix + "\n".join(safe_lines[-200:])
 
-    def _sanitize_journal_entry(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        session_alias: str,
-    ) -> dict[str, Any]:
-        result: dict[str, Any] = {"session": session_alias}
-        for raw_key, value in payload.items():
-            key = str(raw_key)
-            if key not in _JOURNAL_SAFE_KEYS:
-                continue
-            if key in {"utc_time", "started_utc", "finished_utc"}:
-                timestamp = str(value)
-                try:
-                    datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                except ValueError:
-                    continue
-                result[key] = timestamp
-                continue
-            result[key] = self._sanitize_context_value(value, depth=1)
+    def _sanitize_journal_entry(self, payload: Mapping[str, Any], *, session_alias: str) -> dict[str, Any]:
+        result = {"session": session_alias}
+        result.update(sanitize_technical(payload, allowed_keys=_JOURNAL_SAFE_KEYS))
         return result
 
     def _sanitize_context_value(self, value: Any, *, depth: int = 0) -> Any:
-        if depth > 8:
-            return "<ausgelassen: Verschachtelungstiefe>"
-        if value is None or isinstance(value, (bool, int, float)):
-            return value
-        if isinstance(value, (str, Path)):
-            return self._sanitize_free_text(str(value))
-        if isinstance(value, Mapping):
-            result: dict[str, Any] = {}
-            for raw_key, child_value in value.items():
-                key = str(raw_key)
-                if _BLOCKED_CONTEXT_KEY_PATTERN.search(key):
-                    continue
-                result[key] = self._sanitize_context_value(
-                    child_value,
-                    depth=depth + 1,
-                )
-            return result
-        if isinstance(value, (list, tuple, set, frozenset)):
-            items = list(value)[:MAXIMUM_EXPORTED_COLLECTION_ITEMS]
-            sanitized = [
-                self._sanitize_context_value(item, depth=depth + 1)
-                for item in items
-            ]
-            if len(value) > MAXIMUM_EXPORTED_COLLECTION_ITEMS:
-                sanitized.append("<weitere Einträge ausgelassen>")
-            return sanitized
-        return self._sanitize_free_text(type(value).__name__)
-
-    def _sanitize_free_text(self, value: str) -> str:
-        sanitized = str(value).replace("\x00", "")
-        sanitized = _URL_PATTERN.sub("<entfernte-url>", sanitized)
-        sanitized = _WINDOWS_PATH_PATTERN.sub("<entfernter-pfad>", sanitized)
-        sanitized = _UNIX_PATH_PATTERN.sub("<entfernter-pfad>", sanitized)
-        for environment_key in ("USERNAME", "USERDOMAIN", "COMPUTERNAME"):
-            identifier = os.environ.get(environment_key, "").strip()
-            if len(identifier) >= 3:
-                sanitized = re.sub(
-                    rf"(?<![A-Za-z0-9]){re.escape(identifier)}"
-                    r"(?![A-Za-z0-9])",
-                    "<entfernte-kennung>",
-                    sanitized,
-                    flags=re.IGNORECASE,
-                )
-
-        sanitized = _EMAIL_PATTERN.sub("<entfernte-e-mail>", sanitized)
-        sanitized = _MAC_PATTERN.sub("<entfernte-netzwerkadresse>", sanitized)
-        sanitized = _IPV4_PATTERN.sub("<entfernte-netzwerkadresse>", sanitized)
-        sanitized = _IPV6_PATTERN.sub("<entfernte-netzwerkadresse>", sanitized)
-        sanitized = _SECRET_ASSIGNMENT_PATTERN.sub(
-            lambda match: (
-                f"{match.group(1)}{match.group(2)}<entferntes-geheimnis>"
-            ),
-            sanitized,
+        return sanitize_technical(
+            value,
+            allowed_keys=_JOURNAL_SAFE_KEYS | CONTEXT_KEYS | SETTING_KEYS,
+            depth=depth,
         )
-        sanitized = _BEARER_PATTERN.sub("Bearer <entferntes-geheimnis>", sanitized)
-        sanitized = _JWT_PATTERN.sub("<entferntes-geheimnis>", sanitized)
-        sanitized = _KNOWN_TOKEN_PATTERN.sub("<entferntes-geheimnis>", sanitized)
-        sanitized = _SENSITIVE_FILENAME_PATTERN.sub(
-            "<entfernter-dateiname>",
-            sanitized,
-        )
-        sanitized = _PERSONAL_NUMBER_PATTERN.sub(
-            "<entfernte-nummer>",
-            sanitized,
-        )
-        sanitized = _LONG_IDENTIFIER_PATTERN.sub(
-            "<entfernte-kennung>",
-            sanitized,
-        )
-        if len(sanitized) > MAXIMUM_EXPORTED_TEXT_LENGTH:
-            sanitized = (
-                sanitized[:1536]
-                + " … <gekürzt> … "
-                + sanitized[-384:]
-            )
-        return sanitized

@@ -1,0 +1,28 @@
+name: "Sonstige Frage"
+description: "Eine Frage zur Bedienung oder zum Projekt stellen."
+title: "[Frage] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Diese Meldung und Anhänge können öffentlich zugänglich sein. Bitte keine persönlichen,
+        vertraulichen oder fremden geschützten Angaben veröffentlichen; auch Profilnamen,
+        Dateipfade und Screenshots prüfen. Diagnosepakete sind freiwillig und werden nicht
+        automatisch angehängt. Die Filterung garantiert keine vollständige Anonymität.
+        Für Datenschutzanfragen und Sicherheitslücken den vertraulichen Kontakt aus den
+        Datenschutzinformationen verwenden. Support erfolgt freiwillig ohne zugesicherte
+        Antwortzeit oder Umsetzung. Solange das Repository privat ist, ist Zugriff erforderlich.
+  - type: textarea
+    id: question
+    attributes:
+      label: "Frage"
+      description: "Was soll geklärt werden? Vertrauliche Inhalte bitte nicht hier einstellen."
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Prüfung vor Veröffentlichung
+      options:
+        - label: "Ich habe Text und Anhänge geprüft und keine persönlichen, vertraulichen oder unberechtigt verwendeten fremden Inhalte beigefügt. Mir ist die mögliche öffentliche Sichtbarkeit bekannt."
+          required: true

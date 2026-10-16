@@ -10,10 +10,10 @@ on:
       release_kind:
         description: Veröffentlichungsart
         required: true
-        default: commercial
+        default: free
         type: choice
         options:
-          - commercial
+          - free
           - development
       allow_timed_out_ci:
         description: Entwicklungsrelease nach dokumentiertem CI-Zeitlimit und erfolgreichem lokalen Kompletttest
@@ -101,7 +101,14 @@ jobs:
           $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
           & $iscc `
             "/DAppVersion=$env:APP_VERSION" `
+            "/DAppPublisherName=$((Get-Content -LiteralPath 'config/legal_profile.json' -Raw | ConvertFrom-Json).provider_name)" `
             'installer\SacrificialTower.iss'
+
+      - name: Scrollsperre und Zustimmung der Installer-Lizenzseite testen
+        shell: pwsh
+        run: |
+          $iscc = Join-Path $env:INNO_ROOT 'ISCC.exe'
+          .\scripts\test_installer_license.ps1 -IsccPath $iscc
 
       - name: Installation und Deinstallation isoliert testen
         shell: pwsh

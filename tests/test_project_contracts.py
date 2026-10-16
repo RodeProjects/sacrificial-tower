@@ -132,7 +132,7 @@ class ProjectContractTests(unittest.TestCase):
             (root / "legal/terms.md").write_text("{{unknown_field}}", encoding="utf-8")
             self.assertTrue(missing_fields(root))
 
-    def test_development_release_defers_only_known_commercial_fields(self):
+    def test_development_release_defers_only_known_release_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "config").mkdir()
@@ -142,7 +142,7 @@ class ProjectContractTests(unittest.TestCase):
                 "provider_postal_address",
                 "provider_additional_details",
                 "support_retention_policy",
-                "commercial_terms",
+                "distribution_terms",
                 "release_legal_review",
             ):
                 profile[key] = f"[[{key.upper()}]]"
@@ -151,8 +151,7 @@ class ProjectContractTests(unittest.TestCase):
             )
             (root / "legal/terms.md").write_text(
                 "## Aktuelle Entwicklungsversion\n"
-                "noch nicht für den regulären Verkauf freigegebene "
-                "Entwicklungsversion",
+                "kostenlose Entwicklungsversion für Tests und Evaluation",
                 encoding="utf-8",
             )
             self.assertEqual(development_release_blockers(root), [])

@@ -1,8 +1,8 @@
-# Asset-Herkunft und kommerzielle Nutzung
+# Asset-Herkunft und Nutzungsrechte
 
 ## Rechteinhaber
 
-© 2026 Florian Rode. Alle Rechte vorbehalten.
+© 2026 Wolfgang Florian Rode. Nicht eingeräumte Rechte bleiben vorbehalten.
 
 ## Projektinterne Symbole
 
@@ -10,10 +10,10 @@ Die SVG-Symbole in diesem Ordner wurden eigens für den
 Kühlturm-Generator als einfache geometrische Liniengrafiken erstellt. Sie
 stammen aus keinem externen Iconpaket.
 
-Die Verwendung, Vervielfältigung, Veränderung und Verbreitung dieser Symbole
-ist ausschließlich durch den Rechteinhaber oder mit dessen vorheriger
-ausdrücklicher Genehmigung zulässig. Dies gilt auch für ihre Verwendung als
-Bestandteil kommerzieller Distributionen des Projekts.
+Für Verwendung, Vervielfältigung, Veränderung und kostenlose Verbreitung eigener
+Symbole gilt die [Projektlizenz](../../../../LICENSE.md). Urheber-/Herkunftshinweise
+bleiben erhalten; kommerzielle Weiterverbreitung ist nach deren Bedingungen
+untersagt. Rechte an fremden eigenständigen Inhalten werden nicht beansprucht.
 
 ## Programmsymbol
 
@@ -31,7 +31,7 @@ Drittanbieter-Assetpaket.
 Am 14.09.2026 bestätigte Florian Rode ausdrücklich, die im Dialog „Über …“
 verwendete Logografik und die bereitgestellten Test-STL selbst erstellt zu haben
 und sämtliche Rechte daran zu besitzen. Die Integration und Distribution im
-eigenen proprietären Produkt sind damit autorisiert. Das erzeugte Windows-Icon
+eigenen kostenlos angebotenen Projekt sind damit autorisiert. Das erzeugte Windows-Icon
 ist eine technische Ableitung der bereitgestellten Grafik.
 
 Die beiden STL-Fixtures sind bytegleiche Kopien der jeweiligen Dateien unter

@@ -39,7 +39,8 @@ Für GUI-Tests vorab `$env:QT_QPA_PLATFORM='offscreen'` setzen.
 | Kalibrierung und gemeinsame Projekte | `test_phase16`, `test_joint_*`, `test_bambu_*` |
 | Native Zeitberechnung/Parsing | `test_native_gcode_analysis`, `test_acceleration_timing`, `test_phase13` |
 | GUI, About und Lebenszyklen | `test_latest_gui_requirements`, `test_background_job_manager`, `test_gui_crash_stability` |
-| Lieferumfang, Rechtstexte, Architekturgrenzen | `test_project_contracts`, `test_update_packaging` |
+| Supportpakete, Datenfilterung | `test_support_report`, `test_support_diagnostic_events` |
+| Lieferumfang, Rechtstexte, Architekturgrenzen | `test_project_contracts`, `test_legal_documents`, `test_update_packaging` |
 | Update-/CI-Sicherheit | `test_update_*`, `test_release_*`, `test_ci_change_classifier` |
 
 Die Muster sind Navigation, keine automatisch vollständige Testauswahl. Aktuelle
@@ -96,8 +97,10 @@ fixierten Wheels führen zum Abbruch. Der Build sammelt Lizenztexte aus den exak
 Python und Qt, übernimmt Quellarchive und entfernt nicht erlaubte Qt-Plugins.
 Unbekannte Qt-DLLs blockieren den Build. `build-inventory.json` dokumentiert jede
 ausgelieferte Datei mit Größe und SHA-256. Kurze Lizenzablagepfade vermeiden
-Windows-Pfadlängengrenzen; `legal/notice-index.json` erhält die ursprünglichen Fundstellen. Entwicklungspakete dürfen sichtbare
-rechtliche Platzhalter enthalten; `publish_update.ps1` blockiert ihre Veröffentlichung.
+Windows-Pfadlängengrenzen; `legal/notice-index.json` erhält die ursprünglichen Fundstellen.
+Entwicklungspakete dürfen sichtbar markierte offene Angaben enthalten. Für ausdrücklich
+beauftragte Entwicklungsreleases gilt die begrenzte Ausnahme aus
+[Veröffentlichung](distribution.md); fehlende Pflichtangaben blockieren den jeweiligen Weg.
 
 Der CI-Build verwendet Inno Setup 6.7.3 mit festem Downloadhash und führt danach
 isolierte Installer-/Deinstallertests aus. Vorgehen: [Update-Kanal](update_channel.md).
@@ -122,3 +125,41 @@ In eingeschränkten Windows-Testkonten kann PyInstaller beim Prüfen eines fremd
 User-Site-Ordners scheitern. Für einen isolierten lokalen Build pro Prozess
 `PYTHONNOUSERSITE=1` und `PYTHONUSERBASE=<Repository>/.tmp/python-userbase` setzen;
 keine Zugriffsrechte an persönlichen Python-Verzeichnissen verändern.
+
+## Anbieter und Installer-Metadaten
+
+Der rechtliche Herausgeber stammt aus `config/legal_profile.json`.
+PyInstaller übernimmt den Namen in `CompanyName`. Inno Setup verlangt zusätzlich
+`/DAppPublisherName=<provider_name>`; der Workflow und beide Installer-Testskripte
+lesen ihn aus demselben Profil. `AppId`, Datenpfade und Entwicklerkennung bleiben
+stabil, damit vorhandene Installationen und Benutzerdaten weiter erkannt werden.
+
+`python scripts/export_legal_documents.py` exportiert dieselben aufgelösten
+Rechtstexte wie die Oberfläche nach `build/legal-public/`. Darin enthält
+`terms.md` bereits die vollständige Projektlizenz; `terms.txt` enthält denselben
+Text mit UTF-8-BOM für Inno Setup. Die Vorlagen unter `legal/` unverändert als
+Vorlagen behalten und öffentliche Kopien nach jeder Text-/Profiländerung neu
+erzeugen. Der PyInstaller-Build übernimmt die aufgelösten Kopien unter
+`_internal/legal/published/`; die Lieferumfangsprüfung erkennt fehlende oder
+veraltete Fassungen. Inno Setup zeigt `terms.txt` vor der interaktiven Installation
+auf seiner Lizenzseite. Bei interaktiven Installationen wird „Zustimmen und weiter“
+erst freigeschaltet, nachdem das Textende einmal sichtbar war. Der Klick auf
+diesen Button ist die ausdrückliche Zustimmung; eine zusätzliche Auswahl per
+Radiobutton entfällt. Das bloße Scrollen wechselt die Seite nicht.
+Zurückblättern und erneutes Öffnen der Seite behalten die Freigabe des Buttons.
+Vollständig sichtbare kurze Texte brauchen keine künstliche Scrollbewegung.
+`installer/LicenseScroll.iss` prüft den nativen Scrollbereich unabhängig davon,
+ob Maus, Tastatur oder Scrollbalken verwendet werden. Die Navigation wird zusätzlich
+gegen ein vorzeitiges Weitergehen geprüft; beim Verlassen wird die Überwachung
+beendet. Der Installer-Workflow prüft die Steuerelemente in kleinen isolierten
+Test-Installern mit `scripts/test_installer_license.ps1 -IsccPath <ISCC.exe>`:
+langer Text, Navigation zum Textende über die Texteingabemarke, die tatsächlich
+ausgelieferten Bedingungen, vollständig sichtbarer kurzer Text und stiller Ablauf.
+Geprüft werden auch vorzeitiges Weitergehen, Beschriftung, sich nicht überlappende
+Buttons, Rückkehr zur Lizenzseite und die Wiederherstellung der üblichen Buttons
+auf anderen Seiten.
+Dabei werden weder Anwendung noch Benutzerdaten installiert oder verändert.
+Stille Programmaktualisierungen zeigen keine Lizenzseite und werden nicht durch
+die Scrollsperre blockiert. Automatische Updates gelten nicht als Zustimmung zu
+nachträglich verschärften Bedingungen. Der Export lädt nichts hoch und ersetzt
+keine Veröffentlichungsfreigabe.

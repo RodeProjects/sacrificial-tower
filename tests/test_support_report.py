@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -115,14 +116,11 @@ class SupportReportServiceTests(unittest.TestCase):
         self.assertIn("API-Key=topsecret", report)
         self.assertIn("+49 170 1234567", report)
         self.assertIn("slicer_discovery_completed", diagnostics)
-        self.assertIn("Kein verwendbarer Slicer erkannt", diagnostics)
+        self.assertNotIn("Kein verwendbarer Slicer erkannt", diagnostics)
         self.assertIn('"workflow_stage": "degraded"', diagnostics)
-        self.assertIn("<entfernter-pfad>", diagnostics)
-        self.assertIn("<entfernte-url>", diagnostics)
-        self.assertIn("<entfernte-netzwerkadresse>", diagnostics)
-        self.assertIn("Traceback-Rahmen: Zeile 42, Funktion auswerten", diagnostics)
+        self.assertIn("<Freitext ausgelassen>", diagnostics)
+        self.assertIn("Traceback-Rahmen: Zeile 42", diagnostics)
         self.assertIn("Ausnahmetyp: RuntimeError", diagnostics)
-        self.assertIn('"safe_state": "failed"', diagnostics)
         self.assertNotIn("D:\\Private", diagnostics)
         self.assertNotIn("tester@example.com", diagnostics)
         self.assertNotIn("geheim.gcode", diagnostics)
@@ -133,7 +131,7 @@ class SupportReportServiceTests(unittest.TestCase):
         self.assertNotIn("source_profile_fingerprint", diagnostics)
         self.assertNotIn("privat", diagnostics)
         self.assertEqual(manifest["report_id"], bundle.report_id)
-        self.assertEqual(manifest["support_report_schema_version"], 2)
+        self.assertEqual(manifest["support_report_schema_version"], 3)
         self.assertFalse(manifest["privacy"]["raw_logs_included"])
         self.assertFalse(manifest["privacy"]["user_files_included"])
         self.assertTrue(manifest["privacy"]["user_text_stored_verbatim"])
@@ -152,6 +150,126 @@ class SupportReportServiceTests(unittest.TestCase):
             second.path.name,
             "SacrificialTower_Problembericht_2026-07-31_16-42-05_2.zip",
         )
+
+    def test_arbitrary_names_are_excluded_even_in_nested_keys_and_allowed_fields(self) -> None:
+        private = "Erika Musterfrau geheime Krankengeschichte"
+        journal = DiagnosticJournal(self.root / "logs/background_jobs.jsonl")
+        journal.start_session()
+        journal.record(
+            "profile_matching_finished", message=private, reason=private,
+            error_type=private, worker_class=private, product_name=private,
+            active_jobs=[{private: 42, "job_kind": "preview", "state": private}],
+            profile_name=private, result_code=private,
+        )
+        bundle = SupportReportService(self.root, diagnostic_journal=journal).create_bundle(
+            title="Fehler", description="Keine persönlichen Angaben",
+            application_context={
+                private: {"state": "ready"}, "profile_name": private,
+                "profile": {"status_text": private, private: True, "state": "matched"},
+                "settings": {"target_layer_time_s": 10.0, private: "ready"},
+                "active_background_jobs": [{"job_kind": "preview", "state": "running"}],
+                "visible_error": private,
+            },
+        )
+        with zipfile.ZipFile(bundle.path) as archive:
+            exported = "\n".join(archive.read(name).decode("utf-8") for name in archive.namelist())
+        self.assertNotIn(private, exported)
+        self.assertIn("Profil 1", exported)
+        self.assertIn('"target_layer_time_s": 10.0', exported)
+        self.assertIn('"job_kind": "preview"', exported)
+        self.assertIn('"state": "matched"', exported)
+
+    def test_no_technical_field_passes_arbitrary_text_or_object_representations(self) -> None:
+        from cooling_tower.support_report import _JOURNAL_SAFE_KEYS
+        from cooling_tower.support_privacy import CONTEXT_KEYS, SETTING_KEYS
+
+        class PrivateObject:
+            def __str__(self):
+                raise AssertionError("Object representation must not be exported")
+
+            __repr__ = __str__
+
+        service = SupportReportService(self.root)
+        private = "Erika Musterfrau: persönliche medizinische Angaben"
+        for key in _JOURNAL_SAFE_KEYS | CONTEXT_KEYS | SETTING_KEYS:
+            with self.subTest(key=key):
+                exported = json.dumps(service._sanitize_context_value({key: private}), ensure_ascii=False)
+                self.assertNotIn(private, exported)
+                service._sanitize_context_value({key: PrivateObject()})
+        cyclic = {"profile": None}
+        cyclic["profile"] = cyclic
+        self.assertIn("Verschachtelung ausgelassen", json.dumps(service._sanitize_context_value(cyclic)))
+
+    def test_malformed_logs_and_untrusted_traceback_names_do_not_leak(self) -> None:
+        logs = self.root / "logs"
+        logs.mkdir()
+        (logs / "background_jobs.jsonl").write_text(
+            'not json\n[]\n{"event": "PRIVATE-NAME", "utc_time": "PERSONAL"}\n',
+            encoding="utf-8",
+        )
+        (logs / "application_runtime.log").write_text(
+            '  File "C:/private/health.py", line 42, in ErikaPrivat\n'
+            'ErikaPrivateError: health data\nRuntimeError: PRIVATE-MESSAGE\n', encoding="utf-8",
+        )
+        bundle = SupportReportService(self.root).create_bundle(title="Fehler", description="Text")
+        with zipfile.ZipFile(bundle.path) as archive:
+            diagnostics = archive.read("diagnose.log").decode("utf-8")
+        for private in ("PRIVATE-NAME", "PERSONAL", "health", "Erika", "PRIVATE-MESSAGE"):
+            self.assertNotIn(private, diagnostics)
+        self.assertIn("Traceback-Rahmen: Zeile 42", diagnostics)
+        self.assertIn("Ausnahmetyp: RuntimeError", diagnostics)
+        self.assertIn("unknown_event", diagnostics)
+
+    def test_concurrent_exports_do_not_replace_each_other(self) -> None:
+        service = SupportReportService(self.root, now_provider=lambda: self.created_at)
+        def export(index):
+            return service.create_bundle(title=f"Fehler {index}", description=f"Bericht {index}")
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            bundles = list(pool.map(export, range(8)))
+        self.assertEqual(len({bundle.path for bundle in bundles}), 8)
+        for index, bundle in enumerate(bundles):
+            with zipfile.ZipFile(bundle.path) as archive:
+                self.assertIn(f"Bericht {index}", archive.read("problembericht.txt").decode("utf-8"))
+
+    def test_failed_zip_write_leaves_no_partial_or_replaced_bundle(self) -> None:
+        service = SupportReportService(self.root, now_provider=lambda: self.created_at)
+        previous = service.create_bundle(title="Vorhanden", description="Erhalten")
+        original = previous.path.read_bytes()
+        with patch("cooling_tower.support_report.zipfile.ZipFile.writestr", side_effect=OSError("full")):
+            with self.assertRaises(OSError):
+                service.create_bundle(title="Fehler", description="Text")
+        self.assertEqual(previous.path.read_bytes(), original)
+        self.assertEqual(list(service.output_directory.iterdir()), [previous.path])
+
+    def test_logs_outside_own_directory_and_external_output_are_rejected(self) -> None:
+        external = self.root / "external"
+        external.mkdir()
+        source = external / "slicer-profile.json"
+        source.write_text('{"name":"Private Profile"}', encoding="utf-8")
+        original = source.read_bytes()
+        service = SupportReportService(self.root / "app")
+        with self.assertRaises(OSError):
+            service._read_log_tail(source, 100)
+        service.output_directory = external / "output"
+        with self.assertRaises(ValueError):
+            service.create_bundle(title="Fehler", description="Text")
+        self.assertFalse(service.output_directory.exists())
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_large_logs_and_collections_are_bounded_before_export(self) -> None:
+        logs = self.root / "logs"
+        logs.mkdir()
+        path = logs / "background_jobs.jsonl"
+        path.write_bytes(b"sensitive-prefix" + b"x" * 100 + b'\n{"event":"session_started"}\n')
+        service = SupportReportService(self.root)
+        tail, truncated = service._read_log_tail(path, 50)
+        self.assertTrue(truncated)
+        self.assertEqual(tail, b'{"event":"session_started"}\n')
+        self.assertEqual(len(service._sanitize_context_value([None] * 1000)), 100)
+        self.assertIsNone(service._sanitize_context_value({"duration_s": float("nan")})["duration_s"])
+        self.assertEqual(service._sanitize_context_value({"return_code": 0xC0000142})["return_code"], 0xC0000142)
+        with self.assertRaises(ValueError):
+            service.create_bundle(title="x" * 501, description="Text")
 
     def test_technical_diagnostics_filter_common_identifiers_and_secrets(self) -> None:
         log_root = self.root / "logs"
@@ -200,12 +318,7 @@ class SupportReportServiceTests(unittest.TestCase):
             "b" * 64,
         ):
             self.assertNotIn(sensitive_value, diagnostics)
-        self.assertIn("<entfernter-pfad>", diagnostics)
-        self.assertIn("<entfernte-url>", diagnostics)
-        self.assertIn("<entfernte-e-mail>", diagnostics)
-        self.assertIn("<entfernte-netzwerkadresse>", diagnostics)
-        self.assertIn("<entferntes-geheimnis>", diagnostics)
-        self.assertIn("<entfernte-kennung>", diagnostics)
+        self.assertIn("<Freitext ausgelassen>", diagnostics)
 
     def test_only_two_most_recent_sessions_are_copied(self) -> None:
         log_root = self.root / "logs"
@@ -213,7 +326,8 @@ class SupportReportServiceTests(unittest.TestCase):
         entries = [
             {
                 "session_id": session,
-                "event": marker,
+                "event": "session_started",
+                "event_sequence": {"old": 1, "previous": 2, "current": 3}[session],
                 "job_id": f"private-{session}",
             }
             for session, marker in (
@@ -235,9 +349,9 @@ class SupportReportServiceTests(unittest.TestCase):
         with zipfile.ZipFile(bundle.path) as archive:
             diagnostics = archive.read("diagnose.log").decode("utf-8")
 
-        self.assertNotIn("NICHT_AUFNEHMEN", diagnostics)
-        self.assertIn("VORHERIGE_SITZUNG", diagnostics)
-        self.assertIn("AKTUELLE_SITZUNG", diagnostics)
+        self.assertNotIn('"event_sequence": 1,', diagnostics)
+        self.assertIn('"event_sequence": 2', diagnostics)
+        self.assertIn('"event_sequence": 3', diagnostics)
         self.assertNotIn('"session_id"', diagnostics)
         self.assertNotIn("private-previous", diagnostics)
         self.assertIn('"session": "Sitzung-1"', diagnostics)
@@ -285,6 +399,8 @@ class SupportReportDialogTests(unittest.TestCase):
                 privacy_text,
             )
             self.assertIn("vor der Weitergabe", privacy_text)
+            self.assertIn("öffentlich", privacy_text)
+            self.assertIn("issues/new/choose", dialog.issue_link.text())
             dialog.summary_edit.setText("Slicer fehlt")
             dialog.description_edit.setPlainText(
                 "Die Slicer-Liste bleibt nach dem Programmstart leer."

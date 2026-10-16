@@ -216,7 +216,8 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn('"cooling_tower._native_timing"', spec)
         self.assertIn("native_timing_extensions", spec)
         self.assertIn('"assets" / "app.ico"', spec)
-        self.assertIn("StringStruct(u'CompanyName', u'RodeProjects')", spec)
+        self.assertIn("StringStruct(u'CompanyName', {provider_name!r})", spec)
+        self.assertIn("config/legal_profile.json", spec)
         application = (
             PROJECT_ROOT / "src" / "cooling_tower" / "application.py"
         ).read_text(encoding="utf-8")

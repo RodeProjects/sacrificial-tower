@@ -1,0 +1,42 @@
+name: "Fehler melden"
+description: "Ein reproduzierbares Problem mit Sacrificial Tower beschreiben."
+title: "[Fehler] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Diese Meldung und Anhänge können öffentlich zugänglich sein. Bitte keine persönlichen,
+        vertraulichen oder fremden geschützten Angaben veröffentlichen; auch Profilnamen,
+        Dateipfade und Screenshots prüfen. Diagnosepakete sind freiwillig und werden nicht
+        automatisch angehängt. Die Filterung garantiert keine vollständige Anonymität.
+        Für Datenschutzanfragen und Sicherheitslücken den vertraulichen Kontakt aus den
+        Datenschutzinformationen verwenden. Support erfolgt freiwillig ohne zugesicherte
+        Antwortzeit oder Umsetzung. Solange das Repository privat ist, ist Zugriff erforderlich.
+  - type: textarea
+    id: version
+    attributes:
+      label: "Programmversion und Windows-Version"
+      description: "z. B. Programmversion aus dem Menü und Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Schritte und beobachtetes Verhalten"
+      description: "Was wurde getan, was geschah und was wurde erwartet? Persönliche Profilnamen durch Profil 1 ersetzen."
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: "Freiwilliges Diagnosepaket oder bereinigte Screenshots"
+      description: "ZIP über Support & Diagnose erstellen, entpacken und ALLE enthaltenen Dateien prüfen. Insbesondere problembericht.txt enthält eigene Texte unverändert. Eine geprüfte ZIP kann hier manuell angehängt werden. Originalprofile, Rohlogs und Modelle bitte nicht ungeprüft hochladen."
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Prüfung vor Veröffentlichung
+      options:
+        - label: "Ich habe Text und Anhänge geprüft und keine persönlichen, vertraulichen oder unberechtigt verwendeten fremden Inhalte beigefügt. Mir ist die mögliche öffentliche Sichtbarkeit bekannt."
+          required: true

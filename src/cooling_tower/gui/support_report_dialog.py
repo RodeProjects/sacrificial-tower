@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from cooling_tower.support_report import SupportReportService
+from cooling_tower.legal_documents import legal_profile
 from cooling_tower.version import APP_NAME
 
 
@@ -66,6 +68,7 @@ class SupportReportDialog(QDialog):
         layout.addWidget(introduction)
 
         self.summary_edit = QLineEdit()
+        self.summary_edit.setMaxLength(500)
         self.summary_edit.setObjectName("supportReportSummary")
         self.summary_edit.setPlaceholderText(
             "Kurze Zusammenfassung, z. B. „Slicer wird nicht erkannt“"
@@ -105,10 +108,13 @@ class SupportReportDialog(QDialog):
             "Wichtig: Zusammenfassung und Beschreibung werden unverändert im "
             "Klartext gespeichert. Geben Sie dort keine persönlichen oder "
             "sensiblen Daten ein.\n\n"
-            "Technische Diagnosedaten werden gefiltert. Rohlogs, Pfade, "
-            "Dateinamen, Zugangsdaten sowie G-Code-, STL-, Slicer- und "
-            "Konfigurationsdateien werden nicht beigefügt. Prüfen Sie die ZIP "
-            "vor der Weitergabe."
+            "Die technische Diagnose enthält nur freigegebene Angaben. "
+            "Profilnamen und freie Fehlermeldungen werden ausgelassen. "
+            "Rohlogs, Originaldateien und Profile werden nicht beigefügt. "
+            "Prüfen Sie alle Dateien in der ZIP vor der Weitergabe.\n\n"
+            "GitHub-Meldungen und Anhänge können öffentlich zugänglich sein. "
+            "Screenshots und eigene Anhänge werden nicht automatisch bereinigt. "
+            "Eine vollständig anonyme ZIP wird nicht garantiert."
         )
         privacy_text.setObjectName("supportReportPrivacyText")
         privacy_text.setWordWrap(True)
@@ -122,6 +128,18 @@ class SupportReportDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.result_label)
+
+        support_url = escape(legal_profile()["support_url"], quote=True)
+        self.issue_link = QLabel(
+            f'<a href="{support_url}">Fehler, Funktionswunsch oder Frage auf GitHub melden</a>'
+            '<br>Freiwilliger Support; GitHub-Konto und Repositoryzugriff erforderlich. '
+            'Solange das Repository privat ist, ist der Zugriff beschränkt. '
+            'Die ZIP wird nicht automatisch angehängt.'
+        )
+        self.issue_link.setWordWrap(True)
+        self.issue_link.setOpenExternalLinks(True)
+        self.issue_link.setObjectName("supportReportIssueLink")
+        layout.addWidget(self.issue_link)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)

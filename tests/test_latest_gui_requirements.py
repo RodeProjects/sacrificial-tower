@@ -450,9 +450,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         for expected in (
             "Kühlturm-Generator",
-            "Florian Rode",
+            "Wolfgang Florian Rode",
             "Entwicklungsversion",
-            "florian.rode@outlook.com",
+            "GitHub Issues",
         ):
             self.assertIn(expected, labels)
         self.assertNotIn("© 2026 Florian Rode", labels)
@@ -479,7 +479,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         self.assertEqual(
             window.about_copyright_text.text(),
-            "2026 Florian Rode · Alle Rechte vorbehalten.",
+            "2026 Wolfgang Florian Rode · Alle Rechte vorbehalten.",
         )
         self.assertTrue(window.about_copyright_symbol.pixmap().isNull())
         stylesheet = window.styleSheet()
@@ -505,6 +505,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 self.assertIn(color, stylesheet)
         window._set_about_license_status(CURRENT_LICENSE_STATUS)
         self.assertIn("#123c63", window.about_support_link.text())
+        self.assertIn("issues/new/choose", window.about_support_link.text())
+        self.assertNotIn("mailto:", window.about_support_link.text())
         self.assertEqual(
             [button.text() for button in window.about_legal_buttons],
             [

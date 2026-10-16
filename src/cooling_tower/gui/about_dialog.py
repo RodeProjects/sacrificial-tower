@@ -16,36 +16,19 @@ LICENSE_STATUS_DEFINITIONS = {
     "development": {
         "label": "Entwicklungsversion",
         "description": (
-            "Diese Version befindet sich noch in Entwicklung und ist nicht "
+            "Diese kostenlose Version befindet sich noch in Entwicklung und ist nicht "
             "für den regulären Vertrieb bestimmt."
         ),
         "foreground": "#6b4b00",
         "background": "#fff3ce",
         "border": "#e3c365",
     },
-    "evaluation": {
-        "label": "Testversion",
-        "description": (
-            "Diese Version ist für einen begrenzten Test- und "
-            "Evaluierungszeitraum vorgesehen."
-        ),
-        "foreground": "#174ea6",
-        "background": "#eaf2ff",
-        "border": "#9bbcf2",
-    },
-    "licensed": {
-        "label": "Lizenzierte Version",
-        "description": "Für diese Version liegt eine gültige Lizenz vor.",
+    "free": {
+        "label": "Kostenlose Version",
+        "description": "Kostenlose Nutzung einschließlich gewerblicher Verwendung zulässiger Ergebnisse.",
         "foreground": "#17633a",
         "background": "#e7f6ed",
         "border": "#8fc9a5",
-    },
-    "unlicensed": {
-        "label": "Nicht lizenzierte Version",
-        "description": "Für diese Version liegt keine gültige Lizenz vor.",
-        "foreground": "#9b1c1c",
-        "background": "#fdecec",
-        "border": "#e4a1a1",
     },
 }
 
@@ -237,9 +220,9 @@ class AboutDialog(QDialog):
         )
         developer_layout.addLayout(self.about_copyright_row)
         proprietary_notice = QLabel(
-            "Proprietäre Software. Die Nutzung, Vervielfältigung, "
-            "Weitergabe oder Veränderung ist nur im Rahmen der "
-            "geltenden Lizenzbedingungen gestattet."
+            "Kostenlose Software. Klonen, Forken und Weiterentwicklung sind "
+            "nach der Projektlizenz erlaubt; kommerzielle Weiterverbreitung "
+            "ist untersagt. Erzeugte Kühltürme dürfen kommerziell genutzt werden."
         )
         proprietary_notice.setWordWrap(True)
         proprietary_notice.setObjectName("aboutBodyText")
@@ -315,12 +298,12 @@ class AboutDialog(QDialog):
         support_icon.setPixmap(
             QIcon(str(GUI_ASSET_ROOT / "mail.svg")).pixmap(20, 20)
         )
-        support_icon.setAccessibleName("E-Mail")
+        support_icon.setAccessibleName("GitHub Issues")
         support_layout.addWidget(support_icon)
-        email = escape(provider["provider_email"], quote=True)
+        support_url = escape(provider["support_url"], quote=True)
         support_link = QLabel(
-            f'Support: <a href="mailto:{email}">'
-            f'<span style="color:#123c63;">{email}</span></a>'
+            f'Freiwilliger Support: <a href="{support_url}">'
+            '<span style="color:#123c63;">GitHub Issues</span></a>'
         )
         support_link.setObjectName("aboutSupportLink")
         support_link.setOpenExternalLinks(True)

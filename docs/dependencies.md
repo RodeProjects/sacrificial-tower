@@ -9,6 +9,12 @@ werden beim Build automatisch gesammelt. Unveränderte Einträge nicht bei jedem
 Arbeitsauftrag erneut recherchieren; bei Versions-/Lizenz-/Distributionsänderung
 erneut prüfen und diesen Nachweis aktualisieren.
 
+Die Anwendung wird kostenlos unter einer eigenen Source-Available-Lizenz angeboten.
+Die folgenden Aussagen über kommerzielle Nutzungsrechte beschreiben die Rechte an
+Drittkomponenten; sie sind kein Verkaufsmodell der Anwendung. Kostenlosigkeit hebt
+Drittanbieterpflichten nicht auf. Der Store-Vertriebsweg benötigt eine zusätzliche
+LGPL-/Paketierungsprüfung, siehe [Veröffentlichung](distribution.md).
+
 ## Laufzeit
 
 | Komponente / geprüfte Version | Lizenz und belastbare Quelle | Proprietär/kommerziell, Pflichten und Kosten |
@@ -62,6 +68,12 @@ Die bestehende MSVC-Toolchain wurde nicht neu eingeführt. Ein alternativer Comp
 würde eine eigene ABI-/Build-/Lizenzprüfung benötigen und wird nicht als bereits
 validierter Ersatz ausgegeben.
 
+Lokaler Bestandsnachweis vom 15.10.2026 mit `vswhere`: Visual Studio Community 2022
+17.13.3 und Build Tools 2019 16.11.45 sind installiert. Der Anbieter hat die
+Tätigkeit als alleiniger Einzelunternehmer bestätigt. Das grenzt die mögliche
+Community-Berechtigung ein; es bestätigt noch nicht die Lizenz-/REDIST-Zuordnung
+der tatsächlich ausgewählten 2019-Toolchain oder eines späteren Store-Pakets.
+
 Für die permissiven Python-Buildwerkzeuge sind keine Lizenzzahlungen oder
 Umsatzschwellen vorgesehen. Die Standardsuite verwendet `unittest` und QtTest aus
 Essentials. Git und GitHub Actions sind Entwicklungswerkzeuge, keine eingebauten
@@ -100,7 +112,7 @@ oder CycloneDX-SBOM und kein Lizenzfreigabezertifikat**. Besonders die vollstän
 Zuordnung statisch eingebetteter Qt-, OpenSSL-, NumPy- und Compiler-Bestandteile
 muss zur konkreten Distribution bestätigt werden. Der offene Eintrag
 `release_legal_review` erfasst diese Prüfung. Bis dahin blockiert der reguläre
-Publish-Einstieg. Details unter [Kommerzieller Vertrieb](commercial_release.md).
+Publish-Einstieg. Details unter [Kostenlose Veröffentlichung](distribution.md).
 
 ## Slicer, Dienste und eigene Inhalte
 

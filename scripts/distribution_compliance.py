@@ -11,6 +11,9 @@ import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+from cooling_tower.legal_documents import DOCUMENTS, export_legal_documents, render_legal_document
+
 QT_LIBRARIES = frozenset({"qt6core.dll", "qt6gui.dll", "qt6widgets.dll", "qt6network.dll", "qt6svg.dll", "qt6opengl.dll"})
 QT_PLUGINS = frozenset({
     "qwindows.dll", "qoffscreen.dll", "qminimal.dll", "qmodernwindowsstyle.dll",
@@ -88,6 +91,8 @@ def prepare_legal_material(destination: Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copytree(ROOT / "legal", destination, dirs_exist_ok=True)
+    shutil.copy2(ROOT / "LICENSE.md", destination / "LICENSE.md")
+    export_legal_documents(destination / "published", root=ROOT)
     notice_index = []
     source_registry = json.loads((ROOT / "config/qt_sources.json").read_text(encoding="utf-8"))
     source_root = ROOT / "build/qt-sources"
@@ -140,9 +145,30 @@ def audit_bundle(root: Path) -> dict:
         with path.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         files.append({"path": relative, "bytes": path.stat().st_size, "sha256": digest})
-    for required in ("terms.md", "privacy.md", "third_party.md", "source_build_notes.md", "notice-index.json", "binary-origins.json", "licenses/Qt/LGPL-3.0-only.txt", "licenses/Qt/GPL-3.0-only.txt", "licenses/Python-LICENSE.txt"):
+    for required in ("LICENSE.md", "terms.md", "privacy.md", "third_party.md", "source_build_notes.md", "notice-index.json", "binary-origins.json", "licenses/Qt/LGPL-3.0-only.txt", "licenses/Qt/GPL-3.0-only.txt", "licenses/Python-LICENSE.txt"):
         if not (root / "_internal/legal" / required).is_file():
             raise ValueError(f"Erforderlicher Lizenztext fehlt: {required}")
+    resource_root = root / "_internal"
+    published = resource_root / "legal/published"
+    for title, filename in DOCUMENTS.items():
+        expected = render_legal_document(title, root=resource_root)
+        path = published / filename
+        if not path.is_file() or path.read_text(encoding="utf-8") != expected:
+            raise ValueError(f"Aufgelöster Rechtstext fehlt oder ist veraltet: {filename}")
+    terms_path = published / "terms.txt"
+    if (
+        not terms_path.is_file()
+        or terms_path.read_text(encoding="utf-8-sig")
+        != render_legal_document("Lizenzbedingungen", root=resource_root)
+    ):
+        raise ValueError("Installer-Lizenztext fehlt oder ist veraltet.")
+    license_path = published / "LICENSE.md"
+    if (
+        not license_path.is_file()
+        or license_path.read_text(encoding="utf-8")
+        != (resource_root / "legal/LICENSE.md").read_text(encoding="utf-8")
+    ):
+        raise ValueError("Veröffentlichte Projektlizenz fehlt oder weicht vom Paket ab.")
     for entry in json.loads((ROOT / "config/qt_sources.json").read_text(encoding="utf-8"))["archives"]:
         expected = "_internal/legal/sources/" + entry["filename"]
         if not any(item["path"] == expected and item["sha256"] == entry["sha256"] for item in files):

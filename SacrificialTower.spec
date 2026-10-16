@@ -20,6 +20,7 @@ exec(
     version_namespace,
 )
 app_version = version_namespace["APP_VERSION"]
+provider_name = json.loads((project_root / "config/legal_profile.json").read_text(encoding="utf-8"))["provider_name"]
 native_timing_extensions = list(
     (source_root / "cooling_tower").glob("_native_timing*.pyd")
 )
@@ -47,7 +48,7 @@ version_info_path.write_text(
       StringTable(
         u'040704B0',
         [
-          StringStruct(u'CompanyName', u'RodeProjects'),
+          StringStruct(u'CompanyName', {provider_name!r}),
           StringStruct(u'FileDescription', u'Sacrificial Tower'),
           StringStruct(u'FileVersion', u'{app_version}.0'),
           StringStruct(u'InternalName', u'SacrificialTower'),

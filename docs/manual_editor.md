@@ -6,6 +6,19 @@ bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und automatische
 Formberechnung bleiben eigenständige bestehende Abläufe. Ein Methodenwechsel
 erhält die Entwürfe und ihre getrennten Ergebnis- und Exportstände.
 
+## Inhalt
+
+- [Voraussetzungen und getrennte Methoden](#voraussetzungen-und-getrennte-methoden)
+- [Bedienung und eigene Einstellungen](#bedienung-und-eigene-einstellungen)
+- [Geometriemodell und Invarianten](#geometriemodell-und-invarianten)
+- [Tessellierung und STL](#tessellierung-und-stl)
+- [Darstellung, Farben und Hintergrundarbeit](#darstellung-farben-und-hintergrundarbeit)
+- [Ein unveränderter Prüfslice](#ein-unveränderter-prüfslice)
+- [Ergebniszustände und Export](#ergebniszustände-und-export)
+- [Prozesse, Persistenz und Dateisicherheit](#prozesse-persistenz-und-dateisicherheit)
+- [Prüfungen und reale Abnahme](#prüfungen-und-reale-abnahme)
+
+
 ## Voraussetzungen und getrennte Methoden
 
 Die Anwendung setzt einen unterstützten Slicer voraus. Beide Methoden stehen

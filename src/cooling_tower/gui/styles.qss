@@ -1850,22 +1850,10 @@ QLabel#aboutStatusBadge[licenseStatus="development"] {
     border: 1px solid #e3c365;
 }
 
-QLabel#aboutStatusBadge[licenseStatus="evaluation"] {
-    color: #174ea6;
-    background: #eaf2ff;
-    border: 1px solid #9bbcf2;
-}
-
-QLabel#aboutStatusBadge[licenseStatus="licensed"] {
+QLabel#aboutStatusBadge[licenseStatus="free"] {
     color: #17633a;
     background: #e7f6ed;
     border: 1px solid #8fc9a5;
-}
-
-QLabel#aboutStatusBadge[licenseStatus="unlicensed"] {
-    color: #9b1c1c;
-    background: #fdecec;
-    border: 1px solid #e4a1a1;
 }
 
 QPushButton#aboutLegalButton {

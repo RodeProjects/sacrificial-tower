@@ -1,6 +1,6 @@
 # Sacrificial Tower
 
-Windows-Anwendung zur Analyse lokaler G-Code- und STL-Dateien und zur Erzeugung
+Kostenlose Windows-Anwendung zur Analyse lokaler Druckdaten und zur Erzeugung
 eines adaptiven, geschlossenen Kühlturms. Der aktuelle Turm besitzt keinen
 modellierten inneren Hohlraum; das tatsächliche Infill bestimmt der Slicer.
 Ziel-Layerzeit, Außendurchmesser, Übergangswinkel und Standfuß begrenzen die
@@ -25,13 +25,13 @@ GUI-/PyInstaller-Einstieg. Native Analyse und Buildvoraussetzungen stehen unter
 
 ## Bedienung
 
-1. G-Code oder STL auswählen. Quellen werden inhaltlich geprüft und unverändert behalten.
+1. STL auswählen. Quellen werden inhaltlich geprüft und unverändert behalten.
 2. Slicer, Drucker-, Prozess- und Filamentprofile auswählen und ausdrücklich bestätigen.
 3. Zielzeit und Geometrie festlegen, Vorschau erstellen und Ergebnis prüfen.
 4. Den bestätigten Kandidaten in einen eigenen Ausgabeordner exportieren.
 
 STL wird erst nach erfolgreicher Validierung und Bestätigung isoliert vorgeslict;
-G-Code wird direkt analysiert. Die Anwendung repariert keine beschädigten Modelle
+Der dabei erzeugte G-Code wird lokal analysiert; vorhandenen G-Code verarbeitet die separate CLI. Die Anwendung repariert keine beschädigten Modelle
 und schreibt weder Profile noch Installationsdateien eines Slicers um. Bekannte
 und erkannte Slicer-Verzeichnisse sind als Ausgabeziele gesperrt. Der detaillierte
 [Quellenablauf](docs/source_workflow.md) beschreibt Grenzen und Cacheverhalten.
@@ -59,14 +59,27 @@ Der [Dokumentationsindex](docs/README.md) führt zu Architektur, Tests, Migratio
 Slicern, nativer Analyse und Programmaktualisierungen. Den aktuellen Bestand aus
 älteren Phasen dokumentiert ein ausdrücklich [historisches Archiv](docs/history/development_phases.md).
 
-Der eigene Code ist [proprietär](LICENSE.md). Die Oberfläche enthält offline
-lesbare Nutzungsbedingungen für die Entwicklungsversion, Datenschutzinformationen
-und Drittanbieterhinweise. [Dependencies und Lizenzpflichten](docs/dependencies.md)
-sowie der [kommerzielle Freigabeprozess](docs/commercial_release.md) sind zentral
-dokumentiert. Noch fehlende Daten stehen vollständig in der
-[Platzhaltercheckliste](docs/missing_data.md); Anbieterwerte nur in
-`config/legal_profile.json` ergänzen. Die Entwicklungsversion ist noch nicht
-für den regulären Verkauf freigegeben.
+Die [Projektlizenz](LICENSE.md) erlaubt kostenlose Nutzung, auch im Gewerbe,
+Klonen, Forken und Weiterentwicklung mit erhaltenen Urheberhinweisen.
+Kommerzielle Weiterverbreitung der Software einschließlich abgeleiteter Fassungen
+ist untersagt; erzeugte Kühltürme dürfen kommerziell verwendet werden.
+Das öffentlich einsehbare Lizenzmodell heißt „Source Available“.
+
+Die Oberfläche enthält vollständige Projektlizenz, Nutzungsbedingungen,
+Datenschutzinformationen und Drittanbieterhinweise. Maßgeblich sind
+[Abhängigkeiten und Lizenzpflichten](docs/dependencies.md),
+[kostenlose Veröffentlichung](docs/distribution.md) und die
+[Checkliste offener Nachweise](docs/missing_data.md).
+Die aktuelle Fassung ist eine kostenlose Entwicklungsversion; die Veröffentlichung
+im Microsoft Store und die Öffnung des Quellcode-Repositorys sind vorbereitet,
+aber noch nicht erfolgt. Anbieterwerte werden nur in `config/legal_profile.json`
+gepflegt.
+
+Fehler, Funktionswünsche und Fragen laufen über
+[GitHub Issues](https://github.com/RodeProjects/sacrificial-tower/issues/new/choose).
+Solange das Repository privat ist, benötigen Nutzer Zugriffsrechte.
+[Support und Diagnose](docs/support.md) erklärt die freiwilligen Anhänge,
+ihre mögliche öffentliche Sichtbarkeit und den vertraulichen Kontaktweg.
 
 Benutzerdaten liegen getrennt vom Programm unter
 `%LOCALAPPDATA%/RodeProjects/SacrificialTower/<Instanz>/`. Der eigenständige

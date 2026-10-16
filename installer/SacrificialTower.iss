@@ -2,6 +2,10 @@
   #error AppVersion muss aus src/cooling_tower/version.py übergeben werden.
 #endif
 
+#ifndef AppPublisherName
+  #error AppPublisherName muss aus config/legal_profile.json übergeben werden.
+#endif
+
 #ifndef AppIdValue
   #define AppIdValue "{{D47169C5-9DE6-46AF-A8C9-72A394CD2949}"
 #endif
@@ -32,9 +36,10 @@ AppId={#AppIdValue}
 AppName=Sacrificial Tower
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
-AppPublisher=RodeProjects
+AppPublisher={#AppPublisherName}
 AppPublisherURL=https://github.com/RodeProjects
-AppSupportURL=https://github.com/RodeProjects/sacrificial-tower
+AppSupportURL=https://github.com/RodeProjects/sacrificial-tower/issues/new/choose
+LicenseFile=..\dist\SacrificialTower\_internal\legal\published\terms.txt
 DefaultDirName={#DefaultInstallDir}
 DefaultGroupName=Sacrificial Tower
 DisableProgramGroupPage=yes
@@ -86,6 +91,8 @@ Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Flags: nowait skipi
 Type: dirifempty; Name: "{app}"
 
 [Code]
+#include "LicenseScroll.iss"
+
 var
   DeleteStandaloneUserData: Boolean;
   ExistingReplacementPending: Boolean;

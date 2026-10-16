@@ -1,5 +1,19 @@
 # Architektur und Wartungsleitlinien
 
+## Inhalt
+
+- [Laufzeitpfade](#laufzeitpfade)
+- [Paketverantwortung](#paketverantwortung)
+- [Gemeinsame Infrastruktur](#gemeinsame-infrastruktur)
+- [Quellen- und Analysepipeline](#quellen--und-analysepipeline)
+- [Thread-Lebenszyklus](#thread-lebenszyklus)
+- [Externe Slicer-Prozesse](#externe-slicer-prozesse)
+- [Diagnose und Stresstests](#diagnose-und-stresstests)
+- [Regeln für Änderungen](#regeln-für-änderungen)
+- [Verantwortlichkeiten nach dem Wartbarkeitsumbau September 2026](#verantwortlichkeiten-nach-dem-wartbarkeitsumbau-september-2026)
+- [Grenzen und nächste größere Strukturänderungen](#grenzen-und-nächste-größere-strukturänderungen)
+
+
 ## Laufzeitpfade
 
 Die Anwendung besitzt zwei bewusst getrennte Einstiegspunkte:
@@ -67,10 +81,11 @@ bleiben Qt-unabhängig.
 Die GUI besitzt einen einzigen quellenneutralen Einstieg. `SourceArtifact`
 hält die unveränderte Benutzereingabe einschließlich Hash fest;
 `PreparedAnalysisSource` hält getrennt davon den analysierten G-Code und seine
-Herkunft. Ein vorhandener G-Code wird direkt vorbereitet. Eine STL muss zuerst
-die strenge `StlValidationService`-Prüfung und die ausdrückliche
-Profilbestätigung bestehen und wird danach durch `SourcePreSliceService`
-isoliert in G-Code überführt. Beide Pfade münden ausschließlich in
+Herkunft. Die aktuelle GUI nimmt ausschließlich STL als Originalquelle an und
+führt zuerst die strenge `StlValidationService`-Prüfung und die ausdrückliche
+Profilbestätigung durch; danach überführt `SourcePreSliceService` die STL
+isoliert in G-Code. Die separate CLI analysiert vorhandenen G-Code direkt.
+Die gemeinsame Analyselogik liefert
 `GCodeAnalysisSnapshot`; Turmprofil, Prognose, Vorschau, Kalibrierung und Export
 enthalten keine STL-Sonderberechnung.
 
@@ -471,7 +486,7 @@ Die manuellen Fachmodule unter `manual/` bleiben Qt-unabhängig.
 Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert.
 Das automatische Einstellungsschema 21 bleibt unverändert; manuelle,
 wiederverwendbare Werte liegen getrennt in `manual_settings.json`; dessen eigenes
-Schema und Migrationen stehen in [Persistenz](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-2).
+Schema und Migrationen stehen in [Persistenz](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-10).
 Modell, Zustände, Bedienung und Prüfnachweise stehen im
 [manuellen Editor](manual_editor.md).
 Beide Methoden verwenden die bestehenden Aktionen und die responsive Anordnung
@@ -623,7 +638,12 @@ Crashlog und den Hinweis beim nächsten Start erkennbar.
 JSONL-Datei. Jeder technische und fachliche Job-Eintrag enthält Sitzungs- und
 Korrelations-ID, Programmversion, Ereignisnummer, UTC- und monotone Zeit,
 Zustandsübergang, Worker- und Thread-Identität, Abbruch-/Fehlergrund und Dauer.
-Pfade, lange Inhalte sowie Schlüssel- und Profilinhalte werden redigiert.
+Lokale Logs besitzen eine Grundfilterung, können aber weiterhin Namen,
+Dateinamen und freie Fehlermeldungen enthalten. Sie sind keine freigegebenen
+öffentlichen Supportdateien. Der davon getrennte Export über `SupportReportService`
+verwendet eine ausdrückliche Feld- und Wertefreigabe in `support_privacy.py`,
+begrenzte Lesezugriffe und neutrale Sitzungs-/Profilbezeichnungen.
+[Support und Diagnose](support.md) dokumentiert Inhalt und verbleibende Grenzen.
 
 Der zentrale Qt-Message-Handler erfasst insbesondere Timer-, ThreadStorage-,
 `setParent`- und vorzeitig zerstörte `QThread`-Warnungen zusammen mit einem

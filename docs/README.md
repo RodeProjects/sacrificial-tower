@@ -2,8 +2,11 @@
 
 Sacrificial Tower analysiert lokale G-Code-/STL-Daten und erzeugt einen
 druckzeitabhängigen Hilfskörper. Einstieg und Startbefehle stehen im
-[Repository-README](../README.md). Diese Übersicht ist der zentrale Wegweiser;
-bei Änderungen zuerst das zuständige Thema lesen.
+[Repository-README](../README.md). Diese Übersicht ist der zentrale Wegweiser.
+Für die Bedienung mit [Manuellem Editor](manual_editor.md) und
+[Turmgeometrie](tower_geometry.md) beginnen; für Installation und Tests mit
+[Entwicklung](development.md). Ältere Messungen und Anforderungskataloge stehen
+getrennt unter „Nachweise und historische Einordnung“.
 
 | Thema | Maßgebliches Dokument |
 |---|---|
@@ -13,8 +16,9 @@ bei Änderungen zuerst das zuständige Thema lesen.
 | Direkte Vorschauaktionen sowie entfernte und verbleibende Einstellungen links | [Manuelle Bedienelemente](manual_controls_analysis.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
-| Proprietäre Distribution, Rechtstexte, Freigaben | [Kommerzieller Vertrieb](commercial_release.md) |
-| Fehlende Anbieter-/Vertriebsangaben mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
+| Kostenlose Nutzung, Source-Available-Lizenz, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
+| GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
+| Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
 | G-Code-/STL-Prüfung, Profile, Preslice und Cache | [Quellenablauf](source_workflow.md) |
 | Slicer-Erkennung und neue Adapter | [Erkennungsmodule](slicer_detection_modules.md) |
 | Prozessisolation, QProcess und Abbruch | [Slicer-Prozesse](slicer_qprocess_compatibility.md) |
