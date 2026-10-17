@@ -31,6 +31,10 @@
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
+[Messages]
+SelectTasksDesc=
+SelectTasksLabel2=Soll zusätzlich eine Desktop-Verknüpfung erstellt werden?
+
 [Setup]
 AppId={#AppIdValue}
 AppName=Sacrificial Tower
@@ -41,6 +45,7 @@ AppPublisherURL=https://github.com/RodeProjects
 AppSupportURL=https://github.com/RodeProjects/sacrificial-tower/issues/new/choose
 LicenseFile=..\dist\SacrificialTower\_internal\legal\published\terms.txt
 DefaultDirName={#DefaultInstallDir}
+AppendDefaultDirName=no
 DefaultGroupName=Sacrificial Tower
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -77,7 +82,7 @@ Name: "{autoprograms}\Sacrificial Tower deinstallieren"; Filename: "{uninstallex
 Name: "{autodesktop}\Sacrificial Tower"; Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Desktop-Verknüpfung erstellen"; GroupDescription: "Zusätzliche Verknüpfungen:"; Flags: unchecked
+Name: "desktopicon"; Description: "Desktop-Verknüpfung erstellen"; Flags: unchecked
 
 #ifndef UninstallIntegrationTest
 [Run]
@@ -92,12 +97,25 @@ Type: dirifempty; Name: "{app}"
 
 [Code]
 #include "LicenseScroll.iss"
+#include "UpdateHandoff.iss"
 
 var
   DeleteStandaloneUserData: Boolean;
   ExistingReplacementPending: Boolean;
   ExistingUninstallerPath: String;
   ExistingReplacementDeletesUserData: Boolean;
+
+<event('InitializeWizard')>
+procedure InitializeTaskSelection;
+begin
+  if WizardSilent then
+    Exit;
+  WizardForm.SelectTasksLabel.AdjustHeight;
+  WizardForm.TasksList.Top := WizardForm.SelectTasksLabel.Top +
+    2 * WizardForm.SelectTasksLabel.Height;
+  WizardForm.TasksList.Height := WizardForm.SelectTasksPage.ClientHeight -
+    WizardForm.TasksList.Top;
+end;
 
 function InstalledApplicationRegistryKey(): String;
 var
@@ -205,7 +223,7 @@ end;
 
 function IsAutomaticUpdate(): Boolean;
 begin
-  Result := HasCommandLineSwitch('SACRIFICIALTOWERUPDATE');
+  Result := HasCommandLineSwitch('SACRIFICIALTOWERUPDATE') and not UpdateHandoffActive;
 end;
 
 function TestReplacementWasAccepted(): Boolean;

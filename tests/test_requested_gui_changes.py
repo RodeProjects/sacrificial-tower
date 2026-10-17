@@ -458,6 +458,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window._update_download_request_id = 9
         installer = self.root / "SacrificialTowerSetup-test.exe"
         events: list[str] = []
+        attempt = Mock()
+        attempt.poll.return_value = ("starting", "")
+        attempt.commit.side_effect = lambda: events.append("freigeben")
 
         with (
             patch(
@@ -465,8 +468,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
             ) as dialog_type,
             patch.object(
                 window.update_service,
-                "launch_installer",
-                side_effect=lambda _path: events.append("installer"),
+                "start_installation",
+                side_effect=lambda *_args, **_kwargs: (events.append("installer"), attempt)[1],
             ),
             patch.object(
                 QApplication,
@@ -480,7 +483,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window._on_update_download_succeeded(9, installer)
 
         dialog_type.assert_called_once_with(window, seconds=10)
-        self.assertEqual(events, ["countdown", "installer", "beenden"])
+        self.assertEqual(events, ["countdown", "installer"])
+        attempt.commit.assert_not_called()
+        window._cancel_update_installation()
+        attempt.cancel.assert_called_once()
         window.close()
 
     def test_slicer_titles_are_left_aligned(self) -> None:

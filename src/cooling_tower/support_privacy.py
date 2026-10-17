@@ -30,7 +30,7 @@ _ERROR_OPERATIONS = frozenset({
 SAFE_ERROR_TYPES = frozenset(
     name for name, value in vars(builtins).items()
     if isinstance(value, type) and issubclass(value, BaseException)
-)
+) | frozenset({"UpdateError", "UpdateCancelled", "URLError", "HTTPError", "SSLError", "SSLCertVerificationError"})
 
 # Keys are also data: never copy arbitrary mapping keys, including profile names.
 CONTEXT_KEYS = frozenset({
@@ -77,7 +77,7 @@ def sanitize_technical(value: Any, *, allowed_keys: frozenset[str], key: str = "
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        if key == "return_code":
+        if key in {"return_code", "winerror", "errno", "http_status"}:
             return value if isinstance(value, int) and -(2**31) <= value < 2**32 else None
         if (key in SETTING_KEYS or _NUMERIC_KEY.search(key)
                 or key in {"event_sequence", "return_code", "timeout_ms", "diagnostic_event_schema_version",
@@ -94,7 +94,7 @@ def sanitize_technical(value: Any, *, allowed_keys: frozenset[str], key: str = "
             return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
         except ValueError:
             return None
-    if key in {"version", "program_version"}:
+    if key in {"version", "program_version", "current_version", "target_version"}:
         return value if _VERSION.fullmatch(value) else "<Version ausgelassen>"
     if key in {"event", "source_event"}:
         return value if value in SAFE_EVENTS else "unknown_event"
@@ -112,6 +112,18 @@ def sanitize_technical(value: Any, *, allowed_keys: frozenset[str], key: str = "
     return value if value in SAFE_TOKENS else OMITTED_TEXT
 
 SAFE_EVENTS = frozenset({
+    'update_check_started', 'update_check_failed', 'update_manifest_rejected',
+    'update_manifest_verified', 'update_download_started', 'update_download_verified',
+    'update_download_failed', 'update_restart_requested', 'update_restart_cancelled',
+    'update_installer_launch_requested', 'update_installer_integrity_verified',
+    'update_installer_integrity_failed', 'update_installer_process_created',
+    'update_installer_launch_failed', 'update_installer_exited_early',
+    'update_installer_ready_timeout', 'update_installer_ready', 'update_handoff_cancelled',
+    'update_installer_ack_inconsistent',
+    'update_handoff_signal_failed',
+    'update_target_started', 'update_download_discarded',
+    'update_handoff_committed', 'update_shutdown_started', 'update_shutdown_completed',
+    'update_shutdown_failed', 'update_previous_outcome',
     'application_startup_failed',
     'calibration_joint_stagnated',
     'calibration_round_finished',
@@ -201,6 +213,11 @@ SAFE_EVENTS = frozenset({
 })
 
 SAFE_TOKENS = frozenset({
+    'update_failed', 'update_manifest_signature_invalid', 'update_installer_too_large',
+    'update_cancelled', 'update_installer_size_mismatch', 'update_installer_hash_mismatch',
+    'ready', 'parent_exited', 'install_started', 'install_completed',
+    'restart_started', 'restart_failed', 'setup_completed', 'setup_failed',
+    'handoff_cancelled', 'parent_exit_timeout', 'handoff_invalid',
     'AMD64',
     'ARM64',
     'Darwin',

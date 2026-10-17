@@ -374,6 +374,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             [
                 "Allgemeine Einstellungen …",
                 "Support & Diagnose …",
+                "Buy me a coffee …",
                 "Über Kühlturm-Generator",
             ],
         )

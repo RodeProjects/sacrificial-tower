@@ -28,6 +28,66 @@ from cooling_tower.support_report import SupportReportService
 
 
 class SupportReportServiceTests(unittest.TestCase):
+    def test_clipboard_crash_report_omits_raw_update_error_details(self):
+        from cooling_tower.support_report import previous_crash_report_for_export
+        first = DiagnosticJournal(self.root / "logs/background_jobs.jsonl")
+        first.start_session()
+        first.record("update_installer_launch_failed", target_version="9.9.9", winerror=225,
+                     error_message="private user content", traceback="private source path",
+                     installer_log_path="C:/private/setup.log", attempt_id="private token")
+        second = DiagnosticJournal(first.log_path)
+        second.start_session()
+        exported = previous_crash_report_for_export(second)
+        self.assertIn("update_installer_launch_failed", exported)
+        self.assertIn("225", exported)
+        self.assertNotIn("private", exported)
+        self.assertNotIn("attempt_id", exported)
+        self.assertIn("private user content", first.log_path.read_text())
+        second.close_session()
+
+    def test_next_session_bundle_includes_previous_update_failure_and_setup_stage(self):
+        from cooling_tower.update_installation import recover_update_outcomes
+        logs = self.root / "logs"
+        first = DiagnosticJournal(logs / "background_jobs.jsonl")
+        first.start_session()
+        first.record("update_installer_launch_failed", target_version="9.9.9", winerror=225)
+        first.close_session()
+        native_logs = logs / "updates"
+        native_logs.mkdir()
+        (native_logs / "update-test.status").write_text(
+            "protocol=1\nversion=9.9.9\nstage=ready\nstage=setup_failed\n")
+        (native_logs / "update-test.log").write_text("private raw installer data")
+        second = DiagnosticJournal(logs / "background_jobs.jsonl")
+        second.start_session()
+        recover_update_outcomes(native_logs, second, "0.8.14")
+        service = SupportReportService(self.root, diagnostic_journal=second)
+        bundle = service.create_bundle(title="Update fehlgeschlagen", description="Fehler aus vorheriger Sitzung")
+        with zipfile.ZipFile(bundle.path) as archive:
+            diagnostics = archive.read("diagnose.log").decode("utf-8")
+        self.assertIn("update_installer_launch_failed", diagnostics)
+        self.assertIn("update_previous_outcome", diagnostics)
+        self.assertIn("setup_failed", diagnostics)
+        self.assertIn("9.9.9", diagnostics)
+        self.assertIn("225", diagnostics)
+        self.assertNotIn("private raw installer data", diagnostics)
+        second.close_session()
+
+    def test_update_diagnostics_keep_native_codes_and_drop_local_raw_details(self):
+        service = SupportReportService(Path(self.temporary.name))
+        result = service._sanitize_journal_entry({
+            "event": "update_installer_launch_failed", "target_version": "0.8.14",
+            "winerror": 225, "errno": 13, "http_status": 403,
+            "error_message": "private personal text", "installer_log_path": "C:/Users/private/setup.log",
+            "attempt_id": "user identifying token", "return_code": 0xC0000005,
+        }, session_alias="session-1")
+        self.assertEqual(result["event"], "update_installer_launch_failed")
+        self.assertEqual(result["winerror"], 225)
+        self.assertEqual(result["errno"], 13)
+        self.assertEqual(result["http_status"], 403)
+        self.assertEqual(result["target_version"], "0.8.14")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("attempt_id", result)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

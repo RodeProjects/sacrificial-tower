@@ -66,6 +66,10 @@ dann in den jeweiligen AppData-Bereich kopiert, wenn am Ziel noch keine Datei
 existiert. Quelle und bestehende Zieldateien bleiben unangetastet. Erst danach
 läuft die jeweilige Schema-Migration mit eigener Sicherung.
 
+Ohne gespeicherte Fenstergröße startet das Hauptfenster mit 1250 × 1080 Pixeln.
+Bereits gespeicherte Größen und Positionen werden bei weiteren Starts übernommen.
+Der Standardwert ändert weder das Speicherformat noch bestehende Einstellungen.
+
 ## Garantien
 
 - Eine Datei wird ausschließlich als UTF-8-JSON-Objekt akzeptiert.

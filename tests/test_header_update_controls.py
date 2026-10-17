@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -14,7 +14,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
@@ -233,6 +233,169 @@ class HeaderUpdateControlsTests(unittest.TestCase):
         self.settle()
         self.assertTrue(self.window.header_update_controls.isHidden())
         self.assertEqual(self.rect(self.window.options_button), baseline)
+
+    def begin_installation(self, state="starting"):
+        self.offer_update()
+        attempt = Mock()
+        attempt.poll.return_value = (state, "test error")
+        attempt.log_path = Path(self.temporary.name) / "setup.log"
+        with (
+            patch("cooling_tower.gui.main_window.UpdateRestartCountdownDialog.exec_countdown",
+                  return_value=QDialog.DialogCode.Accepted),
+            patch.object(self.window.update_service, "start_installation", return_value=attempt) as start,
+        ):
+            self.window._on_update_download_succeeded(0, Path(self.temporary.name) / "setup.exe")
+        start.assert_called_once()
+        return attempt
+
+    def test_restart_click_starts_async_handoff_and_leaves_ui_responsive(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtTest import QTest
+        attempt = self.begin_installation()
+        ticks = []
+        timer = QTimer(self.window)
+        timer.timeout.connect(lambda: ticks.append(1))
+        timer.start(10)
+        QTest.qWait(150)
+        self.assertGreater(len(ticks), 1)
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window._update_install_dialog.isVisible())
+        attempt.commit.assert_not_called()
+        self.window._cancel_update_installation()
+        attempt.cancel.assert_called_once()
+        self.assertIsNone(self.window._update_install_dialog)
+        self.assertFalse(self.window._closing)
+
+    def test_early_setup_failure_keeps_program_open_and_displays_log_location(self):
+        self.begin_installation("failed")
+        with patch.object(self.window, "_show_update_error") as error:
+            self.window._poll_update_installation()
+        self.assertIn("setup.log", error.call_args.args[0])
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window.update_button.isEnabled())
+        self.assertIsNone(self.window._update_install_attempt)
+
+    def test_failed_settings_save_does_not_authorize_installer(self):
+        import time
+        attempt = self.begin_installation("ready")
+        self.window._update_install_timer.stop()
+        self.window._update_shutdown_started = time.monotonic()
+        with (
+            patch.object(self.window.settings_store, "save", side_effect=OSError("write failed")),
+            patch.object(self.window, "_show_update_error") as error,
+        ):
+            self.assertFalse(self.window.close())
+        attempt.commit.assert_not_called()
+        attempt.cancel.assert_called_once()
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window._closing)
+        error.assert_called_once()
+
+    def test_ready_installer_commits_only_after_settings_and_jobs_are_safe(self):
+        import time
+        attempt = self.begin_installation("ready")
+        self.window._update_install_timer.stop()
+        self.window._update_shutdown_started = time.monotonic()
+        with patch.object(self.window, "_save_user_settings", wraps=self.window._save_user_settings) as save:
+            self.assertTrue(self.window.close())
+        save.assert_called_once_with(strict=True)
+        attempt.commit.assert_called_once()
+        attempt.cancel.assert_not_called()
+        self.assertFalse(self.window.isVisible())
+
+    def test_cancel_invalidates_already_queued_close(self):
+        attempt = self.begin_installation("ready")
+        self.window._poll_update_installation()
+        self.window._cancel_update_installation()
+        self.settle()
+        self.assertTrue(self.window.isVisible())
+        attempt.commit.assert_not_called()
+
+    def test_setup_failure_at_commit_keeps_window_and_hint_controller_usable(self):
+        import time
+        attempt = self.begin_installation("ready")
+        attempt.commit.side_effect = RuntimeError("setup exited")
+        self.window._update_install_timer.stop()
+        self.window._update_shutdown_started = time.monotonic()
+        with (
+            patch.object(self.window._hint_controller, "dispose") as dispose,
+            patch.object(self.window, "_show_update_error") as error,
+        ):
+            self.assertFalse(self.window.close())
+            dispose.assert_not_called()
+        attempt.cancel.assert_called_once()
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window._closing)
+        error.assert_called_once()
+
+    def test_busy_jobs_are_cancelled_without_blocking_gui_and_timeout_aborts_update(self):
+        attempt = self.begin_installation("ready")
+        self.window._update_install_timer.stop()
+        job = Mock(job_id="test-job")
+        with (
+            patch.object(self.window.background_job_manager, "active_jobs", return_value=[job]),
+            patch.object(self.window.background_job_manager, "cancel_job") as cancel,
+            patch.object(self.window, "_show_update_error") as error,
+        ):
+            self.window._poll_update_installation()
+            cancel.assert_called_once_with("test-job", reason="application_shutdown")
+            self.window._update_shutdown_started -= 60
+            self.window._poll_update_installation()
+        attempt.cancel.assert_called_once()
+        attempt.commit.assert_not_called()
+        self.assertTrue(self.window.isVisible())
+        error.assert_called_once()
+
+    def test_update_from_confirmed_file_and_profiles_in_creation_overview(self):
+        workflow = self.window.workflow
+        workflow.set_slicer_step_visible(True)
+        workflow.source_validation_succeeded("modell.stl", analysis_complete=True)
+        workflow.slicer_succeeded("Testslicer")
+        self.assertTrue(workflow.complete_preparation())
+        self.settle()
+        self.assertTrue(self.window.automatic_generation_card.isVisible())
+        attempt = self.begin_installation("ready")
+        with patch.object(self.window, "close", wraps=self.window.close) as close:
+            self.window._poll_update_installation()
+            self.settle()
+        close.assert_called_once()
+        attempt.commit.assert_called_once()
+        attempt.cancel.assert_not_called()
+        self.assertFalse(self.window.isVisible())
+
+    def test_real_background_worker_is_released_before_install_commit(self):
+        import threading
+        import time
+        from PySide6.QtCore import Signal, Slot
+        from PySide6.QtTest import QTest
+        from cooling_tower.gui.worker_contract import CancelableWorker
+
+        entered = threading.Event()
+        class WaitingWorker(CancelableWorker):
+            finished = Signal(int)
+            @Slot()
+            def run(self):
+                entered.set()
+                self.cancellation_event.wait(5)
+                self.finished.emit(99)
+
+        worker = WaitingWorker()
+        self.window.background_job_manager.start_job(kind=JobKind.PROFILE_MATCH, worker=worker, request_id=99)
+        deadline = time.monotonic() + 3
+        while not entered.is_set() and time.monotonic() < deadline:
+            QTest.qWait(10)
+        self.assertTrue(entered.is_set())
+        attempt = self.begin_installation("ready")
+        active_at_commit = []
+        attempt.commit.side_effect = lambda: active_at_commit.append(self.window.background_job_manager.active_jobs())
+        self.window._poll_update_installation()
+        deadline = time.monotonic() + 3
+        while self.window.isVisible() and time.monotonic() < deadline:
+            QTest.qWait(20)
+        self.assertTrue(worker.cancellation_event.is_set())
+        self.assertEqual(len(active_at_commit), 1)
+        self.assertFalse(active_at_commit[0])
+        self.assertFalse(self.window.isVisible())
 
 
 if __name__ == "__main__":

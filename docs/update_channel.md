@@ -187,8 +187,124 @@ Store-spezifische Variante der Distributionsdatei.
   links daneben; beim Abbrechen wird der bereits geladene Installer entfernt.
 - HTTPS-Zertifikate werden über den nativen Windows-Zertifikatsspeicher
   geprüft.
-- Nach erfolgreicher Prüfung wird Inno Setup still gestartet, die Anwendung
-  beendet, ersetzt und anschließend neu geöffnet.
+- Nach erfolgreicher Prüfung wird Inno Setup über die nachfolgend beschriebene
+  bestätigte Übergabe gestartet, die Anwendung geordnet beendet, ersetzt und
+  anschließend neu geöffnet.
+
+### Bestätigte Übergabe und sicheres Beenden
+
+`Jetzt neu starten` beendet den Countdown sofort und öffnet unmittelbar eine
+bedienbare Fortschrittsanzeige. Der Betriebssystemaufruf zum Starten des Setups
+und die erneute Größen-/SHA-256-Prüfung laufen außerhalb des Qt-Oberflächenthreads.
+Das gilt auch nach bestätigter Datei-, Slicer- und Profilauswahl in der Übersicht
+der Erstellungsmethoden. Die eigentliche Installation benötigt weiterhin Zeit;
+der Button kann weder eine Windows-/Virenscanner-Prüfung überspringen noch einen
+sofortigen erfolgreichen Neustart garantieren.
+
+Die Übergabe verwendet drei pro Versuch zufällig benannte lokale Windows-Ereignisse
+(`ready`, `commit`, `cancel`) und ein vom Setup geöffnetes Handle des ursprünglichen
+Programmprozesses. Das Setup bestätigt seine Bereitschaft erst in `PrepareToInstall`.
+Die Anwendung prüft zusätzlich das zum Versuch und zur Zielversion passende,
+tatsächlich sichtbare Statusprotokoll. Ein Ereignis aus einer virtualisierten
+Scanner-Ausführung allein genügt nicht als Bestätigung.
+
+Erst danach werden Hintergrundaufgaben kooperativ abgebrochen und deren tatsächliche
+Thread-Enden abgewartet. Auch manuelle und allgemeine Einstellungen müssen erfolgreich
+gespeichert sein. Die Installation erhält erst nach dem akzeptierten Schließen des
+Fensters eine Freigabe und wartet zusätzlich auf das **wirkliche Prozessende**.
+Ohne beide Voraussetzungen ersetzt das Setup keine Programmdateien. Ein erzwungenes
+Prozessende ohne Freigabe, ein Abbruch und eine verspätete Setup-Ausführung können
+deshalb kein bereits verworfenes Update nachträglich installieren.
+
+Für die Startbestätigung gelten 90 Sekunden, für das kooperative Beenden der
+Hintergrundaufgaben 30 Sekunden und im Setup höchstens 120 Sekunden für die
+bestätigte Prozessbeendigung. Ein Startfehler lässt die laufende Anwendung geöffnet.
+Ein weiterhin blockierter nativer Startaufruf hält keine Qt-Objekte oder verwalteten
+QThreads fest; seine verspätete Ausführung bleibt durch die fehlende Freigabe gesperrt.
+Der neue Aufruf verwendet `/NOCLOSEAPPLICATIONS` und `/NORESTARTAPPLICATIONS`.
+Andere Programme werden damit nicht zwangsweise geschlossen. Das Setup startet
+die Anwendung erst nach erfolgreicher Installation einmal neu. Scheitert der
+Neustart, wird das separat protokolliert.
+
+Ältere installierte Versionen ohne dieses Übergabeprotokoll können weiterhin den
+neuen Installer starten. Ihre bisherige Start-/Fehlerbehandlung wird dadurch
+jedoch nicht rückwirkend ersetzt. Der Fix muss zunächst als neue Programmversion
+installiert werden. Ein bereits installierter Altstand erhält keine lokalen
+Quellcodeänderungen automatisch.
+
+Das bestätigte Protokoll beginnt mit Version 0.8.14. Der neue Startpfad akzeptiert
+nur eine neuere Zielversion ab dieser Grenze; ein älterer Installer darf nicht
+versehentlich ohne die erforderliche Installationssperre ausgeführt werden.
+
+### Update-Diagnose
+
+Das strukturierte Journal `logs/background_jobs.jsonl` protokolliert Manifestprüfung,
+Downloadprüfung, Neustartwunsch, erneute Integritätsprüfung, Prozesserzeugung,
+Bereitschaft, Abbruch, Zeitüberschreitungen und die sichere Beendigung. Dazu gehören
+Zielversion, Dauer, tatsächlich verfügbare Windows-/Betriebssystemfehlernummern,
+HTTP-Status und Rückgabecodes eines vorzeitig beendeten Setup-Prozesses. Eine
+Windows-Zugriffsverweigerung allein wird nicht als Virenscannerfund ausgegeben.
+
+Jeder Versuch erhält außerdem unter `logs/updates/` einen eindeutigen Namen:
+`update-<Kennung>.log` enthält das native Inno-Protokoll; die danebenliegende
+`.status`-Datei enthält Protokollversion, Versuch, Zielversion und feste Phasenmarker.
+In der installierten Fassung liegen diese Dateien standardmäßig unter
+`%LOCALAPPDATA%\RodeProjects\SacrificialTower\standalone\logs\updates`.
+Diese Dateien bleiben außerhalb des temporären Downloads auch nach Programmende
+erhalten. Damit sind Datei-/Installationsfehler und Neustartfehler auch nach dem
+Schließen der alten Anwendung nachvollziehbar. Beim nächsten Start werden die
+bestätigten Phasen des jüngsten Versuchs begrenzt in das Journal übernommen und
+die tatsächlich gestartete Programmversion zugeordnet. Das bestätigt den Start
+der Zielversion, ohne einen manuellen Start als automatischen Neustart auszugeben.
+
+Das native Setup-Protokoll ist laut Inno ausdrücklich kein stabiles maschinenlesbares
+Format. Deshalb werden ausschließlich die eigenen festen Statusmarker automatisch
+ausgewertet. Ein abgebrochenes oder vom Betriebssystem/Virenscanner beendetes Setup
+kann nur den letzten bestätigten Stand hinterlassen. Nach Ende der alten Anwendung
+existiert kein dauerhafter Agent, der jeden späteren nativen Prozess-Exitcode erfassen
+könnte. Die Anwendung verspricht auch keinen atomaren Austausch des gesamten
+Installationsordners oder eine vollständige Wiederherstellung nach Stromausfall.
+Bei einem Fehler während des tatsächlichen Dateiaustauschs die nativen Logs prüfen
+und gegebenenfalls den verifizierten Installer erneut manuell ausführen.
+
+Rohlogs bleiben lokal und können vollständige Pfade und Fehlertexte enthalten.
+Supportexporte übernehmen nur ausdrücklich freigegebene Ereignisse, technische
+Fehlernummern und Versions-/Phasenangaben. Pfade, Versuch-Kennungen, freie Fehlertexte
+und die nativen Setup-Rohlogs werden nicht automatisch exportiert. Einzelheiten:
+[Support und Datenschutzgrenze](support.md).
+
+### Virenscanner: Unterbrechungen reduzieren, Schutz erhalten
+
+Avast beschreibt CyberCapture als Prüfung seltener oder unbekannter ausführbarer
+Dateien. Ein gültiges Update-Manifest schützt die Herkunft und Integrität des
+Downloads; es ersetzt keine Authenticode-Publisher-Reputation beim Virenscanner.
+Eine Garantie gegen Fehlalarme oder echte Blockierungen ist technisch nicht möglich.
+Es werden keine Scanner deaktiviert, Ausnahmen angelegt, Sicherheitsabfragen
+umgangen oder blockierte Prozesse automatisch immer wieder gestartet.
+
+Kostenlos umsetzbar sind ein konsistenter öffentlicher Vertriebskanal, nachvollziehbare
+Builds, unveränderte geprüfte Releaseartefakte und das Einreichen des konkreten
+Installers beim Hersteller zur Prüfung einer vermuteten Falscherkennung. Eine solche
+Einreichung übermittelt die Datei an einen externen Anbieter und erfolgt deshalb
+nicht automatisch. Erst nach Prüfung des Herstellerergebnisses über den konkreten
+Fund entscheiden; eine passende Prüfsumme beweist für sich allein keine Schadlosigkeit.
+
+Vertrauenswürdige Authenticode-Signaturen für Programm, Installer und Uninstaller
+können die Publisher-Reputation verbessern. Selbstsignierte Zertifikate schaffen
+diese öffentliche Reputation nicht. Auch bezahlte OV-/EV-Zertifikate garantieren
+keine unterbrechungsfreie Ausführung; eine kostenpflichtige Signaturdienstleistung
+wurde nicht eingeführt. Der Microsoft Store ist ein gesondert zu prüfender
+Vertriebsweg mit anderer Signatur-/Updateverwaltung. Seine SmartScreen-Vorteile
+sind keine Zusage über das Verhalten unabhängiger Virenscanner. Bestehende
+Store-/Rechts-/Distributionsprüfungen bleiben erforderlich.
+
+Offizielle Quellen, geprüft am 17.10.2026:
+[Inno-Parameter und Logging](https://jrsoftware.org/ishelp/topic_setupcmdline.htm),
+[Inno-Ereignisse](https://jrsoftware.org/ishelp/topic_scriptevents.htm),
+[Inno-Rückgabecodes](https://jrsoftware.org/ishelp/topic_setupexitcodes.htm),
+[Avast CyberCapture](https://support.avast.com/avast/en/ww/home/current/solutions/antivirus-cybercapture),
+[Avast-Dateiprüfung](https://support.avast.com/article/258/),
+[Microsoft Publisher-Reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
 
 ## Build- und Veröffentlichungsprüfung
 

@@ -17,6 +17,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Kostenlose Nutzung, Source-Available-Lizenz, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
+| Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |
 | GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
 | G-Code-/STL-Prüfung, Profile, Preslice und Cache | [Quellenablauf](source_workflow.md) |

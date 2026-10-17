@@ -58,6 +58,22 @@ stehen in `AGENTS.md`. Externe Slicer und Installer-Tests besitzen eigene Voraus
 ein übersprungener Test ersetzt keine echte Integrationsabnahme. Vorhandene
 Windows-Stressskripte und CI separat für Thread-/Prozessänderungen verwenden.
 
+`test_update_handoff_native.py` verwendet den vorhandenen Inno-Compiler aus
+`INNO_ROOT`, `build/tools/InnoSetup` oder `build/inno-portable/compiler`. Die
+Testinstallation unter `build/update-handoff-tests` hat keine Deinstallation und
+keinen Bezug zur realen Installation. Sie prüft den echten Übergabecontroller,
+Abbruch, fehlende Freigabe, tatsächliches Prozessende, Austausch einer Testdatei
+und den anschließenden Start eines harmlosen Testprozesses. Der Installer-Workflow
+führt sie nach Installation des festgelegten Compilers verpflichtend aus.
+
+In einer eingeschränkten Codex-AppContainer-Umgebung können native Kindprozesse
+und Qt-Schließvorgänge vom normalen Windows-Benutzerkontext abweichen. Auf dem
+betroffenen Entwicklungsgerät die nativen/GUI-Prüfungen daher im Host-Kontext
+mit `QT_QPA_PLATFORM=offscreen` und einem eigenen, beschreibbaren `TEMP`/`TMP`
+unter `build/` ausführen. Scanner bleiben aktiv. Ein eventuelles virtuelles
+Startsignal ohne sichtbare Statusdatei wird ausdrücklich als nicht freigegebene
+Übergabe geprüft und nicht als erfolgreiche Installation gewertet.
+
 GitHub Actions führt die vollständige Testauswahl mit
 `python scripts/run_isolated_tests.py` pro Testdateimuster in einem eigenen
 Python-Prozess aus. Jeder Prozess verwendet die normale `unittest`-Discovery
@@ -133,6 +149,17 @@ PyInstaller übernimmt den Namen in `CompanyName`. Inno Setup verlangt zusätzli
 `/DAppPublisherName=<provider_name>`; der Workflow und beide Installer-Testskripte
 lesen ihn aus demselben Profil. `AppId`, Datenpfade und Entwicklerkennung bleiben
 stabil, damit vorhandene Installationen und Benutzerdaten weiter erkannt werden.
+
+Bei der interaktiven Installationsordner-Auswahl aktiviert
+`AppendDefaultDirName=no` den integrierten Button „Neuen Ordner erstellen“ unten
+links im Durchsuchen-Dialog. Ein neuer Unterordner kann am ausgewählten Ort
+als Installationsziel angelegt und benannt werden; auf dem Datenträger entsteht
+er erst bei der Installation. Der Dialog übernimmt den tatsächlich ausgewählten
+Ordner; er hängt „SacrificialTower“ nicht automatisch an. Der vorgeschlagene
+Standardpfad und ausdrücklich übergebene `/DIR`-Pfade bleiben unverändert.
+Es wird keine zusätzliche Bibliothek verwendet. Grundlage:
+[Inno-Setup-Dokumentation](https://jrsoftware.org/ishelp/topic_setup_appenddefaultdirname.htm);
+die vorhandene Lizenzdokumentation für Inno Setup gilt weiter.
 
 `python scripts/export_legal_documents.py` exportiert dieselben aufgelösten
 Rechtstexte wie die Oberfläche nach `build/legal-public/`. Darin enthält

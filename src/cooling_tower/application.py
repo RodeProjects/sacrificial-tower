@@ -258,7 +258,8 @@ def offer_previous_crash_report(
         details.setDetailedText(report)
         details.exec()
     elif clicked is copy_button:
-        QApplication.clipboard().setText(report)
+        from cooling_tower.support_report import previous_crash_report_for_export
+        QApplication.clipboard().setText(previous_crash_report_for_export(journal))
     elif clicked is folder_button:
         QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(journal.log_path.parent))

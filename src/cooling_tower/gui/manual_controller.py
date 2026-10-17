@@ -511,9 +511,11 @@ class ManualGenerationController(QObject):
         if box.clickedButton() is box._reset_yes_button:
             self.panel.reset_all()
 
-    def save_settings(self):
+    def save_settings(self, *, strict=False):
         try: self.store.save(self.panel.settings)
-        except (OSError,ValueError) as error: self.panel.status_label.setText(str(error))
+        except (OSError,ValueError) as error:
+            self.panel.status_label.setText(str(error))
+            if strict: raise
 
     def describe_export(self,result):
         w = self.window

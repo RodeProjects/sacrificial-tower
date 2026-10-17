@@ -1,6 +1,6 @@
 # Kostenlose Veröffentlichung und rechtliche Voraussetzungen
 
-Stand: 15.10.2026. Sacrificial Tower wird kostenlos angeboten. Vorgesehen sind
+Stand: 17.10.2026. Sacrificial Tower wird kostenlos angeboten. Vorgesehen sind
 der Microsoft Store und öffentlich einsehbarer Quellcode auf GitHub. Das
 Quellcode-Repository bleibt bis zu einer ausdrücklichen Veröffentlichung privat.
 Eine Versionsnummer oder ausgefüllte Checkliste ist keine Freigabe oder
@@ -20,6 +20,9 @@ zeitliche Befristung unter ihren Bedingungen. Eine spätere Lizenzänderung wirk
 nicht rückwirkend. Freiwillige Zuwendungen ohne Software-Gegenleistung und
 gesonderte Beratung, Schulung oder Installationshilfe sind nach der genauen
 Abgrenzung in `LICENSE.md` zulässig; sie dürfen keine verdeckte Softwarebezahlung sein.
+Der Menüpunkt „Buy me a coffee …“ setzt genau diese gegenleistungsfreie
+Unterstützung um. Zahlungsweg, Datenschutz, PayPal-Kontovoraussetzungen,
+Gebühren und steuerliche Prüfungen stehen unter [Freiwillige Unterstützung](voluntary_support.md).
 
 Bei Beiträgen Dritter sicherstellen, dass die Einreichenden die erforderlichen
 Rechte besitzen und ihre übernommenen Beiträge unter der Projektlizenz stehen.

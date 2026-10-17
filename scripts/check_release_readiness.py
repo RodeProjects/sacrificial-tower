@@ -8,9 +8,11 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
     "provider_name": "Vollständiger Name des verantwortlichen Anbieters",
+    "provider_display_name": "Bevorzugter Anzeigename der Oberfläche; ersetzt nicht den rechtlichen Anbieternamen",
     "provider_brand": "Entwicklerkennung, keine eigene Firmierung",
     "support_url": "GitHub-Issue-Auswahl für freiwilligen Support",
     "provider_email": "Erreichbare Kontakt-E-Mail-Adresse",
+    "support_paypal_email": "Bestätigte PayPal-Empfängeradresse für freiwillige Unterstützung ohne Gegenleistung",
     "provider_postal_address": "Ladungsfähige Anschrift: Straße, Hausnummer, PLZ, Ort, Land",
     "provider_additional_details": "Rechtsform, Vertretung, Register und USt-ID, soweit einschlägig; andernfalls ausdrücklich nicht einschlägig",
     "support_retention_policy": "Speicher-/Löschkriterien und eingesetzte GitHub-/Maildienste",
@@ -82,6 +84,8 @@ def checklist(root: Path = ROOT) -> str:
                 if "{{" + key + "}}" in path.read_text(encoding="utf-8")]
         if key in {"provider_name", "support_url"}:
             uses.append("`src/cooling_tower/gui/about_dialog.py`")
+        if key in {"provider_display_name", "support_paypal_email"}:
+            uses.append("`src/cooling_tower/gui/voluntary_support_dialog.py`")
         rows.append(f"| {'OFFEN' if key in missing else 'eingetragen'} | `{key}` | {description} | {', '.join(uses) or 'Freigabeprozess'} |")
     return """# Fehlende Angaben und Platzhalter
 

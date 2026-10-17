@@ -16,9 +16,11 @@ Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
 | Status | Feld in config/legal_profile.json | Erwartete Daten | Verwendung |
 |---|---|---|---|
 | eingetragen | `provider_name` | Vollständiger Name des verantwortlichen Anbieters | `legal/privacy.md`, `legal/terms.md`, `legal/third_party.md`, `src/cooling_tower/gui/about_dialog.py` |
+| eingetragen | `provider_display_name` | Bevorzugter Anzeigename der Oberfläche; ersetzt nicht den rechtlichen Anbieternamen | `src/cooling_tower/gui/voluntary_support_dialog.py` |
 | eingetragen | `provider_brand` | Entwicklerkennung, keine eigene Firmierung | `legal/privacy.md`, `legal/terms.md` |
 | eingetragen | `support_url` | GitHub-Issue-Auswahl für freiwilligen Support | `legal/privacy.md`, `legal/terms.md`, `src/cooling_tower/gui/about_dialog.py` |
 | eingetragen | `provider_email` | Erreichbare Kontakt-E-Mail-Adresse | `legal/privacy.md`, `legal/terms.md` |
+| eingetragen | `support_paypal_email` | Bestätigte PayPal-Empfängeradresse für freiwillige Unterstützung ohne Gegenleistung | `legal/privacy.md`, `legal/terms.md`, `src/cooling_tower/gui/voluntary_support_dialog.py` |
 | eingetragen | `provider_postal_address` | Ladungsfähige Anschrift: Straße, Hausnummer, PLZ, Ort, Land | `legal/privacy.md`, `legal/terms.md` |
 | eingetragen | `provider_additional_details` | Rechtsform, Vertretung, Register und USt-ID, soweit einschlägig; andernfalls ausdrücklich nicht einschlägig | `legal/terms.md` |
 | eingetragen | `support_retention_policy` | Speicher-/Löschkriterien und eingesetzte GitHub-/Maildienste | `legal/privacy.md` |

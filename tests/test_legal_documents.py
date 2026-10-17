@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from cooling_tower.legal_documents import DOCUMENTS, export_legal_documents, render_legal_document
+from cooling_tower.legal_documents import DOCUMENTS, export_legal_documents, legal_profile, render_legal_document
 from distribution_compliance import audit_bundle
 
 
@@ -54,6 +54,23 @@ class LegalDocumentExportTests(unittest.TestCase):
                 export_legal_documents(destination, root=root)
             self.assertEqual((destination / "terms.md").read_bytes(), b"previous valid publication")
             self.assertEqual([path.name for path in destination.iterdir()], ["terms.md"])
+
+    def test_support_terms_are_shared_by_app_installer_and_privacy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            export_legal_documents(destination, root=ROOT)
+            terms = (destination / "terms.txt").read_text(encoding="utf-8-sig")
+            self.assertEqual(terms, render_legal_document("Lizenzbedingungen", root=ROOT))
+            self.assertIn("## Freiwillige Unterstützung über PayPal", terms)
+            self.assertIn("von 1,50 € bis 50,00 € pro Zahlung", terms)
+            self.assertIn("unverbindlicher, frei änderbarer Vorschlag", terms)
+            self.assertIn(legal_profile(root=ROOT)["provider_name"], terms)
+            self.assertIn("keine steuerbegünstigte Spende", terms)
+            self.assertIn("keine Zahlung aus", terms)
+            privacy = (destination / "privacy.md").read_text(encoding="utf-8")
+            self.assertIn("## Freiwillige Unterstützung und PayPal", privacy)
+            self.assertIn("Art. 6 Abs. 1 lit. b DSGVO", privacy)
+            self.assertIn("acht Jahre", privacy)
 
     def test_packaged_root_uses_its_own_profile_and_appends_license_once(self):
         with tempfile.TemporaryDirectory() as directory:

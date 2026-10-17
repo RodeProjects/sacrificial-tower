@@ -33,6 +33,12 @@ class UpdateCheckWorker(CancelableWorker):
                 result = self.update_service.check_for_update(self.current_version)
             except Exception as error:
                 if not self.cancellation_requested():
+                    self.diagnose(
+                        "update_check_failed", outcome="failed", error_type=type(error).__name__,
+                        winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None),
+                        result_code=getattr(error, "code", "update_failed"),
+                        error_message=str(error), traceback=traceback.format_exc(),
+                    )
                     self.failed.emit(
                         self.request_id,
                         str(error),
@@ -77,6 +83,12 @@ class UpdateDownloadWorker(CancelableWorker):
                 pass
             except Exception as error:
                 if not self.cancellation_requested():
+                    self.diagnose(
+                        "update_download_failed", outcome="failed", error_type=type(error).__name__,
+                        winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None),
+                        result_code=getattr(error, "code", "update_failed"),
+                        error_message=str(error), traceback=traceback.format_exc(),
+                    )
                     self.failed.emit(
                         self.request_id,
                         str(error),

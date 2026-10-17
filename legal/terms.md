@@ -1,6 +1,6 @@
 # Nutzungsbedingungen für Sacrificial Tower
 
-Stand: 15. Oktober 2026.
+Stand: 18. Oktober 2026.
 
 ## Anbieter
 
@@ -15,6 +15,46 @@ Direkter Kontakt, insbesondere für Rechts-, Datenschutz- und Sicherheitsanliege
 Sacrificial Tower wird kostenlos angeboten. Es gibt keinen Kaufpreis, kein
 Abonnement und keine kostenpflichtig freizuschaltenden Funktionen. Die Software
 darf auch im beruflichen und gewerblichen Umfeld verwendet werden.
+
+## Freiwillige Unterstützung über PayPal
+
+Über „Buy me a coffee …“ im Menü können Sie dem Entwickler freiwillig einen
+einmaligen Geldbetrag als Dankeschön zuwenden. Empfänger ist {{provider_name}},
+PayPal-Empfängeradresse: {{support_paypal_email}}. Die vorgeschlagenen Beträge
+sind 2,50 €, 5 €, 10 €, 15 € und 20 €; alternativ können Sie einen eigenen Betrag
+von 1,50 € bis 50,00 € pro Zahlung eingeben. PayPal kann eigene Transaktionsgrenzen vorgeben.
+5 € sind beim erstmaligen Öffnen als unverbindlicher, frei änderbarer Vorschlag
+vorausgewählt. Dadurch entsteht keine Zahlungsverpflichtung.
+
+Eine Zahlung ist weder Voraussetzung für Download, Installation und Nutzung noch
+für Updates oder die gewöhnliche Supportmöglichkeit. Sie erhalten dafür keine
+zusätzlichen Nutzungsrechte, Funktionen, bevorzugte Bearbeitung, zugesagte
+Weiterentwicklung oder andere Gegenleistung. Die Anwendung bleibt auch ohne
+Unterstützung vollständig kostenlos. Es wird kein Abonnement eingerichtet.
+Die Zuwendung ist keine steuerbegünstigte Spende; der Anbieter stellt keine
+Spendenbescheinigung aus.
+
+„Weiter zu PayPal“ öffnet die externe PayPal-Website im Browser mit dem gewählten
+Betrag in EUR, der Empfängeradresse und einem festen Zahlungszweck sowie
+technischen Angaben zur Zahlungsseite. Das Öffnen löst noch keine Zahlung aus.
+Prüfen Sie Empfänger, Betrag, Einmaligkeit und etwaige Gebühren bei PayPal und
+bestätigen Sie die Zahlung erst dort, wenn Sie einverstanden sind. Die Abwicklung
+unterliegt den PayPal-Bedingungen. Empfangsgebühren werden grundsätzlich vom
+eingehenden Betrag abgezogen; insbesondere bei Fremdwährungen oder internationalen
+Zahlungen können weitere PayPal-Gebühren entstehen. Die Anwendung erhebt keinen
+zusätzlichen Aufschlag. Sie empfängt keine Zahlungsbestätigung und zeigt keinen
+bestätigten Zahlungserfolg an.
+
+Die Datenschutzinformationen sind vor dem Öffnen von PayPal über einen Link im
+Unterstützungsdialog unter „Über“ abrufbar. PayPal verarbeitet Zahlungsdaten
+eigenständig; der Anbieter verarbeitet erhaltene Transaktionsdaten für Abwicklung
+und gesetzliche Pflichten. Bei versehentlichen Zahlungen oder Rückfragen wenden
+Sie sich an {{provider_email}}. Gesetzliche Rechte, einschließlich etwaiger
+Rückforderungs- und Erstattungsansprüche, bleiben unberührt.
+Microsoft ist weder Veranstalter noch Sponsor dieser Unterstützung.
+
+PayPal-Bedingungen: https://www.paypal.com/de/legalhub/paypal/useragreement-full
+Gebühren: https://www.paypal.com/de/business/paypal-business-fees
 
 ## Aktuelle Entwicklungsversion
 

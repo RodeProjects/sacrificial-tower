@@ -121,7 +121,7 @@ begin
   WizardForm.BackButton.Left := WizardForm.NextButton.Left - ScaleX(8) -
     WizardForm.BackButton.Width;
   WizardForm.PageDescriptionLabel.Caption :=
-    'Bitte bis zum Ende scrollen. Danach können Sie zustimmen.';
+    'Bitte lesen Sie die Lizenzvereinbarung vollständig durch. Am Ende des Textes können Sie Ihre Zustimmung erteilen.';
   RefreshLicenseScroll;
   if not LicenseEndReached then
   begin

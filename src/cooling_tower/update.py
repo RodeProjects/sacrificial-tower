@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import ssl
-import subprocess
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -23,7 +22,8 @@ from cooling_tower.update_manifest import (
     UpdateManifestSignatureError,
     verify_update_manifest_signature,
 )
-from cooling_tower.windows_process import windows_subprocess_creation_flags
+from cooling_tower.diagnostic_context import record_diagnostic
+from cooling_tower.version import APP_VERSION
 
 
 DEFAULT_UPDATE_MANIFEST_URL = (
@@ -42,6 +42,10 @@ _ALLOWED_INSTALLER_PATH_PREFIX = (
 
 class UpdateError(RuntimeError):
     """A safe update check, download, or launch could not be completed."""
+
+    def __init__(self, message: str, *, code: str = "update_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class UpdateCancelled(UpdateError):
@@ -107,7 +111,7 @@ def parse_update_manifest(
             ),
         )
     except UpdateManifestSignatureError as error:
-        raise UpdateError(str(error)) from error
+        raise UpdateError(str(error), code="update_manifest_signature_invalid") from error
     if raw.get("schema_version") != 1:
         raise UpdateError("Die Version des Update-Manifests wird nicht unterstützt.")
 
@@ -187,18 +191,26 @@ class UpdateService:
         )
 
     def check_for_update(self, current_version: str) -> UpdateInfo | None:
+        record_diagnostic("update_check_started", current_version=current_version)
         request = self._request(self.manifest_url, "application/json")
         try:
             with self._opener(request, timeout=self.timeout_s) as response:
                 payload = response.read(MAXIMUM_MANIFEST_BYTES + 1)
         except (HTTPError, URLError, OSError, TimeoutError) as error:
+            record_diagnostic("update_check_failed", error_type=type(error).__name__,
+                              winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None),
+                              http_status=getattr(error, "code", None), error_message=str(error), outcome="failed")
             raise UpdateError("Der Update-Kanal ist derzeit nicht erreichbar.") from error
         if len(payload) > MAXIMUM_MANIFEST_BYTES:
             raise UpdateError("Das Update-Manifest ist unerwartet groß.")
-        info = parse_update_manifest(
-            payload,
-            public_keys=self._manifest_public_keys,
-        )
+        try:
+            info = parse_update_manifest(payload, public_keys=self._manifest_public_keys)
+        except UpdateError as error:
+            record_diagnostic("update_manifest_rejected", outcome="failed", result_code=error.code,
+                              error_message=str(error))
+            raise
+        record_diagnostic("update_manifest_verified", target_version=info.version,
+                          file_size_bytes=info.size_bytes, outcome="success")
         return info if is_newer_version(info.version, current_version) else None
 
     def download_installer(
@@ -208,6 +220,8 @@ class UpdateService:
         progress_callback: Callable[[int], None] | None = None,
         cancellation_event: Event | None = None,
     ) -> Path:
+        record_diagnostic("update_download_started", target_version=info.version,
+                          expected_size_bytes=info.size_bytes)
         temporary_directory = Path(
             tempfile.mkdtemp(
                 prefix="sacrificial-tower-update-",
@@ -224,33 +238,45 @@ class UpdateService:
             with self._opener(request, timeout=self.timeout_s) as response:
                 header_size = response.headers.get("Content-Length")
                 if header_size is not None and int(header_size) > MAXIMUM_INSTALLER_BYTES:
-                    raise UpdateError("Der Update-Installer ist unerwartet groß.")
+                    raise UpdateError("Der Update-Installer ist unerwartet groß.", code="update_installer_too_large")
                 with partial.open("wb") as handle:
                     while True:
                         if cancellation_event is not None and cancellation_event.is_set():
-                            raise UpdateCancelled("Der Update-Download wurde abgebrochen.")
+                            raise UpdateCancelled("Der Update-Download wurde abgebrochen.", code="update_cancelled")
                         block = response.read(1024 * 1024)
                         if not block:
                             break
                         downloaded += len(block)
                         if downloaded > MAXIMUM_INSTALLER_BYTES:
-                            raise UpdateError("Der Update-Installer ist unerwartet groß.")
+                            raise UpdateError("Der Update-Installer ist unerwartet groß.", code="update_installer_too_large")
                         handle.write(block)
                         digest.update(block)
                         if progress_callback is not None:
                             progress_callback(min(100, downloaded * 100 // info.size_bytes))
             if downloaded != info.size_bytes:
-                raise UpdateError("Der Update-Installer hat nicht die erwartete Größe.")
+                raise UpdateError("Der Update-Installer hat nicht die erwartete Größe.", code="update_installer_size_mismatch")
             if digest.hexdigest().casefold() != info.sha256:
-                raise UpdateError("Die SHA-256-Prüfung des Updates ist fehlgeschlagen.")
+                raise UpdateError("Die SHA-256-Prüfung des Updates ist fehlgeschlagen.", code="update_installer_hash_mismatch")
             os.replace(partial, target)
             if progress_callback is not None:
                 progress_callback(100)
             completed = True
+            record_diagnostic("update_download_verified", target_version=info.version,
+                              file_size_bytes=downloaded, outcome="success")
             return target.resolve()
-        except UpdateError:
+        except UpdateError as error:
+            record_diagnostic("update_download_failed", target_version=info.version,
+                              error_type=type(error).__name__, error_message=str(error),
+                              result_code=error.code,
+                              file_size_bytes=downloaded,
+                              outcome="cancelled" if isinstance(error, UpdateCancelled) else "failed")
             raise
         except (HTTPError, URLError, OSError, TimeoutError, ValueError) as error:
+            record_diagnostic("update_download_failed", target_version=info.version,
+                              error_type=type(error).__name__, winerror=getattr(error, "winerror", None),
+                              http_status=getattr(error, "code", None), errno=getattr(error, "errno", None),
+                              error_message=str(error),
+                              file_size_bytes=downloaded, outcome="failed")
             raise UpdateError("Der Update-Installer konnte nicht geladen werden.") from error
         finally:
             if not completed:
@@ -272,37 +298,20 @@ class UpdateService:
             and installer.suffix.casefold() == ".exe"
         ):
             shutil.rmtree(folder, ignore_errors=True)
+            record_diagnostic("update_download_discarded", success=not folder.exists())
 
-    @staticmethod
-    def launch_installer(installer_path: str | Path) -> None:
+    def start_installation(self, installer_path: str | Path, info: UpdateInfo,
+                           log_root: str | Path, *, journal=None):
+        from cooling_tower.update_installation import UpdateInstallationAttempt
+
         installer = Path(installer_path).resolve()
         if os.name != "nt" or installer.suffix.casefold() != ".exe":
             raise UpdateError("Der automatische Installer wird nur unter Windows unterstützt.")
-        if not installer.is_file():
-            raise UpdateError("Der heruntergeladene Update-Installer fehlt.")
-        creation_flags = windows_subprocess_creation_flags(
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-            getattr(subprocess, "DETACHED_PROCESS", 0),
-        )
-        try:
-            subprocess.Popen(
-                [
-                    str(installer),
-                    "/SP-",
-                    "/VERYSILENT",
-                    "/SUPPRESSMSGBOXES",
-                    "/NORESTART",
-                    "/CURRENTUSER",
-                    "/CLOSEAPPLICATIONS",
-                    "/NORESTARTAPPLICATIONS",
-                    "/SACRIFICIALTOWERUPDATE",
-                ],
-                cwd=installer.parent,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-                creationflags=creation_flags,
-            )
-        except OSError as error:
-            raise UpdateError("Der Update-Installer konnte nicht gestartet werden.") from error
+        if version_key(info.version) < (0, 8, 14) or not is_newer_version(info.version, APP_VERSION):
+            raise UpdateError("Der Installer unterstützt keine neuere, sichere Updateübergabe.")
+        root = (self.temporary_root or Path(tempfile.gettempdir())).resolve()
+        if (installer.parent.parent != root
+                or not installer.parent.name.startswith("sacrificial-tower-update-")
+                or installer.name != f"SacrificialTowerSetup-{info.version}.exe"):
+            raise UpdateError("Der Installer liegt nicht im eigenen Update-Downloadordner.")
+        return UpdateInstallationAttempt(installer, info, Path(log_root), journal=journal).start()

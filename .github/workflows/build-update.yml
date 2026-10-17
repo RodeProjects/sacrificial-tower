@@ -104,6 +104,10 @@ jobs:
             "/DAppPublisherName=$((Get-Content -LiteralPath 'config/legal_profile.json' -Raw | ConvertFrom-Json).provider_name)" `
             'installer\SacrificialTower.iss'
 
+      - name: Sichere Updateübergabe mit echtem Setup testen
+        shell: pwsh
+        run: python -m unittest discover -s tests -p test_update_handoff_native.py -v
+
       - name: Scrollsperre und Zustimmung der Installer-Lizenzseite testen
         shell: pwsh
         run: |

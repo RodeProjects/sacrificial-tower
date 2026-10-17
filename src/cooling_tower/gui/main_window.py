@@ -4,6 +4,7 @@ import math
 import os
 import re
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from html import escape
@@ -53,6 +54,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -122,6 +124,7 @@ from cooling_tower.slicers.draft_shield import (
     draft_shield_source, with_simulated_draft_shield_disabled,
 )
 from cooling_tower.gui.support_report_dialog import SupportReportDialog
+from cooling_tower.gui.voluntary_support_dialog import VoluntarySupportDialog
 from cooling_tower.gui.texts import (
     PREDICTION_ROWS,
     SETTING_INFO_TEXTS,
@@ -131,6 +134,9 @@ from cooling_tower.gui.texts import (
 )
 from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
 from cooling_tower.gui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
+from cooling_tower.update_installation import (
+    SHUTDOWN_TIMEOUT_S, record_update, recover_update_outcomes,
+)
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.workflow_controller import WorkflowController, WorkflowStage
 from cooling_tower.gui.widgets import (
@@ -750,6 +756,13 @@ class MainWindow(QMainWindow):
         self._update_check_request_id = 0
         self._update_download_request_id = 0
         self._update_download_cancel_requested = False
+        self._update_install_attempt = None
+        self._update_install_dialog = None
+        self._update_shutdown_started = None
+        self._update_install_timer = QTimer(self)
+        self._update_install_timer.setInterval(100)
+        self._update_install_timer.timeout.connect(self._poll_update_installation)
+        QTimer.singleShot(0, self, self._recover_update_outcomes)
         self._slicer_request_id = 0
         self._pending_slicer_discovery: tuple[bool, Path | None] | None = None
         self._slicer_step_auto_discovery_attempted = False
@@ -866,6 +879,7 @@ class MainWindow(QMainWindow):
         self._about_dialog: QDialog | None = None
         self._export_success_dialog: QDialog | None = None
         self._support_report_dialog: SupportReportDialog | None = None
+        self._voluntary_support_dialog: VoluntarySupportDialog | None = None
 
         self.settings_store = UserSettingsStore(
             explicit_user_settings
@@ -965,8 +979,8 @@ class MainWindow(QMainWindow):
         self._restore_phase17_ui_state(ui_state)
         window = ui_state.get("window", {})
         self.resize(
-            int(window.get("width", 900)),
-            int(window.get("height", 900)),
+            int(window.get("width", 1250)),
+            int(window.get("height", 1080)),
         )
         self._restore_initial_window_position(window)
         self.update_wall_path_preview()
@@ -1104,6 +1118,11 @@ class MainWindow(QMainWindow):
         self.support_report_action.triggered.connect(
             self.show_support_report_dialog
         )
+        self.voluntary_support_action = self.options_menu.addAction(
+            QIcon(str(GUI_ASSET_ROOT / "coffee.svg")),
+            "Buy me a coffee …",
+        )
+        self.voluntary_support_action.triggered.connect(self.show_voluntary_support_dialog)
         self.about_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "info_circle.svg")),
             f"Über {APP_NAME}",
@@ -4244,6 +4263,7 @@ class MainWindow(QMainWindow):
     def start_update_download(self) -> None:
         if (
             self._closing
+            or self._update_install_attempt is not None
             or self.available_update is None
             or self.background_job_manager.has_active(JobKind.UPDATE_DOWNLOAD)
         ):
@@ -4319,6 +4339,7 @@ class MainWindow(QMainWindow):
         self.workflow_header.refresh_layout()
         result = UpdateRestartCountdownDialog(self, seconds=10).exec_countdown()
         if result == QMessageBox.DialogCode.Rejected:
+            self._record_update("update_restart_cancelled", outcome="cancelled")
             self.update_service.discard_installer(installer_path)
             self.update_button.setText("Aktualisieren")
             self.update_button.setEnabled(True)
@@ -4329,15 +4350,105 @@ class MainWindow(QMainWindow):
             return
         self.update_button.setText("Installation startet …")
         self.workflow_header.refresh_layout()
+        self._record_update("update_restart_requested", outcome="starting")
+        dialog = QProgressDialog(
+            "Das Setup wird gestartet und geprüft. Das Programm wird anschließend "
+            "sicher beendet und nach erfolgreicher Installation neu gestartet.\n\n"
+            "Eine Prüfung durch Windows oder den Virenscanner kann etwas dauern.",
+            "Abbrechen", 0, 0, self,
+        )
+        dialog.setWindowTitle("Sacrificial-Tower-Update")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self._cancel_update_installation)
+        self._update_install_dialog = dialog
+        dialog.show()
         try:
-            self.update_service.launch_installer(installer_path)
+            self._update_install_attempt = self.update_service.start_installation(
+                installer_path, self.available_update, self.user_data_root / "logs" / "updates",
+                journal=self.background_job_manager.diagnostic_journal,
+            )
         except Exception as error:
-            self.update_service.discard_installer(installer_path)
+            self._record_update("update_installer_launch_failed", outcome="failed",
+                                error_type=type(error).__name__, error_message=str(error),
+                                winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None))
+            self._finish_update_installation()
             self._show_update_error(str(error))
             return
-        application = QApplication.instance()
-        if application is not None:
-            application.quit()
+        self._update_install_timer.start()
+
+    def _record_update(self, event: str, **details) -> None:
+        record_update(self.background_job_manager.diagnostic_journal, event,
+                      target_version=self.available_update.version if self.available_update else None,
+                      **details)
+
+    def _recover_update_outcomes(self) -> None:
+        recover_update_outcomes(self.user_data_root / "logs" / "updates",
+                                self.background_job_manager.diagnostic_journal, APP_VERSION)
+
+    def _finish_update_installation(self) -> None:
+        self._update_install_timer.stop()
+        self._update_install_attempt = None
+        self._update_shutdown_started = None
+        self._closing = False
+        self._dismiss_update_install_dialog()
+        self.update_button.setText("Aktualisieren")
+        self.update_button.setEnabled(True)
+        self.workflow_header.refresh_layout()
+
+    def _dismiss_update_install_dialog(self) -> None:
+        dialog, self._update_install_dialog = self._update_install_dialog, None
+        if dialog is not None:
+            dialog.canceled.disconnect(self._cancel_update_installation)
+            dialog.close()
+            dialog.deleteLater()
+
+    def _cancel_update_installation(self) -> None:
+        attempt = self._update_install_attempt
+        if attempt is not None:
+            attempt.cancel()
+        self._finish_update_installation()
+
+    def _poll_update_installation(self) -> None:
+        attempt = self._update_install_attempt
+        if attempt is None:
+            return
+        state, message = attempt.poll()
+        if state in {"failed", "cancelled"}:
+            log_path = attempt.log_path
+            self._finish_update_installation()
+            if state == "failed":
+                self._show_update_error(f"{message}\n\nSetup-Protokoll: {log_path}")
+            return
+        if state != "ready":
+            return
+        if self._update_shutdown_started is None:
+            self._update_shutdown_started = time.monotonic()
+            self._closing = True
+            self._feasibility_timer.stop()
+            self._record_update("update_shutdown_started", outcome="starting")
+            self._update_install_dialog.setLabelText(
+                "Das Setup ist bereit. Hintergrundaufgaben werden kontrolliert "
+                "beendet und die Einstellungen gespeichert …")
+            for job in self.background_job_manager.active_jobs():
+                self.background_job_manager.cancel_job(job.job_id, reason="application_shutdown")
+        if self.background_job_manager.active_jobs():
+            if time.monotonic() - self._update_shutdown_started >= SHUTDOWN_TIMEOUT_S:
+                self._record_update("update_shutdown_failed", outcome="failed", timed_out=True)
+                attempt.cancel()
+                self._finish_update_installation()
+                self._show_update_error("Hintergrundaufgaben konnten nicht sicher beendet werden. "
+                                        "Das Setup wurde nicht für die Installation freigegeben.")
+            return
+        # Leave this timer callback before closing widgets and the last window.
+        self._update_install_timer.stop()
+        QTimer.singleShot(0, self, self._close_for_update)
+
+    def _close_for_update(self) -> None:
+        if self._update_install_attempt is not None and self._update_shutdown_started is not None:
+            self.close()
 
     @Slot(int, str, str)
     def _on_update_download_failed(
@@ -11379,6 +11490,34 @@ class MainWindow(QMainWindow):
             return
         self.export_success_dialog.accept()
 
+    def show_voluntary_support_dialog(self) -> None:
+        """Open the local amount chooser; network access needs a separate click."""
+        if self._voluntary_support_dialog is None:
+            try:
+                self._voluntary_support_dialog = VoluntarySupportDialog(self)
+                self._voluntary_support_dialog.legal_document_requested.connect(
+                    self._show_voluntary_support_legal_document
+                )
+            except (OSError, ValueError, KeyError):
+                QMessageBox.warning(self, "Freiwillige Unterstützung",
+                                    "Die Empfängerangaben konnten nicht geladen werden.")
+                return
+        dialog = self._voluntary_support_dialog
+        dialog.setWindowState(Qt.WindowState.WindowNoState)
+        self._show_internal_dialog_without_flash(
+            dialog, self._resize_voluntary_support_dialog,
+        )
+
+    def _resize_voluntary_support_dialog(self) -> None:
+        dialog = self._voluntary_support_dialog
+        if dialog is not None:
+            dialog.fit_to_screen()
+            self._place_dialog_centered(dialog)
+
+    def _show_voluntary_support_legal_document(self, title: str) -> None:
+        self.show_about_dialog()
+        self.about_dialog.show_document(title)
+
     def show_support_report_dialog(self) -> None:
         """Show the local report composer without transmitting any data."""
 
@@ -13944,8 +14083,8 @@ class MainWindow(QMainWindow):
         self.validate_form()
         self._schedule_feasibility_validation()
 
-    def _save_user_settings(self) -> None:
-        self.manual_controller.save_settings()
+    def _save_user_settings(self, *, strict: bool = False) -> None:
+        self.manual_controller.save_settings(strict=strict)
         try:
             window_geometry = self.normalGeometry()
             window_position = self.pos()
@@ -13972,9 +14111,16 @@ class MainWindow(QMainWindow):
                 },
             )
         except OSError:
-            pass
+            if strict:
+                raise
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        update_shutdown = self._update_shutdown_started is not None
+        if self._update_install_attempt is not None and not update_shutdown:
+            self._update_install_attempt.cancel()
+            self._update_install_timer.stop()
+            self._dismiss_update_install_dialog()
+            self._update_install_attempt = None
         self.preparation_transition.cancel()
         self._closing = True
         self._pending_support_retry = None
@@ -13988,6 +14134,10 @@ class MainWindow(QMainWindow):
         self._feasibility_timer.stop()
         shutdown_result = self.background_job_manager.shutdown(5000)
         if not shutdown_result.clean:
+            if update_shutdown:
+                self._update_install_attempt.cancel()
+                self._finish_update_installation()
+                self._record_update("update_shutdown_failed", outcome="failed", timed_out=True)
             self._closing = False
             event.ignore()
             QMessageBox.warning(
@@ -13999,7 +14149,20 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._save_user_settings()
+        try:
+            self._save_user_settings(strict=update_shutdown)
+        except Exception as error:
+            if not update_shutdown:
+                raise
+            self._record_update("update_shutdown_failed", outcome="failed",
+                                error_type=type(error).__name__, error_message=str(error),
+                                winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None))
+            self._update_install_attempt.cancel()
+            self._finish_update_installation()
+            event.ignore()
+            self._show_update_error("Die Einstellungen konnten nicht sicher gespeichert werden. "
+                                    "Das Update wurde nicht freigegeben.")
+            return
         self._cleanup_source_preslice_result()
         for session in self.generation_sessions.values():
             session.discard_preview()
@@ -14013,8 +14176,28 @@ class MainWindow(QMainWindow):
             self._export_success_dialog.close()
         if self._support_report_dialog is not None:
             self._support_report_dialog.close()
-        self._hint_controller.dispose()
+        if self._voluntary_support_dialog is not None:
+            self._voluntary_support_dialog.close()
         application = QApplication.instance()
+        super().closeEvent(event)
+        if update_shutdown:
+            try:
+                if not event.isAccepted():
+                    raise RuntimeError("Das Programmfenster konnte nicht geschlossen werden.")
+                self._update_install_attempt.commit()
+            except Exception as error:
+                self._record_update("update_shutdown_failed", outcome="failed",
+                                    error_type=type(error).__name__, error_message=str(error),
+                                    winerror=getattr(error, "winerror", None), errno=getattr(error, "errno", None))
+                self._update_install_attempt.cancel()
+                self._finish_update_installation()
+                event.ignore()
+                self._show_update_error(str(error))
+                return
+            self._dismiss_update_install_dialog()
+            self._update_install_attempt = None
+            self._update_shutdown_started = None
+            self._record_update("update_shutdown_completed", outcome="success")
+        self._hint_controller.dispose()
         if application is not None:
             application.removeEventFilter(self._internal_dialog_reveal_filter)
-        super().closeEvent(event)

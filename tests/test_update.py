@@ -30,6 +30,7 @@ from cooling_tower.update import (
     version_key,
 )
 from cooling_tower.update_manifest import sign_update_manifest
+from cooling_tower.diagnostic_context import diagnostic_scope
 
 
 INSTALLER_URL = (
@@ -95,6 +96,19 @@ def manifest_for(payload: bytes, version: str = "0.4.2") -> bytes:
 
 
 class UpdateServiceTests(unittest.TestCase):
+    def test_download_diagnostics_explain_integrity_failures_with_stable_code(self):
+        info = UpdateInfo("9.9.9", INSTALLER_URL, "0" * 64, 9)
+        events = []
+        with tempfile.TemporaryDirectory() as temporary:
+            service = UpdateService(temporary_root=temporary, opener=SequenceOpener(FakeResponse(b"installer")))
+            with diagnostic_scope(lambda event, **fields: events.append((event, fields))):
+                with self.assertRaises(UpdateError):
+                    service.download_installer(info)
+        failure = next(fields for event, fields in events if event == "update_download_failed")
+        self.assertEqual(failure["result_code"], "update_installer_hash_mismatch")
+        self.assertEqual(failure["file_size_bytes"], 9)
+        self.assertEqual(failure["target_version"], "9.9.9")
+
     def test_numeric_versions_allow_a_longer_last_component(self) -> None:
         self.assertEqual(version_key("0.4.100"), (0, 4, 100))
         self.assertTrue(is_newer_version("0.4.10", "0.4.9"))
@@ -281,15 +295,11 @@ class UpdateServiceTests(unittest.TestCase):
             self.assertEqual(list(Path(temporary).iterdir()), [])
 
     def test_launch_uses_the_silent_inno_update_switches(self) -> None:
+        from cooling_tower.update_installation import installer_command
         with tempfile.TemporaryDirectory() as temporary:
             installer = Path(temporary) / "update.exe"
             installer.write_bytes(b"test")
-            with (
-                patch("cooling_tower.update.os.name", "nt"),
-                patch("cooling_tower.update.subprocess.Popen") as popen,
-            ):
-                UpdateService.launch_installer(installer)
-            command = popen.call_args.args[0]
+            command = installer_command(installer.resolve(), "test", Path(temporary) / "log", Path(temporary) / "status")
             self.assertEqual(
                 command,
                 [
@@ -299,9 +309,14 @@ class UpdateServiceTests(unittest.TestCase):
                     "/SUPPRESSMSGBOXES",
                     "/NORESTART",
                     "/CURRENTUSER",
-                    "/CLOSEAPPLICATIONS",
+                    "/NOCLOSEAPPLICATIONS",
                     "/NORESTARTAPPLICATIONS",
+                    "/RESTARTEXITCODE=3010",
                     "/SACRIFICIALTOWERUPDATE",
+                    "/STUPDATEHANDOFF=test",
+                    f"/STUPDATEPARENT={os.getpid()}",
+                    f"/STUPDATESTATUS={Path(temporary) / 'status'}",
+                    f"/LOG={Path(temporary) / 'log'}",
                 ],
             )
 

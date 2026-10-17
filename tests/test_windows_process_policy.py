@@ -173,7 +173,7 @@ class WindowsProcessPolicyUnitTests(unittest.TestCase):
     def test_all_product_subprocess_launchers_use_safe_creation_flags(self) -> None:
         managed_launchers = (
             PROJECT_ROOT / "start_gui.pyw",
-            SRC_ROOT / "cooling_tower" / "update.py",
+            SRC_ROOT / "cooling_tower" / "update_installation.py",
             SRC_ROOT / "cooling_tower" / "slicers" / "discovery.py",
             SRC_ROOT / "cooling_tower" / "slicers" / "process.py",
         )

@@ -131,6 +131,26 @@ sind in den [Datenschutzinformationen](../legal/privacy.md) beschrieben.
 Logo, Icons und Test-STL haben einen [eigenen Herkunftsnachweis](../src/cooling_tower/gui/assets/ASSET_LICENSES.md).
 Windows-Systemfonts werden verwendet, keine neue Schriftdatei wird mitgeliefert.
 
+### PayPal als freiwilliger externer Zahlungsweg (geprüft 17.10.2026)
+
+Kein SDK und keine neue Bibliothek: Der Unterstützungsdialog öffnet ausschließlich
+einen HTTPS-Link zu PayPal Payments Standard im externen Browser. Keine PayPal-
+oder Buy-Me-a-Coffee-Logos, Skripte oder fremden Assets werden übernommen; das
+Kaffeetassen-SVG ist eine eigene geometrische Liniengrafik. „Buy me a coffee“
+bezeichnet hier den Menüpunkt, keine Anbindung an die gleichnamige Plattform.
+
+Maßgeblich sind die [PayPal-Nutzungsbedingungen](https://www.paypal.com/de/legalhub/paypal/useragreement-full),
+[Datenschutzhinweise](https://www.paypal.com/de/legalhub/paypal/privacy-full) und
+[Transaktionsgebühren](https://www.paypal.com/de/business/paypal-business-fees).
+Keine zusätzliche Softwarelizenz, Attribution, Monatsgebühr oder Umsatzbeteiligung
+für diesen Link eingeführt; **Zahlungsempfang ist grundsätzlich gebührenpflichtig**.
+Standard für Inlandsspenden am Prüftag: 2,49 % + 0,35 EUR; internationale Zahlungen,
+Währungswechsel und andere Zahlungswege können abweichen. Keine Gemeinnützigkeit
+oder Berechtigung für Sondertarife angenommen. Diese zahlungsabhängigen Gebühren
+sind Bestandteil des ausdrücklich beauftragten PayPal-Zahlungswegs.
+Kontoeignung und steuerliche Behandlung sind gesonderte Betreiberpflichten:
+[Umsetzung und Nachweise](voluntary_support.md).
+
 Python-Patchpflege: Am Prüftag nennt die [offizielle Downloadübersicht](https://www.python.org/downloads/)
 3.13.15 als aktuellen 3.13-Stand. Die lokale Projektumgebung 3.13.2 wurde für die
 Tests unverändert verwendet. CI bleibt auf der gepflegten Reihe 3.13; der alte

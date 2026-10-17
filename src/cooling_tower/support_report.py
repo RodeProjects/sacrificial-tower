@@ -67,6 +67,14 @@ _JOURNAL_SAFE_KEYS = frozenset(
         "duration_s",
         "effective_profile_available",
         "elapsed_s",
+        "current_version",
+        "target_version",
+        "update_stage",
+        "expected_size_bytes",
+        "winerror",
+        "errno",
+        "http_status",
+        "installed_version_matches",
         "error_code",
         "error_message",
         "error_scope",
@@ -152,6 +160,22 @@ _JOURNAL_SAFE_KEYS = frozenset(
         "worker_class",
     }
 )
+
+
+def previous_crash_report_for_export(journal: DiagnosticJournal) -> str:
+    """Use the same explicit vocabulary for clipboard reports as for ZIPs."""
+    try:
+        raw = json.loads(journal.build_previous_crash_report())
+    except json.JSONDecodeError:
+        raw = {}
+    events = raw.get("events", [])
+    report = {
+        "report_type": "unexpected_previous_session",
+        "previous_session": sanitize_technical(raw.get("previous_session", {}), allowed_keys=_JOURNAL_SAFE_KEYS),
+        "events": [sanitize_technical(entry, allowed_keys=_JOURNAL_SAFE_KEYS)
+                   for entry in events[-250:] if isinstance(entry, Mapping)],
+    }
+    return json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 @dataclass(frozen=True, slots=True)

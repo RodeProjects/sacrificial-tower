@@ -59,6 +59,18 @@ auf ein begrenztes technisches Format geprüft. Zahlen und Zeitpunkte können
 trotzdem einen Vorgang charakterisieren: **Datensparsamkeit ist keine garantierte
 Anonymität.** Neue Exportfelder oder Wörter benötigen eine bewusste Datenschutzprüfung.
 
+Updateereignisse behalten zusätzlich die geprüfte Zielversion, feste Updatephasen
+und verfügbare technische Windows-/HTTP-/Prozessfehlernummern. Freie Fehlertexte,
+Versuch-Kennungen und lokale Setup-Pfade werden weiterhin ausgelassen. Die nativen
+Dateien unter `logs/updates/` sind lokale Rohlogs und kein automatischer Bestandteil
+eines Supportpakets. Ablauf und Grenzen stehen unter
+[Update-Diagnose](update_channel.md#update-diagnose).
+
+Der beim nächsten Start angebotene Bericht über einen unerwarteten Abbruch verwendet
+beim Kopieren in die Zwischenablage denselben technischen Wortschatz. Die lokale
+Detailanzeige und die Ursprungslogs behalten ihre vollständigen Diagnosedaten;
+solche Rohansichten vor einer manuellen Weitergabe gesondert prüfen.
+
 ZIP-Dateien werden zunächst temporär geschrieben und erst nach vollständiger
 Erstellung übernommen. Zieldateien werden exklusiv reserviert, damit parallele
 Exporte nichts überschreiben. Bei Fehlern werden temporäre und unvollständige
