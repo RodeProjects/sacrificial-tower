@@ -5,30 +5,29 @@ from dataclasses import replace
 from functools import partial
 import math
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
+from PySide6.QtCore import QEvent,QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLayout, QLabel, QPushButton, QSizePolicy,
                               QCheckBox, QScrollArea, QSplitter, QSlider)
 
-from cooling_tower.gui.widgets import SectionCard, WheelSafeComboBox
+from cooling_tower.gui.widgets import SectionCard
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 from cooling_tower.gui.widgets.manual_canvas import ManualCanvas
-from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox,ManualNumericSettingWidget
+from cooling_tower.gui.widgets.manual_inputs import ManualDoubleSpinBox,ManualSpinBox,ManualNumericSettingWidget,boundary_message,compact_manual_width
 from cooling_tower.gui.widgets.manual_preview_info import ManualPreviewInformation
 from cooling_tower.gui.widgets.manual_resolution_control import ResolutionHeading,ResolutionSlider,ResolutionEndLabels,RotationSlider,RotationEndLabels,slider_handle_style,SLIDER_GROOVE_OFFSET_STYLE,SLIDER_VALUE_STYLE
 from cooling_tower.gui.widgets.manual_xray_controls import XRayControls,PreviewToolsRow
 from cooling_tower.gui.widgets.manual_settings_pane import ManualSettingsPane
+from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
+from cooling_tower.gui.widgets.layer_time_color_controls import LayerTimeColorControls
 from cooling_tower.gui.widgets.manual_point_editor import ManualPointEditor,PointField
 from cooling_tower.gui.design_tokens import COLORS,METRICS
-from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, MINIMUM_TOWER_DIAMETER_MM, OBJECT_RESOLUTION_STAGES, object_resolution_default, bounded_edit, bounded_coordinate_edit, initial_draft,
-                                          insert_point, move_point, remove_point, set_minimum_diameter, set_curve, reset_point_curves, couple_point, validate, validate_settings)
+from cooling_tower.manual.geometry import (ManualSettings, Coordinate, GeometryError, MINIMUM_TOWER_DIAMETER_MM, MAXIMUM_MANUAL_CIRCLE_SEGMENTS, DEFAULT_COLOR_SCALE_LIMIT_S, manual_color_scale_limit, minimum_original_layer_time, OBJECT_RESOLUTION_STAGES, object_resolution_default, bounded_edit, bounded_coordinate_edit, initial_draft,
+                                          insert_point, move_point, remove_point, set_minimum_diameter, set_curve, reset_point_curves, validate, validate_settings)
 from cooling_tower.manual.layer_snap import snap_layer_height
 
 
 class ManualGenerationPanel(QWidget):
-    FORM_SETTINGS = ("minimum_diameter_mm","maximum_diameter_mm","foot_diameter_mm","maximum_foot_diameter_mm",
-                     "foot_height_mm","circle_segments","expansion_enabled","expansion_angle_deg",
-                     "contraction_enabled","contraction_angle_deg")
     draft_changed = Signal(object)
     generate_requested = Signal()
     export_requested = Signal()
@@ -39,7 +38,7 @@ class ManualGenerationPanel(QWidget):
     settings_visibility_changed = Signal()
 
     LABELS = {
-        "color_reference_time_s": ("Farbreferenz für Original-Layer", "s", 5, 30),
+        "color_reference_time_s": ("Gewünschte Layerzeit", "s", 3, 60),
         "minimum_diameter_mm": ("Minimaler Turm-Außendurchmesser", "mm", MINIMUM_TOWER_DIAMETER_MM, 1000),
         "maximum_diameter_mm": ("Maximaler Turm-Außendurchmesser", "mm", .1, 1000),
         "top_diameter_mm": ("Außendurchmesser der Turmspitze", "mm", .1, 1000),
@@ -48,12 +47,11 @@ class ManualGenerationPanel(QWidget):
         "maximum_foot_diameter_mm": ("Maximaler Fuß-Außendurchmesser", "mm", .1, 1000),
         "foot_height_mm": ("Standfußhöhe (ab Druckbett)", "mm", .05, 1000),
         "height_mm": ("Obere Turmhöhe (ab Druckbett)", "mm", .1, 1000),
-        "circle_segments": ("Turm-Kreissegmente", "", 12, 720),
+        "circle_segments": ("Turm-Kreissegmente", "", 12, MAXIMUM_MANUAL_CIRCLE_SEGMENTS),
         "expansion_angle_deg": ("Maximaler Aufweitungswinkel", "°", .1, 89),
         "contraction_angle_deg": ("Maximaler Verjüngungswinkel", "°", .1, 89),
         "overhang_angle_deg": ("Visueller Überhang-Grenzwinkel", "°", .1, 89),
-        "gradient_start_deficit_s": ("Layerdefizit: Farbbeginn", "s", 0, 29.9),
-        "gradient_full_deficit_s": ("Layerdefizit: vollständig Rot", "s", .1, 30),
+        "color_deficit_time_s": ("Layerzeitdefizit bis Rot", "s", 0, 60),
         "point_diameter_mm": ("Ausgewählter Punkt: Außendurchmesser", "mm", .01, 1000),
         "point_height_mm": ("Ausgewählter Punkt: Höhe", "mm", .001, 1000),
         "control_diameter_mm": ("Kurvengriff: Durchmesserposition", "mm", .01, 1000),
@@ -64,6 +62,8 @@ class ManualGenerationPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("manualGenerationPanel")
         self.settings = settings or ManualSettings()
+        self._color_scale_limit = DEFAULT_COLOR_SCALE_LIMIT_S
+        self._original_minimum_layer_time = None
         self._resolution_default_percent = object_resolution_default()
         self.draft = self.reference = self.initial = None
         self.selected = ""
@@ -108,27 +108,34 @@ class ManualGenerationPanel(QWidget):
         self.settings_pane.toggle_requested.connect(self.toggle_settings)
         self.splitter.addWidget(self.settings_pane)
         for title, names in (
-            ("Turm und Standfuß", ("circle_segments",)),
-            ("Geometrische Winkelgrenzen", ("expansion_angle_deg","contraction_angle_deg")),
-            ("Ausgewählter Profilpunkt und Kurve", ("control_diameter_mm","control_height_mm")),
-            ("Visuelle Prüfung", ("overhang_angle_deg","color_reference_time_s","gradient_start_deficit_s","gradient_full_deficit_s"))):
+            ("Turmform und Bearbeitung", ("circle_segments","expansion_angle_deg","control_diameter_mm","control_height_mm")),
+            ("Visuelle Prüfung", ("overhang_angle_deg",))):
             card = SectionCard(title)
             card.setProperty("manualSettings", True)
             card.body_divider.hide()
             form.addWidget(card)
             for name in names:
-                if name in {"expansion_angle_deg","contraction_angle_deg","overhang_angle_deg"}:
+                if name in {"expansion_angle_deg","overhang_angle_deg"}:
                     option = name.replace("_angle_deg","_enabled")
-                    text = {"expansion_enabled":"Aufweitung begrenzen", "contraction_enabled":"Verjüngung begrenzen",
+                    text = {"expansion_enabled":"Max. Aufweitungswinkel in Vorschau begrenzen",
                             "overhang_enabled":"Überhangstellen visuell markieren"}[option]
                     box = QCheckBox(text)
                     box.pressed.connect(self._begin_interaction)
                     box.released.connect(self._end_interaction)
                     box.toggled.connect(partial(self.change_setting,option))
                     self.checks[option] = box
-                    card.content_layout.addWidget(box)
+                    if name != "expansion_angle_deg":
+                        self.overhang_option,self.overhang_info_button = self._checkbox_with_hint(
+                            box,"Markiert überhängende Stellen am Turm rot. Der Grenzwinkel steht darunter. Ändert die Turmform nicht.")
+                        card.content_layout.addWidget(self.overhang_option)
                 card.content_layout.addWidget(self._numeric(name))
-            if title == "Turm und Standfuß":
+                if name == "expansion_angle_deg":
+                    self.expansion_option,self.expansion_info_button = self._checkbox_with_hint(box,
+                        "Verhindert beim Bearbeiten der Turmform ein stärkeres Aufweiten als oben eingestellt. "
+                        "Der Winkel wird zur Senkrechten gemessen.",
+                        accessible_name="Informationen zur Aufweitungsbegrenzung")
+                    card.content_layout.addWidget(self.expansion_option)
+            if title == "Turmform und Bearbeitung":
                 from cooling_tower.gui.widgets.simulation_option import SimulationOption
                 from cooling_tower.gui.texts import FULL_INFILL_HINT_HTML, FULL_INFILL_HINT_ACCESSIBLE, SOURCE_SUPPORT_HINT_HTML
                 self.full_infill_option = SimulationOption("100% Turmfüllung simulieren", FULL_INFILL_HINT_HTML,
@@ -140,36 +147,27 @@ class ManualGenerationPanel(QWidget):
                 for option in (self.full_infill_option, self.source_support_option):
                     card.content_layout.addWidget(option)
                     option.checkbox.toggled.connect(lambda _: self.draft_changed.emit(self.draft))
-                self.height_note = QLabel()
-                self.height_note.setWordWrap(True)
-                card.content_layout.addWidget(self.height_note)
-            elif title.startswith("Ausgewählter"):
                 box = QCheckBox("Vertikale Greifer auf Layer einrasten")
                 box.setToolTip("Aktiv: Greifer rasten auf Druckschichten ein. Aus: Höhen stufenlos ziehen. Zahlenfelder bleiben frei eingebbar.")
                 box.toggled.connect(partial(self.change_setting,"layer_snap_enabled"))
                 self.checks["layer_snap_enabled"] = box
-                card.content_layout.insertWidget(0,box)
-                self.selection_label = QLabel("Greifer auswählen oder Profil doppelklicken.")
-                self.selection_label.setWordWrap(True)
-                card.content_layout.insertWidget(0,self.selection_label)
-                self.segment_combo = WheelSafeComboBox()
-                self.segment_combo.addItems(["Ausgehender Abschnitt: gerade", "Ausgehender Abschnitt: Bézierkurve"])
-                self.segment_combo.currentIndexChanged.connect(self._segment_changed)
-                card.content_layout.addWidget(self.segment_combo)
-                self.smooth_checkbox = QCheckBox("Tangenten am ausgewählten Punkt koppeln")
-                self.smooth_checkbox.toggled.connect(self._smooth_changed)
-                card.content_layout.addWidget(self.smooth_checkbox)
+                self.layer_snap_option,self.layer_snap_info_button = self._checkbox_with_hint(box,
+                    "Beim Ziehen rasten Höhengreifer auf die Drucklayer ein. Ohne Häkchen sind Höhen stufenlos verstellbar. Zahlenfelder bleiben frei eingebbar.")
+                card.content_layout.insertWidget(0,self.layer_snap_option)
             elif title == "Visuelle Prüfung":
-                box = QCheckBox("Kritische Original-Layer anzeigen")
-                box.toggled.connect(partial(self.change_setting,"critical_layers_enabled"))
-                self.checks["critical_layers_enabled"] = box
-                card.content_layout.insertWidget(0,box)
-                self.overhang_note = QLabel()
-                self.overhang_note.setWordWrap(True)
-                card.content_layout.addWidget(self.overhang_note)
-                self.critical_note = QLabel()
-                self.critical_note.setWordWrap(True)
-                card.content_layout.addWidget(self.critical_note)
+                self.layer_time_controls = LayerTimeColorControls()
+                for name in ("color_info_button","color_enabled_checkbox","color_settings"):
+                    setattr(self,name,getattr(self.layer_time_controls,name))
+                self.color_range_slider=self.layer_time_controls.range_slider
+                self.color_scale_spin=self.layer_time_controls.scale_spin
+                self.checks["critical_layers_enabled"] = self.color_enabled_checkbox
+                self.color_enabled_checkbox.toggled.connect(partial(self.change_setting,"critical_layers_enabled"))
+                self.layer_time_controls.times_changed.connect(self._color_times_changed)
+                self.layer_time_controls.scale_changed.connect(self._color_scale_changed)
+                self.layer_time_controls.interaction_started.connect(self._begin_interaction)
+                self.layer_time_controls.interaction_finished.connect(self._end_interaction)
+                card.content_layout.addWidget(self.layer_time_controls)
+        self._sync_input_widths()
         self.reset_button = QPushButton("Alles zurücksetzen")
         self.reset_button.clicked.connect(self.reset_all)
         form.addWidget(self.reset_button)
@@ -330,6 +328,20 @@ class ManualGenerationPanel(QWidget):
         self.set_actions(False,False,False,False)
         self._view_changed("side")
 
+    def _checkbox_with_hint(self,checkbox,hint,*,accessible_name=None):
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        layout.setContentsMargins(0,METRICS.form_row_vertical_padding_px,
+                                  0,METRICS.form_row_vertical_padding_px)
+        layout.setSpacing(METRICS.setting_info_text_gap_px)
+        info = InfoToolButton(hint,accessible_name=accessible_name or f"Informationen zu {checkbox.text()}",
+                              object_name="settingInfoButton",diameter_px=METRICS.setting_info_diameter_px)
+        checkbox.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        layout.addWidget(info)
+        layout.addWidget(checkbox)
+        layout.addStretch(1)
+        return host,info
+
     def _numeric(self,name):
         label,unit,lo,hi = self.LABELS[name]
         spin = ManualSpinBox() if name == "circle_segments" else ManualDoubleSpinBox()
@@ -342,17 +354,30 @@ class ManualGenerationPanel(QWidget):
                                    default_provider=lambda:self.default_value(name),
                                    info_text="Alle Breiten sind Außendurchmesser. Fußhöhe und Turmhöhe sind absolute Z-Höhen über dem Druckbett." if unit == "mm" else
                                    "Winkel zur Vertikalen; lokale Radiussteigung. Die visuelle Prüfung verändert keine Geometrie." if unit == "°" else
-                                   "Gleiche Kreissegmentzahl für alle STL-Ringe; unabhängig von Drucklayern und Kurvenunterteilungen." if name == "circle_segments" else "")
+                                     "• Mehr Kreissegmente machen den Turm runder.\n"
+                                     "• Das Modell wird komplexer und die Berechnung dauert länger.\n"
+                                     "• Mehr Fahrwege vergrößern und verkomplizieren den G-Code.\n"
+                                     "• Maximal 256 Kreissegmente." if name == "circle_segments" else "")
         row.set_feedback_enabled(True)
         row.error_feedback_finished.connect(lambda:self._interaction_feedback.discard(name))
         row.reset_button.clicked.disconnect()
-        row.reset_button.clicked.connect(lambda:self.reset_value(name))
+        row.reset_button.clicked.connect(lambda:(self.reset_value(name),row.set_error(None)))
         spin.setKeyboardTracking(False)
         spin.valueChanged.connect(partial(self._numeric_changed,name))
-        spin.limit_attempted.connect(lambda value:self._numeric_changed(name,int(value) if name == "circle_segments" else value))
+        spin.limit_attempted.connect(lambda value:row.set_error(boundary_message(spin,value,"Segmente" if name=="circle_segments" else "Winkel" if unit=="°" else "Wert")))
         spin.lineEdit().editingFinished.connect(partial(self._detect_numeric_attempt,name))
         self.rows[name],self.editors[name] = row,spin
         return row
+
+    def _sync_input_widths(self):
+        spins=tuple(self.editors.values())
+        width=compact_manual_width(spins)
+        for spin in spins:spin.setFixedWidth(width)
+
+    def changeEvent(self,event):
+        super().changeEvent(event)
+        if event.type() in {QEvent.Type.StyleChange,QEvent.Type.FontChange,QEvent.Type.ApplicationFontChange} and hasattr(self,"layer_time_controls"):
+            QTimer.singleShot(0,self,self._sync_input_widths)
 
     def default_value(self,name):
         if name == "object_resolution_percent":
@@ -385,6 +410,8 @@ class ManualGenerationPanel(QWidget):
         self._committed_state = None
         self.draft = None
         self.reference = reference
+        self._color_scale_limit = manual_color_scale_limit(reference.context.layers)
+        self._original_minimum_layer_time = minimum_original_layer_time(reference.context.layers)
         self.selected = self.canvas.selected = ""
         s = settings or self.settings
         limit = reference.context.maximum_foot_diameter_mm
@@ -404,13 +431,19 @@ class ManualGenerationPanel(QWidget):
                                      foot_diameter_mm=draft.foot_diameter_mm)
         reference.context.validate(draft)
         self.canvas.set_reference(reference)
-        self.height_note.setText(reference.context.height_note)
         self.retry_button.hide()
         self._point_defaults = {p.identity:p.position for p in draft.points if p.kind != "free"}
         self._control_defaults = {(draft.points[i].identity,n):getattr(c,f"control{n}") for i,c in enumerate(draft.curves) for n in (1,2)}
         self.commit(draft)
 
     def commit(self,draft):
+        settings=draft.settings
+        maximum=min(settings.color_scale_max_time_s,self._color_scale_limit)
+        green=min(settings.color_reference_time_s,maximum)
+        deficit=(round(green-min(settings.color_red_time_s,green),6)
+                 if green<settings.color_reference_time_s else settings.color_deficit_time_s)
+        bounded_settings=replace(settings,color_scale_max_time_s=maximum,color_reference_time_s=green,color_deficit_time_s=deficit)
+        if bounded_settings!=settings:draft=replace(draft,settings=bounded_settings)
         if self.draft is not None and draft != self.draft and not self._history_restoring:
             if self._interaction_origin is None:
                 self._undo_stack.append(self._committed_state or self._editor_state())
@@ -464,29 +497,13 @@ class ManualGenerationPanel(QWidget):
         s = self.settings
         values = s.to_dict()
         if self.draft:
-            point = next((p for p in self.draft.points if p.identity == ("top" if self.selected == "top_width" else self.selected)),None)
-            if not self.selected:self.selection_label.setText("Kein Profilpunkt ausgewählt")
-            if point:
-                self.selection_label.setText(f"{'Freier Profilpunkt' if point.kind == 'free' else {'foot':'Fußrand','base':'Körperbeginn','top':'Oberer Abschluss'}[point.kind]} · {point.position.z_mm:.2f} mm")
-            if self.selected == "foot_height":
-                self.selection_label.setText("Fußübergang · vertikal verschieben")
-            if self.selected in self.canvas.LIMITS:
-                self.selection_label.setText(self.LABELS[self.selected][0]+" · horizontal verschieben")
             control = self._selected_control()
             if control:
                 i,n = control
                 p = getattr(self.draft.curves[i],f"control{n}")
                 values.update(control_diameter_mm=p.diameter_mm,control_height_mm=p.z_mm)
-                self.selection_label.setText(f"Bézier-Kontrollgriff {n} · Abschnitt {i+1}")
             self.rows["control_diameter_mm"].setVisible(control is not None)
             self.rows["control_height_mm"].setVisible(control is not None)
-            self.smooth_checkbox.setEnabled(point is not None and point.kind in {"base","free"})
-            with QSignalBlocker(self.smooth_checkbox): self.smooth_checkbox.setChecked(point.smooth if point else False)
-            index = self._segment_index()
-            self.segment_combo.setEnabled(index is not None and index > 0)
-            with QSignalBlocker(self.segment_combo):
-                self.segment_combo.setCurrentIndex(int(self.draft.curves[index].curved) if index is not None else 0)
-            self.critical_note.setText(f"Die Farben vergleichen ausschließlich die Original-Layer mit der Farbreferenz von {s.color_reference_time_s:g} s; sie bewerten nicht den manuellen Turm.")
         for name,spin in self.editors.items():
             with QSignalBlocker(spin):
                 value = values.get(name,self.default_value(name))
@@ -494,6 +511,9 @@ class ManualGenerationPanel(QWidget):
             self.rows[name].refresh_reset_state()
         for name,box in self.checks.items():
             with QSignalBlocker(box): box.setChecked(getattr(s,name))
+        self.color_settings.setVisible(s.critical_layers_enabled)
+        self.layer_time_controls.set_times(s.color_reference_time_s,s.color_deficit_time_s,s.color_scale_max_time_s,
+                                          scale_limit=self._color_scale_limit,original_minimum=self._original_minimum_layer_time)
         with QSignalBlocker(self.resolution_slider):
             self.resolution_slider.setValue(OBJECT_RESOLUTION_STAGES.index(s.object_resolution_percent)+1)
         self.resolution_label.setText(f"{s.object_resolution_percent} %")
@@ -605,7 +625,9 @@ class ManualGenerationPanel(QWidget):
                       value if name in {"height_mm","foot_height_mm"} else p.z_mm)
         elif name in {"control_diameter_mm","control_height_mm"}:
             control = self._selected_control()
-            if control: self.move_control(*control,self.editors["control_diameter_mm"].value(),self.editors["control_height_mm"].value())
+            if control:
+                error=self.move_control(*control,self.editors["control_diameter_mm"].value(),self.editors["control_height_mm"].value())
+                if error:self.rows[name].set_error(str(error))
         else:
             self.change_setting(name,value)
 
@@ -795,24 +817,18 @@ class ManualGenerationPanel(QWidget):
     def _selected_control(self):
         return tuple(map(int,self.selected.split(":")[1:])) if self.selected.startswith("control:") else None
 
-    def _segment_index(self):
-        if self.selected in {"foot","foot_height"}: return 0
-        if self.selected in {"top","top_width"} and self.draft is not None: return len(self.draft.curves)-1
-        control = self._selected_control()
-        if control: return control[0]
-        return next((i for i,p in enumerate(self.draft.points[:-1]) if p.identity == ("top" if self.selected == "top_width" else self.selected)),None) if self.draft else None
+    def _color_times_changed(self,reference,deficit):
+        if self._syncing or self._busy or self.draft is None:
+            return
+        settings = replace(self.settings,color_reference_time_s=reference,color_deficit_time_s=deficit)
+        self.commit(self._checked(replace(self.draft,settings=settings)))
 
-    def _segment_changed(self,index):
-        if self._syncing or self._busy or self.draft is None: return
-        i = self._segment_index()
-        if i is not None:
-            try: self.commit(self._checked(set_curve(self.draft,i,curved=bool(index))))
-            except GeometryError as e: self.feedback(e,"points"); self._sync()
-
-    def _smooth_changed(self,enabled):
-        if self._syncing or self._busy or self.draft is None: return
-        try: self.commit(self._checked(couple_point(self.draft,self.selected,enabled)))
-        except GeometryError as e: self.feedback(e,"points"); self._sync()
+    def _color_scale_changed(self,maximum,reference,deficit):
+        if self._syncing or self._busy or self.draft is None:return
+        settings=replace(self.settings,color_scale_max_time_s=maximum)
+        if reference!=settings.color_reference_time_s:
+            settings=replace(settings,color_reference_time_s=reference,color_deficit_time_s=deficit)
+        self.commit(self._checked(replace(self.draft,settings=settings)))
 
     def insert(self,z):
         if self._busy or self.draft is None: return
@@ -918,12 +934,30 @@ class ManualGenerationPanel(QWidget):
         self.commit(draft)
 
     def tower_reset_draft(self):
-        defaults = self.initial.settings if self.initial is not None else ManualSettings()
-        settings = replace(self.settings,**{name:getattr(defaults,name) for name in self.FORM_SETTINGS})
-        settings = replace(settings,maximum_foot_diameter_mm=self.default_value("maximum_foot_diameter_mm"))
-        return self._checked(initial_draft(settings,self.reference.context.layers,
-                                          self.reference.context.maximum_height_mm,self.reference.context.key,
-                                          foot_diameter_mm=self.default_value("foot_diameter_mm")))
+        # Geometry fields follow the restored points; every independent setting
+        # remains intact. Fit the standard profile inside the active limits.
+        settings = replace(self.settings,foot_height_mm=self.initial.settings.foot_height_mm,
+                           maximum_foot_diameter_mm=min(1000,max(self.settings.maximum_foot_diameter_mm,
+                                                                 self.settings.minimum_diameter_mm+2)),
+                           contraction_enabled=False)
+        draft = initial_draft(settings,self.reference.context.layers,
+                              self.reference.context.maximum_height_mm,self.reference.context.key,
+                              foot_diameter_mm=self.default_value("foot_diameter_mm"))
+        body = draft.base_diameter_mm/2
+        span = draft.foot_diameter_mm/2-body
+        factor = min(1,(self.settings.maximum_foot_diameter_mm/2-body)/span) if span else 1
+        if self.settings.contraction_enabled:
+            slope = -min(draft.curves[0].slope_extrema())
+            if slope > 0:
+                factor = min(factor,math.tan(math.radians(self.settings.contraction_angle_deg))/slope)
+        def fitted(position):
+            return replace(position,radius_mm=body+(position.radius_mm-body)*factor)
+        points = tuple(replace(point,position=fitted(point.position)) for point in draft.points)
+        curves = tuple(replace(curve,**{name:fitted(getattr(curve,name))
+                       for name in ("start","control1","control2","end")}) for curve in draft.curves)
+        settings = replace(self.settings,foot_diameter_mm=points[0].position.diameter_mm,
+                           foot_height_mm=points[1].position.z_mm)
+        return self._checked(replace(draft,settings=settings,points=points,curves=curves))
 
     def can_reset_tower(self):
         if self._busy or self.draft is None or self.reference is None:
@@ -962,7 +996,7 @@ class ManualGenerationPanel(QWidget):
         self.status_label.setText(str(error))
         self.status_changed.emit()
         row = self.rows.get(name)
-        if row is not None and name not in self._interaction_feedback:
+        if row is not None:
             self._interaction_feedback.add(name)
             row.set_error(str(error))
 
@@ -1020,16 +1054,11 @@ class ManualGenerationPanel(QWidget):
     def _apply_view_editability(self):
         if not hasattr(self,"canvas"): return
         editable = self.canvas.view in {"side","front"}
-        self.smooth_checkbox.setEnabled(editable and self.draft is not None and self.selected in {p.identity for p in self.draft.points[1:-1]})
         for name,row in self.rows.items():
-            if name not in {"color_reference_time_s","overhang_angle_deg","gradient_start_deficit_s","gradient_full_deficit_s"}:
+            if name not in {"color_reference_time_s","overhang_angle_deg","color_deficit_time_s"}:
                 row.setEnabled(editable)
-        for name in ("expansion_enabled","contraction_enabled"):
-            self.checks[name].setEnabled(editable)
+        self.checks["expansion_enabled"].setEnabled(editable)
         self.reset_button.setEnabled(self.can_reset_all())
-        if not editable:
-            self.segment_combo.setEnabled(False)
-            self.smooth_checkbox.setEnabled(False)
 
     def set_busy(self,busy,cancelling=False,exporting=False):
         self._busy = busy

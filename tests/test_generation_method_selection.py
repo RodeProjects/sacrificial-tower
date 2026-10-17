@@ -336,7 +336,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         for _ in range(5):
             self.app.processEvents()
         cards = window.manual_generation_panel.settings_content.findChildren(SectionCard)
-        self.assertEqual(len(cards), 4)
+        self.assertEqual(len(cards), 2)
         self.assertEqual(window.manual_generation_panel.settings_content.layout().spacing(), 0)
         for previous, following in zip(cards, cards[1:]):
             self.assertEqual(previous.geometry().bottom() + 1, following.y())

@@ -192,6 +192,19 @@ class EditorChangesTests(unittest.TestCase):
             QTest.qWait(15)
         self.assertIn(view.key(), view.cache, dialog.canvas.accessibleDescription())
         count = view.request_id
+        material=view.cache[view.key()].material
+        with patch.object(view,"_start_render",side_effect=AssertionError("color edit started a worker")):
+            previous_key = view.key()
+            dialog.color_enabled_checkbox.setChecked(True)
+            for red in (8, 10):
+                dialog.color_gradient.request_value("red", red)
+                dialog.canvas.grab()
+                self.assertNotEqual(view.key(), previous_key)
+                self.assertIs(view.cache[view.key()].material,material)
+                self.assertEqual(view.request_id,count)
+                previous_key = view.key()
+            dialog.target_spin.setValue(12)
+            self.assertEqual(view.key(), previous_key)
         dialog.canvas.zoom = 2
         dialog.canvas.pan = 15
         dialog.canvas._background = None
@@ -286,6 +299,7 @@ class EditorChangesTests(unittest.TestCase):
                 start.assert_called_once()
 
     def test_new_joint_scene_replaces_stale_label_during_rebuild(self):
+        from PySide6.QtGui import QColor, QPalette
         from cooling_tower.preview import PreviewScene, LineSegment3D, Point3D
         from cooling_tower.models import BedBounds
         w = self.window()
@@ -301,7 +315,10 @@ class EditorChangesTests(unittest.TestCase):
         self.assertIs(preview.canvas.scene, scene)
         self.assertNotIn("veraltet", preview.state_label.text())
         self.assertEqual("✓ Aktuell", preview.state_label.text())
+        self.assertEqual(preview.state_label.property("state"), "current")
+        self.assertEqual(preview.state_label.palette().color(QPalette.ColorRole.WindowText), QColor("#176b45"))
         self.assertEqual(preview.state, PreviewState.BUILDING)
+        self.assertFalse(preview.side_button.isEnabled())
 
     def test_rescan_restores_only_unchanged_profiles_per_role(self):
         w = self.window()

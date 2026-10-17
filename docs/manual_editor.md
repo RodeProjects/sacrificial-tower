@@ -53,7 +53,7 @@ vollständig neben die Ansichtsbuttons passt.
 
 ### Objektspezifische Simulationen
 
-Unter „Turm und Standfuß“ steht **100% Turmfüllung simulieren** mit derselben
+Unter „Turmform und Bearbeitung“ steht **100% Turmfüllung simulieren** mit derselben
 Erklärung wie im automatischen Modus. Die Form bleibt unverändert; der gemeinsame
 Prüfslice und das exportierte 3MF verwenden nur für den Turm 100% Füllung und
 das passende Füllmuster. Die Übernahme wird zusätzlich im erzeugten G-Code
@@ -259,14 +259,18 @@ Geometrie. Beim Auswählen eines Kontrollgriffs bleiben die Griffe seines
 zugehörigen Profilpunkts sichtbar.
 Ein Klick auf eine leere, nicht interaktive Fläche hebt die Auswahl auf;
 Navigationsbewegungen und Profildoppelklick bleiben davon getrennt.
-Innenpunkte können ihre Tangenten
-koppeln; beide Seiten erhalten dann dieselbe lokale Steigung.
+Bestehende gekoppelte Tangenten bleiben geometrisch unterstützt; beide Seiten
+haben dieselbe lokale Steigung. Der bisherige Kopplungsschalter und das
+Dropdown für gerade/Bézierabschnitte entfallen aus der linken Leiste.
+Griffziehen aktiviert weiterhin eine Bézierkurve, Punkt-Doppelklick setzt
+die angrenzenden Abschnitte zurück.
 
 Numerische Einstellungen besitzen Einheit, Info und bei vorhandenem Standardwert
 einen Reset. Wiederverwendbare
 manuelle Werte werden separat gespeichert, einschließlich Farbreferenz für das
-Original, Durchmessergrenzen, Fußwerte und Kreissegmentzahl. Im manuellen Modus
-gibt es weder eine gewünschte Mindest-Layerzeit noch eine Layerzeit-Toleranz.
+Original, Durchmessergrenzen, Fußwerte und Kreissegmentzahl. Die gewünschte Layerzeit
+im manuellen Modus dient ausschließlich der Einfärbung; es gibt weiterhin
+keine Zielzeit für die Turmberechnung und keine Layerzeit-Toleranz.
 Die Farbreferenz in „Visuelle Prüfung“ färbt ausschließlich Originalschichten;
 sie bewertet weder den gestalteten Turm noch das geprüfte Ergebnis. Der Gesamtreset
 erzeugt einen neuen gültigen Anfangsentwurf. Manuell hinzugefügte Profilpunkte
@@ -303,8 +307,11 @@ Die zehn redundanten linken Maß- und Grenzfelder sowie die Buttons
 „Punkt hinzufügen“ und „Punkt entfernen“ entfallen. Maße, Durchmessergrenzen
 und freie Profilpunktkoordinaten werden direkt in der Vorschau eingestellt;
 Punkte werden dort per Doppelklick hinzugefügt und per Rechtsklick oder
-Entf/Backspace entfernt. Links bleiben Kreissegmente, geometrische Winkelgrenzen,
-Layer-Snapping, Abschnittsmodus, Tangentenkopplung und visuelle Prüfeinstellungen.
+Entf/Backspace entfernt. Die linke Leiste ist auf zwei graue Bereiche reduziert:
+**Turmform und Bearbeitung** bündelt Kreissegmente, Aufweitungsgrenze,
+Layer-Snapping, Griffkoordinaten und Simulationsoptionen; **Visuelle Prüfung**
+enthält Überhangmarkierung und Zeitdefizit-Einfärbung. Die Verjüngungsgrenze
+besitzt keine linke Eingabe mehr; gespeicherte Werte bleiben kompatibel.
 Die beiden präzisen Béziergriff-Koordinatenfelder bleiben ebenfalls links, da
 der direkte Editor bei einem ausgewählten Kontrollgriff dessen Profilpunkt zeigt.
 Die Auswahl der Vorschaugreifer und das Hinzufügen von Punkten benötigen
@@ -336,14 +343,18 @@ Profil und die Druckbettplatzierung geprüft. So bleibt beispielsweise die Höhe
 eines freien Punkts beweglich, wenn sein Durchmesser bereits das Minimum erreicht.
 Die tatsächlich
 begrenzende Einstellung wird ausschließlich an Bezeichnung und Eingaberahmen
-kurz rot markiert; zusätzliche rote Meldungstexte unter den manuellen Feldern
-entfallen. Hintergrund und eingegebener Zahlenwert behalten ihre normale Farbe.
-Die Farbänderung hält 850 ms und blendet in 200 ms linear zur normalen Farbe zurück;
-die Haltephase ist 500 ms länger als die der Grenzlinie. Weitere Ereignisse während
-der Animation verlängern sie nicht; nach ihrem Ende kann ein neuer Grenzversuch
-die Markierung erneut auslösen. Der Grund bleibt im Footer und für assistive
-Technik verfügbar. Auch Werte, die Qt bereits
-an seinen Eingabegrenzen abfangen würde, gelangen zur fachlichen Grenzprüfung.
+kurz rot markiert. Unter dem betreffenden linken Eingabefeld erscheint zusätzlich
+der Grund, etwa „Max. Segmente = 256“. Der Text bleibt mindestens zwei Sekunden
+sichtbar; ein neuer Hinweis ersetzt ihn, eine gültige manuelle Eingabe entfernt
+ihn früher. Nach Ablauf erscheint er erst bei einem neuen ungültigen Versuch.
+Hintergrund und eingegebener Zahlenwert behalten ihre normale Farbe. Numerische
+Grenzverletzungen werden beim Übernehmen auf die zulässige Unter-/Obergrenze
+korrigiert; auch Pfeilklicks an einer bereits erreichten Grenze zeigen den Grund.
+Ungültige Zeichen und nicht ganzzahlige Segmentzahlen erhalten eigene Hinweise.
+Punkt und Komma werden als Dezimaltrennzeichen akzeptiert und als Komma angezeigt.
+Die linken Zahlenfelder teilen die anhand ihrer maximal plausiblen Werte,
+Einheiten, Schrift und Pfeiltasten gemessene Breite. Änderungen der Schrift oder
+Darstellung messen sie erneut. Der Grund bleibt auch für assistive Technik verfügbar.
 Unmögliche Optionswechsel werden zurückgewiesen. Der letzte gültige Entwurf
 bleibt erhalten. Bei einer für die Quelle ungültigen gespeicherten Konfiguration
 können Einstellungen korrigiert und die Initialisierung erneut versucht werden.
@@ -594,7 +605,9 @@ der gewählten Rasterqualität. Originaldaten, Analyse, Turm und Druckexport ble
 in ihrer bisherigen Genauigkeit. Die Regleränderung erneuert nur den
 Original-Flächencache; Pan, Zoom, Einpassen und Transparenz bauen keine neuen
 Flächen. Fertige Ansichten werden zusätzlich wiederverwendet: höchstens zehn
-Zeichenfolgen mit zusammen maximal 32 MiB einschließlich ihrer X-Ray-Varianten.
+Zeichenfolgen mit einem gemeinsamen Budget von 64 MiB einschließlich ihrer
+X-Ray-Varianten und der vorbereiteten Farbmaterialien. Gemeinsam verwendete
+Materialpuffer werden nur einmal gezählt; die aktuelle Ansicht bleibt erhalten.
 Quellenwechsel löschen diesen Cache. Konturen werden unabhängig von der Netzstufe
 zwischengespeichert (höchstens acht Varianten, konservatives Speicherbudget 16 MiB).
 Das Zurückschalten auf eine bereits aufgebaute Stufe startet keinen neuen Worker.
@@ -615,18 +628,32 @@ Silhouette geschlossener sicherer Netze, bis das Polygonnetz fertig ist. Bei
 unsicheren umfangreichen Netzen bleibt eine begrenzte Drahtvorschau sichtbar,
 bis die Originaldarstellung bereitsteht.
 
-Bei insgesamt mehr als 6.000 Originaldreiecken zeichnet der Worker die
-Flächenschattierung in ein eigenes begrenztes `QImage` und zeichnet dieses einmal
-in die fertige `QPicture`-Zeichenfolge. Die lange Bildkante steigt mit der
+Der Worker zeichnet die Flächenschattierung in eigene begrenzte `QImage`-Puffer.
+Die lange Bildkante steigt mit der
 Qualitätspräferenz von rund 512 auf 1.280 Pixel (plus kleiner Rand). Der GUI-Thread
 spielt beim Pan/Zoom dadurch ein Bild statt zehntausender Flächen-/Knotenbefehle
 ab. Originalkonturen bleiben Vektoren in tatsächlicher Bildschirmpräzision;
 innere Schattierung darf bei niedrigen Stufen bzw. starkem Zoom weicher sein.
 Alle großen Netzstufen verzichten auf Einzelpunkte; Kanten erscheinen erst ab
-75 %. Kleine Quellen behalten die volle vektorielle Detaildarstellung. Normal-
+75 %. Kleine Quellen behalten ihre Kanten und Einzelpunkte in diesen Puffern. Normal-
 und X-Ray-Bilder werden separat mit ihrer bisherigen Deckkraft pro Fläche
 berechnet; X-Ray wird nicht nachträglich als pauschale Bildtransparenz angenähert.
 Widget- oder `QPixmap`-Zugriffe erfolgen dabei nicht im Worker.
+
+Reine Änderungen der Zeitdefizit-Einfärbung verwenden diese vorbereitete
+Darstellung sofort wieder: Netzreduktion, Projektion, Beleuchtung, Konturen,
+Turmtessellierung und Platzierung bleiben unverändert. In Profilansichten werden
+bereits schattierte grüne und rote Endfarben je Originalschicht interpoliert;
+dadurch bleiben auch die ursprünglichen Netzdetails und die separate
+X-Ray-Komposition erhalten. Räumliche Ansichten und reine G-Code-Quellen
+verwenden vorbereitete Layerpfade. Ein direkt geändertes Farbbild wird ohne
+erneute Bildserialisierung wiedergegeben. Die manuellen Zeitgreifer aktualisieren
+die Einfärbung während des Ziehens. Auch der Bereichseditor verwendet
+die vorbereiteten Materialien für seine Farbänderungen.
+Wird während des ersten Aufbaus nur eine Farbe geändert, läuft derselbe
+Geometrieauftrag weiter; sein Ergebnis erhält die neuesten Farbwerte.
+Ansichts-, Rotations-, Quellen- und Auflösungsänderungen können weiterhin einen
+neuen Geometrieaufbau erfordern. Die Farbfunktion verändert keine Druckdaten.
 
 Während eines Vorbereitungs-/Generierungs-/Exportauftrags ist der
 Auflösungsregler gesperrt.
@@ -668,7 +695,8 @@ bleiben Originalhöhe, Layermaßstab und Profilhöhe deckungsgleich. Der Turm bl
 in diesen beiden Ansichten ein gefülltes bearbeitbares Profil.
 Turmaktionen, Auswahl und erneutes Einstellen derselben Drehung erneuern dort
 keine Originalflächen. Ein neuer Drehwinkel erneuert den Original-Flächencache
-einmal; Originalauflösung und Originalfarbparameter aktualisieren ihn ebenfalls.
+einmal; eine neue Originalauflösung baut die Darstellung ebenfalls neu auf.
+Originalfarbparameter verwenden die vorbereitete Darstellung wieder.
 Die Vorschau zeigt beim Hover keine Popup-Bedienhinweise; die Bedienung steht
 dauerhaft in der Legende darunter.
 
@@ -775,8 +803,8 @@ unbeschränkten Aufwand; bei Nichterfüllung wird abgebrochen statt ein ungenaue
 Mesh als gültig auszugeben.
 
 Alle STL-Ringe einschließlich Boden verwenden exakt dieselbe tatsächliche
-Kreissegmentzahl (12–720). Ohne eigene Wahl wird bei der Initialisierung
-`max(30, ceil(Fußdurchmesser in mm))` festgelegt und anschließend als eigener
+Kreissegmentzahl (12–256). Ohne eigene Wahl wird bei der Initialisierung
+`min(256, max(30, ceil(Fußdurchmesser in mm)))` festgelegt und anschließend als eigener
 manueller Wert geführt. Die radiale Polygonabweichung in XY ist davon getrennt:
 `Radius * (1 - cos(pi / Segmentzahl))`. Die räumliche Turmanzeige verwendet
 immer die vollständige eingestellte Kreissegmentzahl, unabhängig von der
@@ -799,10 +827,110 @@ projizieren das Original orthogonal neben bzw. vor das zweidimensionale Turmprof
 Sie erzeugen keine fiktive Originalgeometrie aus G-Code.
 Ohne Original-STL werden ausschließlich die vorhandenen Druckbahnen angezeigt.
 
-Kritische Originalschichten verwenden exakt `LayerRangeCanvas.layer_color()`
-mit den tatsächlichen ursprünglichen Layerzeiten. Farbreferenz, Beginn des Defizitverlaufs
-und volle Rotmarkierung sind eigene manuelle Werte. Sie zeigen den vorbereiteten
-Originalstand; geprüfte gemeinsame Layerzeiten stehen getrennt im Ergebnis.
+**Layerzeit-Einfärbungen aktivieren** bewertet die ursprünglichen Layerzeiten.
+Die Checkbox steht direkt hinter ihrer Beschriftung. Erst nach Aktivierung
+erscheint eine Leiste mit den Abschnitten **Rot**, **Übergang** und **Grün**.
+„Rot“ steht fest linksbündig, „Grün“ fest rechtsbündig über der Leiste.
+„Übergang“ bleibt mittig über einem vorhandenen Farbverlauf; fehlt dort Platz,
+wird nur diese Beschriftung eingekürzt beziehungsweise ausgeblendet.
+Separate Zahlenfelder und Resetbuttons für die beiden Zeitgrenzen entfallen.
+Schwarze Striche in der Leiste markieren die tatsächlichen Grenzen; darunter
+sind sie mit dunklen Greifpunkten verbunden. Hover, Tastaturfokus und Ziehen
+heben jeweils Punkt und zugehörigen Strich gemeinsam blau hervor.
+Die Punkte lassen sich mit der Maus ziehen oder per Pfeiltaste um 0,1 s ändern.
+Bild-Auf/Ab ändert um 1 s. Ein vollständiger Zug bildet einen Undo-Schritt.
+Bei enger Lage werden die Punkte horizontal auseinandergerückt, während ihre
+Verbindungslinien die tatsächlichen Skalenpositionen behalten. Die Grenzwerte
+bleiben direkt unter ihren Greifpunkten. Bei einer Überschneidung weicht nur
+die linke 0 beziehungsweise die rechte Endwertbox in eine zweite Zeile aus;
+beide Seiten reagieren unabhängig. Ihre grauen Orientierungslinien verlängern
+sich bis kurz vor den verschobenen Wert und lassen Text und Greifpunkte frei.
+Auch in normaler Position sind die äußeren Striche etwas länger, ohne die
+Werte weiter nach unten zu setzen.
+
+Layer ab einschließlich der grünen Layerzeit (Standard 10 s) sind grün.
+Die grüne Grenze reicht von 3 s bis zum gewählten Skalenende.
+Layer bis einschließlich der roten Layerzeit (Standard 6 s) sind vollständig rot.
+Dazwischen liegt ein linearer Übergang, bei den Standards mit dem mittleren
+Mischton bei 8 s. Die rote Grenze darf nicht negativ sein und darf die grüne
+nicht überschreiten. Bei gleicher Zeit entfällt der Übergang samt Überschrift:
+unter der gemeinsamen Grenze ist das Original rot, ab der Grenze grün.
+Die Greifpunkte bleiben auch dann horizontal getrennt und lassen sich mit Maus
+und Tastatur wieder auseinanderziehen. Die Greifer können weder einander überschreiten
+noch den dargestellten Zeitbereich verlassen. Maus und Tastatur stoppen an den
+Grenzen ohne roten Hinweis. Nur ungültige Eingaben in der Endwertbox zeigen eine
+kurze rote Erklärung für zwei Sekunden; eine gültige Boxeingabe blendet sie früher
+aus. Die beiden Info-Icons für Einfärbung und STL-Auflösung erklären jeweils nur
+die wesentliche Wirkung in wenigen kurzen Zeilen.
+
+Ein kleines graues, nach oben zeigendes Dreieck **unter** der Farbleiste markiert
+die tatsächliche kürzeste Original-Layerzeit. Hover oder Aktivierung zeigt den
+exakten Messwert sowie den auf 0,1 s kaufmännisch gerundeten Rastwert. Beim Ziehen
+rasten beide Farbgrenzen innerhalb von 6 Pixeln am Originalminimum ein, sofern
+der gerundete Wert ihre Grenzen erfüllt. Weiterziehen über 10 Pixel löst die
+Rastung; die kleine Hysterese verhindert Flackern. Dreieck und Greifer werden
+währenddessen blau hervorgehoben. Der Greifpunkt bleibt unterhalb des Dreiecks
+bedienbar; eine gemeinsame Grenzlinie darf während der Rastung hinter dem
+Dreieck liegen. Wenn nur der Ersatztext passt, wird dieser hervorgehoben.
+Die Grün-Grenze bleibt mindestens 3 s, Rot und Grün überholen sich nicht.
+Reiner Klick, Tastatur, Laden, Quellenwechsel oder Skalenänderungen rasten nicht
+automatisch ein. Der ungerundete Messwert und die übrigen Grenzen bleiben erhalten.
+
+Liegt das Minimum außerhalb der gewählten Skala oder würde das sichtbare Dreieck
+Greifpunkte, Verbindungslinien oder Skalenenden überdecken, entfällt der Pfeil.
+Stattdessen steht „Min. Layerzeit der STL: … s“ in dezenter Schrift unter der gesamten Leiste samt
+Greifern, Werten und gegebenenfalls abgesenkter Endwertbox. Bei mehr Platz kehrt
+der Pfeil automatisch zurück. Ohne verlässliche Layerzeiten entfällt die Anzeige.
+Der ungerundete Messwert wird einmal beim Laden aus den vorbereiteten
+Original-Layern bestimmt; Farbänderungen, Formreset und Skalierung ändern ihn
+nicht. Er wird nicht als zusätzliche Benutzereinstellung gespeichert.
+
+Das Skalenende rechts ist eine kompakte Sekunden-Eingabe (Standard 14 s,
+0,1-s-Schritte, mindestens 3 s); der linke Skalenstart bleibt 0 s.
+Die erlaubte Obergrenze ist normalerweise 60 s. Hat das vorbereitete Original
+eine längere Layerzeit, ist dessen tatsächliche maximale Layerzeit die Grenze,
+auf einen erreichbaren 0,1-s-Schritt abgerundet. Maßgeblich sind alle Layer des
+Originals, unabhängig von Turmform, Farbschwellen und Ansicht. Die Grenze wird
+einmal beim Laden des Originals bestimmt; es ist kein neuer Slice nötig.
+Dieselbe Obergrenze gilt für den grünen Greifer. Beim Wechsel zu einem Objekt
+mit kleinerem Maximum werden Endwert und betroffene Farbgrenzen gemeinsam
+angepasst; die grüne Grenze bleibt immer innerhalb der gewählten Skala.
+Ein höheres Objektmaximum erweitert nur den erlaubten Eingabebereich, nicht
+automatisch den gewählten Skalenendwert. Beim Objektwechsel oder Laden von
+Einstellungen werden zu hohe Skalenendwerte auf die neue Obergrenze begrenzt.
+Beim Verkleinern werden darüber liegende Farbgrenzen ans neue Ende verschoben.
+Grün erreicht das Skalenende; falls nötig folgt Rot bis zur gleichen Grenze.
+Beispielsweise ergeben 3 s Skalenende aus den Standards eine gemeinsame harte
+Farbgrenze bei 3 s. Die gesamte Änderung bildet einen Undo-Schritt.
+Bereits passende Grenzen bleiben erhalten. Eine reine Skalenänderung verschiebt
+nur die proportionalen Positionen; geänderte Grenzen färben die vorbereitete
+Originaldarstellung neu ein. Turm und Platzierung werden nicht neu aufgebaut.
+Die Eingabe akzeptiert Punkt und Komma und
+zeigt ein Komma. Während laufender Aufträge sind Greifer und Eingabe gesperrt.
+„Alles zurücksetzen“ stellt Rot bei 6 s, Grün bei 10 s und das Skalenende 14 s her.
+„Turmform zurücksetzen“ erhält diese Darstellungseinstellungen.
+
+Gespeichert werden ab Schema 12 `color_reference_time_s` und
+`color_deficit_time_s` (bis Schema 17 positiv, ab Schema 18 auch 0 für eine harte
+Farbgrenze). Die absolute Rotgrenze `color_red_time_s` wird nur noch
+als Differenz abgeleitet und nicht gespeichert. Ab Schema 14 kommt das rein
+visuelle `color_scale_max_time_s` hinzu. Die Migration 11→12 erhält die
+bisher eingestellte Übergangsbreite und kehrt die Färbung entsprechend auf
+Layerzeitdefizite um; Einzelheiten und Sicherungen stehen in der
+[Migrationsdokumentation](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-18).
+
+Alle manuellen Darstellungswege einschließlich STL-Flächen, Silhouetten und
+Druckbahnen verwenden dieselbe Interpolation `LayerRangeCanvas.layer_time_color()`.
+Abschalten erhält die Werte; Formreset und Turmerzeugung ändern die Farbgrenzen
+nicht. Die Farben beziehen sich ausschließlich auf den vorbereiteten Originalstand;
+geprüfte gemeinsame Layerzeiten stehen getrennt im Ergebnis. Der Bereichseditor
+verwendet dieselbe Farbleiste, ihre Bedienung und die absoluten Farbgrenzen;
+seine Einfärbung bleibt unabhängig von der Mindest-Layerzeit für die Turmberechnung.
+Dort werden die Anzeigeoptionen erst mit Übernehmen in die laufende Sitzung
+übertragen; Abbrechen verwirft den Entwurf.
+Die sichere Umstellung bestehender manueller Einstellungen bis Schema 18
+ist unter [Einstellungsmigrationen](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-18)
+beschrieben.
 
 „Überhangstellen visuell markieren“ ist standardmäßig aktiviert; eine gespeicherte
 Abwahl bleibt erhalten. „Alles zurücksetzen“ aktiviert die Markierung wieder.
@@ -810,9 +938,9 @@ Die Überhangmarkierung ist rein visuell. Sie betrifft nur nach außen wachsende
 Abschnitte und prüft die lokale positive Steigung, einschließlich exakter
 Übergangspunkte am Warnwinkel. Ein interpretierbarer Orca-/Bambu-/Anycubic-Wert
 `support_threshold_angle` wird von der Horizontalen umgerechnet:
-`90° - Profilwert`. Fehlende oder mehrdeutige Werte verwenden einen sichtbar
-erklärten Fallback von 45° zur Vertikalen. Der Profilstandard bleibt über Reset
-verfügbar; eigene Winkel werden als solche gekennzeichnet.
+`90° - Profilwert`. Fehlende oder mehrdeutige Werte verwenden 45° zur Vertikalen.
+Der Profilstandard bleibt über Reset verfügbar. Die bisherigen zusätzlichen
+Profilwert- und Farbvergleichstexte entfallen aus der linken Leiste.
 
 Geometriebearbeitung erneuert das Turmprofil und nutzt die zwischengespeicherte
 Originaldarstellung weiter. Räumliche Original- und Turmflächen werden als
@@ -857,8 +985,10 @@ Proxy und vollständige Flächen verwenden dieselbe Originalrotation und denselb
 Mittelpunkt; 0° am Slider entspricht der Originalausrichtung. Auch die statischen
 Ansichten verwenden diese Rotation. Die Quellkoordinaten bleiben unverändert.
 Der Worker zeichnet ausschließlich in eigene `QPicture`-/`QImage`-Objekte; `QPixmap` und
-Widgets bleiben im GUI-Thread. Request-ID und vollständige Kamera-/Farbidentität
-verwerfen verspätete Ergebnisse. Ein Quellen-/Ansichtswechsel bricht ersetzte Jobs ab. Das
+Widgets bleiben im GUI-Thread. Request-ID und Kamera-/Quellen-/Auflösungsidentität
+verwerfen verspätete Geometrieergebnisse; bei ausschließlich geänderten Farben
+wird das passende Ergebnis unmittelbar neu eingefärbt.
+Ein Quellen-/Ansichtswechsel bricht ersetzte Jobs ab. Das
 Schließen des Hauptfensters verhindert neue Renderjobs und nutzt den zentralen
 kontrollierten Shutdown.
 Der Wechsel zu einer direkt gezeichneten Auflösungsstufe beendet ausstehende
@@ -886,7 +1016,7 @@ eingepasst, Profilansicht ohne kritische Layerfarben, auf demselben Windows-Host
 | `Test-STL (manifold) gekürzt.stl` | 40.598 | 17.062 | 25.996 | 381 ms | 2,3 ms | 6,7 / 0,6 ms |
 | `Test-STL Vase (manifold).stl` | 46.336 | 9.292 | 27.560 | 162 ms | 1,3 ms | 1,7 / 0,4 ms |
 
-Der kalte Aufbau umfasst Reduktion und beide Rasterbilder im Worker; beim
+Der kalte Aufbau umfasst Reduktion und die benötigten Materialpuffer im Worker; beim
 erneuten Wählen einer bereits aufgebauten Stufe wird ihre gesamte Zeichenfolge
 wiederverwendet. Diese Werte sind modell-/geräteabhängig und messen nicht die
 komplette Anwendung. `test_manual_view_performance.py` sichert alle positiven
@@ -991,10 +1121,14 @@ abgebrochene oder unvollständige Läufe werden nicht als Ergebnis übernommen.
 
 Im manuellen Footer steht **Turmform zurücksetzen** direkt rechts neben
 **Alles zurücksetzen**. Der Formreset stellt die Standardform wieder her und
-entfernt freie Punkte sowie Kurvenanpassungen. Er setzt auch minimale/maximale
-Turmdurchmesser, Fußdurchmesser/-höhe/-grenze, Kreissegmente und geometrische
-Aufweitungs-/Verjüngungsgrenzen auf Standards zurück. Visuelle Präferenzen,
-Layer-Snapping, Originalauflösung und Originaldrehung bleiben erhalten;
+entfernt freie Punkte sowie Kurvenanpassungen. Er stellt feste Profilpunkte
+und Béziergriffe einschließlich Fußdurchmesser und Fußhöhe wieder her.
+Alle unabhängigen Einstellungen bleiben erhalten, insbesondere Durchmessergrenzen,
+Kreissegmente, Winkelgrenzen, Simulationsoptionen, visuelle Präferenzen,
+Layer-Snapping, Originalauflösung und Originaldrehung. Die Standardform wird
+innerhalb der weiterhin gültigen Grenzen aufgebaut: Der Körper verwendet das
+aktuelle Mindestmaß, der Standardfuß wird nötigenfalls an Fußbreiten- und
+Verjüngungsgrenze angepasst. Dabei werden keine Grenzen automatisch erweitert;
 das letzte geprüfte Ergebnis bleibt für den bisherigen Export verfügbar und
 wird bei abweichender Form als veraltet markiert. Der Button ist auch in der
 freien Ansicht nutzbar und während eines laufenden Auftrags gesperrt.
@@ -1063,12 +1197,12 @@ Bei einem fehlgeschlagenen Slice bleiben nur diese Diagnoseverzeichnisse in
 einem separaten `manual_failed_*`-Ordner erhalten; der Fehlermeldung ist dessen
 Pfad beigefügt. Unvollständige Druckartefakte werden weiterhin freigegeben.
 
-`manual_settings.json` hat ein eigenes Schema 8 und läuft über
+`manual_settings.json` hat ein eigenes versioniertes Format und läuft über
 `VersionedJsonStore`. Geometriepunkte, Quellenbindung und Artefakte werden nicht
 persistiert. Unbekannte neuere, beschädigte oder extern geänderte Dateien
 werden nicht überschrieben. 1→2 übernimmt die alte Zielzeit ausschließlich als
 Farbreferenz für Originalschichten und entfernt die Toleranz. Details zur
-direkten und mehrstufigen 0→1→2→3→4→5→6→7→8-Migration, zum Layer-Snapping,
+direkten und mehrstufigen Migration, zum Layer-Snapping,
 zur Vorschauauflösung und den
 Sicherungen stehen in [Persistenz](settings_migrations.md).
 

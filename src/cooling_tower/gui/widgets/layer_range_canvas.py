@@ -49,8 +49,8 @@ class LayerRangeCanvas(QWidget):
         self.target_time_s = 10.0
         self.time_coloring_enabled = False
         self.xray_enabled = False
-        self.gradient_start_deficit_s = 0.0
-        self.gradient_full_deficit_s = 1.0
+        self.color_green_time_s = 10.0
+        self.color_red_time_s = 6.0
         self.zoom = 1.0
         self.pan = 0.0
         self.pan_x = 0.0
@@ -147,8 +147,6 @@ class LayerRangeCanvas(QWidget):
 
     def set_target_time(self, value):
         self.target_time_s = value
-        self._background = None
-        self.update()
 
     def set_resolution(self, percent):
         from cooling_tower.manual.geometry import OBJECT_RESOLUTION_STAGES
@@ -172,10 +170,10 @@ class LayerRangeCanvas(QWidget):
         from cooling_tower.gui.object_view import OriginalObjectView
         self.object_view = OriginalObjectView(self, artifact, manager)
 
-    def set_color_thresholds(self, start, full):
-        if not math.isfinite(start) or not math.isfinite(full) or not 0 <= start < full:
-            raise ValueError("Die Farbgrenzen müssen endlich sein und 0 ≤ Beginn < vollständig Rot erfüllen.")
-        self.gradient_start_deficit_s, self.gradient_full_deficit_s = start, full
+    def set_color_times(self, green, red):
+        if not math.isfinite(green) or not math.isfinite(red) or not 0 <= red <= green:
+            raise ValueError("Die Farbgrenzen müssen endlich sein und 0 ≤ Rot ≤ Grün erfüllen.")
+        self.color_green_time_s, self.color_red_time_s = green, red
         self._background = None
         self.update()
 
@@ -287,6 +285,15 @@ class LayerRangeCanvas(QWidget):
         return QRectF(x, upper - 7, 30, 14), QRectF(x, lower - 7, 30, 14)
 
     @classmethod
+    def layer_time_color(cls, green_time, red_time, actual):
+        """Interpolate absolute original-layer times, including a hard boundary."""
+        if green_time==red_time:
+            return QColor(cls.OBJECT_COLOR if actual>=green_time else cls.CRITICAL_COLOR)
+        ratio = min(1.0, max(0.0, (actual-green_time)/(red_time-green_time)))
+        green, red = QColor(cls.OBJECT_COLOR), QColor(cls.CRITICAL_COLOR)
+        return QColor(*(round(a+(b-a)*ratio) for a,b in zip(green.getRgb()[:3],red.getRgb()[:3])))
+
+    @classmethod
     def layer_color(cls, target, actual, start_deficit_s=0.0, full_deficit_s=1.0):
         ratio = min(1.0, max(0.0, (target - actual - start_deficit_s) / (full_deficit_s - start_deficit_s)))
         green, red = QColor(cls.OBJECT_COLOR), QColor(cls.CRITICAL_COLOR)
@@ -317,8 +324,8 @@ class LayerRangeCanvas(QWidget):
             height = max(0.7, self.y_for_z(self.bottoms[position]) - y)
             if y > self.height() or y + height < 0:
                 continue
-            color = (self.layer_color(self.target_time_s, self.layers[position].total_time_s,
-                                     self.gradient_start_deficit_s, self.gradient_full_deficit_s)
+            color = (self.layer_time_color(self.color_green_time_s, self.color_red_time_s,
+                                          self.layers[position].total_time_s)
                      if self.time_coloring_enabled else QColor(self.NEUTRAL_OBJECT_COLOR))
             for a, b in intervals:
                 paths[color.rgb()].addRect(QRectF(self.x_for_position(a), y, max(0.7, self.x_for_position(b) - self.x_for_position(a)), height))

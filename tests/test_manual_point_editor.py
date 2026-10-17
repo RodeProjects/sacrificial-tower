@@ -322,7 +322,8 @@ class ManualPointEditorTests(unittest.TestCase):
                 with self.subTest(identity_kind=identity_kind,delta=delta):
                     p.initialize(normal,ManualSettings())
                     p.insert(20);identity=p.selected;p.move(identity,21.060426,20.071234)
-                    p.segment_combo.setCurrentIndex(1)
+                    from cooling_tower.manual.geometry import set_curve
+                    p.commit(set_curve(p.draft,2,curved=True))
                     if identity_kind=="control":identity="control:2:1"
                     p.select(identity);c=p.canvas
                     handle=next(pos for name,pos,_ in c.handles() if name==identity)
@@ -469,7 +470,8 @@ class ManualPointEditorTests(unittest.TestCase):
 
     def test_coupled_bezier_attempt_shows_both_violated_widths(self):
         p=self.panel;c=p.canvas;p.insert(20);p.move(p.selected,20,20)
-        p.smooth_checkbox.setChecked(True)
+        from cooling_tower.manual.geometry import couple_point
+        p.commit(couple_point(p.draft,p.selected,True))
         p._control_from_canvas(1,2,200,17)
         self.assertEqual(set(c._width_limit_settings),{"minimum_diameter_mm","maximum_diameter_mm"})
 

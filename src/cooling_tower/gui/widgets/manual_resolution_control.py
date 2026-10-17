@@ -149,12 +149,10 @@ class ResolutionHeading(QWidget):
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet("font-size: 8pt; padding: 0;")
         self.info_button=InfoToolButton(
-            "Diese Einstellung betrifft nur die Darstellung des Originalobjekts in der Vorschau.\n"
-            "0 % zeigt die Originalsilhouette. Alle Stufen darüber wählen die Netzqualität automatisch.\n"
-            "Der Prozentwert gewichtet Performance und Optik; er ist kein Anteil der Originalflächen.\n"
-            "Kleine Objekte behalten ihr Originalnetz. Unklare Bereiche bleiben geschützt.\n"
-            "Bei großen Objekten zeigen niedrige Stufen glatte Flächen, hohe Stufen mehr Netzdetails.\n"
-            "Beim Export wird das Originalobjekt immer in voller Originalqualität exportiert.",self,
+            "Nur für die Vorschau:\n"
+            "• 0 %: Silhouette.\n"
+            "• Niedrig: schneller. Hoch: mehr Details.\n"
+            "Export immer in Originalqualität.",self,
             accessible_name="Informationen zur STL-Vorschauauflösung",
             object_name="settingInfoButton",
             diameter_px=self.title.fontMetrics().height())

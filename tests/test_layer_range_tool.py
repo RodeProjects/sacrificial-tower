@@ -471,15 +471,15 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertTrue(dialog.legend.color_key.isHidden())
         self.assertFalse(canvas.time_coloring_enabled)
         self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.NEUTRAL_OBJECT_COLOR)
-        dialog.color_start_spin.setValue(.5)
-        dialog.color_full_spin.setValue(1.5)
+        dialog.color_gradient.request_value('red', 11)
+        dialog.color_gradient.request_value('green', 12)
         dialog.target_spin.setValue(20)
         self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.NEUTRAL_OBJECT_COLOR)
         dialog.color_enabled_checkbox.setChecked(True)
         self._settle_layout()
         self.assertFalse(dialog.color_settings.isHidden())
         self.assertFalse(dialog.legend.color_key.isHidden())
-        self.assertEqual((dialog.color_start_spin.value(),dialog.color_full_spin.value()),(.5,1.5))
+        self.assertEqual(dialog.color_thresholds(),(10,12))
         self.assertEqual(canvas.grab().toImage().pixelColor(point).name(),canvas.CRITICAL_COLOR)
         self.assertEqual(dialog.ranges,ranges)
 
@@ -538,7 +538,7 @@ class LayerRangeUiTests(unittest.TestCase):
     def test_layer_inputs_use_compact_height_without_clipping_text_or_arrows(self):
         dialog=self._styled_dialog()
         self._settle_layout()
-        spins=(dialog.target_spin,dialog.color_start_spin,dialog.color_full_spin,
+        spins=(dialog.target_spin,
                dialog.new_start_spin,dialog.new_end_spin,
                *(spin for _,first,last,_ in dialog.range_rows for spin in (first,last)))
         for spin in spins:
@@ -617,9 +617,9 @@ class LayerRangeUiTests(unittest.TestCase):
             self.assertAlmostEqual(dialog.target_spin.y(), dialog.target_info_button.parentWidget().y()
                              + (dialog.target_info_button.parentWidget().height() - dialog.target_spin.height()) // 2, delta=1)
             self.assertLessEqual(dialog.color_info_button.parentWidget().height(), dialog.settings_panel.height())
-            color_label = next(label for label in dialog.settings_panel.findChildren(QLabel)
-                               if label.text() == "Zeitdefizit-Einfärbung aktivieren")
-            self.assertLessEqual(color_label.height(), color_label.fontMetrics().height() + 2)
+            color_checkbox = dialog.color_enabled_checkbox
+            self.assertEqual(color_checkbox.text(),"Layerzeit-Einfärbungen aktivieren")
+            self.assertEqual(color_checkbox.layoutDirection(),Qt.LayoutDirection.RightToLeft)
             self.assertEqual(dialog.new_start_spin.parentWidget().y(), dialog.new_end_spin.parentWidget().y())
             for row, first, last, select in dialog.range_rows:
                 remove = next(button for button in row.findChildren(QPushButton) if button.text() == "Entfernen")
@@ -764,7 +764,7 @@ class LayerRangeUiTests(unittest.TestCase):
         expected=("• In diesen Bereichen wird der Turm keine zusätzliche Layerzeit erzeugen<br>"
                   "• Der Turm wird, wenn möglich, bis auf seinen Min.-Durchmesser schrumpfen.<br>"
                   "• Ausnahmen: Der Standfuß und nötige Aufweitungen für nicht-ausgeschlossene Bereiche")
-        self.assertEqual(texts,["Layerzeit-Defizit","<b>Ausschlussbereiche:</b>",expected])
+        self.assertEqual(texts,["Layerzeit","<b>Ausschlussbereiche:</b>",expected])
         self.assertNotIn("<ul",expected)
         self.assertIn(self.dialog.canvas.NEUTRAL_OBJECT_COLOR,self.dialog.legend.exclusion_swatch.styleSheet())
 
@@ -800,22 +800,18 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertEqual(dialog._unwrapped_settings_width(), preferred)
         self.assertTrue(hint.wordWrap())
 
-    def test_deficit_reset_and_labels_align_with_full_width_slider(self):
+    def test_shared_color_controls_use_the_manual_header_and_single_scale_input(self):
+        from cooling_tower.gui.widgets.layer_time_color_controls import LayerTimeColorControls
+        from PySide6.QtWidgets import QAbstractSpinBox
         dialog = self._styled_dialog()
-        self._settle_layout()
-        reset, start, full = dialog.color_reset_button, dialog.color_start_spin, dialog.color_full_spin
-        self.assertEqual(reset.height(), full.height())
-        self.assertEqual(reset.y(), full.y())
-        self.assertEqual(start.y(), full.y())
-        self.assertLess(dialog.color_gradient.y(), start.y())
-        self.assertLess(dialog.color_start_label.geometry().right(), dialog.color_gradient.x())
-        self.assertLess(dialog.color_gradient.geometry().right(), dialog.color_full_label.x())
-        self.assertEqual(dialog.color_full_label.geometry().right(), reset.geometry().right())
-        self.assertEqual((dialog.color_start_label.text(), dialog.color_full_label.text()), ("0,0 s", "1,0 s"))
-        full.setValue(1.25)
-        start.setValue(.15)
-        self._settle_layout()
-        self.assertEqual((dialog.color_start_label.text(), dialog.color_full_label.text()), ("0,2 s", "1,3 s"))
+        manual = LayerTimeColorControls()
+        self.addCleanup(dispose_test_widget, manual)
+        self.assertIsInstance(dialog.color_controls, LayerTimeColorControls)
+        self.assertEqual(dialog.color_info_button.toolTip(), manual.color_info_button.toolTip())
+        self.assertEqual(dialog.color_controls.findChildren(QAbstractSpinBox), [dialog.color_scale_spin])
+        self.assertEqual(dialog.color_thresholds(), (6, 10))
+        self.assertEqual(dialog.color_scale_spin.value(), 14)
+        self.assertEqual(dialog.color_gradient.original_minimum_time, min(layer.total_time_s for layer in self.layers))
 
     def test_target_label_and_reset_height_and_standard_value(self):
         dialog = self._styled_dialog()
@@ -845,29 +841,23 @@ class LayerRangeUiTests(unittest.TestCase):
         custom.target_reset_button.click()
         self.assertEqual(custom.target_spin.value(), 12)
 
-    def test_deficit_input_rounds_half_up_and_blocked_or_typed_values_are_not_clipped(self):
+    def test_scale_accepts_comma_and_dot_and_shows_errors_only_for_input(self):
         dialog = self._styled_dialog()
         self._settle_layout()
-        for value, expected in ((.05, .1), (.15, .2), (1.25, 1.3), (1.55, 1.6), (1.95, 2.0), (5, 2)):
-            dialog.color_full_spin.setValue(value)
-            self.assertEqual(dialog.color_full_spin.value(), expected)
-            self.assertEqual(dialog.color_full_spin.text(), f"≥ {expected:.1f} s".replace(".", ","))
-        editor = dialog.color_full_spin.lineEdit()
-        editor.setFocus()
-        dialog.color_full_spin.selectAll()
-        QTest.keyClicks(editor, "1,25")
-        self._settle_layout()
-        self.assertGreaterEqual(self._usable_editor_width(dialog.color_full_spin),
-                                editor.fontMetrics().horizontalAdvance(editor.text()))
-        dialog.color_full_spin.interpretText()
-        self.assertEqual(dialog.color_full_spin.value(), 1.3)
-        self.assertEqual(dialog.color_gradient.full_handle.value(), 13)
-        for spin in (dialog.target_spin, dialog.new_start_spin, dialog.new_end_spin):
-            with QSignalBlocker(spin):
-                spin.setValue(spin.maximum())
-            self._settle_layout()
-            self.assertGreaterEqual(self._usable_editor_width(spin),
-                                    spin.lineEdit().fontMetrics().horizontalAdvance(spin.text()))
+        spin = dialog.color_scale_spin
+        for text in ('12,5', '12.5'):
+            spin.setFocus(); spin.selectAll(); QTest.keyClicks(spin, text)
+            QTest.keyClick(spin, Qt.Key.Key_Return)
+            self.assertEqual(spin.value(), 12.5)
+            self.assertIn('12,5', spin.text())
+        spin.selectAll(); QTest.keyClicks(spin, '100')
+        QTest.keyClick(spin, Qt.Key.Key_Return)
+        self.assertEqual(spin.value(), 60)
+        self.assertFalse(dialog.color_controls.notice_label.isHidden())
+        dialog.color_controls.clear_notice()
+        dialog.color_gradient.request_value('green', 100)
+        self.assertEqual(dialog.color_gradient.green_time, 60)
+        self.assertTrue(dialog.color_controls.notice_label.isHidden())
 
     def test_compact_fields_expand_without_wrapping_left_pane(self):
         dialog = self._styled_dialog()
@@ -876,9 +866,7 @@ class LayerRangeUiTests(unittest.TestCase):
         dialog.splitter.setSizes([0, 10000])
         self._settle_layout()
         self.assertLessEqual(dialog.settings_panel.width(), dialog._preferred_pane_widths[0] + 4)
-        self.assertEqual(dialog.color_start_spin.prefix(), "≤ ")
-        self.assertEqual(dialog.color_full_spin.prefix(), "≥ ")
-        for spin in (dialog.target_spin, dialog.color_start_spin, dialog.color_full_spin):
+        for spin in (dialog.target_spin,):
             metrics = spin.lineEdit().fontMetrics()
             spare = self._usable_editor_width(spin) - metrics.horizontalAdvance(spin.text())
             self.assertGreaterEqual(spare, metrics.horizontalAdvance("0") - 1)
@@ -943,8 +931,7 @@ class LayerRangeUiTests(unittest.TestCase):
             self.assertFalse(dialog.rotation_controls.end_labels.labels[90].isHidden())
             self.assertGreaterEqual(controls.height(), controls.heightForWidth(controls.width()))
         dialog.preview_notes.setMaximumHeight(64)
-        dialog.color_full_spin.setValue(2)
-        dialog.color_start_spin.setValue(1.9)
+        dialog.color_gradient.request_value('red', 9.9)
         self._settle_layout()
         self.assertGreater(dialog.preview_notes.verticalScrollBar().maximum(), 0)
         for label in dialog.preview_notes.findChildren(QLabel):
@@ -955,70 +942,98 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertLessEqual(dialog.legend.mapTo(dialog.preview_notes.viewport(), dialog.legend.rect().bottomRight()).y(),
                              dialog.preview_notes.viewport().height())
 
-    def test_configurable_color_limits_update_canvas_and_legend_without_changing_ranges(self):
-        self.dialog.commit_range(-1, 10, 20)
+    def test_absolute_color_limits_are_independent_of_target_time_and_ranges(self):
+        dialog = self.dialog
+        dialog.commit_range(-1, 10, 20)
         changes = []
-        self.dialog.ranges_changed.connect(changes.append)
-        self.dialog.color_start_spin.setValue(.2)
-        self.dialog.color_full_spin.setValue(.8)
-        canvas = self.dialog.canvas
-        self.assertEqual((canvas.gradient_start_deficit_s, canvas.gradient_full_deficit_s), (.2, .8))
-        self.assertEqual((self.dialog.legend.start_deficit_s, self.dialog.legend.full_deficit_s), (.2, .8))
-        self.assertEqual(canvas.layer_color(10, 9.9, .2, .8).name(), canvas.OBJECT_COLOR)
-        self.assertEqual(canvas.layer_color(10, 9.2, .2, .8).name(), canvas.CRITICAL_COLOR)
-        self.assertNotEqual(canvas.layer_color(10, 9.5, .2, .8).name(), canvas.OBJECT_COLOR)
-        self.assertNotEqual(canvas.layer_color(10, 9.5, .2, .8).name(), canvas.CRITICAL_COLOR)
-        self.assertEqual(self.dialog.ranges, ((10, 20),))
+        dialog.ranges_changed.connect(changes.append)
+        dialog.color_gradient.request_value('red', 7)
+        dialog.color_gradient.request_value('green', 11)
+        canvas = dialog.canvas
+        self.assertEqual((canvas.color_red_time_s, canvas.color_green_time_s), (7, 11))
+        self.assertEqual((dialog.legend.red_time_s, dialog.legend.green_time_s), (7, 11))
+        self.assertEqual(canvas.layer_time_color(11, 7, 6).name(), canvas.CRITICAL_COLOR)
+        self.assertEqual(canvas.layer_time_color(11, 7, 12).name(), canvas.OBJECT_COLOR)
+        self.assertNotIn(canvas.layer_time_color(11, 7, 9).name(), (canvas.OBJECT_COLOR, canvas.CRITICAL_COLOR))
+        canvas.grab()
+        background = canvas._background
+        dialog.target_spin.setValue(20)
+        self.assertIs(canvas._background, background)
+        self.assertEqual(dialog.color_thresholds(), (7, 11))
+        self.assertEqual(dialog.ranges, ((10, 20),))
         self.assertEqual(changes, [])
-        self.dialog.color_start_spin.setValue(1)
-        self.assertGreater(self.dialog.color_full_spin.value(), self.dialog.color_start_spin.value())
-        self.dialog.color_full_spin.setValue(.1)
-        self.assertLess(self.dialog.color_start_spin.value(), self.dialog.color_full_spin.value())
-        self.assertEqual(canvas.gradient_start_deficit_s, self.dialog.legend.start_deficit_s)
-        self.assertEqual(canvas.gradient_full_deficit_s, self.dialog.legend.full_deficit_s)
 
-    def test_dual_deficit_slider_drag_fields_and_keyboard_stay_synchronized(self):
+    def test_joined_color_grips_stay_separately_operable_and_color_without_a_fade(self):
         dialog = self._styled_dialog()
         self._settle_layout()
         slider = dialog.color_gradient
-        self.assertEqual(slider.MAXIMUM_SECONDS, 2)
-        self.assertEqual((dialog.color_start_spin.value(), dialog.color_full_spin.value()), (0, 1))
-        self.assertEqual((slider.start_handle.value(), slider.full_handle.value()), (0, 10))
+        slider.red_handle.setFocus()
+        QTest.keyClick(slider.red_handle, Qt.Key.Key_End)
+        self.assertEqual(dialog.color_thresholds(), (10, 10))
+        self.assertTrue(slider.zone_labels[1].isHidden())
+        self.assertTrue(dialog.legend.gradient.hard_boundary)
+        self.assertIn("direkter Farbwechsel", dialog.legend.accessibleName())
+        self.assertFalse(slider.red_handle.geometry().intersects(slider.green_handle.geometry()))
+        self.assertEqual(dialog.canvas.layer_time_color(10, 10, 9.9).name(), dialog.canvas.CRITICAL_COLOR)
+        self.assertEqual(dialog.canvas.layer_time_color(10, 10, 10).name(), dialog.canvas.OBJECT_COLOR)
+        QTest.keyClick(slider.red_handle, Qt.Key.Key_Left)
+        self.assertEqual(dialog.color_thresholds(), (9.9, 10))
+        dialog.color_scale_spin.setValue(5)
+        self.assertEqual(dialog.color_thresholds(), (5, 5))
+        self.assertEqual((dialog.canvas.color_red_time_s, dialog.canvas.color_green_time_s), (5, 5))
+        slider.green_handle.setFocus()
+        QTest.keyClick(slider.green_handle, Qt.Key.Key_Home)
+        self.assertEqual(dialog.color_thresholds(), (5, 5))
+        slider.request_value('red', 1)
+        QTest.keyClick(slider.green_handle, Qt.Key.Key_Home)
+        self.assertEqual(dialog.color_thresholds(), (1, 3))
 
-        def drag(handle, value):
-            point = QPoint(round(slider.x_for_value(value)), handle.geometry().center().y())
-            QTest.mousePress(handle, Qt.MouseButton.LeftButton,
-                             pos=QPoint(handle.width() // 2, handle.height() // 2))
-            QTest.mouseMove(handle, handle.mapFrom(slider, point))
-            QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=handle.mapFrom(slider, point))
-            self._settle_layout()
-            return slider.value_at(point.x()) / 10
+    def test_color_scale_ceiling_and_minimum_come_from_the_current_original(self):
+        for actual_maximum, expected_limit in ((20, 60), (70.06, 70)):
+            with self.subTest(actual_maximum=actual_maximum):
+                layers = tuple(make_layer(i, i*.2, .2, time)
+                    for i, time in enumerate((.25, 8, actual_maximum), 1))
+                dialog = LayerRangeDialog(layers, object_segments(layers), target_time_s=10,
+                    target_minimum=5, target_maximum=120, color_red_time_s=65,
+                    color_green_time_s=66, color_scale_max_time_s=70)
+                self.addCleanup(dispose_test_widget, dialog)
+                self.assertEqual(dialog.color_scale_spin.maximum(), expected_limit)
+                self.assertEqual(dialog.color_scale_spin.value(), expected_limit)
+                self.assertEqual(dialog.color_gradient.original_minimum_time, .25)
+                self.assertEqual(dialog.color_thresholds(), (min(65, expected_limit), min(66, expected_limit)))
+                dialog.color_gradient.request_value('green', 100)
+                self.assertEqual(dialog.color_gradient.green_time, expected_limit)
+                self.assertTrue(dialog.color_controls.notice_label.isHidden())
 
-        expected = drag(slider.start_handle, 5)
-        self.assertAlmostEqual(dialog.color_start_spin.value(), expected, delta=.03)
-        self.assertEqual(slider.start_handle.value(), round(dialog.color_start_spin.value() * 10))
-        expected = drag(slider.full_handle, 15)
-        self.assertAlmostEqual(dialog.color_full_spin.value(), expected, delta=.03)
-        drag(slider.full_handle, 20)
-        self.assertEqual(dialog.color_full_spin.value(), 2)
-        dialog.color_start_spin.setValue(1.8)
-        self._settle_layout()
-        self.assertEqual(slider.start_handle.value(), 18)
-        dialog.color_full_spin.setValue(.2)
-        self._settle_layout()
-        self.assertEqual((slider.start_handle.value(), slider.full_handle.value()), (1, 2))
-        self.assertFalse(slider.start_handle.geometry().intersects(slider.full_handle.geometry()))
-        slider.start_handle.setFocus()
-        QTest.keyClick(slider.start_handle, Qt.Key.Key_Right)
-        self.assertEqual((dialog.color_start_spin.value(), dialog.color_full_spin.value()), (.2, .3))
-        QTest.keyClick(slider.full_handle, Qt.Key.Key_End)
-        self.assertEqual(dialog.color_full_spin.value(), 2)
-        QTest.keyClick(slider.full_handle, Qt.Key.Key_Home)
-        self.assertEqual((dialog.color_start_spin.value(), dialog.color_full_spin.value()), (0, .1))
-        self.assertEqual((dialog.canvas.gradient_start_deficit_s, dialog.canvas.gradient_full_deficit_s), (0, .1))
-        self.assertEqual((dialog.legend.start_deficit_s, dialog.legend.full_deficit_s), (0, .1))
-        dialog.color_reset_button.click()
-        self.assertEqual((slider.start_handle.value(), slider.full_handle.value()), (0, 10))
+    def test_original_minimum_marker_and_fallback_are_shared_with_the_manual_editor(self):
+        layers = (make_layer(1, .2, .2, .364), *self.layers[1:])
+        dialog = LayerRangeDialog(layers, object_segments(layers), target_time_s=10,
+            target_minimum=5, target_maximum=120, time_coloring_enabled=True)
+        self.addCleanup(dispose_test_widget, dialog)
+        dialog.color_controls.setFixedWidth(320)
+        dialog.show(); self._settle_layout()
+        slider = dialog.color_gradient
+        self.assertFalse(slider.minimum_marker.isHidden())
+        self.assertTrue(slider.minimum_information.isHidden())
+        self.assertEqual(slider.minimum_marker.toolTip(), "Min. Layerzeit der STL: 0,364 s\nRastpunkt für Farbgrenzen: 0,4 s")
+        slider.request_value('red', .4)
+        self.assertTrue(slider.minimum_marker.isHidden())
+        self.assertFalse(slider.minimum_information.isHidden())
+        self.assertEqual(slider.minimum_information.text(), "Min. Layerzeit der STL: 0,364 s")
+        slider.request_value('red', 6)
+        self.assertFalse(slider.minimum_marker.isHidden())
+        self.assertTrue(slider.minimum_information.isHidden())
+        handle=slider.red_handle;origin=handle.mapToGlobal(handle.rect().center())
+        delta=round((.364-slider.red_time)*slider.track_rect().width()/slider.maximum_time)
+        QTest.mousePress(handle,Qt.MouseButton.LeftButton,pos=handle.rect().center())
+        QTest.mouseMove(handle,handle.mapFromGlobal(origin+QPoint(delta,0)))
+        self.assertEqual(slider.snapped_kind,"red")
+        self.assertEqual(dialog.canvas.color_red_time_s,.4)
+        self.assertEqual(dialog.color_thresholds(),(.4,10))
+        self.assertTrue(slider.minimum_marker.snapped)
+        self.assertFalse(slider.minimum_marker.isHidden())
+        QTest.mouseRelease(handle,Qt.MouseButton.LeftButton,pos=handle.mapFromGlobal(origin+QPoint(delta,0)))
+        self.assertIsNone(slider.snapped_kind)
 
     def test_closing_tool_cancels_pending_rebuild_and_scroll_callbacks(self):
         dialog = LayerRangeDialog(self.layers, object_segments(self.layers),
@@ -1059,7 +1074,6 @@ class LayerRangeUiTests(unittest.TestCase):
 
     def test_drag_merge_is_committed_only_on_release(self):
         # Isolate join highlighting from changes to the default heatmap scale.
-        self.dialog.color_full_spin.setValue(.5)
         self.dialog.commit_range(-1, 10, 20)
         self.dialog.commit_range(-1, 30, 40)
         self.app.processEvents()
@@ -1146,7 +1160,7 @@ class LayerRangeUiTests(unittest.TestCase):
 
         def rendered_width():
             image = canvas.grab().toImage()
-            color = canvas.layer_color(canvas.target_time_s, self.layers[49].total_time_s)
+            color = canvas.layer_time_color(canvas.color_green_time_s, canvas.color_red_time_s, self.layers[49].total_time_s)
             return sum(image.pixelColor(x, cursor.y()) == color for x in range(image.width()))
 
         before_pixels = rendered_width()
@@ -1255,10 +1269,11 @@ class LayerRangeUiTests(unittest.TestCase):
                 dialog.target_spin.stepUp()
                 self.assertAlmostEqual(dialog.target_spin.value(), 15.1)
                 dialog.commit_range(-1, 10, 20)
-                dialog.color_start_spin.setValue(.1)
-                dialog.color_full_spin.setValue(.7)
+                dialog.color_gradient.request_value('red', 7)
+                dialog.color_gradient.request_value('green', 11)
+                dialog.color_scale_spin.setValue(18)
                 self.assertEqual(window.collect_settings(), original)
-                self.assertEqual(window._range_color_thresholds, (0, 1))
+                self.assertEqual(window._range_color_thresholds, (6, 10))
                 self.assertFalse(dialog.color_enabled_checkbox.isChecked())
                 self.assertFalse(dialog.xray_button.isChecked())
                 dialog.color_enabled_checkbox.setChecked(True)
@@ -1270,7 +1285,8 @@ class LayerRangeUiTests(unittest.TestCase):
                 self.assertIsNone(window._layer_range_dialog)
                 self.assertEqual(window.collect_settings().excluded_layer_ranges, ((10, 20),))
                 self.assertAlmostEqual(window.target_time_spin.value(), 15.1)
-                self.assertEqual(window._range_color_thresholds, (.1, .7))
+                self.assertEqual(window._range_color_thresholds, (7, 11))
+                self.assertEqual(window._range_color_scale_max_time_s, 18)
                 self.assertTrue(window._range_time_coloring_enabled)
                 self.assertTrue(window._range_xray_enabled)
                 window.target_time_spin.stepDown()
@@ -1282,16 +1298,18 @@ class LayerRangeUiTests(unittest.TestCase):
                     self.app.processEvents()
                     self.assertEqual(dialog.ranges, ((10, 20),))
                     self.assertEqual(dialog.target_spin.value(), 15)
-                    self.assertEqual(dialog.color_start_spin.value(), .1)
-                    self.assertEqual(dialog.color_full_spin.value(), .7)
+                    self.assertEqual(dialog.color_gradient.red_time, 7)
+                    self.assertEqual(dialog.color_gradient.green_time, 11)
+                    self.assertEqual(dialog.color_scale_spin.value(), 18)
                     self.assertTrue(dialog.color_enabled_checkbox.isChecked())
                     self.assertTrue(dialog.xray_button.isChecked())
                     dialog.color_enabled_checkbox.setChecked(False)
                     dialog.xray_button.setChecked(False)
                     dialog.target_spin.setValue(30)
                     dialog.commit_range(-1, 35, 45)
-                    dialog.color_start_spin.setValue(.2)
-                    dialog.color_full_spin.setValue(.8)
+                    dialog.color_gradient.request_value('red', 8)
+                    dialog.color_gradient.request_value('green', 12)
+                    dialog.color_scale_spin.setValue(20)
                     self.assertEqual(window.collect_settings(), accepted)
                     if action == "button":
                         dialog.cancel_button.click()
@@ -1303,13 +1321,13 @@ class LayerRangeUiTests(unittest.TestCase):
                     self.app.processEvents()
                     self.assertIsNone(window._layer_range_dialog)
                     self.assertEqual(window.collect_settings(), accepted)
-                    self.assertEqual(window._range_color_thresholds, (.1, .7))
+                    self.assertEqual(window._range_color_thresholds, (7, 11))
                     self.assertTrue(window._range_time_coloring_enabled)
                     self.assertTrue(window._range_xray_enabled)
                 window.show_layer_range_tool()
                 self.assertEqual(window._layer_range_dialog.ranges, ((10, 20),))
-                self.assertEqual(window._layer_range_dialog.color_start_spin.value(), .1)
-                self.assertEqual(window._layer_range_dialog.color_full_spin.value(), .7)
+                self.assertEqual(window._layer_range_dialog.color_gradient.red_time, 7)
+                self.assertEqual(window._layer_range_dialog.color_gradient.green_time, 11)
                 window._discard_source_preslice("source_replaced")
                 self.assertEqual(window.collect_settings().excluded_layer_ranges, ())
                 self.assertIsNone(window._layer_range_dialog)
@@ -1380,22 +1398,16 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertEqual(self.dialog.canvas.yaw_deg, 87)
         self.assertEqual(slider.tickInterval(), 45)
 
-    def test_color_reset_updates_both_limits_atomically_in_the_draft(self):
+    def test_scale_reduction_updates_both_color_limits_atomically_in_the_draft(self):
         dialog = self.dialog
-        self.assertFalse(dialog.color_reset_button.isEnabled())
         dialog.commit_range(-1, 10, 20)
-        dialog.color_start_spin.setValue(.8)
-        dialog.color_full_spin.setValue(1.2)
-        self.assertTrue(dialog.color_reset_button.isEnabled())
         received = []
         dialog.color_thresholds_changed.connect(lambda a, b: received.append((a, b)))
-        dialog.color_reset_button.click()
-        self.assertEqual(received, [(0., 1.)])
-        self.assertEqual((dialog.color_start_spin.value(), dialog.color_full_spin.value()), (0., 1.))
-        self.assertEqual((dialog.canvas.gradient_start_deficit_s, dialog.canvas.gradient_full_deficit_s), (0., 1.))
-        self.assertEqual((dialog.legend.start_deficit_s, dialog.legend.full_deficit_s), (0., 1.))
-        self.assertEqual(dialog.color_gradient.full_handle.value(), 10)
-        self.assertFalse(dialog.color_reset_button.isEnabled())
+        dialog.color_scale_spin.setValue(3)
+        self.assertEqual(received, [(3, 3)])
+        self.assertEqual(dialog.color_thresholds(), (3, 3))
+        self.assertEqual((dialog.canvas.color_red_time_s, dialog.canvas.color_green_time_s), (3, 3))
+        self.assertEqual((dialog.legend.red_time_s, dialog.legend.green_time_s), (3, 3))
         self.assertEqual(dialog.ranges, ((10, 20),))
         self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
         self.assertTrue(dialog.isVisible())

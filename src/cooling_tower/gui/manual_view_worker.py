@@ -14,6 +14,7 @@ from cooling_tower.manual.service import check_cancel
 from cooling_tower.preview import PreviewCancelled
 from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 from cooling_tower.preview.display_mesh import SMALL_MESH_FACES,simplify_display_mesh
+from cooling_tower.gui.object_material import ObjectMaterial
 
 OBJECT_TOPOLOGY_WIDTH_PX = .5
 
@@ -107,8 +108,7 @@ def profile_surface_styles(reference,frame,settings,brightness,event,*,topology_
     previous=None
     for index,layer in enumerate(layers):
         check_cancel(event)
-        color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
-            settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+        color=LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
         if color != previous:
             if index:
                 boundary=layers[index-1].z_mm/height
@@ -179,12 +179,8 @@ class RasterObjectPicture(QPicture):
         self.raster_size=(0,0)
 
 
-def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact_contour,contour_pen=None):
-    """Bound GUI replay cost to one image, independent of source face count.
-
-    Rasterization stays in the worker. Original contours remain vector paths
-    at viewport precision; the image only carries the shaded interior.
-    """
+def _surface_rasters(projected,silhouette,settings,paint,event):
+    """Prepare bounded normal/X-ray interiors; contours stay vector paths."""
     bounds=silhouette.boundingRect() if silhouette is not None and not silhouette.isEmpty() else QRectF()
     if bounds.isEmpty():
         low,high=projected.min(axis=(0,1)),projected.max(axis=(0,1))
@@ -193,8 +189,7 @@ def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact
     scale=pixels/max(bounds.width(),bounds.height(),1e-6)
     bounds=bounds.adjusted(-2/scale,-2/scale,2/scale,2/scale)
     width,height=math.ceil(bounds.width()*scale),math.ceil(bounds.height()*scale)
-    result=RasterObjectPicture()
-    result.raster_size=(width,height)
+    captured=[]
     for opacity in (1,.28):
         check_cancel(event)
         raster=QImage(width,height,QImage.Format.Format_ARGB32_Premultiplied)
@@ -205,22 +200,83 @@ def _raster_object_picture(projected,silhouette,frame,settings,paint,event,exact
             painter.translate(-bounds.left(),-bounds.top())
             paint(painter,opacity,False)
         finally:painter.end()
-        picture=result if opacity==1 else QPicture()
-        painter=QPainter(picture)
-        try:
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            if exact_contour and silhouette is not None and not silhouette.isEmpty():
-                painter.setClipPath(silhouette)
-            painter.drawImage(bounds,raster)
-            painter.setClipping(False)
-            if exact_contour and silhouette is not None and not silhouette.isEmpty():
-                painter.setOpacity(opacity)
-                painter.strokePath(silhouette,contour_pen if contour_pen is not None
-                    else cosmetic_pen(QColor(ORIGINAL_OBJECT_BLUE).darker(125),1))
-        finally:painter.end()
-        if opacity!=1:result.xray_picture=picture
+        captured.append(raster)
     check_cancel(event)
-    return result
+    return captured,bounds
+
+
+def _layer_material_paths(reference,frame,event,*,fill=False):
+    """Project each original layer once; later palette changes only draw paths."""
+    paths=[]
+    bottom=0.
+    for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
+        check_cancel(event)
+        path=QPainterPath()
+        if len(section):
+            coordinates=np.empty((*section.shape[:-1],3))
+            coordinates[...,:2]=section
+            coordinates[...,2]=layer.z_mm
+            screens,_=frame.project(rotate_object(coordinates,reference.silhouette.center_xy,
+                                                   frame.object_center,frame.object_rotation))
+            if fill:
+                lower=screens[...,0].min(axis=1)
+                upper=screens[...,0].max(axis=1)
+                order=np.argsort(lower)
+                lower,upper=lower[order],np.maximum.accumulate(upper[order])
+                starts=np.r_[0,np.flatnonzero(lower[1:]>upper[:-1]+1e-9)+1]
+                ends=np.r_[starts[1:]-1,len(lower)-1]
+                heights,_=frame.project(np.array([(frame.object_center[0],frame.object_center[1],z)
+                                                   for z in (bottom,layer.z_mm)]))
+                y1,y2=heights[:,1]
+                for left,right in zip(lower[starts],upper[ends]):
+                    path.addRect(QRectF(float(left),min(y1,y2),float(right-left),abs(y2-y1)))
+                path.setFillRule(Qt.FillRule.WindingFill)
+            else:
+                for a,b in screens:
+                    path.moveTo(QPointF(*a));path.lineTo(QPointF(*b))
+        paths.append((layer.total_time_s,path))
+        bottom=layer.z_mm
+    return paths
+
+
+def _prepare_mesh_material(reference,frame,settings,event,projected,brightness,order,silhouette):
+    layers=reference.context.layers
+    profile=frame.pitch==0 and bool(layers) and layers[-1].z_mm>0
+    material=ObjectMaterial(RasterObjectPicture,path=silhouette,layers=layers,
+        paths=() if profile else _layer_material_paths(reference,frame,event),
+        neutral_color=getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE),
+        outline=reliable_original_contours(reference))
+    polygons=[]
+    for index in order:
+        if len(polygons)%512==0:check_cancel(event)
+        polygons.append((index,QPolygonF([QPointF(*point) for point in projected[index]])))
+    dense=len(reference.object_triangles)>SMALL_MESH_FACES
+    show_edges=settings.object_resolution_percent>=75
+    palettes=[("neutral",QColor(material.neutral_color)),("green",QColor(LayerRangeCanvas.OBJECT_COLOR))]
+    if profile:palettes.append(("red",QColor(LayerRangeCanvas.CRITICAL_COLOR)))
+    for name,color in palettes:
+        check_cancel(event)
+        styles,indices=surface_styles(color,brightness)
+        backing=color.lighter(135) if name!="neutral" and profile else silhouette_backing_color()
+        backing.setAlpha(210)
+        def paint(painter,opacity=1,outline=True):
+            painter.setOpacity(opacity)
+            if silhouette is not None and not silhouette.isEmpty():
+                painter.fillPath(silhouette,backing)
+                painter.setClipPath(silhouette)
+            for number,(index,polygon) in enumerate(polygons):
+                if number%512==0:check_cancel(event)
+                style=styles[indices[index]]
+                if dense:draw_display_surface(painter,polygon,style,edges=show_edges)
+                else:draw_surface(painter,polygon,color,brightness[index],style)
+        images,bounds=_surface_rasters(projected,silhouette,settings,paint,event)
+        material.add_palette(name,images,bounds)
+    if profile:
+        height=layers[-1].z_mm
+        axis,_=frame.project(np.array([(0,0,0),(0,0,height)]))
+        material.set_profile_axis(float(axis[0,1]),float(axis[1,1]),height)
+    check_cancel(event)
+    return material.recolor(settings)
 
 
 def silhouette_backing_color():
@@ -260,6 +316,9 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
     projected,depth=frame.project(triangles)
     brightness=surface_brightness(triangles,frame)
     order=np.argsort(depth.mean(axis=1))
+    if vector:
+        silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
+        return _prepare_mesh_material(reference,frame,settings,event,projected,brightness,order,silhouette)
     base_color=QColor(LayerRangeCanvas.OBJECT_COLOR if settings.critical_layers_enabled
                       else getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE))
     silhouette=original_silhouette_path(reference,frame,event) if frame.exact_silhouette else None
@@ -278,8 +337,7 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
     if settings.critical_layers_enabled and not profile_colors:
         for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
             check_cancel(event)
-            color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
-                                               settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+            color=LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
             if color==QColor(LayerRangeCanvas.OBJECT_COLOR) or not len(section):continue
             coordinates=np.empty((*section.shape[:-1],3))
             sx,sy=section[...,0]-center[0],section[...,1]-center[1]
@@ -309,13 +367,6 @@ def render_spatial_object(reference,frame,settings,event,*,vector=False):
                 painter.strokePath(silhouette,contour_pen)
         check_cancel(event)
 
-    # QPicture serializes material stops on brush changes. Many alternating
-    # layer colors must use the same bounded worker raster as a dense mesh.
-    complex_material=(profile_colors and bool(styles)
-        and len(styles[0][0].gradient().stops())*len(projected)>50_000)
-    if vector and len(projected) and (dense or complex_material):
-        return _raster_object_picture(projected,silhouette,frame,settings,paint,event,
-            reliable_original_contours(reference),contour_pen if profile_colors else None)
     painter=QPainter(image)
     try:
         paint(painter,.28 if not vector and frame.highlight in {"object","all"} else 1)
@@ -400,6 +451,13 @@ def _build_original_silhouette_path(reference,frame,mesh,event=None):
 
 def render_silhouette_object(reference,frame,settings,event,image):
     """Draw complete original contours without a reduced mesh or triangle details."""
+    if isinstance(image,QPicture):
+        profile=frame.pitch==0 and reference.silhouette is not None
+        material=ObjectMaterial(RasterObjectPicture,path=original_silhouette_path(reference,frame,event),
+            layers=reference.context.layers,paths=_layer_material_paths(reference,frame,event,fill=profile),
+            fill=profile,neutral_color=getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE))
+        check_cancel(event)
+        return material.recolor(settings)
     painter=QPainter(image)
     try:
         if not isinstance(image,QPicture):
@@ -427,8 +485,7 @@ def render_silhouette_object(reference,frame,settings,event,image):
                     heights,_=frame.project(np.array([(frame.object_center[0],frame.object_center[1],z)
                                                        for z in (bottom,layer.z_mm)]))
                     y1,y2=heights[:,1]
-                    color=(LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
-                        settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+                    color=(LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
                         if settings.critical_layers_enabled else QColor(ORIGINAL_OBJECT_BLUE))
                     for left,right in zip(lower[starts],upper[ends]):
                         paths[color.rgb()].addRect(QRectF(float(left),min(y1,y2),float(right-left),abs(y2-y1)))
@@ -445,8 +502,7 @@ def render_silhouette_object(reference,frame,settings,event,image):
             if settings.critical_layers_enabled:
                 for layer,section in zip(reference.context.layers,reference.silhouette.segments_xy):
                     check_cancel(event)
-                    color=LayerRangeCanvas.layer_color(settings.color_reference_time_s,layer.total_time_s,
-                        settings.gradient_start_deficit_s,settings.gradient_full_deficit_s)
+                    color=LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
                     if color == QColor(LayerRangeCanvas.OBJECT_COLOR) or not len(section):continue
                     coordinates=np.empty((*section.shape[:-1],3))
                     coordinates[...,:2]=section
@@ -474,16 +530,26 @@ def render_spatial_toolpaths(reference, frame, settings, event, image):
     screens, _ = frame.project(array)
     tops = [layer.z_mm for layer in reference.context.layers]
     groups = defaultdict(list)
+    paths=defaultdict(QPainterPath) if isinstance(image,QPicture) else None
     for i, (segment, screen) in enumerate(zip(array, screens)):
         if i % 1024 == 0:
             check_cancel(event)
-        layer = reference.context.layers[min(len(tops) - 1,
-            bisect_left(tops, float(segment[:, 2].mean()) - 1e-5))]
-        color = (LayerRangeCanvas.layer_color(settings.color_reference_time_s, layer.total_time_s,
-                    settings.gradient_start_deficit_s, settings.gradient_full_deficit_s)
+        layer_index=min(len(tops)-1,bisect_left(tops,float(segment[:,2].mean())-1e-5))
+        layer = reference.context.layers[layer_index]
+        if paths is not None:
+            paths[layer_index].moveTo(QPointF(*screen[0]))
+            paths[layer_index].lineTo(QPointF(*screen[1]))
+            continue
+        color = (LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
                  if settings.critical_layers_enabled
                  else QColor(getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE)))
         groups[color.rgb()].append(QLineF(QPointF(*screen[0]), QPointF(*screen[1])))
+    if paths is not None:
+        material=ObjectMaterial(RasterObjectPicture,path=None,layers=reference.context.layers,
+            paths=((reference.context.layers[index].total_time_s,path) for index,path in paths.items()),
+            neutral_color=getattr(reference,"object_color",ORIGINAL_OBJECT_BLUE),line_width=1.2)
+        check_cancel(event)
+        return material.recolor(settings)
     painter = QPainter(image)
     try:
         if not isinstance(image,QPicture):

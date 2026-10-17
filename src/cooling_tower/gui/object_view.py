@@ -2,11 +2,11 @@
 
 Uses the manual editor's mesh simplification, exact contours, raster/vector
 replay and managed render worker. Camera movement only transforms a cached
-picture; mesh preparation and expensive color/quality changes run off-thread.
+picture; geometry/quality changes run off-thread and colors reuse its material.
 """
 from collections import OrderedDict
 from itertools import count
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 import traceback
 
@@ -15,7 +15,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.gui.manual_view_worker import ManualViewWorker, SpatialFrame
-from cooling_tower.manual.geometry import ManualSettings
+from cooling_tower.gui.object_material import draw_object_picture,object_picture_cache_size
 from cooling_tower.manual.service import check_cancel
 from cooling_tower.preview import PreviewCancelled
 from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
@@ -24,6 +24,14 @@ from cooling_tower.preview.mesh_silhouette import build_mesh_silhouette
 # ManualCanvas uses positive IDs; range windows share a decreasing sequence so
 # a closing worker cannot collide with a newly opened editor in the same manager.
 _VIEW_REQUEST_IDS = count(-1, -1)
+
+
+@dataclass(frozen=True)
+class _ObjectColorSettings:
+    object_resolution_percent: int = 75
+    critical_layers_enabled: bool = True
+    color_reference_time_s: float = 10
+    color_red_time_s: float = 6
 
 
 class SourceMeshWorker(CancelableWorker):
@@ -74,7 +82,7 @@ class OriginalObjectView(QObject):
             source_data=SimpleNamespace(object_segments=canvas._segments),
             object_triangles=None, object_silhouette=None,
             object_color=canvas.NEUTRAL_OBJECT_COLOR)
-        self.settings = replace(ManualSettings(), critical_layers_enabled=True)
+        self.settings = _ObjectColorSettings()
         self.cache = OrderedDict()
         self.job_id = None
         self.request_id = next(_VIEW_REQUEST_IDS)
@@ -93,8 +101,7 @@ class OriginalObjectView(QObject):
                                         parent_operation_id="range-original-mesh")
 
     def key(self):
-        return (self.canvas.yaw_deg, self.canvas.target_time_s,
-                self.canvas.gradient_start_deficit_s, self.canvas.gradient_full_deficit_s,
+        return (self.canvas.yaw_deg, self.canvas.color_green_time_s, self.canvas.color_red_time_s,
                 self.canvas.object_resolution_percent, self.canvas.time_coloring_enabled)
 
     def frame(self):
@@ -102,14 +109,25 @@ class OriginalObjectView(QObject):
         return SpatialFrame(0, 0, 1, (0, 0), 0, 0, center, (0, 0), center,
                             self.canvas.yaw_deg, "both", True)
 
+    def _color_settings(self,key):
+        return replace(self.settings,object_resolution_percent=key[3],color_reference_time_s=key[1],
+                       color_red_time_s=key[2],critical_layers_enabled=key[4])
+
     def draw(self, painter):
         if self.reference.object_triangles is None:
             return False
         key = self.key()
         picture = self.cache.get(key)
         if picture is None:
+            material=next((getattr(value,"material",None) for old_key,value in reversed(self.cache.items())
+                if (old_key[0],old_key[3])==(key[0],key[3]) and getattr(value,"material",None) is not None),None)
+            if material is not None:
+                picture=material.recolor(self._color_settings(key),serialize=False)
+                self._remember(key,picture)
+        if picture is None:
             if key != self.failed_key:
-                if self.job_id is not None and self.active_key is not None and key != self.active_key:
+                if (self.job_id is not None and self.active_key is not None
+                        and (key[0],key[3])!=(self.active_key[0],self.active_key[3])):
                     self.manager.cancel_job(self.job_id, reason="range_view_replaced")
                 if not self.timer.isActive():
                     self.timer.start()
@@ -118,12 +136,7 @@ class OriginalObjectView(QObject):
         painter.save()
         painter.translate(self.canvas.x_for_position(0), self.canvas.y_for_z(0))
         painter.scale(self.canvas._scale(), self.canvas._scale())
-        xray = getattr(picture, "xray_picture", None)
-        if self.canvas.xray_enabled and xray is not None:
-            painter.drawPicture(0, 0, xray)
-        else:
-            painter.setOpacity(.28 if self.canvas.xray_enabled else 1)
-            painter.drawPicture(0, 0, picture)
+        draw_object_picture(painter,picture,.28 if self.canvas.xray_enabled else 1)
         painter.restore()
         return True
 
@@ -136,9 +149,7 @@ class OriginalObjectView(QObject):
             return
         self.request_id = next(_VIEW_REQUEST_IDS)
         self.active_key = key
-        settings = replace(self.settings, object_resolution_percent=key[4], color_reference_time_s=key[1],
-                           gradient_start_deficit_s=key[2], gradient_full_deficit_s=key[3],
-                           critical_layers_enabled=key[5])
+        settings = self._color_settings(key)
         worker = ManualViewWorker(self.request_id, self.reference, self.frame(), settings, key)
         worker.succeeded.connect(self._rendered)
         worker.failed.connect(self._failed)
@@ -157,14 +168,15 @@ class OriginalObjectView(QObject):
         if self.closed or request_id != self.request_id:
             return
         key, picture = result
-        self.cache[key] = picture
-        def size(value):
-            raster = getattr(value, "raster_size", (0, 0))
-            return value.size() + raster[0] * raster[1] * 8
-        while len(self.cache) > 10 or (len(self.cache) > 1 and sum(size(p) for p in self.cache.values()) > 32 * 1024 * 1024):
-            self.cache.popitem(last=False)
+        self._remember(key,picture)
         self.canvas._background = None
         self.canvas.update()
+
+    def _remember(self,key,picture):
+        self.cache[key] = picture
+        self.cache.move_to_end(key)
+        while len(self.cache)>1 and (len(self.cache)>10 or object_picture_cache_size(self.cache.values())>64*1024*1024):
+            self.cache.popitem(last=False)
 
     @Slot(int, str, str)
     def _failed(self, request_id, message, details):

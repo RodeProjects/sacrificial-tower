@@ -1,6 +1,6 @@
 # Linke Bedienelemente und direkte Vorschau
 
-Stand: 14.10.2026. Die redundanten Maßfelder und Punktbuttons wurden aus der
+Stand: 17.10.2026. Die redundanten Maßfelder und Punktbuttons wurden aus der
 linken Leiste des manuellen Modus entfernt. Die maßgebliche Bedienungsbeschreibung
 steht in [Manueller Editor](manual_editor.md); dieses Dokument ordnet die
 verbleibenden Einstellungen und noch offenen Bedienmöglichkeiten ein.
@@ -31,13 +31,11 @@ in der Vorschau sind mögliche weitere Verbesserungen.
 | Linke Einstellung | Noch fehlender gleichwertiger Bedienweg rechts |
 |---|---|
 | Béziergriff: Durchmesserposition/Höhe | Präzise Griffkoordinaten; der direkte Editor zeigt beim ausgewählten Griff dessen Profilpunkt |
-| Gerade/Bézierkurve | Direkte Abschnittsumschaltung; Griffziehen aktiviert Bézier, Punkt-Doppelklick setzt Kurven zurück |
-| Tangenten koppeln | Sichtbarer Kopplungszustand und bedienbarer Schalter |
 | Vertikale Greifer auf Layer einrasten | Dauerhafter Layer-/Millimeter-Schalter |
-| Aufweitung/Verjüngung begrenzen und jeweiliger Winkel | Aktivierung und Winkelwerte für die verbindlichen Geometriegrenzen |
+| Maximaler Aufweitungswinkel; darunter „Max. Aufweitungswinkel in Vorschau begrenzen“ | Winkelwert und Aktivierung der verbindlichen Geometriegrenze |
 | Turm-Kreissegmente | Eigener Regler für den erzeugten Turm; Auflösung (STL) steuert die Originaldarstellung |
 | Überhangstellen markieren und visueller Grenzwinkel | Schalter und Warnwinkel |
-| Kritische Original-Layer, Farbreferenz, Farbbeginn und vollständig Rot | Aktivierung, Sekundenwert und Farbgrenzen |
+| Layerzeit-Einfärbungen aktivieren | Checkbox direkt hinter dem Text; darunter Rot bis / Grün ab (6 s / 10 s), feste Beschriftungen links/rechts und editierbares Skalenende (Standard 14 s, mindestens 3 s); grüne Grenze und Endwert teilen die objektabhängige Obergrenze (normalerweise 60 s). Graues Dreieck unter der Leiste für das Objekt-Minimum, bei Platzmangel als Zusatztext unter allen Werten. Greifer stoppen still; nur ungültige Boxeingaben zeigen rote Hinweise. |
 
 Eine sichtbare Wirkung ersetzt keine Einstellmöglichkeit. Die visuelle
 Überhangwarnung markiert Stellen; die geometrischen Winkelgrenzen verhindern
@@ -45,3 +43,16 @@ ungültige Formen. Diese Funktionen bleiben getrennt. Beide Béziergriff-Felder
 erscheinen links nur bei ausgewähltem Kontrollgriff. Die verbliebenen Form- und
 Kurvenfelder sind weiterhin an die editierbaren Profilansichten gebunden;
 visuelle Prüfeinstellungen bleiben auch in den räumlichen Ansichten verfügbar.
+
+Die verbliebenen Einstellungen stehen in nur zwei Bereichen: **Turmform und
+Bearbeitung** sowie **Visuelle Prüfung**. Verjüngungsschalter und -winkel,
+Abschnittsdropdown und Tangentenkopplungsschalter sowie die zusätzlichen
+Profilwert-/Farbvergleichstexte wurden entfernt. Griffziehen aktiviert weiterhin
+Bézierabschnitte; Punkt-Doppelklick setzt ihre Kurven zurück. Bestehende
+Winkel- und Tangentendaten bleiben intern kompatibel.
+
+**Turmform zurücksetzen** entfernt freie Punkte und stellt feste Punkte sowie
+Béziergriffe unter den aktuellen Grenzen wieder her. Unabhängige Einstellungen
+bleiben erhalten. **Alles zurücksetzen** stellt zusätzlich alle manuellen
+Einstellungen und Vorschaupräferenzen auf ihre Standards zurück. Einzelheiten
+und der Umgang mit engeren Grenzen stehen im [manuellen Editor](manual_editor.md#ergebniszustände-und-export).

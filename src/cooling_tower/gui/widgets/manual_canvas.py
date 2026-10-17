@@ -20,6 +20,7 @@ from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.design_tokens import BOUNDARY_FEEDBACK_HOLD_MS,BOUNDARY_FEEDBACK_FADE_MS,ORIGINAL_OBJECT_BLUE
 from cooling_tower.gui.manual_view_worker import (SpatialFrame,ManualViewWorker,render_spatial_object,rotate_object,
                                                 cosmetic_pen,surface_brightness,draw_surface,render_silhouette_backing)
+from cooling_tower.gui.object_material import draw_object_picture,object_picture_cache_size
 
 
 def history_arrow_icon(redo=False):
@@ -217,7 +218,11 @@ class ManualCanvas(QWidget):
         if self.reference is None or self.draft is None:return None
         s = self.draft.settings
         return (self.reference.context.key,self._spatial_render_frame(),s.color_reference_time_s,s.critical_layers_enabled,
-                s.gradient_start_deficit_s,s.gradient_full_deficit_s,s.object_resolution_percent)
+                s.color_red_time_s,s.object_resolution_percent)
+
+    @staticmethod
+    def _object_geometry_key(key):
+        return key[:2]+key[5:]
 
     def _queue_spatial_render(self):
         key = self._spatial_key()
@@ -228,7 +233,9 @@ class ManualCanvas(QWidget):
             self._render_failure_key = None
             self.setAccessibleDescription("")
             self._render_desired = key
-            if self._render_job:self._render_manager.cancel_job(self._render_job,reason="manual_view_replaced")
+            if (self._render_job and self._render_active_key is not None and
+                    self._object_geometry_key(key)!=self._object_geometry_key(self._render_active_key)):
+                self._render_manager.cancel_job(self._render_job,reason="manual_view_replaced")
             self._render_timer.start()
         if self._render_job is None and not self._render_timer.isActive():
             self._render_timer.start()
@@ -250,7 +257,15 @@ class ManualCanvas(QWidget):
     @Slot(int,object)
     def _spatial_succeeded(self,request_id,result):
         key,img = result
-        if request_id == self._view_request_id and key == self._spatial_key():
+        current=self._spatial_key()
+        if (request_id==self._view_request_id and current is not None and
+                self._object_geometry_key(key)==self._object_geometry_key(current)):
+            if key!=current:
+                material=getattr(img,"material",None)
+                if material is None:return
+                img=material.recolor(self.draft.settings,serialize=False)
+                key=current
+            self._render_timer.stop()
             self._object_cache = img
             self._object_render_key = key
             self._remember_object_picture(key,img)
@@ -259,9 +274,11 @@ class ManualCanvas(QWidget):
 
     @Slot(int,str,str)
     def _spatial_failed(self,request_id,message,details):
-        if request_id == self._view_request_id and self._render_active_key == self._spatial_key():
+        current=self._spatial_key()
+        if (request_id==self._view_request_id and current is not None and self._render_active_key is not None
+                and self._object_geometry_key(self._render_active_key)==self._object_geometry_key(current)):
             self._render_proxy = False
-            self._render_failure_key = self._render_active_key
+            self._render_failure_key = current
             self.setAccessibleDescription("Vollständige Objektansicht konnte nicht aufgebaut werden: "+message)
 
     @Slot(object)
@@ -300,6 +317,11 @@ class ManualCanvas(QWidget):
 
     def set_draft(self, draft):
         old = self.draft
+        colors_only=(old is not None and replace(old,settings=draft.settings)==draft and
+            replace(old.settings,color_reference_time_s=draft.settings.color_reference_time_s,
+                    color_deficit_time_s=draft.settings.color_deficit_time_s,
+                    color_scale_max_time_s=draft.settings.color_scale_max_time_s,
+                    critical_layers_enabled=draft.settings.critical_layers_enabled)==draft.settings)
         self.draft = draft
         self._insertion_preview = None
         if (old is not None and any(getattr(old.settings,name)!=getattr(draft.settings,name)
@@ -307,12 +329,13 @@ class ManualCanvas(QWidget):
             self._hide_width_limit_guide()
         if self._height_snap_z is not None and not math.isclose(draft.height_mm,self._height_snap_z,rel_tol=0,abs_tol=1e-8):
             self._set_height_snap_feedback(None)
-        self._rings = tessellate(draft).points
-        if self.reference is not None:
-            self._placement = self.reference.context.validate(draft)
+        if not colors_only:
+            self._rings = tessellate(draft).points
+            if self.reference is not None:
+                self._placement = self.reference.context.validate(draft)
         if old is None or self._fitted_framing is None:
             self.fit_scene()
-        color_fields = ("color_reference_time_s","critical_layers_enabled","gradient_start_deficit_s","gradient_full_deficit_s")
+        color_fields = ("color_reference_time_s","critical_layers_enabled","color_red_time_s")
         if old is None or any(getattr(old.settings,n) != getattr(draft.settings,n) for n in color_fields):
             self._object_cache = None
         self._update_fit_button()
@@ -627,8 +650,7 @@ class ManualCanvas(QWidget):
     def _object_color(self, layer):
         settings = self.draft.settings
         if settings.critical_layers_enabled:
-            return LayerRangeCanvas.layer_color(settings.color_reference_time_s, layer.total_time_s,
-                                                 settings.gradient_start_deficit_s, settings.gradient_full_deficit_s)
+            return LayerRangeCanvas.layer_time_color(settings.color_reference_time_s,settings.color_red_time_s,layer.total_time_s)
         return QColor(self.OBJECT_COLOR)
 
     def _render_object(self):
@@ -638,6 +660,14 @@ class ManualCanvas(QWidget):
         fast_contour=mesh is not None and mesh.source is native and mesh.topology.reliable_contours
         key=self._spatial_key()
         cached=self._object_pictures.get(key)
+        if cached is None:
+            geometry_key=self._object_geometry_key(key)
+            material=next((getattr(picture,"material",None)
+                for old_key,picture in reversed(self._object_pictures.items())
+                if self._object_geometry_key(old_key)==geometry_key and getattr(picture,"material",None) is not None),None)
+            if material is not None:
+                cached=material.recolor(self.draft.settings,serialize=False)
+                self._remember_object_picture(key,cached)
         if cached is not None:
             self._object_pictures.move_to_end(key)
             self._render_timer.stop()
@@ -701,9 +731,7 @@ class ManualCanvas(QWidget):
     def _remember_object_picture(self,key,picture):
         self._object_pictures[key]=picture
         self._object_pictures.move_to_end(key)
-        def size(item):
-            return item.size()+(item.xray_picture.size() if getattr(item,"xray_picture",None) is not None else 0)
-        while len(self._object_pictures)>10 or sum(size(item) for item in self._object_pictures.values())>32*1024*1024:
+        while len(self._object_pictures)>1 and (len(self._object_pictures)>10 or object_picture_cache_size(self._object_pictures.values())>64*1024*1024):
             self._object_pictures.popitem(last=False)
 
     def _surface_color(self, z):
@@ -779,12 +807,7 @@ class ManualCanvas(QWidget):
         painter.translate(frame.width/2+frame.pan[0]-frame.projected_center[0]*scale,
                           frame.height/2+frame.pan[1]+frame.projected_center[1]*scale)
         painter.scale(scale,scale)
-        painter.setOpacity(opacity)
-        xray=getattr(picture,"xray_picture",None)
-        if xray is not None and opacity==.28:
-            painter.setOpacity(1)
-            painter.drawPicture(0,0,xray)
-        else:painter.drawPicture(0,0,picture)
+        draw_object_picture(painter,picture,opacity)
         painter.restore()
 
     def _original_image(self):

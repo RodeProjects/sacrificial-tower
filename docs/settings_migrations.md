@@ -31,7 +31,7 @@ einfacheres Format behalten.
 - [Schema 19: maximale getrennte Slices](#schema-19-maximale-getrennte-slices)
 - [Schema 20: Simulation ohne Turmstützen](#schema-20-simulation-ohne-turmstützen)
 - [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
-- [Getrennte manuelle Einstellungen (eigenes Schema 10)](#getrennte-manuelle-einstellungen-eigenes-schema-10)
+- [Getrennte manuelle Einstellungen (eigenes Schema 18)](#getrennte-manuelle-einstellungen-eigenes-schema-18)
 
 
 ## Speicherorte und parallele Installationen
@@ -366,12 +366,13 @@ und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
 
-## Getrennte manuelle Einstellungen (eigenes Schema 10)
+## Getrennte manuelle Einstellungen (eigenes Schema 18)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
 automatische Format bleibt bei Schema 21. `ManualSettingsStore` normalisiert
-strikte boolesche Werte, endliche Zahlen und gekoppelte Durchmesser-/Farbgrenzen.
+strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
+gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
 Die explizite Legacy-Migration 0→1 ergänzt den Schemaschlüssel. 1→2 ersetzt
 `target_layer_time_s` durch `color_reference_time_s` und entfernt
 `layer_time_tolerance_s`. Die bisherige Zielzeit dient damit ausschließlich als
@@ -448,7 +449,123 @@ zugehörigen Maximal-/Standfußwerte, damit zuvor gültige kleine Durchmessergru
 konsistent bleiben. Typen, Einheiten oder Werte, die bereits im alten Schema
 ungültig waren, werden weiterhin streng normalisiert. Andere gültige Präferenzen
 bleiben erhalten. Ältere Versionen dürfen Schema 10 weder übernehmen noch überschreiben.
-Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8→9→10 wird das Original gesichert,
+10→11 ersetzt die bisherigen Defizitgrenzen durch absolute Layerzeiten für die
+manuelle Einfärbung. `color_reference_time_s` ist nun die grüne Obergrenze
+(5–30 s), `color_red_time_s` die absolute Rotgrenze (größer als die grüne Grenze,
+maximal 60 s). Die Oberfläche zeigte in Schema 11 die Differenz beider gespeicherten Werte
+als „Zeitüberschreitung bis Rot“ an; 10/14 s erschienen dort als 10 s plus 4 s.
+Das Speicherformat und seine Semantik blieben bei dieser Darstellung unverändert. Bis zur grünen Grenze bleibt das Original grün; darüber wird
+linear zu Rot interpoliert. Die frühere Defizitbewertung hatte die umgekehrte
+Farbrichtung. Ihre gültige Farbreferenz bleibt als gewünschte Layerzeit erhalten;
+die Breite `gradient_full_deficit_s - gradient_start_deficit_s` wird zur neuen
+Zeit bis Rot addiert. Die beiden alten Defizitfelder entfallen. Ungültige alte
+Farbgrenzen verwenden einen Übergang von 1 s. Beispiel: Referenz 12 s,
+Defizitbeginn 0,5 s und vollständig Rot ab 2 s werden zu Grün bis 12 s und
+Rot ab 13,5 s. Die Abbildung erhält die Übergangsbreite, nicht die alte
+Farbaussage. Andere gültige Präferenzen bleiben erhalten. Der Bereichseditor
+verwendet weiterhin seine eigene Defizitbewertung; seine Darstellung wird über
+separate, nicht persistierte Farbeinstellungen an denselben Renderer übergeben.
+Ältere Versionen mit Schema 10 dürfen die neue Datei weder interpretieren noch
+überschreiben; automatische Übernahmen gleichnamiger Farbwerte sind wegen der
+geänderten Semantik nicht zulässig.
+11→12 korrigiert die Farbrichtung auf kürzere, defizitäre Layerzeiten.
+`color_reference_time_s` bleibt die gewünschte Layerzeit (Standard 10 s).
+Das neue Feld `color_deficit_time_s` speichert einen positiven Defizitbetrag
+(Standard 4 s; validierte Werte größer als 0 bis 60 s). `color_red_time_s`
+entfällt im Dokument und wird im Modell ausschließlich als
+`color_reference_time_s - color_deficit_time_s` abgeleitet. Layer ab der
+gewünschten Zeit sind grün, ab dem vollen Defizit und darunter rot.
+Einzelresets stellen unabhängig 10 s beziehungsweise 4 s wieder her.
+
+Die Migration validiert den alten absoluten Sekundenwert streng nach den
+Schema-11-Regeln und übernimmt bei gültigen Werten die Übergangsbreite
+`alte Rotgrenze - gewünschte Layerzeit` als positiven Defizitbetrag. Beispiel:
+10/14 s wird zu 10 s gewünschter Layerzeit und 4 s Defizit, mit Rot bei 6 s
+oder weniger. Die Übergangsbreite bleibt erhalten; die Farbaussage kehrt sich
+bewusst um. Fehlende/ungültige alte Rotgrenzen verwenden 4 s, ungültige
+Referenzen 10 s. Typen, andere Einheiten, nicht endliche Zahlen und damalige
+Grenzverletzungen werden nicht als gültige Werte übernommen. Andere gültige
+Einstellungen bleiben erhalten. Aktuelle Referenz- und Defizitwerte werden
+unabhängig normalisiert. Ältere Versionen mit Schema 11 dürfen Schema 12
+weder lesen noch überschreiben oder gleichnamige Farbwerte automatisch
+zurückübernehmen.
+12→13 begrenzt `circle_segments` auf maximal 256. Nach den alten Regeln gültige
+Integerwerte 257–720 werden auf 256 korrigiert; Typen und schon zuvor ungültige
+Werte erhalten weiterhin den sicheren Standard. Der positive interne Defizitwert
+bleibt gespeichert, darf aber die grüne Layerzeit nicht mehr übersteigen:
+damit ist die daraus abgeleitete absolute Rotgrenze nie negativ. Gültige alte
+Defizite über der grünen Zeit werden auf diese begrenzt (Rot bei 0 s).
+Die Oberfläche zeigt jetzt zuerst die absolute Rotgrenze (Standard 6 s), dann
+die absolute grüne Layerzeit (Standard 10 s); beide Einzelresets arbeiten mit
+diesen absoluten Werten. Aktuelle grüne Referenz und Defizit werden in ihrer
+Abhängigkeit validiert. Ältere Versionen mit Schema 12 dürfen Schema 13 weder
+lesen noch überschreiben; eine automatische Rückübernahme ist nicht freigegeben.
+
+13→14 ergänzt `color_scale_max_time_s` als rein visuelles Ende der Layerzeit-Farbskala.
+Der Standard ist 14 s; liegt die bisherige gültige grüne Zeit höher, wird die
+Skala mindestens bis zu ihr erweitert (auf den nächsten 0,1-s-Schritt aufgerundet).
+Beide bestehenden Farbgrenzen, ihre Bedeutung und ihre Präzision bleiben erhalten.
+Das neue Feld muss endlich, mindestens so groß wie die grüne Zeit und höchstens
+3600 s sein. Es wird in 0,1-s-Schritten normalisiert. Ungültige Typen, fremde
+Einheiten und unzulässige Werte erhalten den passenden sicheren Standard.
+Die Oberfläche verwendet jetzt Greifpunkte statt der beiden separaten Zeitfelder;
+die Skala wird mitgespeichert, wirkt aber weder auf Druckartefakte noch auf
+Modellgeometrie. Schema 13 darf die neue Datei weder lesen noch überschreiben;
+eine automatische Rückübernahme ist nicht freigegeben.
+
+14→15 erweitert die gültige grüne Layerzeit von 5–30 s auf 3–30 s. Dadurch
+kann das Skalenende in der Oberfläche bis auf 3 s sinken; darüber liegende
+Farbgrenzen werden gemeinsam und mit mindestens 0,1 s Abstand angepasst.
+Der linke Skalenstart bleibt 0 s. Der gespeicherte Endwert muss weiterhin
+mindestens die grüne Grenze umfassen. Die Migration erhält sämtliche zuvor
+gültigen Zeiten einschließlich ihrer Präzision. In Schema 14 ungültige grüne
+Werte unter 5 s werden nicht nachträglich gültig, sondern erhalten den sicheren
+Standard 10 s. Bei neuen gültigen grünen Zeiten unter 4 s wird ein ungültiges
+Defizit auf höchstens diese Referenz begrenzt, damit Rot niemals negativ wird.
+Ältere Versionen mit Schema 14 dürfen Schema 15 weder lesen noch überschreiben;
+eine automatische Rückübernahme ist nicht freigegeben.
+
+15→16 ersetzt die feste Skalenobergrenze von 3600 s durch eine objektabhängige
+Bediengrenze: normalerweise 60 s, bei längeren Original-Layerzeiten höchstens
+deren tatsächliches Maximum (auf 0,1 s abgerundet). Diese Grenze wird beim
+Laden des vorbereiteten Originals einmal berechnet, nicht als Objektdatum in
+den wiederverwendbaren Einstellungen gespeichert. Gültige gespeicherte
+Endwerte bleiben bei der Migration erhalten und werden erst mit bekanntem
+Objekt auf dessen zulässige Obergrenze begrenzt. So bleiben Werte für Objekte
+mit Layerzeiten über 60 s auch nach einem Neustart nutzbar. Für die Ausnahme
+sind nun auch endliche Endwerte über 3600 s erlaubt; in Schema 15 unzulässige
+Werte über 3600 s erhalten bei der Migration weiterhin den sicheren Standard.
+Typen, Einheit und 0,1-s-Schritte werden wie bisher validiert. Die Obergrenze
+greift bei direkter Eingabe, Pfeiltasten, Laden, Objektwechsel und Undo.
+Schema 15 darf die neue Datei weder lesen noch überschreiben; eine automatische
+Rückübernahme ist nicht freigegeben.
+
+16→17 erweitert auch die grüne Zeitgrenze von bisher 3–30 s auf dieselbe
+objektabhängige Obergrenze wie das Skalenende: normalerweise 60 s, bei längeren
+Original-Layerzeiten deren Maximum, auf 0,1 s abgerundet. Gespeichert wird
+weiter die absolute grüne Referenz plus positives Defizit. Die Normalisierung
+prüft endliche Werte, Referenz mindestens 3 s, nichtnegative rote Grenze und
+ein Skalenende, das die Referenz umfasst. Erst der geladene Originalkontext
+bestimmt die konkrete Obergrenze; kleinere Objektgrenzen korrigieren alle
+betroffenen Werte gemeinsam. Zuvor gültige Werte und ihre Präzision bleiben
+erhalten; in Schema 16 ungültige grüne Referenzen über 30 s fallen weiterhin
+auf 10 s zurück. Schema 16 darf die neue Datei weder lesen noch überschreiben;
+eine automatische Rückübernahme ist nicht freigegeben.
+Die neue Minimum-Markierung wird aus den Originaldaten abgeleitet und erzeugt
+keine zusätzliche Einstellung oder Formatänderung.
+
+17→18 erlaubt `color_deficit_time_s = 0` als gemeinsame rote/grüne Grenze.
+Die Darstellung schaltet dann unter der Referenz auf Rot und ab einschließlich
+der Referenz auf Grün; Leiste und Modell verwenden dieselbe harte Grenze ohne
+Division durch eine Übergangsbreite. Beide Greifer bleiben getrennt bedienbar,
+die Überschrift „Übergang“ entfällt. Aktuelle Defizite werden als endliche Zahlen
+von 0 bis zur grünen Referenz validiert. Zuvor gültige positive Defizite bleiben
+erhalten. Da 0 in Schema 17 ungültig war, ersetzt die Migration solche alten
+Einträge weiterhin durch den damaligen sicheren Standard (höchstens 4 s).
+Schema 17 darf die neue Datei weder lesen noch überschreiben; eine automatische
+Rückübernahme ist nicht freigegeben.
+
+Vor direkten und mehrstufigen Migrationen 0→1→2→3→4→5→6→7→8→9→10→11→12→13→14→15→16→17→18 wird das Original gesichert,
 anschließend atomar gespeichert. Alle früheren Migrationsschritte bleiben erhalten.
 
 Der aktuelle Oberflächenstandard beträgt in allen Ansichten 75 %; Einzel- und

@@ -788,7 +788,8 @@ class MainWindow(QMainWindow):
         self._excluded_layer_ranges: tuple[tuple[int, int], ...] = ()
         self._layer_range_silhouette = None
         self._layer_range_dialog: LayerRangeDialog | None = None
-        self._range_color_thresholds = (0.0, 1.0)
+        self._range_color_thresholds = (6.0, 10.0)
+        self._range_color_scale_max_time_s = 14.0
         self._range_time_coloring_enabled = False
         self._range_xray_enabled = False
         self.tower_assessment: TowerNeedAssessment | None = None
@@ -11764,8 +11765,9 @@ class MainWindow(QMainWindow):
             target_maximum=float(self.target_time_spin.property("validationMaximum")),
             target_decimals=self.target_time_spin.decimals(),
             ranges=self._excluded_layer_ranges,
-            gradient_start_deficit_s=self._range_color_thresholds[0],
-            gradient_full_deficit_s=self._range_color_thresholds[1],
+            color_red_time_s=self._range_color_thresholds[0],
+            color_green_time_s=self._range_color_thresholds[1],
+            color_scale_max_time_s=self._range_color_scale_max_time_s,
             time_coloring_enabled=self._range_time_coloring_enabled,
             xray_enabled=self._range_xray_enabled,
             silhouette=silhouette,
@@ -11795,7 +11797,8 @@ class MainWindow(QMainWindow):
         target_changed = target_time != self.target_time_spin.value()
         ranges_changed = ranges != self._excluded_layer_ranges
         self._excluded_layer_ranges = ranges
-        self._range_color_thresholds = (dialog.color_start_spin.value(), dialog.color_full_spin.value())
+        self._range_color_thresholds = dialog.color_thresholds()
+        self._range_color_scale_max_time_s = dialog.color_scale_spin.value()
         self._range_time_coloring_enabled = dialog.color_enabled_checkbox.isChecked()
         self._range_xray_enabled = dialog.xray_button.isChecked()
         # The normal target signal refreshes validation and modified-state UI.

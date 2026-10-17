@@ -170,7 +170,7 @@ class ManualGeometryTests(unittest.TestCase):
         self.assertEqual(mesh.segment_count,max(30,math.ceil(d.foot_diameter_mm)))
 
     def test_initial_segment_default_has_floor_30_and_still_follows_foot_diameter(self):
-        for foot_diameter,expected in ((25,30),(30,30),(30.01,31),(42,42),(95,95)):
+        for foot_diameter,expected in ((25,30),(30,30),(30.01,31),(42,42),(95,95),(300,256)):
             with self.subTest(foot_diameter=foot_diameter):
                 d=initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=100)),150,"segments",
                                 foot_diameter_mm=foot_diameter)

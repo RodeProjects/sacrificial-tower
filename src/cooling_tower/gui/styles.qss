@@ -2145,14 +2145,20 @@ QDoubleSpinBox, QSpinBox {
     padding: 0 48px 0 8px;
 }
 
-/* The range tool uses native suffixes, without the main window's unit overlay. */
+  QDoubleSpinBox[manualCompactInput="true"],
+  QSpinBox[manualCompactInput="true"] { padding: 0 8px; }
+
+  /* The range tool uses native suffixes, without the main window's unit overlay. */
 QDialog#layerRangeDialog QDoubleSpinBox,
 QDialog#layerRangeDialog QSpinBox { padding: 0 8px; }
 QDialog#layerRangeDialog QSpinBox[rangeCompactInput="true"],
-QDialog#layerRangeDialog QDoubleSpinBox[rangeCompactInput="true"] {
+QDialog#layerRangeDialog QDoubleSpinBox[rangeCompactInput="true"],
+QWidget#timeDeficitControls QDoubleSpinBox[rangeCompactInput="true"] {
     min-height: 0; padding: 2px 8px;
 }
-QDialog#layerRangeDialog QPushButton[rangeCompactReset="true"] {
+QDialog#layerRangeDialog QPushButton[rangeCompactReset="true"],
+QWidget#timeDeficitControls QPushButton[rangeCompactReset="true"],
+QWidget#layerTimeColorControls QPushButton[rangeCompactReset="true"] {
     min-height: 0; padding: 0;
 }
 

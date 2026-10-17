@@ -209,8 +209,9 @@ die Pfeilbuttons ändern sie in Schritten von 0,1 Sekunden. Das Eingabefeld steh
 rechts neben dem Label „Gew. Min-Layerzeit“. Ein gleichhoher Reset-Button
 rechts vom Eingabefeld stellt den Standardwert aus den Benutzervorgaben des
 Hauptfensters wieder her und ist bei diesem Wert deaktiviert.
-„Zeitdefizit-Einfärbung aktivieren“ besitzt rechts eine Checkbox und ist zunächst
-deaktiviert. Einschalten zeigt Farbregler, Wertefelder und Farbverlaufslegende;
+„Layerzeit-Einfärbungen aktivieren“ besitzt ein Hinweis-Icon und direkt hinter dem
+Text eine Checkbox; die Funktion ist zunächst deaktiviert. Einschalten zeigt die
+gemeinsame Farbleiste mit Greifern, Werten und einstellbarem Skalenende;
 Ausschalten blendet sie wieder aus.
 Die Grenzwerte bleiben für ein späteres Einschalten erhalten; währenddessen zeigt
 die Vorschau das Objekt ohne Zeitdefizitfarben in Hellblau, bei jeder Auflösungsstufe.
@@ -324,35 +325,37 @@ sofort, sobald sie wieder getrennt werden, sowie beim Loslassen oder Abbrechen.
 Die Vorschau und die Layereingaben
 rasten immer auf tatsächlichen Original-Layern ein.
 
-Die Färbung verwendet die gemessene Original-Layerzeit, unabhängig davon,
-ob der Layer ausgeschlossen ist: Ausreichende Layer sind grün. Die Einstellungen
-unter „Defizit-Einfärbung nach Mindest-Layerzeit“ zeigen einen Farbverlauf-Slider
-von 0 bis 2 Sekunden mit zwei Greifern und zwei Eingabefeldern darunter.
-Der aktuelle grüne Grenzwert steht links, der aktuelle rote rechts neben dem
-Slider; dazwischen nutzt der Slider die gesamte verfügbare Breite.
-Linker Greifer und linkes Wertefeld steuern die grüne Grenze, rechter Greifer
-und rechtes Wertefeld die rote Grenze. Eingaben und Greiferpositionen bleiben
-in beide Richtungen synchron. Pfeiltasten ändern die fokussierte Grenze um
-0,1 Sekunden, Bildtasten um 0,5 Sekunden; Pos1/Ende erreichen die Grenzwerte.
-Eng benachbarte Greifer liegen auf verschiedenen Seiten des Balkens, damit
-beide unabhängig erreichbar bleiben. Im linken Feld stehen „≤“, der Wert und „s“;
-im rechten Feld stehen „≥“, der Wert und „s“. Sie steuern den linearen
-Übergang von Grün zu Rot; die Standardgrenzen sind 0 und 1 Sekunde.
-Links der grünen Grenze bleibt der Slider grün, rechts der roten Grenze rot.
-Ein gemeinsamer Reset rechts neben den Eingabefeldern stellt diese beiden
-Standardgrenzen wieder her und gehört wie die übrigen Eingaben zum Entwurf.
-Er ist so hoch wie die Eingabefelder und vertikal auf deren Zeile zentriert.
-Bis zur ersten Grenze bleibt die Farbe grün, ab der zweiten bleibt sie rot.
-Die zweite Grenze ist stets größer als die erste; beim Überholen passt sich
-die jeweils andere Grenze um 0,1 Sekunden an. Anzeige und Werte verwenden
-eine Nachkommastelle. Genauere Eingaben werden dezimal kaufmännisch gerundet
-(zum Beispiel 1,25 → 1,3 Sekunden); die Pfeilbuttons ändern die Defizitgrenzen
-um 0,1 Sekunden.
-Beide Grenzen
-und die Legende aktualisieren sich im Entwurf sofort, ohne die Zielzeit oder die
-Turmberechnung zu verändern. Übernommene Ansichtseinstellungen bleiben innerhalb
-der laufenden Programmsitzung beim erneuten Öffnen und bei Quellenwechseln
-erhalten. Bei STL-Auflösungen über 0 % nehmen die schattierten Objektflächen,
+Die Einfärbung verwendet gemessene Original-Layerzeiten unabhängig von
+Ausschlussbereichen und der Mindest-Layerzeit für die Turmberechnung. Beide
+Editoren verwenden dieselbe Komponente mit derselben Bedienung und demselben
+kurzen Hover-Hinweis. Rot steht links, Grün rechts; die Standardgrenzen sind
+6 und 10 Sekunden bei einem Skalenende von 14 Sekunden. Der Bereich dazwischen
+geht fließend von Rot zu Grün über. Zusammengezogene Grenzen erzeugen einen
+unmittelbaren Farbwechsel; die Übergangsüberschrift verschwindet. Die getrennten
+Greifpunkte bleiben auch dann erreichbar. Pfeiltasten ändern um 0,1 Sekunden,
+Bildtasten um 1 Sekunde; Pos1/Ende erreichen die zulässigen Grenzen.
+
+Das kompakte Skalenendfeld erlaubt 3 bis 60 Sekunden, bei längeren Original-Layern
+bis zu deren tatsächlicher Maximalzeit in der Eingabeauflösung von 0,1 Sekunden.
+Ein kleineres Skalenende verschiebt darüber liegende Farbgrenzen gemeinsam ans
+neue Ende. Die Greifer stoppen ohne Fehlermeldung an den Grenzen; ungültige
+Eingaben im Skalenendfeld zeigen kurz einen roten Hinweis. Dezimalpunkt und
+Dezimalkomma werden akzeptiert, angezeigt wird das Komma. Die tatsächliche
+Min-Layerzeit des Originals erscheint als dezenter Pfeil unter der Leiste oder
+bei Platzmangel als „Min. Layerzeit der STL: x s“ unter den Werten.
+Es dient beim Ziehen beider Farbgrenzen als sanfter Rastpunkt auf den nächsten
+0,1-s-Wert; Hervorhebung, Lösen und Grenzregeln entsprechen der manuellen Ansicht.
+Kollidierende äußere Skalenwerte weichen mit verlängerten Orientierungslinien
+nach unten aus. Weitere Einzelheiten der gemeinsamen Darstellung stehen im
+[manuellen Editor](manual_editor.md).
+
+Farbgrenzen, Skalenende und Aktivierung gehören zum Entwurf: Übernehmen erhält
+sie in der laufenden Sitzung, Abbrechen verwirft ihre Änderungen. Bei einem
+Quellenwechsel passen sie sich beim nächsten Öffnen an die Grenzen des aktuellen
+Originals an. Die Werte werden nicht in Benutzervorgaben gespeichert und ändern
+weder Analyse noch Zielzeit oder Turmberechnung. Farbänderungen nutzen das
+vorbereitete Flächenmaterial sofort wieder, ohne Geometrie oder Slicer neu zu
+berechnen. Bei STL-Auflösungen über 0 % nehmen die schattierten Objektflächen,
 Netzkanten und Knoten selbst die höhenabhängigen Layerfarben an. Deckende
 Layerlinien über dem Netz entfallen; Details, Öffnungen und getrennte Inseln
 bleiben sichtbar. Die Profilansichten verwenden dafür ein höhenbezogenes
@@ -368,7 +371,8 @@ weiterhin Auswahl und Zusammenführung. Die Schraffur gilt auch für den gerade
 gezogenen Entwurf, wird immer nach dem Objektbild darüber gezeichnet und
 verändert weder Layerzeiten noch die Defizitfarben.
 Die Legende steht links unten im Vorschaubereich.
-Sie zeigt den Farbbalken und rechts daneben „Layerzeit-Defizit“ ohne Zahlen
+Sie zeigt Rot links und Grün rechts, bei gleichen Grenzen ohne Übergang,
+und rechts daneben „Layerzeit“ ohne Zahlen
 unter dem Balken; die Grenzwerte stehen bei den Einstellungen.
 Der Ausschluss-Hinweis verwendet die neutrale blaue Objektfarbe als Farbmuster,
 den fetten Titel „Ausschlussbereiche:“ und darunter drei bündige Stichpunkte:

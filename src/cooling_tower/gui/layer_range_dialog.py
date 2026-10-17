@@ -1,108 +1,24 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QLocale, QPoint, QRect, QSize, QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QLocale, QPoint, QSize, QSignalBlocker, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOptionFrame, QStyleOptionSpinBox,
+    QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
     QSplitter, QVBoxLayout, QWidget,
 )
 
 from cooling_tower.gui.widgets.layer_range_canvas import LayerRangeCanvas
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
-from cooling_tower.gui.widgets.wheel_safe_inputs import WheelSafeDoubleSpinBox, WheelSafeSpinBox
 from cooling_tower.gui.widgets.wrapping_layout import WrappingLayout
-from cooling_tower.gui.widgets.deficit_range_slider import DeficitRangeSlider, round_deficit
+from cooling_tower.gui.widgets.compact_preview_inputs import _CompactSpin, _CompactDoubleSpin, _CompactLayerSpin, _InputResetButton
+from cooling_tower.gui.widgets.layer_time_color_controls import LayerTimeColorControls
+from cooling_tower.manual.geometry import manual_color_scale_limit, minimum_original_layer_time
 from cooling_tower.gui.widgets.manual_resolution_control import RotationSlider, RotationEndLabels
 from cooling_tower.gui.widgets.manual_xray_controls import xray_button_style
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.texts import SETTING_INFO_TEXTS
 from cooling_tower.models.layer_ranges import normalize_layer_ranges
 from cooling_tower.settings_defaults import GENERATION_DEFAULTS
-
-
-class _CompactSpin:
-    """Reserve a value sample plus room for one additional digit."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setProperty("rangeCompactInput", True)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.valueChanged.connect(lambda _value: self.updateGeometry())
-        # Track uncommitted typed text as well as the numeric value.
-        self.lineEdit().textChanged.connect(lambda _text: self.updateGeometry())
-
-    def setValue(self, value):
-        super().setValue(value)
-        # Qt suppresses the editor's text signal during programmatic updates.
-        # Recompute width even when the caller blocks valueChanged as well.
-        self.updateGeometry()
-
-    def sizeHint(self):
-        hint = super().sizeHint()
-        line_edit = self.lineEdit()
-        metrics = line_edit.fontMetrics()
-        option = QStyleOptionSpinBox()
-        self.initStyleOption(option)
-        option.rect = QRect(0, 0, 1000, hint.height())
-        editor = self.style().subControlRect(QStyle.ComplexControl.CC_SpinBox, option,
-                                            QStyle.SubControl.SC_SpinBoxEditField, self)
-        line_option = QStyleOptionFrame()
-        line_edit.initStyleOption(line_option)
-        line_option.rect = QRect(0, 0, 1000, hint.height())
-        contents = line_edit.style().subElementRect(QStyle.SubElement.SE_LineEditContents,
-                                                   line_option, line_edit)
-        margins = line_edit.textMargins()
-        # Include native text insets and caret space, as well as one spare digit.
-        overhead = 1000 - editor.width() + 1000 - contents.width() + margins.left() + margins.right() + 4
-        text = self._width_sample()
-        text_width = max(metrics.horizontalAdvance(text), metrics.boundingRect(text).width())
-        hint.setWidth(overhead + text_width + metrics.horizontalAdvance("0"))
-        return hint
-
-    def _width_sample(self):
-        return self.lineEdit().displayText()
-
-    def minimumSizeHint(self):
-        return self.sizeHint()
-
-
-class _CompactDoubleSpin(_CompactSpin, WheelSafeDoubleSpinBox):
-    pass
-
-
-class _CompactLayerSpin(_CompactSpin, WheelSafeSpinBox):
-    def _width_sample(self):
-        # Layer edits share a fixed digit budget for this object's full range.
-        # Font/style changes still remeasure it; moving a range does not.
-        metrics = self.lineEdit().fontMetrics()
-        digit = max("0123456789", key=metrics.horizontalAdvance)
-        return digit * len(str(self.maximum()))
-
-
-class _DeficitSpin(_CompactDoubleSpin):
-    def textFromValue(self, value):
-        return self.locale().toString(round_deficit(value), "f", 1)
-
-    def valueFromText(self, text):
-        return round_deficit(super().valueFromText(text))
-
-    def setValue(self, value):
-        super().setValue(round_deficit(value))
-
-
-class _InputResetButton(QPushButton):
-    def __init__(self, editor):
-        super().__init__("↺")
-        self.setProperty("rangeCompactReset", True)
-        self.editor = editor
-        self.setFixedWidth(METRICS.reset_button_size_px)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-
-    def sizeHint(self):
-        return QSize(METRICS.reset_button_size_px, self.editor.sizeHint().height())
-
-    def minimumSizeHint(self):
-        return self.sizeHint()
 
 
 class _XRayButton(QPushButton):
@@ -121,18 +37,24 @@ class _XRayButton(QPushButton):
         return self.sizeHint()
 
 
-class DeficitGradient(QWidget):
+class LayerTimeGradient(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(10)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setAccessibleName("Farbverlauf von Grün bis Rot")
+        self.setAccessibleName("Farbverlauf von Rot bis Grün")
+        self.hard_boundary = False
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        if self.hard_boundary:
+            split = self.width() // 2
+            painter.fillRect(0, 0, split, self.height(), QColor(LayerRangeCanvas.CRITICAL_COLOR))
+            painter.fillRect(split, 0, self.width()-split, self.height(), QColor(LayerRangeCanvas.OBJECT_COLOR))
+            return
         gradient = QLinearGradient(0, 0, self.width(), 0)
-        gradient.setColorAt(0, QColor(LayerRangeCanvas.OBJECT_COLOR))
-        gradient.setColorAt(1, QColor(LayerRangeCanvas.CRITICAL_COLOR))
+        gradient.setColorAt(0, QColor(LayerRangeCanvas.CRITICAL_COLOR))
+        gradient.setColorAt(1, QColor(LayerRangeCanvas.OBJECT_COLOR))
         painter.fillRect(self.rect(), gradient)
 
 
@@ -280,9 +202,10 @@ class LayerTimeLegend(QWidget):
         scale.setFixedWidth(170)
         scale_layout = QVBoxLayout(scale)
         scale_layout.setContentsMargins(0, 0, 0, 0)
-        scale_layout.addWidget(DeficitGradient())
+        self.gradient = LayerTimeGradient()
+        scale_layout.addWidget(self.gradient)
         header.addWidget(scale)
-        header.addWidget(QLabel("Layerzeit-Defizit"))
+        header.addWidget(QLabel("Layerzeit"))
         layout.addWidget(self.color_key)
         exclusions = QGridLayout()
         exclusions.setHorizontalSpacing(6)
@@ -300,22 +223,28 @@ class LayerTimeLegend(QWidget):
         exclusions.addWidget(self.exclusion_title, 0, 1, Qt.AlignmentFlag.AlignVCenter)
         exclusions.addWidget(self.exclusion_text, 1, 1)
         layout.addLayout(exclusions)
-        self.set_thresholds(0.0, 1.0)
+        self._time_coloring_enabled = False
+        self.set_thresholds(6.0, 10.0)
 
     @staticmethod
     def _number(value):
-        return f"{round_deficit(value):.1f}".replace(".", ",")
+        return f"{value:.1f}".replace(".", ",")
 
-    def set_thresholds(self, start, full):
-        self.start_deficit_s, self.full_deficit_s = start, full
-        self.setAccessibleName(f"Legende: Grün bis {self._number(start)} Sekunden Defizit, Rot ab {self._number(full)} Sekunden Defizit; transparente blaue Flächen sind Ausschlussbereiche")
-        self.update()
+    def set_thresholds(self, red, green):
+        self.red_time_s, self.green_time_s = red, green
+        self.gradient.hard_boundary = red == green
+        self.gradient.setAccessibleName("Direkter Farbwechsel von Rot zu Grün" if red == green else "Farbverlauf von Rot bis Grün")
+        self.gradient.update()
+        self.set_time_coloring_enabled(self._time_coloring_enabled)
 
     def set_time_coloring_enabled(self, enabled):
+        self._time_coloring_enabled = enabled
         self.color_key.setVisible(enabled)
+        red_relation = "unter" if self.red_time_s == self.green_time_s else "bis"
         self.setAccessibleName(
-            f"Legende: Grün bis {self._number(self.start_deficit_s)} Sekunden Defizit, "
-            f"Rot ab {self._number(self.full_deficit_s)} Sekunden Defizit; Ausschlussbereiche sind dunkelblau umrahmt"
+            f"Legende: Rot {red_relation} {self._number(self.red_time_s)} Sekunden, Grün ab {self._number(self.green_time_s)} Sekunden; "
+            + ("dazwischen fließender Übergang; " if self.red_time_s < self.green_time_s else "direkter Farbwechsel; ")
+            + "Ausschlussbereiche sind dunkelblau umrahmt"
             if enabled else "Legende: Blaues Originalobjekt; Ausschlussbereiche sind dunkelblau umrahmt")
 
 
@@ -326,7 +255,7 @@ class LayerRangeDialog(QDialog):
 
     def __init__(self, layers, segments, *, target_time_s, target_minimum,
                  target_maximum, target_decimals=2, ranges=(),
-                 gradient_start_deficit_s=0.0, gradient_full_deficit_s=1.0,
+                 color_red_time_s=6.0, color_green_time_s=10.0, color_scale_max_time_s=14.0,
                  time_coloring_enabled=False, xray_enabled=False,
                  silhouette=None, target_time_hint=None, target_default=None,
                  source_artifact=None, render_manager=None, parent=None):
@@ -398,57 +327,20 @@ class LayerRangeDialog(QDialog):
         self.target_reset_button.setToolTip(f"Mindest-Layerzeit auf {self.target_spin.locale().toString(self._target_default, 'f', 1)} s zurücksetzen")
         target_header.addWidget(self.target_reset_button)
         left.addLayout(target_header)
-        color_header = QHBoxLayout()
-        color_header.setSpacing(6)
-        self.color_info_button = self._info_button(
-            "• Zeigt, wie viele Sekunden einem Layer zur gewünschten Mindest-Layerzeit fehlen.\n"
-            "• Zwei Grenzen bestimmen den Übergang von Grün (geringes Defizit) zu Rot (hohes Defizit).\n"
-            "• Grenzen per Greifer oder Wertefeld einstellen (0–2 s).\n"
-            "• Ändert nur die Vorschaufarben, nicht die Turmberechnung.",
-            "Zeitdefizit-Einfärbung aktivieren")
-        color_header.addWidget(self.color_info_button)
-        color_label = QLabel("Zeitdefizit-Einfärbung aktivieren")
-        color_label.setWordWrap(True)
-        color_header.addWidget(color_label, 1)
-        self.color_enabled_checkbox = QCheckBox()
-        self.color_enabled_checkbox.setAccessibleName(color_label.text())
+        self.color_controls = LayerTimeColorControls()
+        scale_limit = manual_color_scale_limit(layers)
+        maximum = min(scale_limit, max(3.0, color_scale_max_time_s))
+        green = min(maximum, max(3.0, color_green_time_s))
+        red = min(green, max(0.0, color_red_time_s))
+        self.color_controls.set_times(green, green-red,
+            maximum, scale_limit=scale_limit,
+            original_minimum=minimum_original_layer_time(layers))
+        for name in ("color_info_button", "color_enabled_checkbox", "color_settings"):
+            setattr(self, name, getattr(self.color_controls, name))
+        self.color_gradient = self.color_controls.range_slider
+        self.color_scale_spin = self.color_controls.scale_spin
         self.color_enabled_checkbox.setChecked(time_coloring_enabled)
-        color_label.setBuddy(self.color_enabled_checkbox)
-        color_header.addWidget(self.color_enabled_checkbox)
-        left.addLayout(color_header)
-        self.color_settings = QWidget()
-        color_limits = QVBoxLayout(self.color_settings)
-        color_limits.setContentsMargins(0, 0, 0, 0)
-        color_limits.setSpacing(3)
-        scale_layout = QHBoxLayout()
-        scale_layout.setSpacing(6)
-        self.color_start_label, self.color_full_label = QLabel(), QLabel()
-        self.color_gradient = DeficitRangeSlider()
-        self.color_gradient.setToolTip("Defizitgrenzen mit den beiden Greifern einstellen · Skala: 0,0 bis 2,0 s")
-        scale_layout.addWidget(self.color_start_label)
-        scale_layout.addWidget(self.color_gradient, 1)
-        scale_layout.addWidget(self.color_full_label)
-        color_limits.addLayout(scale_layout)
-        limit_inputs = QHBoxLayout()
-        limit_inputs.setContentsMargins(0, 0, 0, 0)
-        limit_inputs.setSpacing(6)
-        self.color_start_spin = self._color_spin(gradient_start_deficit_s, 0, DeficitRangeSlider.MAXIMUM_SECONDS - .1,
-                                                "Grün bis Defizit", "≤ ")
-        self.color_full_spin = self._color_spin(max(gradient_full_deficit_s, self.color_start_spin.value() + .1), .1, DeficitRangeSlider.MAXIMUM_SECONDS,
-                                               "Vollständig rot ab Defizit", "≥ ")
-        limit_inputs.addWidget(self.color_start_spin)
-        limit_inputs.addStretch(1)
-        limit_inputs.addWidget(self.color_full_spin)
-        self.color_reset_button = _InputResetButton(self.color_full_spin)
-        self.color_reset_button.setObjectName("settingResetButton")
-        self.color_reset_button.setAutoDefault(False)
-        self.color_reset_button.setToolTip("Defizitgrenzen auf 0,0 s und 1,0 s zurücksetzen")
-        self.color_reset_button.setAccessibleName("Defizitgrenzen zurücksetzen")
-        limit_inputs.addWidget(self.color_reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        color_limits.addLayout(limit_inputs)
-        left.addWidget(self.color_settings)
-        self.color_start_spin.setToolTip("Bis zu diesem Layerzeit-Defizit bleibt das Objekt grün. Danach beginnt der Farbverlauf zu Rot.")
-        self.color_full_spin.setToolTip("Ab diesem Layerzeit-Defizit ist das Objekt vollständig rot. Der Wert muss größer als der Beginn des Farbverlaufs sein.")
+        left.addWidget(self.color_controls)
         divider = QFrame()
         divider.setObjectName("footerHorizontalDivider")
         divider.setFixedHeight(1)
@@ -536,7 +428,7 @@ class LayerRangeDialog(QDialog):
                                                  self.rotation_controls, self.fit_button)
         right_layout.addWidget(self.preview_controls)
         self.canvas.set_target_time(target_time_s)
-        self.canvas.set_color_thresholds(self.color_start_spin.value(), self.color_full_spin.value())
+        self.canvas.set_color_times(self.color_gradient.green_time, self.color_gradient.red_time)
         right_layout.addWidget(self.canvas, 1)
         help_label = QLabel("Freie Fläche: Bereich zeichnen · Greifer: Grenzen ändern · Bereichsfläche: verschieben\nMausrad: zoomen · mittlere Taste: Ansicht verschieben · rechte Taste: Objekt drehen")
         help_label.setWordWrap(True)
@@ -553,7 +445,7 @@ class LayerRangeDialog(QDialog):
         notes_layout.setSpacing(8)
         notes_layout.addWidget(help_label)
         self.legend = LayerTimeLegend()
-        self.legend.set_thresholds(self.color_start_spin.value(), self.color_full_spin.value())
+        self.legend.set_thresholds(*self.color_thresholds())
         notes_layout.addWidget(self.legend)
         self.preview_notes.setWidget(notes_content)
         right_layout.addWidget(self.preview_notes)
@@ -586,13 +478,8 @@ class LayerRangeDialog(QDialog):
         self.target_spin.valueChanged.connect(self._target_changed)
         self.target_reset_button.clicked.connect(lambda: self.target_spin.setValue(self._target_default))
         self._refresh_target_reset()
-        self.color_start_spin.valueChanged.connect(self._color_threshold_changed)
-        self.color_full_spin.valueChanged.connect(self._color_threshold_changed)
-        self.color_gradient.start_changed.connect(self.color_start_spin.setValue)
-        self.color_gradient.full_changed.connect(self.color_full_spin.setValue)
-        self.color_gradient.set_thresholds(self.color_start_spin.value(), self.color_full_spin.value())
-        self._refresh_color_labels()
-        self.color_reset_button.clicked.connect(self._reset_color_thresholds)
+        self.color_controls.times_changed.connect(self._color_times_changed)
+        self.color_controls.scale_changed.connect(lambda _maximum, green, deficit: self._color_times_changed(green, deficit))
         self.add_button.clicked.connect(self._add_range)
         self.fit_button.clicked.connect(self.canvas.fit_object)
         self.canvas.fit_available_changed.connect(self._fit_available_changed)
@@ -601,7 +488,6 @@ class LayerRangeDialog(QDialog):
         self.canvas.selection_changed.connect(self.select_range)
         self.rotation_slider.valueChanged.connect(self._slider_rotation_changed)
         self.canvas.rotation_changed.connect(self._rotation_changed)
-        self._refresh_color_reset()
         self.color_enabled_checkbox.toggled.connect(self._time_coloring_toggled)
         self._time_coloring_toggled(time_coloring_enabled)
         self._rebuild_rows()
@@ -719,7 +605,7 @@ class LayerRangeDialog(QDialog):
         focus = self.focusWidget()
         if focus is not None:
             focus.clearFocus()
-        for spin in (self.target_spin, self.color_start_spin, self.color_full_spin):
+        for spin in (self.target_spin, self.color_scale_spin):
             spin.interpretText()
         self.accept()
 
@@ -755,20 +641,6 @@ class LayerRangeDialog(QDialog):
         return InfoToolButton(hint, accessible_name=f"Informationen zu {label}",
                               object_name="settingInfoButton", diameter_px=METRICS.setting_info_diameter_px)
 
-    def _color_spin(self, value, minimum, maximum, label, prefix):
-        spin = _DeficitSpin()
-        spin.setLocale(QLocale(QLocale.Language.German))
-        # Accept precise typed values, then normalize with decimal half-up rounding.
-        spin.setDecimals(10)
-        spin.setRange(minimum, maximum)
-        spin.setSingleStep(.1)
-        spin.setSuffix(" s")
-        spin.setPrefix(prefix)
-        spin.setKeyboardTracking(False)
-        spin.setValue(value)
-        spin.setAccessibleName(label)
-        return spin
-
     @staticmethod
     def _input_group(label, spin, info=None):
         group = QWidget()
@@ -783,46 +655,19 @@ class LayerRangeDialog(QDialog):
         layout.addWidget(spin)
         return group
 
-    def _color_threshold_changed(self, _value):
-        start, full = self.color_start_spin.value(), self.color_full_spin.value()
-        if start >= full:
-            if self.sender() is self.color_start_spin:
-                with QSignalBlocker(self.color_full_spin):
-                    self.color_full_spin.setValue(start + .1)
-            else:
-                with QSignalBlocker(self.color_start_spin):
-                    self.color_start_spin.setValue(full - .1)
-        start, full = self.color_start_spin.value(), self.color_full_spin.value()
-        self.canvas.set_color_thresholds(start, full)
-        self.legend.set_thresholds(start, full)
-        self.legend.set_time_coloring_enabled(self.color_enabled_checkbox.isChecked())
-        self.color_gradient.set_thresholds(start, full)
-        self._refresh_color_labels()
-        self._refresh_color_reset()
-        self.color_thresholds_changed.emit(start, full)
+    def color_thresholds(self):
+        return self.color_gradient.red_time, self.color_gradient.green_time
+
+    def _color_times_changed(self, green, deficit):
+        red = round(green-deficit, 6)
+        self.canvas.set_color_times(green, red)
+        self.legend.set_thresholds(red, green)
+        self.color_thresholds_changed.emit(red, green)
 
     def _time_coloring_toggled(self, enabled):
-        self.color_settings.setVisible(enabled)
         self.canvas.set_time_coloring_enabled(enabled)
         self.legend.set_time_coloring_enabled(enabled)
         self.preview_notes.updateGeometry()
-
-    def _refresh_color_labels(self):
-        self.color_start_label.setText(f"{self.color_start_spin.value():.1f} s".replace(".", ","))
-        self.color_full_label.setText(f"{self.color_full_spin.value():.1f} s".replace(".", ","))
-
-    def _refresh_color_reset(self):
-        changed = self.color_start_spin.value() != 0.0 or self.color_full_spin.value() != 1.0
-        self.color_reset_button.setEnabled(changed)
-        self.color_reset_button.setProperty("modified", changed)
-        self.color_reset_button.style().unpolish(self.color_reset_button)
-        self.color_reset_button.style().polish(self.color_reset_button)
-
-    def _reset_color_thresholds(self):
-        with QSignalBlocker(self.color_start_spin), QSignalBlocker(self.color_full_spin):
-            self.color_start_spin.setValue(0.0)
-            self.color_full_spin.setValue(1.0)
-        self._color_threshold_changed(None)
 
     @staticmethod
     def _compact_button(button):

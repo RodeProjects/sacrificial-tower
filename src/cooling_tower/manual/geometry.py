@@ -20,6 +20,8 @@ MINIMUM_INSERTION_GAP_MM = 0.1
 CURVE_RADIAL_ERROR_MM = 0.02
 MAXIMUM_CURVE_Z_STEP_MM = 1.0
 MAXIMUM_PROFILE_POINTS = 2048
+MAXIMUM_MANUAL_CIRCLE_SEGMENTS = 256
+DEFAULT_COLOR_SCALE_LIMIT_S = 60.0
 MINIMUM_TOWER_DIAMETER_MM = 1.0
 EPS = 1e-9
 OBJECT_RESOLUTION_STAGES = (0, 1, 5, 10, 15, 25, 50, 75, 100)
@@ -28,6 +30,24 @@ OBJECT_RESOLUTION_STAGES = (0, 1, 5, 10, 15, 25, 50, 75, 100)
 def object_resolution_default(view="side"):
     """Use the same preview quality preference in every view."""
     return 75
+
+
+def manual_color_scale_limit(layers):
+    """Bound the display to 60 s, or this original's longest layer time."""
+    maximum=max((layer.total_time_s for layer in layers
+                 if isinstance(layer.total_time_s,(int,float)) and not isinstance(layer.total_time_s,bool)
+                 and math.isfinite(layer.total_time_s)),default=0.)
+    maximum=max(DEFAULT_COLOR_SCALE_LIMIT_S,maximum)
+    # Stay inside the actual time at the editor's 0.1 s precision. At large
+    # magnitudes a float's own spacing already exceeds that precision.
+    return math.floor(maximum*10)/10 if maximum<1e14 else float(maximum)
+
+
+def minimum_original_layer_time(layers):
+    """Return the original's actual minimum, without rounding or preferences."""
+    return min((layer.total_time_s for layer in layers
+                if isinstance(layer.total_time_s,(int,float)) and not isinstance(layer.total_time_s,bool)
+                and math.isfinite(layer.total_time_s) and layer.total_time_s>=0),default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +69,12 @@ class ManualSettings:
     critical_layers_enabled: bool = False
     layer_snap_enabled: bool = True
     object_resolution_percent: int = object_resolution_default()  # 0: silhouette; >0: automatic quality preference
-    gradient_start_deficit_s: float = 0.0
-    gradient_full_deficit_s: float = 1.0
+    color_deficit_time_s: float = 4.0
+    color_scale_max_time_s: float = 14.0
+
+    @property
+    def color_red_time_s(self):
+        return self.color_reference_time_s-self.color_deficit_time_s
 
     def to_dict(self):
         return asdict(self)
@@ -215,8 +239,8 @@ def validate_settings(s):
             if not isinstance(value, bool):
                 raise GeometryError(name, "Die Option benötigt einen gültigen Ein-/Aus-Wert.")
         elif name == "circle_segments":
-            if value is not None and (type(value) is not int or not 12 <= value <= 720):
-                raise GeometryError(name, "Die Kreissegmentzahl muss zwischen 12 und 720 liegen.")
+            if value is not None and (type(value) is not int or not 12 <= value <= MAXIMUM_MANUAL_CIRCLE_SEGMENTS):
+                raise GeometryError(name, "Die Kreissegmentzahl muss zwischen 12 und 256 liegen.")
         elif name == "object_resolution_percent":
             if type(value) is not int or value not in OBJECT_RESOLUTION_STAGES:
                 raise GeometryError(name, "Die Vorschauauflösung benötigt eine der neun vorgegebenen Prozentstufen.")
@@ -235,10 +259,14 @@ def validate_settings(s):
     for name in ("expansion_angle_deg", "contraction_angle_deg", "overhang_angle_deg"):
         if not 0.1 <= getattr(s, name) <= 89.0:
             raise GeometryError(name, "Der Winkel zur Vertikalen muss zwischen 0,1° und 89° liegen.")
-    if not 5 <= s.color_reference_time_s <= 30:
-        raise GeometryError("color_reference_time_s", "Die Farbreferenz muss zwischen 5 und 30 s liegen.")
-    if not 0 <= s.gradient_start_deficit_s < s.gradient_full_deficit_s <= 30:
-        raise GeometryError("gradient_full_deficit_s", "Die Farbgrenzen müssen 0 ≤ Beginn < vollständig Rot ≤ 30 s erfüllen.")
+    if s.color_reference_time_s<3:
+        raise GeometryError("color_reference_time_s", "Die grüne Layerzeit muss mindestens 3 s betragen.")
+    if not 0 <= s.color_deficit_time_s <= s.color_reference_time_s:
+        raise GeometryError("color_deficit_time_s", "Die rote Layerzeit muss mindestens 0 s betragen und darf die grüne Layerzeit nicht überschreiten.")
+    if s.color_scale_max_time_s<s.color_reference_time_s:
+        raise GeometryError("color_scale_max_time_s", "Das Skalenende muss mindestens die grüne Zeitgrenze umfassen.")
+    if abs(s.color_scale_max_time_s-round(s.color_scale_max_time_s,1))>1e-8:
+        raise GeometryError("color_scale_max_time_s", "Das Skalenende benötigt Schritte von 0,1 s.")
 
 
 def violated_width_limits(draft):
@@ -337,7 +365,7 @@ def initial_draft(settings, layers, maximum_height_mm, context_key, *, foot_diam
     top = Coordinate(body, height)
     s = replace(settings, foot_diameter_mm=foot*2, foot_height_mm=foot_z,
                 maximum_foot_diameter_mm=max(settings.maximum_foot_diameter_mm,foot*2),
-                circle_segments=settings.circle_segments or max(MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS, math.ceil(foot*2)))
+                circle_segments=settings.circle_segments or min(MAXIMUM_MANUAL_CIRCLE_SEGMENTS,max(MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS, math.ceil(foot*2))))
     d = ManualDraft(s, (ProfilePoint("foot", start, "foot"), ProfilePoint("base", end, "base"),
                        ProfilePoint("top", top, "top")), (curve, Cubic.line(end, top)),
                     first, maximum_height_mm, context_key)

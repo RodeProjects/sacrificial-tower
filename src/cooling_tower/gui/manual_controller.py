@@ -192,8 +192,7 @@ class ManualGenerationController(QObject):
             if current.signature() != result.context.key: return
             self.reference = result
             settings = self.panel.settings
-            angle,note = overhang_default(current.effective_profile)
-            self.panel.overhang_note.setText(note if not settings.overhang_user_set else "Eigener Überhangwinkel; Profilstandard über Reset verfügbar.")
+            angle,_ = overhang_default(current.effective_profile)
             if not settings.overhang_user_set: settings = replace(settings,overhang_angle_deg=angle)
             try:
                 self.panel.initialize(result,settings)
@@ -500,7 +499,7 @@ class ManualGenerationController(QObject):
         w.reset_button.setEnabled(self.job_id is None and p.can_reset_all())
         w.reset_button.setToolTip("Alle manuellen Werte, die Turmform und die Vorschau auf Standardwerte zurücksetzen")
         w.tower_reset_button.setEnabled(self.job_id is None and p.can_reset_tower())
-        w.tower_reset_button.setToolTip("Turmform, Durchmessergrenzen und geometrische Winkelgrenzen zurücksetzen")
+        w.tower_reset_button.setToolTip("Turmpunkte und Kurvengriffe zurücksetzen und freie Punkte entfernen; Einstellungen beibehalten")
 
     def request_reset_defaults(self):
         if self.job_id is not None or self.panel.reference is None:

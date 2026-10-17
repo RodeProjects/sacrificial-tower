@@ -203,30 +203,166 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(p.settings.foot_diameter_mm,52)
         self.assertFalse(p.can_reset_tower())
 
-    def test_manual_field_feedback_only_colors_label_and_frame_with_boundary_timing(self):
+    def test_left_settings_use_two_sections_without_removed_controls(self):
+        from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox
+        from cooling_tower.gui.widgets import SectionCard
+        p=self.panel
+        cards=p.settings_content.findChildren(SectionCard)
+        self.assertEqual([card.title_label.text() for card in cards],
+                         ["Turmform und Bearbeitung","Visuelle Prüfung"])
+        self.assertNotIn("contraction_angle_deg",p.editors)
+        self.assertNotIn("contraction_enabled",p.checks)
+        self.assertFalse(p.settings_content.findChildren(QComboBox))
+        texts=[widget.text() for cls in (QLabel,QCheckBox)
+               for widget in p.settings_content.findChildren(cls)]
+        for removed in ("Verjüngung begrenzen","Maximaler Verjüngungswinkel",
+                        "Tangenten am ausgewählten Punkt koppeln","Kritische Original-Layer anzeigen"):
+            self.assertNotIn(removed,texts)
+        self.assertFalse(any("Die Farben vergleichen" in text or "Profilwert (90" in text for text in texts))
+
+    def test_layer_time_controls_are_hidden_until_enabled_and_only_change_colors(self):
+        p=self.panel
+        before=p.draft.artifact_payload()
+        self.assertTrue(p.color_settings.isHidden())
+        self.assertFalse(p.color_range_slider.isVisible())
+        p.color_enabled_checkbox.click()
+        self.assertFalse(p.color_settings.isHidden())
+        p.color_range_slider.request_value("red",6)
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(10,6))
+        p.color_range_slider.request_value("green",12)
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(12,6))
+        p.color_range_slider.request_value("red",3)
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(12,3))
+        p.color_range_slider.request_value("red",0)
+        self.assertLess(p.settings.color_red_time_s,12)
+        p.color_scale_spin.setValue(28)
+        p.color_range_slider.request_value("green",20)
+        self.assertLess(p.settings.color_red_time_s,20)
+        self.assertEqual(p.settings.color_red_time_s,0)
+        p.color_enabled_checkbox.click()
+        self.assertTrue(p.color_settings.isHidden())
+        p.color_enabled_checkbox.click()
+        self.assertEqual(p.color_range_slider.green_time,20)
+        self.assertEqual(p.draft.artifact_payload(),before)
+
+    def test_color_fields_and_checkboxes_have_requested_layout_with_application_styles(self):
+        from PySide6.QtWidgets import QLabel,QStyleOptionButton
+        p=self.panel
+        p.setStyleSheet((Path(__file__).resolve().parents[1]/"src/cooling_tower/gui/styles.qss").read_text(encoding="utf-8"))
+        p.color_enabled_checkbox.click();self.app.processEvents()
+        from PySide6.QtWidgets import QDoubleSpinBox
+        self.assertEqual(p.color_settings.findChildren(QDoubleSpinBox),[p.color_scale_spin])
+        self.assertEqual([item.text() for item in p.color_range_slider.zone_labels],["Rot","Übergang","Grün"])
+        self.assertFalse(p.color_settings.findChildren(QPushButton))
+        for checkbox in (p.checks["expansion_enabled"],p.color_enabled_checkbox):
+            self.assertEqual(checkbox.layoutDirection(),Qt.LayoutDirection.RightToLeft)
+            option=QStyleOptionButton();checkbox.initStyleOption(option)
+            indicator=checkbox.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator,option,checkbox)
+            contents=checkbox.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents,option,checkbox)
+            self.assertGreater(indicator.left(),contents.right())
+            self.assertLess(checkbox.width(),checkbox.parentWidget().width()-30)
+
+    def test_layer_time_settings_sync_after_undo_and_all_reset(self):
+        p=self.panel
+        preferences=replace(p.settings,color_reference_time_s=12,color_deficit_time_s=6,critical_layers_enabled=True)
+        p.initialize(self.reference,preferences)
+        self.assertEqual((p.color_range_slider.green_time,p.color_range_slider.red_time),(12,6))
+        p.color_range_slider.request_value("red",30)
+        p.undo()
+        self.assertEqual(p.settings,preferences)
+        self.assertEqual((p.color_range_slider.green_time,p.color_range_slider.red_time),(12,6))
+        p.reset_all()
+        self.assertTrue(p.color_settings.isHidden())
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(10,6))
+
+    def test_color_scale_and_points_follow_busy_state_and_all_reset(self):
+        p=self.panel
+        p.color_enabled_checkbox.click()
+        p.color_scale_spin.setValue(28)
+        p.color_range_slider.request_value("green",12)
+        p.set_busy(True)
+        self.assertFalse(p.color_scale_spin.isEnabled())
+        self.assertFalse(p.color_range_slider.red_handle.isEnabled())
+        p.color_range_slider.request_value("green",20)
+        self.assertEqual(p.settings.color_reference_time_s,12)
+        p.set_busy(False);p.reset_all()
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s,p.settings.color_scale_max_time_s),(10,6,14))
+
+    def test_tower_reset_preserves_options_and_restores_all_points_and_controls(self):
+        p=self.panel
+        original=p.draft
+        for name,value in (("circle_segments",48),("maximum_diameter_mm",35),
+                           ("maximum_foot_diameter_mm",50),("expansion_enabled",True),
+                           ("expansion_angle_deg",15),("critical_layers_enabled",True),
+                           ("color_reference_time_s",12),("color_deficit_time_s",6),
+                           ("layer_snap_enabled",False),("overhang_enabled",False),
+                           ("object_resolution_percent",5)):
+            p.change_setting(name,value)
+        p.full_infill_checkbox.setChecked(True)
+        p.insert(20)
+        p.move(p.selected,10,20)
+        p.move_control(1,2,8,18)
+        p.move("foot_height",25,7)
+        p.move("foot",30,p.draft.first_layer_z_mm)
+        p.move("top",10,30)
+        preferences=p.settings
+        p.reset_tower()
+        self.assertEqual(p.settings,replace(preferences,foot_diameter_mm=original.foot_diameter_mm,
+                                           foot_height_mm=original.settings.foot_height_mm))
+        self.assertEqual(p.draft.points,original.points)
+        self.assertEqual(p.draft.curves,original.curves)
+        self.assertTrue(p.full_infill_checkbox.isChecked())
+        self.assertFalse(p.can_reset_tower())
+        self.assertTrue(p.can_reset_all())
+        p.reset_all()
+        self.assertEqual(p.draft,p.initial)
+        self.assertFalse(p.full_infill_checkbox.isChecked())
+        self.assertFalse(p.can_reset_all())
+
+    def test_tower_reset_respects_tight_limits_and_retained_contraction_preferences(self):
+        from cooling_tower.manual.geometry import initial_draft
+        p=self.panel
+        settings=replace(ManualSettings(),minimum_diameter_mm=10,maximum_diameter_mm=12,
+                         maximum_foot_diameter_mm=11,foot_diameter_mm=11,contraction_enabled=True,
+                         contraction_angle_deg=1)
+        # Start from a valid narrow cylinder, then let the reset fit its foot.
+        draft=initial_draft(replace(settings,maximum_foot_diameter_mm=12,contraction_enabled=False),
+                            self.reference.context.layers,self.reference.context.maximum_height_mm,
+                            self.reference.context.key,foot_diameter_mm=12)
+        points=tuple(replace(point,position=replace(point.position,radius_mm=5)) for point in draft.points)
+        curves=tuple(replace(curve,**{name:replace(getattr(curve,name),radius_mm=5)
+                     for name in ("start","control1","control2","end")}) for curve in draft.curves)
+        p.commit(replace(draft,settings=replace(settings,foot_diameter_mm=10),points=points,curves=curves))
+        preferences=p.settings
+        p.reset_tower()
+        self.reference.context.validate(p.draft)
+        self.assertEqual(p.settings,replace(preferences,foot_diameter_mm=p.draft.foot_diameter_mm))
+        self.assertLessEqual(p.draft.foot_diameter_mm,11)
+        self.assertEqual(p.draft.base_diameter_mm,10)
+        self.assertFalse(p.can_reset_tower())
+
+    def test_manual_field_feedback_shows_reason_for_two_seconds_and_preserves_canvas(self):
         from cooling_tower.gui.design_tokens import COLORS
         p=self.panel;row=p.rows["circle_segments"]
         normal_label=row.label.styleSheet();normal_editor=row.editor.styleSheet()
         geometry=row.geometry();canvas=p.canvas.geometry()
         p.feedback(GeometryError("circle_segments","Grenze überschritten"),"points")
-        self.assertFalse(row.message_container.isVisible())
-        self.assertFalse(row.message_label.isVisible())
+        self.assertTrue(row.message_container.isVisible())
+        self.assertTrue(row.message_label.isVisible())
         self.assertIn(COLORS["error"],row.label.styleSheet())
         self.assertIn(f"border-color: {COLORS['error']}",row.editor.styleSheet())
         self.assertNotIn("background",row.editor.styleSheet())
         self.assertFalse(row.editor.property("invalid"))
         self.assertEqual(row.editor.accessibleDescription(),"Grenze überschritten")
         animation=row._feedback_animation
-        self.assertEqual(animation.duration(),p.canvas._width_limit_animation.duration()+500)
-        animation.setCurrentTime(850)
+        self.assertGreaterEqual(animation.duration(),2000)
+        animation.setCurrentTime(1999)
         self.assertEqual(row._feedback_amount,1)
-        animation.setCurrentTime(950)
-        self.assertAlmostEqual(row._feedback_amount,.5)
         p.feedback(GeometryError("circle_segments","Grenze weiter überschritten"),"points")
-        self.assertEqual(animation.currentTime(),950)
-        self.assertEqual(row.geometry(),geometry)
+        self.assertEqual(animation.currentTime(),0)
+        self.assertEqual(row.message_label.text(),"Grenze weiter überschritten")
         self.assertEqual(p.canvas.geometry(),canvas)
-        animation.setCurrentTime(1050)
+        animation.setCurrentTime(animation.duration())
         self.assertEqual(row._feedback_amount,0)
         self.assertEqual(row.label.styleSheet(),normal_label)
         self.assertEqual(row.editor.styleSheet(),normal_editor)
@@ -234,7 +370,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(row._feedback_amount,1)
         for candidate in p.rows.values():
             candidate.set_error("Grenze")
-            self.assertFalse(candidate.message_container.isVisible())
+            self.assertFalse(candidate.message_container.isHidden())
             self.assertIn(COLORS["error"],candidate.label.styleSheet())
             candidate.set_error(None)
 
@@ -743,7 +879,8 @@ class ManualGuiTests(unittest.TestCase):
                  patch.object(manual_view_worker,"draw_surface",wraps=manual_view_worker.draw_surface) as surfaces:
                 c.grab()
                 tower.assert_not_called()
-                self.assertEqual(surfaces.call_count,len(source))
+                self.assertGreaterEqual(surfaces.call_count,len(source))
+                self.assertIsNotNone(c._object_cache.material)
             frame=c._spatial_frame()
             self.assertEqual((frame.yaw,frame.pitch),(yaw,0))
             projected,_=frame.project(np.array([(*c._object_center,0),(*c._object_center,20)]))
@@ -921,6 +1058,33 @@ class ManualGuiTests(unittest.TestCase):
         self.assertFalse(p.resolution_slider.isEnabled())
         p.set_busy(False)
         self.assertTrue(p.resolution_slider.isEnabled())
+
+    def test_color_edits_reuse_geometry_and_render_without_worker_or_proxy(self):
+        from cooling_tower.gui.widgets import manual_canvas
+        p=self.panel;c=p.canvas
+        c.grab()
+        material=c._object_cache.material
+        rings=c._rings;placement=c._placement;artifact=p.draft.artifact_payload()
+        with patch.object(manual_canvas,"tessellate",side_effect=AssertionError("tower rebuilt")), \
+             patch.object(manual_canvas,"render_spatial_object",side_effect=AssertionError("object rebuilt")), \
+             patch.object(c,"_queue_spatial_render",side_effect=AssertionError("worker queued")):
+            p.checks["critical_layers_enabled"].setChecked(True)
+            for kind,value in (("green",12),("red",3)):
+                p.color_range_slider.request_value(kind,value);c.grab()
+                self.assertIs(c._object_cache.material,material)
+                self.assertFalse(c._render_proxy)
+                self.assertFalse(c._render_timer.isActive())
+        self.assertIs(c._rings,rings)
+        self.assertIs(c._placement,placement)
+        self.assertEqual(p.draft.artifact_payload(),artifact)
+
+    def test_color_point_keyboard_updates_immediately(self):
+        p=self.panel
+        p.checks["critical_layers_enabled"].setChecked(True)
+        handle=p.color_range_slider.green_handle
+        handle.setFocus();QTest.keyClick(handle,Qt.Key.Key_Right)
+        self.assertEqual(p.settings.color_reference_time_s,10.1)
+        self.assertTrue(handle.hasFocus())
 
     def test_resolution_slider_uses_requested_percentages(self):
         for stage,percent in enumerate((0,1,5,10,15,25,50,75,100),1):
@@ -1698,8 +1862,8 @@ class ManualGuiTests(unittest.TestCase):
             self.assertEqual(heading.info_button.height(),heading.title.fontMetrics().height())
             self.assertLess(heading.info_button.geometry().right(),heading.title.x())
             self.assertLessEqual(abs(heading.info_button.geometry().center().y()-heading.title.geometry().center().y()),1)
-            self.assertIn("nur die Darstellung",heading.info_button.toolTip())
-            self.assertIn("voller Originalqualität",heading.info_button.toolTip())
+            self.assertIn("Nur für die Vorschau",heading.info_button.toolTip())
+            self.assertIn("Originalqualität",heading.info_button.toolTip())
         heading_top=heading.mapTo(p.resolution_host,QPoint()).y()
         labels_top=labels.mapTo(p.resolution_host,QPoint()).y()
         slider_top=p.resolution_slider.mapTo(p.resolution_host,QPoint()).y()
@@ -1707,13 +1871,9 @@ class ManualGuiTests(unittest.TestCase):
         self.assertLess(labels_top,slider_top)
         self.assertLessEqual(slider_top+p.resolution_slider.height(),p.resolution_host.height())
         self.assertLess(labels.faster.font().pointSizeF(),heading.title.font().pointSizeF())
-        self.assertEqual(heading.info_button.toolTip().splitlines(),[
-            "Diese Einstellung betrifft nur die Darstellung des Originalobjekts in der Vorschau.",
-            "0 % zeigt die Originalsilhouette. Alle Stufen darüber wählen die Netzqualität automatisch.",
-            "Der Prozentwert gewichtet Performance und Optik; er ist kein Anteil der Originalflächen.",
-            "Kleine Objekte behalten ihr Originalnetz. Unklare Bereiche bleiben geschützt.",
-            "Bei großen Objekten zeigen niedrige Stufen glatte Flächen, hohe Stufen mehr Netzdetails.",
-            "Beim Export wird das Originalobjekt immer in voller Originalqualität exportiert."])
+        self.assertLess(len(heading.info_button.toolTip()),180)
+        self.assertLessEqual(len(heading.info_button.toolTip().splitlines()),4)
+        self.assertIn("0 %: Silhouette",heading.info_button.toolTip())
         self.assertEqual(p.resolution_slider.toolTip().splitlines()[:2],[
             "Performance → Optik:","0, 1, 5, 10, 15, 25, 50, 75, 100 %."])
         slider=p.resolution_slider
@@ -2023,11 +2183,10 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.draft.points[2].position.diameter_mm,30)
         self.panel.reset_value("point_diameter_mm")
         self.assertAlmostEqual(self.panel.draft.points[2].position.diameter_mm,30)
-        self.panel.segment_combo.setCurrentIndex(1)
-        self.assertTrue(self.panel.draft.curves[2].curved)
         self.assertTrue(any(h[0].startswith("control:") for h in self.panel.canvas.handles()))
         self.panel.select("control:2:1")
         self.panel.move_control(2,1,8,25)
+        self.assertTrue(self.panel.draft.curves[2].curved)
         self.assertAlmostEqual(self.panel.editors["control_diameter_mm"].value(),8)
         self.panel.select(identity);self.panel.remove(identity)
         self.assertEqual(len(self.panel.draft.points),3)
@@ -2117,9 +2276,9 @@ class ManualGuiTests(unittest.TestCase):
     def test_angle_activation_rejected_atomically(self):
         old=self.panel.draft
         self.panel.change_setting("contraction_angle_deg",1)
-        self.panel.checks["contraction_enabled"].setChecked(True)
+        self.panel.change_setting("contraction_enabled",True)
         self.assertFalse(self.panel.settings.contraction_enabled)
-        self.assertFalse(self.panel.checks["contraction_enabled"].isChecked())
+        self.assertNotIn("contraction_enabled",self.panel.checks)
         self.assertEqual(self.panel.draft.curves,old.curves)
         self.assertIn("Verjüngung",self.panel.status_label.text())
 
@@ -2145,17 +2304,18 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_numeric_step_beyond_hard_segment_range_is_reported(self):
         spin=self.panel.editors["circle_segments"]
-        spin.setValue(720)
+        spin.setValue(256)
         spin.stepBy(1)
         self.app.processEvents()
-        self.assertEqual(self.panel.settings.circle_segments,720)
-        self.assertIn("Kreissegmentzahl",self.panel.status_label.text())
+        self.assertEqual(self.panel.settings.circle_segments,256)
+        self.assertEqual(self.panel.rows["circle_segments"].message_label.text(),"Max. Segmente = 256")
 
-    def test_coupling_checkbox_and_control_sync(self):
+    def test_existing_coupled_tangents_remain_valid_when_editing_controls(self):
         self.panel.insert(20)
         identity=self.panel.selected
         self.panel.move(identity,15,20)
-        self.panel.smooth_checkbox.setChecked(True)
+        from cooling_tower.manual.geometry import couple_point
+        self.panel.commit(couple_point(self.panel.draft,identity,True))
         self.assertTrue(self.panel.draft.points[2].smooth)
         self.panel.select("control:1:2")
         self.panel.move_control(1,2,12,18)
@@ -2166,9 +2326,10 @@ class ManualGuiTests(unittest.TestCase):
         p=self.panel
         before=p.draft.artifact_payload()
         p.change_setting("critical_layers_enabled",True)
+        p.color_scale_spin.setValue(28)
         p.change_setting("color_reference_time_s",15)
         layer=self.reference.context.layers[7]
-        self.assertEqual(p.canvas._object_color(layer),LayerRangeCanvas.layer_color(15,layer.total_time_s))
+        self.assertEqual(p.canvas._object_color(layer),LayerRangeCanvas.layer_time_color(15,p.settings.color_red_time_s,layer.total_time_s))
         p.change_setting("critical_layers_enabled",False)
         self.assertEqual(p.canvas._object_color(layer).name(),p.canvas.OBJECT_COLOR)
         p.change_setting("overhang_enabled",True);p.change_setting("overhang_angle_deg",10)
@@ -2363,8 +2524,9 @@ class ManualGuiTests(unittest.TestCase):
         self.assertNotIn("target_layer_time_s",p.rows)
         self.assertNotIn("layer_time_tolerance_s",p.rows)
         before=p.draft.artifact_payload()
+        p.color_scale_spin.setValue(28)
         p.change_setting("color_reference_time_s",15)
-        p.change_setting("gradient_full_deficit_s",2)
+        p.change_setting("color_deficit_time_s",6)
         self.assertEqual(p.draft.artifact_payload(),before)
 
 
@@ -2699,7 +2861,7 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.open_stl_button.isVisible())
         self.assertTrue(w.open_run_button.isVisible())
 
-    def test_tower_reset_button_restores_form_and_limits_and_preserves_visual_settings_and_result(self):
+    def test_tower_reset_button_restores_only_form_and_preserves_settings_and_result(self):
         c,p,w=self.controller,self.panel,self.window
         self.show_manual_footer()
         automatic=w.collect_settings()
@@ -2720,7 +2882,7 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.tower_reset_button.isEnabled())
         w.tower_reset_button.click()
         self.assertEqual(w.tower_reset_button.text(),"Turmform zurücksetzen")
-        self.assertEqual((p.settings.maximum_diameter_mm,p.settings.maximum_foot_diameter_mm),(40,c.reference.context.maximum_foot_diameter_mm))
+        self.assertEqual((p.settings.maximum_diameter_mm,p.settings.maximum_foot_diameter_mm),(35,50))
         for name in ("object_resolution_percent","layer_snap_enabled","color_reference_time_s","overhang_angle_deg"):
             self.assertEqual(getattr(p.settings,name),getattr(settings,name))
         self.assertEqual([point.kind for point in p.draft.points],["foot","base","top"])
@@ -2758,7 +2920,7 @@ class ManualControllerTests(unittest.TestCase):
         w._refresh_footer_auxiliary_visibility()
         self.assertTrue(w.tower_reset_button.isHidden())
 
-    def test_both_footer_resets_restore_minimum_measure_and_default_form(self):
+    def test_footer_resets_distinguish_current_limits_from_default_settings(self):
         p,w=self.panel,self.window
         self.show_manual_footer()
         default=ManualSettings().minimum_diameter_mm
@@ -2773,13 +2935,14 @@ class ManualControllerTests(unittest.TestCase):
                     w.reset_button.click()
             else:
                 w.tower_reset_button.click()
-            self.assertEqual(p.settings.minimum_diameter_mm,default)
-            self.assertEqual(preview_row(p,"minimum_diameter_mm").field.value,default)
-            self.assertEqual(p.draft.base_diameter_mm,default)
-            self.assertEqual(p.draft.points[-1].position.diameter_mm,default)
+            expected=default if all_values else 12.3
+            self.assertEqual(p.settings.minimum_diameter_mm,expected)
+            self.assertEqual(preview_row(p,"minimum_diameter_mm").field.value,expected)
+            self.assertEqual(p.draft.base_diameter_mm,expected)
+            self.assertEqual(p.draft.points[-1].position.diameter_mm,expected)
             left,right,_,_=p.canvas.minimum_measure_geometry()
-            self.assertAlmostEqual(right.x()-left.x(),default*p.canvas.transform()[0])
-            self.assertFalse(w.reset_button.isEnabled())
+            self.assertAlmostEqual(right.x()-left.x(),expected*p.canvas.transform()[0])
+            self.assertEqual(w.reset_button.isEnabled(),not all_values)
             self.assertFalse(w.tower_reset_button.isEnabled())
 
     def test_settings_scroll_position_survives_collapse_and_main_window_layout_callbacks(self):
@@ -2961,6 +3124,7 @@ class ManualControllerTests(unittest.TestCase):
     def test_methods_settings_results_and_reset_independent(self):
         w,p=self.window,self.panel
         original=w.collect_settings()
+        p.color_scale_spin.setValue(28)
         p.change_setting("color_reference_time_s",20);p.move("base",30,8)
         p.change_setting("circle_segments",48)
         self.assertEqual(w.collect_settings(),original)
@@ -3025,8 +3189,9 @@ class ManualControllerTests(unittest.TestCase):
         self.assertTrue(w.background_job_manager.has_active(JobKind.MANUAL_VIEW))
         old_key=p.canvas._spatial_key()
         p.canvas.set_view("side");p.canvas.grab()
-        while (w.background_job_manager.has_active(JobKind.MANUAL_VIEW) or p.canvas._render_timer.isActive()) and time.monotonic()<deadline:
-            self.app.processEvents();time.sleep(.01)
+        # Give cancellation and preparation of all three surface palettes their
+        # own budget, and verify the completed render as well as thread release.
+        self._wait_resolution_render(timeout=20)
         self.assertFalse(w.background_job_manager.has_active(JobKind.MANUAL_VIEW))
         self.assertEqual(p.canvas.view,"side")
         self.assertNotEqual(p.canvas._spatial_key(),old_key)
@@ -3111,6 +3276,33 @@ class ManualControllerTests(unittest.TestCase):
         c.grab()
         self.assertTrue(c._render_timer.isActive())
         self._wait_resolution_render()
+
+    def test_colors_changed_during_initial_render_reuse_that_job(self):
+        from threading import Event
+        from cooling_tower.gui import manual_view_worker
+        self._large_resolution_reference()
+        p=self.panel;c=p.canvas
+        started,release=Event(),Event()
+        self.addCleanup(release.set)
+        original=manual_view_worker.render_spatial_object
+        def paused(*args,**kwargs):
+            started.set();release.wait(5)
+            return original(*args,**kwargs)
+        with patch.object(manual_view_worker,"render_spatial_object",side_effect=paused) as render:
+            p.change_setting("object_resolution_percent",5);c.grab()
+            deadline=time.monotonic()+2
+            while not started.is_set() and time.monotonic()<deadline:
+                self.app.processEvents();time.sleep(.005)
+            self.assertTrue(started.is_set())
+            job=c._render_job
+            p.change_setting("critical_layers_enabled",True)
+            p.color_range_slider.request_value("green",12);c.grab()
+            self.assertEqual(c._render_job,job)
+            self.assertFalse(self.window.background_job_manager.job(job).cancel_requested)
+            release.set()
+            self._wait_resolution_render()
+            self.assertEqual(render.call_count,1)
+            self.assertEqual(c._object_render_key,c._spatial_key())
 
     def test_manual_export_summary_keeps_evidence_kind_when_reopened(self):
         from cooling_tower.manual.service import ManualExportService

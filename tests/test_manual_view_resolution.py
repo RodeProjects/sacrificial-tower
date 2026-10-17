@@ -84,7 +84,7 @@ class ManualViewResolutionTests(unittest.TestCase):
         triangles=trimesh.creation.icosphere(subdivisions=2).triangles.copy()
         triangles[:,:,2]+=1
         triangles.setflags(write=False)
-        layers=tuple(SimpleNamespace(z_mm=i/50,total_time_s=20 if i<=50 else 5)
+        layers=tuple(SimpleNamespace(z_mm=i/50,total_time_s=20 if i<=50 else 2)
                      for i in range(1,101))
         section=np.array([[[-1,0],[1,0]]])
         reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
@@ -123,7 +123,7 @@ class ManualViewResolutionTests(unittest.TestCase):
         mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi/2,(1,0,0)))
         triangles=mesh.triangles.copy();triangles[:,:,2]+=1.2
         triangles.setflags(write=False)
-        layers=tuple(SimpleNamespace(z_mm=i*.024,total_time_s=5) for i in range(1,101))
+        layers=tuple(SimpleNamespace(z_mm=i*.024,total_time_s=2) for i in range(1,101))
         section=np.array([[[-1.2,0],[1.2,0]]])
         reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
             silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=(section,)*len(layers)),
@@ -301,7 +301,7 @@ class ManualViewResolutionTests(unittest.TestCase):
         section=np.array([[[-1,0],[-.5,0]],[[.5,0],[1,0]]])
         reference=SimpleNamespace(object_triangles=triangles,object_silhouette=build_mesh_silhouette(triangles),
             silhouette=SimpleNamespace(center_xy=(0,0),segments_xy=(section,section)),
-            context=SimpleNamespace(layers=(SimpleNamespace(z_mm=.5,total_time_s=20),SimpleNamespace(z_mm=1,total_time_s=5))))
+            context=SimpleNamespace(layers=(SimpleNamespace(z_mm=.5,total_time_s=20),SimpleNamespace(z_mm=1,total_time_s=2))))
         frame=SpatialFrame(240,240,60,(0,0),0,0,(0,0),(0,0),(0,0),0,"both")
         settings=replace(ManualSettings(),object_resolution_percent=0,critical_layers_enabled=True)
         image=rendering.render_spatial_object(reference,frame,settings,None)

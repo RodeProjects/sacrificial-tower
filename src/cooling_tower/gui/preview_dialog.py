@@ -363,7 +363,7 @@ class PreviewDialog(QDialog):
             return
         self._intermediate_scene_active = True
         self.state_label.setText("✓ Vorschau des aktuellen gemeinsamen Slices · Generierung läuft")
-        self.state_label.setProperty("state", "building")
+        self.state_label.setProperty("state", "current")
         self.state_label.show()
         self._refresh_state_style()
         self.canvas.set_scene(scene)
