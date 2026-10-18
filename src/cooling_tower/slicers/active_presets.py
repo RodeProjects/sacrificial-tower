@@ -138,7 +138,11 @@ def _read_config(
         except UnicodeDecodeError:
             return None
 
-    values = _parse_ini_values(text, schema)
+    values = _parse_ini_values(
+        text,
+        schema,
+        allow_implicit_global_section=adapter_id == "prusa_slicer",
+    )
     if values is None:
         values = _parse_json_values(text, schema)
     if values is None:
@@ -155,6 +159,8 @@ def _read_config(
 def _parse_ini_values(
     text: str,
     schema: ActivePresetSchema,
+    *,
+    allow_implicit_global_section: bool = False,
 ) -> dict[str, tuple[Any, ...]] | None:
     parser = configparser.ConfigParser(
         interpolation=None,
@@ -163,6 +169,22 @@ def _parse_ini_values(
     parser.optionxform = str
     try:
         parser.read_string(text)
+    except configparser.MissingSectionHeaderError:
+        if not allow_implicit_global_section:
+            return None
+        parser = configparser.ConfigParser(
+            interpolation=None,
+            strict=False,
+        )
+        parser.optionxform = str
+        try:
+            # PrusaSlicer stores global key/value options before sections in
+            # its main INI. A synthetic header lets ConfigParser continue to
+            # the real [presets] section without interpreting those globals
+            # as active preset selections.
+            parser.read_string(f"[__prusa_global__]\n{text}")
+        except configparser.Error:
+            return None
     except configparser.Error:
         return None
 

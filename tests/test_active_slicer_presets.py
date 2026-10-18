@@ -84,6 +84,7 @@ class ActiveSlicerPresetTests(unittest.TestCase):
         prusa_root = self.root / "PrusaSlicer"
         prusa_root.mkdir()
         (prusa_root / "PrusaSlicer.ini").write_text(
+            "alert_when_supports_needed = 1\n"
             "[presets]\n"
             "printer = Original Prusa MK4S 0.4 nozzle\n"
             "print = 0.20mm STRUCTURAL\n"

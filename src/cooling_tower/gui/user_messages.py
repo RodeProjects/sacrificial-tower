@@ -40,6 +40,9 @@ _EXACT_TRANSLATIONS = {
     "Maximum expansion angle must be greater than zero and at most 70 degrees.": (
         "Der Aufweitungswinkel muss größer als 0° und darf höchstens 70° sein."
     ),
+    "No printable layers were detected in the G-code.": (
+        "Im erzeugten G-Code wurden keine druckbaren Layer erkannt."
+    ),
 }
 
 _ENGLISH_MARKERS = re.compile(

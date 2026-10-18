@@ -26,13 +26,42 @@ Aktuell implementiert sind:
 
 - Anycubic Slicer Next
 - Bambu Studio
+- PrusaSlicer
 
 Als ausdrückliche, nicht aktive Platzhalter existieren:
 
 - UltiMaker Cura
-- PrusaSlicer
 - OrcaSlicer
 - Creality Print
+
+PrusaSlicer besitzt mit `PrusaSlicerAdapter` und `PrusaProfileCatalog` eine
+eigene Integration. Der Katalog liest die FFF-Presetbereiche `printer`,
+`print`, `filament`, aktive Herstellerkataloge und mitgelieferte
+`resources/profiles`-Vorlagen. Er verarbeitet sowohl flache Benutzer-INI-Dateien
+als auch Herstellerdateien mit Abschnitten wie `[printer:Name]` und
+`[print:Name]`. Ausgeblendete `*...*`-Vorlagen bleiben für die Vererbung
+verfügbar, erscheinen jedoch nicht als auswählbare Profile. Aktive
+Herstellerkataloge haben Vorrang vor gebündelten Spiegelkopien; abstrakte
+Vorlagen werden zusätzlich nach Hersteller aufgelöst. Cache- und
+`physical_printer`-Verzeichnisse bleiben außerhalb der Inventarwurzeln.
+
+Der eigene Adapter serialisiert ein aufgelöstes Maschinen-, Prozess- und
+Filamentprofil in eine temporäre INI-Datei innerhalb des isolierten Auftrags
+und ruft den Prusa-CLI-Export auf. Profile, Einstellungen, Cache und sonstige
+Slicer-Verzeichnisse bleiben lesend. Die gemeinsame Vererbungssuche verwendet
+vorgebaute ID- und Namensindizes, damit große Herstellerkataloge nicht für
+jeden Elternverweis vollständig durchsucht werden.
+
+Für die interne Analyse fordert der Adapter in jeder temporären Konfiguration
+explizit textuellen G-Code an, auch wenn das gewählte Maschinenprofil oder eine
+globale PrusaSlicer-Einstellung binären G-Code bevorzugt. Ein trotzdem mit der
+Signatur `GCDE` geliefertes Ergebnis wird vor der Analyse mit verständlicher
+Fehlermeldung abgewiesen. Laufbezogene Überschreibungen werden nach den
+aufgelösten Profilwerten angewendet. Die in automatischer und manueller
+Kalibrierung optionale 100-%-Füllung kombiniert bei PrusaSlicer
+`fill_density = 100%` mit `fill_pattern = rectilinear`, weil PrusaSlicer das
+häufig verwendete Muster `grid` bei dieser Dichte ablehnt. Sämtliche Werte
+existieren nur im programminternen Arbeitsverzeichnis.
 
 ## Installationserkennung von Windows-Apps
 
@@ -115,12 +144,15 @@ Text, gesperrter Profilbestätigung und beendetem Ladezustand. Unbekannte Ursach
 erhalten eine allgemeine Fehlermeldung mit Handlungsmöglichkeit. Veraltete
 Auftragsergebnisse dürfen den neueren Fehler- oder Auswahlzustand nicht ersetzen.
 
-Gezielte Regression: `test_slicer_failure_safety`. Die optionale Prüfung mit
-dem lokal installierten PrusaSlicer wird mit
-`COOLING_TOWER_RUN_INSTALLED_PRUSA_SAFETY_TEST=1` aktiviert. Sie startet keinen
-Slicer, prüft Auswahl/Schließen und vergleicht Originaldateien einschließlich
-Inhalt und Änderungszeit vor und nach dem Vorgang. Eine vollständige
-PrusaSlicer-Integration ist damit ausdrücklich noch nicht implementiert.
+Gezielte Regression: `test_slicer_failure_safety` und
+`test_prusa_slicer_integration`. Die optionale Prüfung mit dem lokal
+installierten PrusaSlicer wird mit
+`COOLING_TOWER_RUN_INSTALLED_PRUSA_INTEGRATION_TEST=1` aktiviert. Sie lädt die
+realen Profile, slicet ein kleines Modell mit der bestätigten Konfiguration und
+erneut mit den Kalibrierungsüberschreibungen, durchläuft außerdem den
+automatischen Kalibrierungsdienst und den manuellen Generierungsdienst,
+analysiert deren textuelle G-Code-Ergebnisse und vergleicht danach Inhalt,
+Größe und Änderungszeit aller Quelldateien.
 
 ## Datenschutz- und Integritätsgrenzen
 

@@ -59,13 +59,17 @@ def _records_owned_by_installation(
         except OSError:
             continue
     accepted: list[ProfileRecord] = []
+    resolved_paths: dict[Path, Path] = {}
     for record in records:
         if record.adapter_id != installation.adapter_id:
             continue
-        try:
-            path = Path(record.path).resolve()
-        except OSError:
-            continue
+        path = resolved_paths.get(record.path)
+        if path is None:
+            try:
+                path = Path(record.path).resolve()
+            except OSError:
+                continue
+            resolved_paths[record.path] = path
         if any(path == root or root in path.parents for root in roots):
             accepted.append(record)
     return tuple(accepted)
@@ -198,28 +202,27 @@ class ProfileInventoryService:
             root = Path(root)
             if not root.is_dir():
                 continue
-            try:
-                paths = tuple(root.rglob("*"))
-            except OSError:
-                continue
-            for path in paths:
-                if path.suffix.casefold() not in _PROFILE_SUFFIXES:
-                    continue
+            for suffix in _PROFILE_SUFFIXES:
                 try:
-                    resolved = path.resolve()
-                    statistics = resolved.stat()
+                    paths = root.rglob(f"*{suffix}")
+                    for path in paths:
+                        try:
+                            resolved = path.resolve()
+                            statistics = resolved.stat()
+                        except OSError:
+                            continue
+                        if resolved in seen or not resolved.is_file():
+                            continue
+                        seen.add(resolved)
+                        states.append(
+                            ProfileFileState(
+                                path=resolved,
+                                size_bytes=statistics.st_size,
+                                modified_ns=statistics.st_mtime_ns,
+                            )
+                        )
                 except OSError:
                     continue
-                if resolved in seen or not resolved.is_file():
-                    continue
-                seen.add(resolved)
-                states.append(
-                    ProfileFileState(
-                        path=resolved,
-                        size_bytes=statistics.st_size,
-                        modified_ns=statistics.st_mtime_ns,
-                    )
-                )
         return tuple(sorted(states, key=lambda item: str(item.path).casefold()))
 
     @staticmethod
@@ -424,6 +427,22 @@ class ProfileInheritanceResolver:
         self.inventory = inventory
         self.adapter = adapter
         self._cache: dict[tuple[str, str], ResolvedProfile] = {}
+        # Vendor catalogues such as PrusaSlicer's contain thousands of
+        # presets.  Building these indexes once keeps inheritance lookup
+        # linear in the number of actual matches instead of rescanning the
+        # entire inventory for every profile.  Tuple order stays identical to
+        # ``inventory.records``, preserving the existing selection policy.
+        records_by_id: dict[str, list[ProfileRecord]] = {}
+        records_by_name: dict[str, list[ProfileRecord]] = {}
+        for record in inventory.records:
+            records_by_id.setdefault(record.profile_id.casefold(), []).append(record)
+            records_by_name.setdefault(record.name.casefold(), []).append(record)
+        self._records_by_id = {
+            key: tuple(records) for key, records in records_by_id.items()
+        }
+        self._records_by_name = {
+            key: tuple(records) for key, records in records_by_name.items()
+        }
 
     def resolve(self, record: ProfileRecord) -> ResolvedProfile:
         return self._resolve(record, ())
@@ -538,19 +557,35 @@ class ProfileInheritanceResolver:
         normalized = reference.casefold().strip()
         exact_ids = tuple(
             record
-            for record in self.inventory.records
-            if record.profile_id.casefold() == normalized
-            and self._compatible_profile_kinds(record.kind, child.kind)
+            for record in self._records_by_id.get(normalized, ())
+            if self._compatible_profile_kinds(record.kind, child.kind)
         )
         if exact_ids:
-            return self._select_parent_mirror(exact_ids, child)
+            return self._select_parent_records(exact_ids, child)
         named = tuple(
             record
-            for record in self.inventory.records
-            if record.name.casefold() == normalized
-            and self._compatible_profile_kinds(record.kind, child.kind)
+            for record in self._records_by_name.get(normalized, ())
+            if self._compatible_profile_kinds(record.kind, child.kind)
         )
-        return self._select_parent_mirror(named, child)
+        return self._select_parent_records(named, child)
+
+    def _select_parent_records(
+        self,
+        candidates: tuple[ProfileRecord, ...],
+        child: ProfileRecord,
+    ) -> tuple[ProfileRecord, ...]:
+        adapter_selector = getattr(
+            self.adapter,
+            "select_profile_parents",
+            None,
+        )
+        if callable(adapter_selector):
+            selected = adapter_selector(candidates, child)
+            if isinstance(selected, tuple) and all(
+                isinstance(item, ProfileRecord) for item in selected
+            ):
+                return selected
+        return self._select_parent_mirror(candidates, child)
 
     def _select_parent_mirror(
         self,

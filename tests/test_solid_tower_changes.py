@@ -432,13 +432,16 @@ class FullInfillProfileTests(unittest.TestCase):
 
     def test_non_orca_adapters_receive_their_effective_override(self) -> None:
         expected = {
-            "prusa_slicer": ("fill_density", "100%"),
-            "cura": ("infill_sparse_density", 100),
+            "prusa_slicer": {
+                "fill_density": "100%",
+                "fill_pattern": "rectilinear",
+            },
+            "cura": {"infill_sparse_density": 100},
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             base = self._profile(root, "orca_slicer")
-            for adapter_id, (key, value) in expected.items():
+            for adapter_id, expected_overrides in expected.items():
                 with self.subTest(adapter_id=adapter_id):
                     installation = replace(
                         base.installation,
@@ -450,8 +453,11 @@ class FullInfillProfileTests(unittest.TestCase):
                         root / adapter_id,
                         simulate_full_tower_infill=True,
                     )
-                    self.assertEqual(overrides[key], value)
-                    self.assertEqual(temporary_profile.effective_values[key], value)
+                    for key, value in expected_overrides.items():
+                        self.assertEqual(overrides[key], value)
+                        self.assertEqual(
+                            temporary_profile.effective_values[key], value
+                        )
 
 
 if __name__ == "__main__":

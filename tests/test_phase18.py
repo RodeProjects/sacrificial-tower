@@ -1611,6 +1611,12 @@ class Phase18UiTests(unittest.TestCase):
             german_user_message("Target layer time must be greater than zero."),
             "Die Ziel-Layerzeit muss größer als 0 sein.",
         )
+        self.assertEqual(
+            german_user_message(
+                "No printable layers were detected in the G-code."
+            ),
+            "Im erzeugten G-Code wurden keine druckbaren Layer erkannt.",
+        )
         generic = german_user_message("Unexpected profile validation failed.")
         self.assertNotIn("validation failed", generic.casefold())
         self.assertNotIn("fehlerprotokoll", generic.casefold())

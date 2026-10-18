@@ -28,7 +28,13 @@ FULL_INFILL_OVERRIDES_BY_ADAPTER: Mapping[
         ("sparse_infill_density", "100%"),
         ("sparse_infill_pattern", "zig-zag"),
     ),
-    "prusa_slicer": (("fill_density", "100%"),),
+    "prusa_slicer": (
+        ("fill_density", "100%"),
+        # PrusaSlicer rejects several sparse patterns, including ``grid``,
+        # when density reaches 100 %.  Rectilinear is a supported solid
+        # pattern and is applied only to the disposable calibration profile.
+        ("fill_pattern", "rectilinear"),
+    ),
     "cura": (("infill_sparse_density", 100),),
 }
 

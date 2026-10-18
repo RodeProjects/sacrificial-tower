@@ -1448,6 +1448,11 @@ class ProfileMatchingService:
             for item in known_machine_profiles
             if _is_selectable_profile(item)
         )
+        known_machine_scope_ids = frozenset(
+            _normalise_profile_identity(value)
+            for machine in known_machine_profiles
+            for value in _machine_scope_identifiers(machine)
+        )
         scored_machines = tuple(
             (item, cls._machine_context_score(item, context))
             for item in machine_candidates
@@ -1523,6 +1528,7 @@ class ProfileMatchingService:
                 machines,
                 context,
                 known_machine_profiles,
+                known_machine_scope_ids=known_machine_scope_ids,
             )
 
         process_resolved = tuple(
@@ -1630,6 +1636,8 @@ class ProfileMatchingService:
         machines: Sequence[ResolvedProfile],
         context: ProfileFilterContext,
         known_machines: Sequence[ResolvedProfile],
+        *,
+        known_machine_scope_ids: frozenset[str] | None = None,
     ) -> bool:
         machine_names = {
             value.casefold()
@@ -1654,6 +1662,7 @@ class ProfileMatchingService:
             inferred_scopes = _recognized_machine_scopes(
                 item,
                 known_machines,
+                known_machine_scope_ids=known_machine_scope_ids,
             )
             if inferred_scopes:
                 selected_machine_scopes = {

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import sys
 import tempfile
@@ -25,13 +24,11 @@ from cooling_tower.gui.main_window import MainWindow
 from cooling_tower.gui.profile_worker import ProfileCatalogWorker, ProfileMatchingWorker
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
 from cooling_tower.slicers import (
-    EffectiveProfile, PrusaSlicerAdapter, ProfileCatalog, ProfileInventoryService,
-    ProfileKind, ProfileRecord, SliceRequest, SlicerCapability, SlicerCandidate,
+    CuraAdapter, EffectiveProfile, ProfileCatalog, ProfileInventoryService,
+    ProfileKind, ProfileRecord, SliceRequest, SlicerCapability,
     SlicerDiscoveryResult, SlicerDiscoveryService, SlicerDiscoverySource,
     SlicerGuiState, SlicerInstallation, SlicerPreferenceStore, SlicerSupportLevel,
-    StaticCandidateDiscovery,
 )
-from cooling_tower.slicers.detection import detection_module_for
 from cooling_tower.slicers.errors import SlicerIntegrationUnavailableError
 from cooling_tower.slicers.support import (
     detected_installation, require_profile_support, slicer_failure_message,
@@ -46,9 +43,13 @@ from gui_lifecycle import dispose_test_widget
 
 
 def installation(root: Path, adapter_id: str = "test") -> SlicerInstallation:
+    product_names = {
+        "prusa_slicer": "PrusaSlicer",
+        "orca_slicer": "OrcaSlicer",
+    }
     return SlicerInstallation(
         adapter_id=adapter_id,
-        product_name="PrusaSlicer" if adapter_id == "prusa_slicer" else adapter_id,
+        product_name=product_names.get(adapter_id, adapter_id),
         version="2.9.6",
         executable_path=root / f"{adapter_id}.exe",
         verified=True,
@@ -75,7 +76,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
 
     def test_all_registered_placeholders_are_closed_despite_legacy_full_flags(self):
-        for adapter_id in ("prusa_slicer", "cura", "orca_slicer", "creality_print"):
+        for adapter_id in ("cura", "orca_slicer", "creality_print"):
             with self.subTest(adapter_id=adapter_id):
                 item = installation(self.root, adapter_id)
                 self.assertFalse(item.can_slice)
@@ -87,19 +88,17 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
                     require_profile_support(item)
 
     def test_implemented_integrations_and_custom_adapters_keep_their_contract(self):
-        for adapter_id in ("anycubic_slicer_next", "bambu_studio", "custom"):
+        for adapter_id in (
+            "anycubic_slicer_next",
+            "bambu_studio",
+            "prusa_slicer",
+            "custom",
+        ):
             with self.subTest(adapter_id=adapter_id):
                 item = installation(self.root, adapter_id)
                 self.assertIs(detected_installation(item), item)
                 self.assertTrue(item.can_slice)
                 require_profile_support(item)
-
-    def test_future_module_activation_needs_no_change_to_error_boundary(self):
-        item = installation(self.root, "prusa_slicer")
-        enabled = replace(detection_module_for(item.adapter_id), implemented=True)
-        with patch("cooling_tower.slicers.detection.registry.detection_module_for", return_value=enabled):
-            require_profile_support(item)
-            self.assertTrue(item.can_slice)
 
     def test_unverified_and_detection_only_installations_are_rejected(self):
         item = installation(self.root)
@@ -114,7 +113,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
     def test_unsupported_and_mismatched_inventory_never_scans_reads_or_caches(self):
         service = ProfileInventoryService(self.root / "cache.json")
         adapter = Mock(adapter_id="test")
-        for item in (installation(self.root, "prusa_slicer"), installation(self.root, "other")):
+        for item in (installation(self.root, "orca_slicer"), installation(self.root, "other")):
             with self.subTest(adapter_id=item.adapter_id), patch.object(service, "snapshot_file_states") as scan:
                 with self.assertRaises(SlicerIntegrationUnavailableError):
                     service.load(adapter, item, force=True)
@@ -123,8 +122,8 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
         self.assertFalse(service.cache_path.exists())
 
     def test_direct_slice_is_rejected_before_copying_or_starting_processes(self):
-        item = installation(self.root, "prusa_slicer")
-        adapter = PrusaSlicerAdapter(runner=Mock())
+        item = installation(self.root, "cura")
+        adapter = CuraAdapter(runner=Mock())
         request = SliceRequest(
             model_path=self.root / "missing.stl",
             output_directory=self.root / "output",
@@ -138,18 +137,18 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
         self.assertFalse(request.output_directory.exists())
 
     def test_saved_unsupported_choice_does_not_outrank_working_installation(self):
-        prusa = installation(self.root, "prusa_slicer")
+        unsupported = installation(self.root, "orca_slicer")
         working = installation(self.root, "anycubic_slicer_next")
         store = SlicerPreferenceStore(self.root / "preferences.json")
-        store.set_last_selected(prusa.identity_key)
+        store.set_last_selected(unsupported.identity_key)
         service = SlicerDiscoveryService(preference_store=store)
-        result = service._build_result((prusa, working), None, ())
+        result = service._build_result((unsupported, working), None, ())
         self.assertEqual(result.recommended_key, working.identity_key)
 
     def test_missing_registered_adapter_is_reported_as_unavailable(self):
         service = SlicerDiscoveryService(adapters=(Mock(adapter_id="other"),))
         with self.assertRaises(SlicerIntegrationUnavailableError):
-            service.adapter_for(installation(self.root, "prusa_slicer"))
+            service.adapter_for(installation(self.root, "orca_slicer"))
 
     def test_unknown_empty_and_private_errors_have_actionable_generic_feedback(self):
         for error in (RuntimeError(), NotImplementedError(), KeyError("private profile"), ValueError("<private>")):
@@ -172,7 +171,7 @@ class SlicerFailureWorkerTests(unittest.TestCase):
         return failed, succeeded
 
     def test_catalog_and_matching_workers_reject_unsupported_before_service_call(self):
-        item = installation(PROJECT_ROOT, "prusa_slicer")
+        item = installation(PROJECT_ROOT, "orca_slicer")
         service = Mock()
         for worker in (
             ProfileCatalogWorker(1, service, item, object()),
@@ -232,7 +231,7 @@ class _SlicerGuiFixture:
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.working = installation(self.root)
-        self.prusa = installation(self.root, "prusa_slicer")
+        self.unsupported = installation(self.root, "orca_slicer")
         records = []
         for kind in (ProfileKind.MACHINE, ProfileKind.PROCESS, ProfileKind.FILAMENT):
             path = self.root / f"{kind.value}.json"
@@ -244,7 +243,7 @@ class _SlicerGuiFixture:
         self.service = SimpleNamespace(
             adapter_for=Mock(return_value=object()),
             remember_selection=Mock(),
-            discover_installations=Mock(return_value=discovery_result(self.working, self.prusa)),
+            discover_installations=Mock(return_value=discovery_result(self.working, self.unsupported)),
         )
 
     def window(self, *, startup=False):
@@ -293,12 +292,12 @@ class _SlicerGuiFixture:
 
 class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
     def test_startup_with_only_saved_unsupported_slicer_closes_without_profile_work(self):
-        self.service.discover_installations.return_value = discovery_result(self.prusa)
+        self.service.discover_installations.return_value = discovery_result(self.unsupported)
         window = self.window(startup=True)
         self.wait_for(lambda: window.profile_status_label.property("state") == "error")
         self.idle(window)
         self.assert_failed(window)
-        self.assertIn("PrusaSlicer", window.profile_status_label.text())
+        self.assertIn("OrcaSlicer", window.profile_status_label.text())
         self.assertIn("nur erkannt", window.slicer_combo.currentText())
         self.profiles.catalog.assert_not_called()
         self.service.adapter_for.assert_not_called()
@@ -311,7 +310,7 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
         window.confirmed_profile_context = object()
         window.profile_status_label.setProperty("inputBlocker", True)
         calls_before = self.profiles.catalog.call_count
-        window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.prusa.identity_key))
+        window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.unsupported.identity_key))
         self.assert_failed(window)
         self.assertIsNone(window._pending_profile_match)
         self.assertEqual(self.profiles.catalog.call_count, calls_before)
@@ -379,7 +378,7 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
     def test_obsolete_success_and_failure_cannot_replace_unsupported_notice(self):
         window = self.start()
         old_request = window._profile_request_id
-        window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.prusa.identity_key))
+        window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.unsupported.identity_key))
         message = window.profile_status_label.text()
         window._on_profile_catalog_succeeded(old_request, self.catalog)
         window._on_profile_catalog_failed(old_request, "old error", "")
@@ -399,7 +398,7 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
         window.start_profile_catalog_loading()
         self.wait_for(entered.is_set)
         try:
-            window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.prusa.identity_key))
+            window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.unsupported.identity_key))
             self.assert_failed(window)
             heartbeat = []
             QTimer.singleShot(0, lambda: heartbeat.append(True))
@@ -413,50 +412,12 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
     def test_repeated_unsupported_selection_never_starts_work_or_prevents_close(self):
         window = self.start()
         for _ in range(20):
-            window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.prusa.identity_key))
+            window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.unsupported.identity_key))
             self.assert_failed(window)
             window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(self.working.identity_key))
             self.wait_for(lambda: window.profile_catalog is not None)
             self.idle(window)
         self.assertTrue(window.close())
-
-
-@unittest.skipUnless(
-    os.environ.get("COOLING_TOWER_RUN_INSTALLED_PRUSA_SAFETY_TEST") == "1",
-    "Installed Prusa read-only safety check is opt-in.",
-)
-class InstalledPrusaSafetyTests(_SlicerGuiFixture, unittest.TestCase):
-    def test_real_prusa_is_detected_but_never_loaded_or_executed_and_closes(self):
-        executable = Path("C:/Program Files/Prusa3D/PrusaSlicer/prusa-slicer.exe")
-        self.assertTrue(executable.is_file())
-        adapter = PrusaSlicerAdapter(runner=Mock())
-        candidate = SlicerCandidate(executable, SlicerDiscoverySource.KNOWN_PATH, adapter_hint=adapter.adapter_id)
-        store = SlicerPreferenceStore(self.root / "prusa-preferences.json")
-        service = SlicerDiscoveryService(
-            adapters=(adapter,), discovery=StaticCandidateDiscovery((candidate,)), preference_store=store,
-        )
-        with patch.dict(os.environ, {"APPDATA": "C:/Users/Flo/AppData/Roaming"}):
-            item = adapter.verify_installation(candidate)
-            self.assertFalse(item.can_slice)
-            store.set_last_selected(item.identity_key)
-            self.service = service
-            def fingerprint():
-                paths = {executable}
-                for root in item.profile_roots:
-                    paths.update(path for path in root.rglob("*") if path.is_file())
-                return {str(path): (path.stat().st_size, path.stat().st_mtime_ns,
-                                   hashlib.sha256(path.read_bytes()).hexdigest()) for path in paths}
-            before = fingerprint()
-            self.assertGreater(len(before), 1)
-            with patch.object(adapter, "discover_profiles", side_effect=AssertionError("must never run")) as profiles:
-                window = self.window(startup=True)
-                self.wait_for(lambda: window.profile_status_label.property("state") == "error")
-                self.idle(window)
-                self.assert_failed(window)
-                self.assertTrue(window.close())
-                profiles.assert_not_called()
-                adapter.runner.run.assert_not_called()
-            self.assertEqual(before, fingerprint())
 
 
 class BoundedSlicerProcessTests(unittest.TestCase):
@@ -602,7 +563,7 @@ class SlicerStepIsolationTests(_SlicerGuiFixture, unittest.TestCase):
     def test_step_one_defers_profiles_and_shows_no_slicer_error(self):
         window = self.window()
         window._isolate_slicer_operations = True
-        self.service.discover_installations.return_value = discovery_result(self.prusa)
+        self.service.discover_installations.return_value = discovery_result(self.unsupported)
         window.start_slicer_discovery()
         self.wait_for(lambda: window.slicer_discovery_result is not None)
         self.idle(window)

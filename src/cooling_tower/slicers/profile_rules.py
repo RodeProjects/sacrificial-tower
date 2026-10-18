@@ -59,12 +59,16 @@ def _machine_scope_identifiers(
 def _recognized_machine_scopes(
     profile: ResolvedProfile,
     known_machines: Sequence[ResolvedProfile],
+    *,
+    known_machine_scope_ids: frozenset[str] | None = None,
 ) -> frozenset[str]:
-    known = {
-        _normalise_profile_identity(value)
-        for machine in known_machines
-        for value in _machine_scope_identifiers(machine)
-    }
+    known = known_machine_scope_ids
+    if known is None:
+        known = frozenset(
+            _normalise_profile_identity(value)
+            for machine in known_machines
+            for value in _machine_scope_identifiers(machine)
+        )
     scopes = {
         _normalise_profile_identity(scope)
         for identifier in _profile_identifiers(profile)
@@ -83,9 +87,7 @@ def _recognized_machine_scopes(
             scope,
         )
     }
-    return frozenset(
-        scope for scope in scopes if scope in known or scope in structured
-    )
+    return frozenset(scope for scope in scopes if scope in known or scope in structured)
 
 
 def _normalise_profile_identity(value: Any) -> str:

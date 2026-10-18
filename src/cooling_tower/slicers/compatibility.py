@@ -63,7 +63,7 @@ SLICER_COMPATIBILITY_MATRIX: tuple[SlicerCompatibility, ...] = (
         "prusa_slicer",
         "PrusaSlicer",
         ("prusa-slicer.exe", "PrusaSlicer.exe"),
-        "--load temporary-effective-profile.ini, --output target.gcode, model",
+        "--load temporary-effective-profile.ini, --export-gcode, --output target.gcode, model",
         "isolated per-job root",
         "effective profile is serialized to a temporary INI file",
         (".gcode",),
