@@ -44,6 +44,7 @@ from cooling_tower.slicers.models import (
 )
 from cooling_tower.slicers.process import ProcessOutcome
 from cooling_tower.version import APP_NAME, APP_SUBTITLE
+from gui_lifecycle import dispose_test_widget
 
 
 class RecordingProbeRunner:
@@ -91,7 +92,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.app.processEvents()
 
     def window(self) -> MainWindow:
-        return MainWindow(user_settings_path=self.root / "settings.json")
+        window = MainWindow(user_settings_path=self.root / "settings.json")
+        self.addCleanup(dispose_test_widget, window)
+        return window
 
     def complete_source_step(self, window: MainWindow) -> None:
         window.workflow.set_slicer_step_visible(True)

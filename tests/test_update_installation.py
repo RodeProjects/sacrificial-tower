@@ -78,6 +78,11 @@ class UpdateInstallationTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail(f"Expected {state}, got {attempt.poll()}")
 
+    def wait_failed_and_logged(self, attempt):
+        self.wait_state(attempt, "failed")
+        attempt._thread.join(2)
+        self.assertFalse(attempt._thread.is_alive())
+
     def test_launch_waits_for_setup_ack_and_requires_explicit_commit(self):
         self.signals.is_ready = False
         attempt = self.attempt()
@@ -98,14 +103,14 @@ class UpdateInstallationTests(unittest.TestCase):
         self.installer.write_bytes(b"tampered")
         with patch("cooling_tower.update_installation.subprocess.Popen") as launch:
             attempt = self.attempt(popen=launch)
-            self.wait_state(attempt, "failed")
+            self.wait_failed_and_logged(attempt)
             launch.assert_not_called()
         self.assertIn("update_installer_integrity_failed", self.journal.log_path.read_text())
 
     def test_early_exit_including_unknown_code_is_logged(self):
         self.process.returncode = 0xC0000005
         attempt = self.attempt()
-        self.wait_state(attempt, "failed")
+        self.wait_failed_and_logged(attempt)
         log = self.journal.log_path.read_text()
         self.assertIn("update_installer_exited_early", log)
         self.assertIn(str(0xC0000005), log)
@@ -117,7 +122,7 @@ class UpdateInstallationTests(unittest.TestCase):
             error.winerror = 5
             raise error
         attempt = self.attempt(popen=denied)
-        self.wait_state(attempt, "failed")
+        self.wait_failed_and_logged(attempt)
         log = self.journal.log_path.read_text()
         self.assertIn('"winerror": 5', log)
         self.assertIn("update_installer_launch_failed", log)
@@ -156,7 +161,7 @@ class UpdateInstallationTests(unittest.TestCase):
         attempt = self.attempt()
         attempt.status_path.unlink()
         self.signals.is_ready = True
-        self.wait_state(attempt, "failed")
+        self.wait_failed_and_logged(attempt)
         self.assertIn("update_installer_ack_inconsistent", self.journal.log_path.read_text())
         self.assertNotIn("commit", self.signals.signalled)
 
