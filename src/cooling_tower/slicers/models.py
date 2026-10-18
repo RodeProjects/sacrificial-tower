@@ -31,6 +31,7 @@ class SlicerDiscoverySource(str, Enum):
     REGISTRY_SYSTEM = "registry_system"
     REGISTRY_USER = "registry_user"
     APP_PATHS = "app_paths"
+    APP_PACKAGE = "app_package"
     KNOWN_PATH = "known_path"
     START_MENU = "start_menu"
     SAVED_PATH = "saved_path"
@@ -92,8 +93,11 @@ class SlicerInstallation:
 
     @property
     def can_slice(self) -> bool:
+        from cooling_tower.slicers.support import integration_is_implemented
+
         return (
             self.verified
+            and integration_is_implemented(self.adapter_id)
             and self.support_level is SlicerSupportLevel.FULL
             and SlicerCapability.CLI_SLICE in self.capabilities
         )
@@ -106,16 +110,20 @@ class SlicerInstallation:
             SlicerDiscoverySource.REGISTRY_SYSTEM,
             SlicerDiscoverySource.REGISTRY_USER,
             SlicerDiscoverySource.APP_PATHS,
+            SlicerDiscoverySource.APP_PACKAGE,
             SlicerDiscoverySource.KNOWN_PATH,
             SlicerDiscoverySource.START_MENU,
         }
 
     @property
     def display_name(self) -> str:
+        from cooling_tower.slicers.support import integration_is_implemented
+
         version = f" {self.version}" if self.version else ""
         suffix = (
             ""
             if self.support_level is SlicerSupportLevel.FULL
+            and integration_is_implemented(self.adapter_id)
             else " (nur erkannt)"
         )
         return f"{self.product_name}{version}{suffix}"

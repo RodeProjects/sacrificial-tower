@@ -15,6 +15,9 @@ from cooling_tower.cli import main as _cli_main  # noqa: E402
 
 
 if __name__ == "__main__":
+    from multiprocessing import freeze_support
+
+    freeze_support()
     if len(sys.argv) > 1:
         raise SystemExit(_cli_main())
     from cooling_tower.application import run_application

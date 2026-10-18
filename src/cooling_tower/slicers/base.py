@@ -36,6 +36,7 @@ from cooling_tower.slicers.process import (
     SlicerProcessRunner,
     create_slicer_process_runner,
 )
+from cooling_tower.slicers.support import detected_installation, require_integration
 from cooling_tower.windows_process import (
     WINDOWS_DLL_INITIALIZATION_FAILED,
     windows_process_status,
@@ -434,6 +435,7 @@ class BaseSlicerAdapter:
             in {
                 SlicerDiscoverySource.KNOWN_PATH,
                 SlicerDiscoverySource.APP_PATHS,
+                SlicerDiscoverySource.APP_PACKAGE,
                 SlicerDiscoverySource.START_MENU,
             }
         )
@@ -475,7 +477,7 @@ class BaseSlicerAdapter:
         roots = self.profile_roots_for(path)
         engine = self.engine_path_for(path)
         capabilities = self.capabilities_for(engine)
-        return SlicerInstallation(
+        return detected_installation(SlicerInstallation(
             adapter_id=self.adapter_id,
             product_name=self.product_name,
             version=self._normalise_version(version),
@@ -487,7 +489,7 @@ class BaseSlicerAdapter:
             support_level=self.support_level,
             profile_roots=roots,
             engine_path=engine,
-        )
+        ))
 
     def _contains_product_marker(self, value: str) -> bool:
         folded = value.casefold()
@@ -693,6 +695,7 @@ class BaseSlicerAdapter:
     def prepare_slice(self, request: SliceRequest) -> PreparedSlice:
         """Copy inputs and build a command without starting an external process."""
 
+        require_integration(request.profile.installation)
         ensure_writable_output(request.output_directory, protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots))
         if request.diagnostics_root is not None:
             ensure_writable_output(request.diagnostics_root, protected_roots=(request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots))

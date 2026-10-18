@@ -25,6 +25,7 @@ from cooling_tower.diagnostics import (
 from cooling_tower.gui.preview_worker import PreviewWorker
 from cooling_tower.gui.profile_worker import ProfileMatchingWorker
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
+from cooling_tower.slicers import SlicerCapability, SlicerSupportLevel
 from cooling_tower.support_report import SupportReportService
 
 
@@ -83,7 +84,12 @@ class SupportDiagnosticEventTests(unittest.TestCase):
             2,
             profile_service,
             object(),
-            object(),
+            SimpleNamespace(
+                adapter_id="diagnostic_test", product_name="Diagnostic test",
+                verified=True,
+                support_level=SlicerSupportLevel.FULL,
+                capabilities=frozenset({SlicerCapability.PROFILE_INVENTORY}),
+            ),
             object(),
         )
         profile_worker.set_diagnostic_callback(profile_capture)

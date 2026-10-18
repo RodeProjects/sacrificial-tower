@@ -12,6 +12,7 @@ from cooling_tower.slicers.models import (
     SlicerDiscoverySource,
 )
 from cooling_tower.windows_process import windows_subprocess_creation_flags
+from cooling_tower.slicers.windows_app_packages import discover_windows_app_packages
 
 
 class CandidateDiscovery(Protocol):
@@ -55,7 +56,7 @@ def _clean_registry_path(value: object) -> Path | None:
 
 
 class WindowsSlicerDiscovery:
-    """Bounded Windows discovery: registry, known paths, then Start menu."""
+    """Bounded Windows discovery: registry, app packages, paths and shortcuts."""
 
     def discover(
         self,
@@ -64,6 +65,7 @@ class WindowsSlicerDiscovery:
         candidates: list[SlicerCandidate] = []
         candidates.extend(self._registry_uninstall_candidates(adapters))
         candidates.extend(self._app_paths_candidates(adapters))
+        candidates.extend(discover_windows_app_packages(adapters))
         for adapter in adapters:
             # Windows exposes compatibility junctions and protected folders
             # below otherwise readable application roots.  A denied folder

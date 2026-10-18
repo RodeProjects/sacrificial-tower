@@ -189,6 +189,14 @@ beim Einklappen kehrt die Überschrift in die gemeinsame Zeile zurück.
 
 ## Slicer- und Profilbestätigung
 
+Die Dateiübergabe bleibt von der Slicer-Vorbereitung unabhängig. Eine vorläufige
+Installationssuche ist in einem abbrechbaren Hilfsprozess begrenzt; Profile
+werden in der normalen Anwendung erst beim Öffnen der Slicer-Einstellungen
+ausgewertet. Fehler dieser Verarbeitung erscheinen ausschließlich in Schritt 2.
+Auch eine hängende Slicer-Verarbeitung darf weder die STL-Prüfung noch das
+kontrollierte Schließen blockieren. Die technischen Grenzen und Tests stehen
+unter [Slicer-Erkennung und Fehlergrenzen](slicer_detection_modules.md#laufzeitfreigabe-und-fehlergrenzen).
+
 Die GUI verwendet einen quellenneutralen `ProfileMatchingContext`.
 Der Fachdienst kann zusätzlich Metadaten vorhandener G-Code-Analysen auswerten;
 daraus folgt kein G-Code-Import in der GUI. Für die STL-Vorbereitung werden ausschließlich

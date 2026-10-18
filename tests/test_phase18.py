@@ -323,6 +323,7 @@ class Phase18UiTests(unittest.TestCase):
             SlicerDiscoverySource.REGISTRY_SYSTEM,
             SlicerDiscoverySource.REGISTRY_USER,
             SlicerDiscoverySource.APP_PATHS,
+            SlicerDiscoverySource.APP_PACKAGE,
             SlicerDiscoverySource.KNOWN_PATH,
             SlicerDiscoverySource.START_MENU,
         }

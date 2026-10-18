@@ -83,16 +83,20 @@ def _ensure_project_venv() -> None:
     raise SystemExit(0)
 
 
-try:
-    _ensure_project_venv()
-except Exception:
-    _fallback_startup_error(traceback.format_exc())
-    raise SystemExit(1)
+if __name__ == "__main__":
+    from multiprocessing import freeze_support
 
-try:
-    from cooling_tower.application import run_application
-except Exception:
-    _fallback_startup_error(traceback.format_exc())
-    raise SystemExit(1)
+    freeze_support()
+    try:
+        _ensure_project_venv()
+    except Exception:
+        _fallback_startup_error(traceback.format_exc())
+        raise SystemExit(1)
 
-raise SystemExit(run_application())
+    try:
+        from cooling_tower.application import run_application
+    except Exception:
+        _fallback_startup_error(traceback.format_exc())
+        raise SystemExit(1)
+
+    raise SystemExit(run_application())

@@ -533,7 +533,7 @@ class StlProfileMatchingTests(unittest.TestCase):
             )
         self.assertFalse(self.adapter.slice_started.is_set())
 
-    def test_stl_slicer_selector_excludes_detection_only_installations(self) -> None:
+    def test_stl_slicer_selector_marks_detection_only_and_prefers_supported_installations(self) -> None:
         app = QApplication.instance() or QApplication([])
         detection_only = SlicerInstallation(
             adapter_id="detected",
@@ -555,16 +555,23 @@ class StlProfileMatchingTests(unittest.TestCase):
         window = MainWindow(
             user_settings_path=self.root / "gui.json",
             enable_update_check=False,
+            isolate_slicer_operations=False,
         )
         try:
             window.current_source_kind = SourceKind.STL
             window._slicer_request_id = 1
             window._on_slicer_discovery_succeeded(1, result)
-            self.assertEqual(window.slicer_combo.count(), 1)
+            self.assertEqual(window.slicer_combo.count(), 2)
             self.assertEqual(
                 window.slicer_combo.currentData(),
                 self.installation.identity_key,
             )
+            window.slicer_combo.setCurrentIndex(
+                window.slicer_combo.findData(detection_only.identity_key)
+            )
+            self.assertIn("nur erkannt", window.slicer_combo.currentText())
+            self.assertIn("noch nicht", window.profile_status_label.text())
+            self.assertFalse(window.profile_confirm_button.isEnabled())
         finally:
             window.close()
             window.deleteLater()

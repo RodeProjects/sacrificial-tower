@@ -52,6 +52,14 @@ gekapselte Laufzeitausnahme ist das austauschbare Slicer-Transportbackend
 `slicers.qprocess_backend`; Adapter, Prozessauftrag und fachliche Auswertung
 bleiben Qt-unabhängig.
 
+Die GUI orchestriert Slicer-Suche und Profiloperationen zusätzlich über
+`slicers.operation_process` in begrenzten Hilfsprozessen. Diese Transportgrenze
+verwendet den bestehenden Windows-Job-Object-Controller des QProcess-Backends,
+ohne die Adapterlogik zu verändern. Zweck, Zeitlimits, Abbruch und Trennung von
+der Dateiübergabe sind zentral in
+[Slicer-Erkennung](slicer_detection_modules.md#laufzeitfreigabe-und-fehlergrenzen)
+dokumentiert.
+
 ## Gemeinsame Infrastruktur
 
 - Datei-Hashes werden über `cooling_tower.file_integrity.sha256_file`

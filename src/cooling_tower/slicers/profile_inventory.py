@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping
 
 from cooling_tower.persistence.versioned_json import atomic_write_json
 from cooling_tower.slicers.adapter import SlicerAdapter
+from cooling_tower.slicers.support import require_profile_support
 from cooling_tower.slicers.models import (
     ProfileKind,
     ProfileRecord,
@@ -125,6 +126,7 @@ class ProfileInventoryService:
         *,
         force: bool = False,
     ) -> ProfileInventory:
+        require_profile_support(installation, adapter)
         with self._lock:
             return self._load_locked(adapter, installation, force=force)
 

@@ -1485,11 +1485,13 @@ class Phase14GuiTests(unittest.TestCase):
         )
         window.start_slicer_discovery()
         self.wait_for_discovery(window)
-        self.assertEqual(window.slicer_combo.count(), 0)
+        self.assertEqual(window.slicer_combo.count(), 1)
+        self.assertIn("nur erkannt", window.slicer_combo.currentText())
         self.assertIn(
-            "Kein verwendbarer Slicer",
-            window.slicer_progress_status_label.text(),
+            "noch nicht",
+            window.profile_status_label.text(),
         )
+        self.assertFalse(window.profile_confirm_button.isEnabled())
         window.close()
 
 

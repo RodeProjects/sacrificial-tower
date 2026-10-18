@@ -12,6 +12,9 @@ from cooling_tower.diagnostic_events import (
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.models.gcode_metadata import SlicerIdentity
 from cooling_tower.slicers.service import SlicerDiscoveryService
+from cooling_tower.slicers.support import slicer_failure_message
+from cooling_tower.slicers.operation_process import isolated_slicer_call
+from cooling_tower.write_policy import register_slicer_roots
 
 
 class SlicerDiscoveryWorker(CancelableWorker):
@@ -27,6 +30,7 @@ class SlicerDiscoveryWorker(CancelableWorker):
         *,
         force: bool = False,
         manual_path: Path | None = None,
+        process_config: dict | None = None,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -34,6 +38,7 @@ class SlicerDiscoveryWorker(CancelableWorker):
         self.source_slicer = source_slicer
         self.force = force
         self.manual_path = manual_path
+        self.process_config = process_config
 
     @Slot()
     def run(self) -> None:
@@ -51,7 +56,21 @@ class SlicerDiscoveryWorker(CancelableWorker):
                 if self.cancellation_requested():
                     self._diagnose_cancelled("before_discovery")
                     return
-                if self.manual_path is not None:
+                if self.process_config is not None:
+                    result = isolated_slicer_call(
+                        "add_manual_installation" if self.manual_path is not None else "discover_installations",
+                        {**self.process_config,
+                         "installations": self.service._installations,
+                         "diagnostics": self.service._diagnostics},
+                        (self.manual_path, self.source_slicer) if self.manual_path is not None else (self.source_slicer,),
+                        {} if self.manual_path is not None else {"force": self.force},
+                        self.cancellation_event,
+                    )
+                    self.service._installations = result.installations
+                    self.service._diagnostics = result.diagnostics
+                    for installation in result.installations:
+                        register_slicer_roots((installation.executable_path.parent, *installation.profile_roots))
+                elif self.manual_path is not None:
                     result = self.service.add_manual_installation(
                         self.manual_path,
                         self.source_slicer,
@@ -64,6 +83,8 @@ class SlicerDiscoveryWorker(CancelableWorker):
                 if self.cancellation_requested():
                     self._diagnose_cancelled("after_discovery")
                     return
+                if result is None:
+                    raise ValueError("Slicer discovery returned no result.")
                 installations = tuple(
                     getattr(result, "installations", ())
                 )
@@ -116,7 +137,7 @@ class SlicerDiscoveryWorker(CancelableWorker):
                     )
                     self.failed.emit(
                         self.request_id,
-                        str(error),
+                        slicer_failure_message(error),
                         traceback.format_exc(),
                     )
                 else:

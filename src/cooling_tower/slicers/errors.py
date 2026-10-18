@@ -6,6 +6,10 @@ class UnsupportedSlicerExecutableError(SlicerError):
     """The selected executable does not belong to a supported adapter."""
 
 
+class SlicerIntegrationUnavailableError(SlicerError):
+    """An installation was detected but has no usable runtime integration."""
+
+
 class SlicerVerificationTimeoutError(SlicerError):
     """A safe product/version probe did not finish in time."""
 

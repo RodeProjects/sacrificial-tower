@@ -385,10 +385,10 @@ class FullInfillProfileTests(unittest.TestCase):
             effective_values={"sparse_infill_density": "12%"},
         )
 
-    def test_orca_full_infill_uses_only_temporary_profile_copy(self) -> None:
+    def test_supported_orca_family_full_infill_uses_only_temporary_profile_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            profile = self._profile(root, "orca_slicer")
+            profile = self._profile(root, "anycubic_slicer_next")
             source_before = profile.process.path.read_bytes()
             temporary_profile, overrides = build_calibration_profile(
                 profile,

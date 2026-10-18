@@ -113,6 +113,9 @@ from cooling_tower.gui.profile_worker import (
 )
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.gui.slicer_worker import SlicerDiscoveryWorker
+from cooling_tower.gui.slicer_operation_guard import guard_slicer_operation
+from cooling_tower.slicers.support import require_profile_support, slicer_failure_message
+from cooling_tower.diagnostic_events import DIAGNOSTIC_EVENT_SCHEMA_VERSION, exception_error_code
 from cooling_tower.gui.stl_validation_worker import StlValidationWorker
 from cooling_tower.gui.source_preslice_worker import SourcePreSliceWorker
 from cooling_tower.gui.support_simulation_dialog import SupportSimulationDialog
@@ -632,6 +635,7 @@ class MainWindow(QMainWindow):
         update_service: UpdateService | None = None,
         enable_update_check: bool | None = None,
         enable_startup_slicer_discovery: bool | None = None,
+        isolate_slicer_operations: bool | None = None,
         user_data_root: str | Path | None = None,
         distribution_channel: DistributionChannel | str | None = None,
         diagnostic_journal: DiagnosticJournal | None = None,
@@ -712,6 +716,20 @@ class MainWindow(QMainWindow):
                 user_config_root / "profile_mappings.json"
             ),
             validator=SlicerProfileProbeValidator(),
+        )
+        self._isolate_slicer_operations = (
+            slicer_service is None and profile_service is None
+            if isolate_slicer_operations is None else bool(isolate_slicer_operations)
+        )
+        self._deferred_profile_catalog_request: dict | None = None
+        self._discovery_process_config = (
+            {"preferences": self.slicer_service.preference_store.path}
+            if self._isolate_slicer_operations else None
+        )
+        self._profile_process_config = (
+            {"inventory": self.profile_service.inventory_service.cache_path,
+             "mappings": self.profile_service.mapping_store.path}
+            if self._isolate_slicer_operations else None
         )
         self.preview_service = preview_service or PreviewService()
         self.export_service = export_service or PreviewExportService()
@@ -3997,6 +4015,23 @@ class MainWindow(QMainWindow):
             self._refresh_preparation_section_layout()
             return
         self.workflow.set_slicer_step_visible(index == 1)
+        if (
+            index == 0 and self._isolate_slicer_operations
+            and self.background_job_manager.has_active(JobKind.PROFILE_MATCH)
+        ):
+            # Returning to file transfer also cancels uncooperative profile
+            # code through the owned process, without waiting in the GUI.
+            self._profile_request_id += 1
+            self._pending_profile_match = None
+            self._profile_catalog_match_source_request_id = None
+            self._deferred_profile_catalog_request = {}
+            self.background_job_manager.cancel_jobs(
+                JobKind.PROFILE_MATCH, reason="file_transfer_step",
+            )
+            self._set_slicer_progress(
+                100, "Profilprüfung wird beim Öffnen von Schritt 2 fortgesetzt",
+                icon="✓", state="pending",
+            )
         if index == 1:
             self._ensure_slicer_profiles_on_first_step_entry()
         self._update_preparation_requirements()
@@ -4005,6 +4040,12 @@ class MainWindow(QMainWindow):
     def _ensure_slicer_profiles_on_first_step_entry(self) -> None:
         """Retry one missing automatic Slicer/profile load per session."""
 
+        deferred = self._deferred_profile_catalog_request
+        if deferred is not None:
+            self._deferred_profile_catalog_request = None
+            self._slicer_step_auto_discovery_attempted = True
+            self.start_profile_catalog_loading(**deferred)
+            return
         if (
             self._slicer_step_auto_discovery_attempted
             or not self._startup_slicer_discovery_enabled
@@ -5206,6 +5247,7 @@ class MainWindow(QMainWindow):
         self._refresh_footer_auxiliary_visibility()
         self._schedule_footer_height_update()
 
+    @guard_slicer_operation
     def start_slicer_discovery(
         self,
         *,
@@ -5298,6 +5340,7 @@ class MainWindow(QMainWindow):
             source_slicer,
             force=force,
             manual_path=manual_path,
+            process_config=self._discovery_process_config,
         )
         worker.succeeded.connect(self._on_slicer_discovery_succeeded)
         worker.failed.connect(self._on_slicer_discovery_failed)
@@ -5336,6 +5379,7 @@ class MainWindow(QMainWindow):
             self.start_slicer_discovery(manual_path=Path(selected))
 
     @Slot(int, object)
+    @guard_slicer_operation
     def _on_slicer_discovery_succeeded(
         self,
         request_id: int,
@@ -5352,11 +5396,12 @@ class MainWindow(QMainWindow):
             verified_installations = tuple(
                 installation
                 for installation in result.installations
-                if installation.verified and installation.can_slice
+                if installation.verified
             )
-            available_keys = {
-                item.identity_key for item in verified_installations
-            }
+            usable_installations = tuple(
+                item for item in verified_installations if item.can_slice
+            ) or verified_installations
+            available_keys = {item.identity_key for item in usable_installations}
             preferred_key = next(
                 (
                     key
@@ -5369,7 +5414,7 @@ class MainWindow(QMainWindow):
                     )
                     if key in available_keys
                 ),
-                None,
+                usable_installations[0].identity_key if usable_installations else None,
             )
             show_last_used_suffix = len(verified_installations) > 1
             for index, installation in enumerate(verified_installations):
@@ -5456,7 +5501,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_widget_style(self.slicer_status_label)
         self._update_slicer_detail()
-        if verified_installations and selected is not None:
+        if selected is not None:
             self._set_slicer_progress(
                 55,
                 "Slicer erkannt · Profile werden als Nächstes geprüft",
@@ -5507,6 +5552,10 @@ class MainWindow(QMainWindow):
         )
         self.slicer_status_label.setProperty("state", "error")
         self._refresh_widget_style(self.slicer_status_label)
+        self._set_slicer_failure_state(
+            "Slicer konnte nicht bestätigt werden: "
+            f"{german_user_message(message)}"
+        )
         self._set_slicer_progress(
             100,
             "Slicer-Suche ohne Ergebnis beendet",
@@ -5516,10 +5565,8 @@ class MainWindow(QMainWindow):
         self.workflow.required_slicer_unavailable(
             "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
         )
-        self.profile_catalog = None
-        self.profile_catalog_confirmation = None
-        self._update_preparation_requirements()
 
+    @guard_slicer_operation
     def _on_slicer_selection_changed(self, _index: int) -> None:
         if self._populating_slicer_combo:
             return
@@ -5527,9 +5574,14 @@ class MainWindow(QMainWindow):
         # originally came from automatic discovery.
         self._automatically_selected_slicer_key = None
         identity_key = self.slicer_combo.currentData()
-        self.slicer_service.remember_selection(
-            identity_key if isinstance(identity_key, str) else None
-        )
+        try:
+            self.slicer_service.remember_selection(
+                identity_key if isinstance(identity_key, str) else None
+            )
+        except Exception as error:
+            # A failed convenience preference must not prevent switching
+            # away from a broken/unsupported slicer.
+            self._record_slicer_operation_error(error, "remember_selection")
         self._update_slicer_detail()
         selected = self.selected_slicer_installation
         if selected is not None:
@@ -5542,6 +5594,36 @@ class MainWindow(QMainWindow):
         )
         if selected is not None:
             self.start_profile_catalog_loading(prefer_active_presets=True)
+
+    def _record_slicer_operation_error(self, error: Exception, operation: str) -> None:
+        journal = self.background_job_manager.diagnostic_journal
+        if journal is not None:
+            journal.record(
+                "slicer_operation_failed",
+                diagnostic_event_schema_version=DIAGNOSTIC_EVENT_SCHEMA_VERSION,
+                outcome="failed",
+                error_code=exception_error_code("slicer_operation", error),
+                error_type=type(error).__name__,
+                operation=operation,
+            )
+
+    def _handle_slicer_operation_error(self, error: Exception, *, operation: str) -> None:
+        self._record_slicer_operation_error(error, operation)
+        self._set_slicer_failure_state(slicer_failure_message(error))
+
+    def _set_slicer_failure_state(self, message: str) -> None:
+        """Revoke stale authorizations and end the busy UI on every failure."""
+        self._profile_request_id += 1
+        self._profile_catalog_preserve_selection_requests.clear()
+        self._profile_rescan_selections = {}
+        self.profile_status_label.setProperty("inputBlocker", False)
+        self._clear_profile_assignment(message, "error", refresh_preview=False)
+        self._set_slicer_progress(
+            100, "Slicer-Verarbeitung nicht verfügbar", icon="✕", state="error"
+        )
+        self.workflow.required_slicer_unavailable("Slicer-Verarbeitung nicht verfügbar")
+        self._update_preparation_requirements()
+        self._update_slicer_discovery_controls()
 
     def _update_slicer_detail(self) -> None:
         installation = self.selected_slicer_installation
@@ -5644,6 +5726,7 @@ class MainWindow(QMainWindow):
         state: str,
         *,
         preserve_catalog: bool = False,
+        refresh_preview: bool = True,
     ) -> None:
         self._discard_source_preslice("profile_context_changed")
         self._pending_profile_match = None
@@ -5696,7 +5779,8 @@ class MainWindow(QMainWindow):
             self.profile_diagnostics.hide()
         self._refresh_stl_availability()
         self._update_preparation_requirements()
-        self.update_wall_path_preview()
+        if refresh_preview:
+            self.update_wall_path_preview()
 
     def _reset_profile_filter_controls(self) -> None:
         self.show_all_profiles_checkbox.setEnabled(False)
@@ -5962,6 +6046,7 @@ class MainWindow(QMainWindow):
             )
         self._refresh_profile_confirmation_button()
 
+    @guard_slicer_operation
     def start_profile_catalog_loading(
         self,
         *,
@@ -5979,6 +6064,22 @@ class MainWindow(QMainWindow):
 
         if self._closing:
             return
+        if self._isolate_slicer_operations and self.preparation_tabs.currentIndex() == 0:
+            # File transfer owns step 1. Do not parse any slicer profiles, show
+            # slicer failures or begin profile matching before step 2 opens.
+            self._deferred_profile_catalog_request = dict(
+                force_inventory=force_inventory, selected_machine=selected_machine,
+                selected_profile_ids=selected_profile_ids,
+                include_all_profiles=include_all_profiles,
+                prefer_active_presets=prefer_active_presets,
+                restore_remembered_profiles=restore_remembered_profiles,
+                match_source_after_loading=match_source_after_loading,
+            )
+            self._set_slicer_progress(
+                100, "Slicer erkannt · Profile werden in Schritt 2 geprüft",
+                icon="✓", state="pending",
+            )
+            return
         installation = self.selected_slicer_installation
         if installation is None:
             self.profile_catalog = None
@@ -5986,6 +6087,7 @@ class MainWindow(QMainWindow):
             self._update_preparation_requirements()
             self._update_slicer_discovery_controls()
             return
+        require_profile_support(installation)
         if self.background_job_manager.has_active(
             JobKind.SLICER_DISCOVERY
         ) or self.background_job_manager.has_active(JobKind.PROFILE_MATCH):
@@ -6034,25 +6136,11 @@ class MainWindow(QMainWindow):
         )
         try:
             adapter = self.slicer_service.adapter_for(installation)
-        except (AttributeError, KeyError, ValueError):
-            self.profile_catalog = None
-            self.profile_catalog_confirmation = None
-            self._set_profile_notice(
-                "Für den ausgewählten Slicer ist kein Profiladapter verfügbar.",
-                state="error",
-            )
-            self._set_slicer_progress(
-                100,
-                "Profiladapter nicht verfügbar",
-                icon="✕",
-                state="error",
-            )
-            self.workflow.required_slicer_unavailable(
-                "Slicer-Profile konnten nicht geladen werden"
-            )
-            self._update_preparation_requirements()
-            self._update_slicer_discovery_controls()
+        except Exception as error:
+            self._handle_slicer_operation_error(error, operation="profile_adapter")
             return
+        if adapter is None:
+            raise RuntimeError("No profile adapter returned.")
 
         self._profile_request_id += 1
         request_id = self._profile_request_id
@@ -6088,6 +6176,7 @@ class MainWindow(QMainWindow):
             prefer_active_presets=(
                 prefer_active_presets and not restored_confirmed_profiles
             ),
+            process_config=self._profile_process_config,
         )
         self.slicer_refresh_button.setEnabled(False)
         self.slicer_manual_button.setEnabled(False)
@@ -6100,6 +6189,7 @@ class MainWindow(QMainWindow):
         )
 
     @Slot(int, object)
+    @guard_slicer_operation
     def _on_profile_catalog_succeeded(
         self,
         request_id: int,
@@ -6238,10 +6328,11 @@ class MainWindow(QMainWindow):
             (
                 "Slicer und Profile geladen · Quelle wird geprüft …"
                 if should_match_source
-                else "Slicer und Profile geladen"
+                else "Slicer und Profile geladen" if catalog.complete
+                else "Slicer-Profile sind unvollständig"
             ),
-            icon="⌛" if should_match_source else "✓",
-            state="running" if should_match_source else "success",
+            icon="⌛" if should_match_source else "✓" if catalog.complete else "!",
+            state="running" if should_match_source else "success" if catalog.complete else "error",
         )
         self._refresh_slicer_header_profiles()
         self._update_preparation_requirements()
@@ -6268,25 +6359,10 @@ class MainWindow(QMainWindow):
         self._profile_catalog_preserve_selection_requests.pop(request_id, None)
         if request_id == self._profile_catalog_match_source_request_id:
             self._profile_catalog_match_source_request_id = None
-        self.profile_catalog = None
-        self.profile_catalog_confirmation = None
-        self._set_profile_notice(
+        self._set_slicer_failure_state(
             "Slicer-Profile konnten nicht geladen werden: "
-            f"{german_user_message(message)}",
-            state="error",
+            f"{german_user_message(message)}"
         )
-        self.profile_confirm_button.setEnabled(False)
-        self.profile_confirm_button.show()
-        self._set_slicer_progress(
-            100,
-            "Slicer-Profile konnten nicht geladen werden",
-            icon="✕",
-            state="error",
-        )
-        self.workflow.required_slicer_unavailable(
-            "Slicer-Profile konnten nicht geladen werden"
-        )
-        self._update_preparation_requirements()
 
     def _catalog_selection_is_confirmed(self) -> bool:
         catalog = self.profile_catalog
@@ -6380,6 +6456,7 @@ class MainWindow(QMainWindow):
             return None
         return ProfileMatchingContext.from_stl(self.source_artifact)
 
+    @guard_slicer_operation
     def start_profile_matching(
         self,
         *,
@@ -6392,10 +6469,13 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._closing:
             return
+        if self._isolate_slicer_operations and self.preparation_tabs.currentIndex() == 0:
+            return
         source_context = self._profile_matching_context()
         installation = self.selected_slicer_installation
         if source_context is None or installation is None:
             return
+        require_profile_support(installation)
         if selected_profile_ids is None and not stale_check_only:
             catalog_confirmation = self.profile_catalog_confirmation
             catalog = self.profile_catalog
@@ -6484,21 +6564,11 @@ class MainWindow(QMainWindow):
             return
         try:
             adapter = self.slicer_service.adapter_for(installation)
-        except (AttributeError, KeyError, ValueError):
-            self._clear_profile_assignment(
-                "Für den ausgewählten Slicer ist kein Profiladapter verfügbar.",
-                "error",
-            )
-            self._set_slicer_progress(
-                100,
-                "Profiladapter nicht verfügbar",
-                icon="✕",
-                state="error",
-            )
-            self.workflow.required_slicer_unavailable(
-                "Slicer-Profile konnten nicht geprüft werden"
-            )
+        except Exception as error:
+            self._handle_slicer_operation_error(error, operation="profile_adapter")
             return
+        if adapter is None:
+            raise RuntimeError("No profile adapter returned.")
 
         self._profile_request_id += 1
         request_id = self._profile_request_id
@@ -6527,6 +6597,7 @@ class MainWindow(QMainWindow):
             stale_check_result=(
                 self.profile_match_result if stale_check_only else None
             ),
+            process_config=self._profile_process_config,
         )
         # A discovery run would use the same adapter concurrently. Keep both
         # discovery actions locked until this native profile thread has ended.
@@ -6542,6 +6613,7 @@ class MainWindow(QMainWindow):
         )
 
     @Slot(int, object)
+    @guard_slicer_operation
     def _on_profile_matching_succeeded(
         self,
         request_id: int,
@@ -7841,23 +7913,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._profile_request_id:
             return
-        self._set_profile_notice(
+        self._set_slicer_failure_state(
             "Profilzuordnung konnte nicht geprüft werden: "
-            f"{german_user_message(message)}",
-            state="error",
+            f"{german_user_message(message)}"
         )
-        self.profile_origin_label.hide()
-        self.profile_diagnostics.hide()
-        self._set_slicer_progress(
-            100,
-            "Slicer-Profile konnten nicht geprüft werden",
-            icon="✕",
-            state="error",
-        )
-        self.workflow.required_slicer_unavailable(
-            "Slicer-Profile konnten nicht geprüft werden"
-        )
-        self._show_confirmed_profiles_analysis_action()
 
     @Slot(object)
     def _on_background_job_released(self, job: BackgroundJob) -> None:
@@ -9180,6 +9239,8 @@ class MainWindow(QMainWindow):
             )
         elif slicer_step_complete:
             slicer_step_text, slicer_step_state = "Abgeschlossen", "success"
+        elif self.profile_status_label.property("state") == "error":
+            slicer_step_text, slicer_step_state = "Slicer-Einstellungen prüfen", "error"
         elif self._analysis_failed and catalog_confirmed:
             slicer_step_text, slicer_step_state = "Analyse prüfen", "error"
         elif catalog_confirmed and source_validated:

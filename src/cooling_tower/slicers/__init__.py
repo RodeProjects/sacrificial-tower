@@ -7,6 +7,7 @@ from cooling_tower.slicers.active_presets import (
 )
 from cooling_tower.slicers.errors import (
     SlicerError,
+    SlicerIntegrationUnavailableError,
     SlicerProcessCancelled,
     SlicerProcessError,
     SlicerSourceMutationError,
@@ -187,6 +188,7 @@ __all__ = [
     "SlicerDiscoveryResult",
     "SlicerDiscoverySource",
     "SlicerError",
+    "SlicerIntegrationUnavailableError",
     "SlicerGuiState",
     "SlicerInstallation",
     "SlicerPreferences",

@@ -11,6 +11,8 @@ from cooling_tower.diagnostic_events import (
     exception_error_code,
 )
 from cooling_tower.gui.worker_contract import CancelableWorker
+from cooling_tower.slicers.support import require_profile_support, slicer_failure_message
+from cooling_tower.slicers.operation_process import isolated_slicer_call
 from cooling_tower.models import GCodeAnalysisSnapshot
 from cooling_tower.slicers import (
     ProfileCatalog,
@@ -44,6 +46,7 @@ class ProfileCatalogWorker(CancelableWorker):
         ] | None = None,
         include_all_profiles: bool = False,
         prefer_active_presets: bool = False,
+        process_config: dict | None = None,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -55,6 +58,7 @@ class ProfileCatalogWorker(CancelableWorker):
         self.selected_profile_ids = dict(selected_profile_ids or {})
         self.include_all_profiles = include_all_profiles
         self.prefer_active_presets = prefer_active_presets
+        self.process_config = process_config
 
     @Slot()
     def run(self) -> None:
@@ -67,6 +71,7 @@ class ProfileCatalogWorker(CancelableWorker):
             try:
                 if self.cancellation_requested():
                     return
+                require_profile_support(self.installation)
                 catalog_method = self.service.catalog
                 parameters = inspect.signature(catalog_method).parameters
                 optional_filter_arguments = {}
@@ -86,11 +91,14 @@ class ProfileCatalogWorker(CancelableWorker):
                     optional_filter_arguments["prefer_active_presets"] = (
                         self.prefer_active_presets
                     )
-                catalog: ProfileCatalog = catalog_method(
-                    self.installation,
-                    self.adapter,
-                    force_inventory=self.force_inventory,
-                    **optional_filter_arguments,
+                arguments = {"force_inventory": self.force_inventory, **optional_filter_arguments}
+                catalog: ProfileCatalog = (
+                    isolated_slicer_call(
+                        "catalog", self.process_config, (self.installation,),
+                        arguments, self.cancellation_event,
+                    ) if self.process_config is not None else catalog_method(
+                        self.installation, self.adapter, **arguments,
+                    )
                 )
                 if self.cancellation_requested():
                     return
@@ -121,7 +129,7 @@ class ProfileCatalogWorker(CancelableWorker):
                     )
                     self.failed.emit(
                         self.request_id,
-                        str(error),
+                        slicer_failure_message(error),
                         traceback.format_exc(),
                     )
             finally:
@@ -150,6 +158,7 @@ class ProfileMatchingWorker(CancelableWorker):
         force_inventory: bool = False,
         include_all_profiles: bool = False,
         stale_check_result: ProfileMatchResult | None = None,
+        process_config: dict | None = None,
     ) -> None:
         super().__init__()
         self.request_id = request_id
@@ -166,6 +175,7 @@ class ProfileMatchingWorker(CancelableWorker):
         self.force_inventory = force_inventory
         self.include_all_profiles = include_all_profiles
         self.stale_check_result = stale_check_result
+        self.process_config = process_config
 
     @Slot()
     def run(self) -> None:
@@ -189,9 +199,16 @@ class ProfileMatchingWorker(CancelableWorker):
                 if self.cancellation_requested():
                     self._diagnose_cancelled("before_matching")
                     return
+                require_profile_support(self.installation)
                 if (
                     self.stale_check_result is not None
-                    and not self.service.inventory_is_stale(self.stale_check_result)
+                    and not (
+                        isolated_slicer_call(
+                            "inventory_is_stale", self.process_config,
+                            (self.stale_check_result,), {}, self.cancellation_event,
+                        ) if self.process_config is not None else
+                        self.service.inventory_is_stale(self.stale_check_result)
+                    )
                 ):
                     if not self.cancellation_requested():
                         self.diagnose(
@@ -215,19 +232,27 @@ class ProfileMatchingWorker(CancelableWorker):
                     else:
                         self._diagnose_cancelled("during_stale_check")
                     return
-                result = self.service.match(
-                    self.source,
-                    self.installation,
-                    self.adapter,
+                arguments = dict(
                     selected_profile_ids=self.selected_profile_ids,
                     force_inventory=(
                         self.force_inventory or self.stale_check_result is not None
                     ),
                     include_all_profiles=self.include_all_profiles,
                 )
+                result = (
+                    isolated_slicer_call(
+                        "match", self.process_config,
+                        (self.source, self.installation), arguments,
+                        self.cancellation_event,
+                    ) if self.process_config is not None else self.service.match(
+                        self.source, self.installation, self.adapter, **arguments,
+                    )
+                )
                 if self.cancellation_requested():
                     self._diagnose_cancelled("after_matching")
                     return
+                if result is None:
+                    raise ValueError("Profile matching returned no result.")
                 selected = getattr(result, "selected", None)
                 candidates = tuple(getattr(result, "candidates", ()))
                 machine_options = tuple(
@@ -332,7 +357,7 @@ class ProfileMatchingWorker(CancelableWorker):
                     )
                     self.failed.emit(
                         self.request_id,
-                        str(error),
+                        slicer_failure_message(error),
                         traceback.format_exc(),
                     )
                 else:

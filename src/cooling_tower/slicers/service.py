@@ -31,6 +31,7 @@ from cooling_tower.slicers.models import (
     SlicerInstallation,
 )
 from cooling_tower.slicers.preferences import SlicerPreferenceStore
+from cooling_tower.slicers.support import detected_installation, require_profile_support
 
 
 _VERSION_COMPONENT = re.compile(r"\d+")
@@ -127,7 +128,7 @@ class SlicerDiscoveryService:
             errors: list[str] = []
             for adapter in adapters:
                 try:
-                    installation = adapter.verify_installation(candidate)
+                    installation = detected_installation(adapter.verify_installation(candidate))
                 except (OSError, SlicerError, ValueError) as error:
                     record_diagnostic(
                         "slicer_candidate_rejected",
@@ -182,7 +183,7 @@ class SlicerDiscoveryService:
         errors: list[str] = []
         for adapter in adapters:
             try:
-                installation = adapter.verify_installation(candidate)
+                installation = detected_installation(adapter.verify_installation(candidate))
             except (OSError, SlicerError, ValueError) as error:
                 record_diagnostic(
                     "slicer_candidate_rejected",
@@ -260,6 +261,7 @@ class SlicerDiscoveryService:
         return self.preference_store.profile_selections_for(identity_key)
 
     def adapter_for(self, installation: SlicerInstallation) -> SlicerAdapter:
+        require_profile_support(installation)
         for adapter in self.adapters:
             if adapter.adapter_id == installation.adapter_id:
                 return adapter
