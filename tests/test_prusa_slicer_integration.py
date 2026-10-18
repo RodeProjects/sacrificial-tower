@@ -326,7 +326,10 @@ class PrusaSlicerIntegrationTests(unittest.TestCase):
         )
         temporary_config = Path(arguments[1])
         serialized = temporary_config.read_text(encoding="utf-8")
-        self.assertEqual(executable, self.executable)
+        self.assertTrue(
+            executable.samefile(self.executable),
+            "The adapter must use the configured PrusaSlicer executable.",
+        )
         self.assertEqual(
             arguments,
             (
