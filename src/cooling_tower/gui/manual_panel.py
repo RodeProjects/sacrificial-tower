@@ -4,6 +4,10 @@ from __future__ import annotations
 from dataclasses import replace
 from functools import partial
 import math
+import copy
+
+from cooling_tower.angles import MANUAL_ANGLE_FIELDS, ProfileAngleBinding, complementary_angle
+from cooling_tower.gui.texts import EXPANSION_ANGLE_CAUTION, SETTING_INFO_TEXTS
 
 from PySide6.QtCore import QEvent,QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
@@ -130,15 +134,26 @@ class ManualGenerationPanel(QWidget):
                         card.content_layout.addWidget(self.overhang_option)
                 card.content_layout.addWidget(self._numeric(name))
                 if name == "expansion_angle_deg":
+                    from cooling_tower.gui.widgets.profile_angle_limit import ProfileAngleLimitControl
+                    self.profile_angle_limit = ProfileAngleLimitControl(self.rows[name], compact=True)
+                    self.profile_angle_limit.checkbox.toggled.connect(self._profile_angle_limit_toggled)
+                    # Keep persistent angle advice independent of the transient
+                    # input-error animation managed by ManualNumericSettingWidget.
+                    self.expansion_warning = QLabel(EXPANSION_ANGLE_CAUTION)
+                    self.expansion_warning.setWordWrap(True)
+                    self.expansion_warning.setStyleSheet(
+                        f"color: {COLORS['warning']}; font-size: 8pt; padding-top: 8px;")
+                    self.expansion_warning.hide()
+                    self.rows[name].layout().addWidget(self.expansion_warning, 3, 1, 1, 3)
                     self.expansion_option,self.expansion_info_button = self._checkbox_with_hint(box,
                         "Verhindert beim Bearbeiten der Turmform ein stärkeres Aufweiten als oben eingestellt. "
-                        "Der Winkel wird zur Senkrechten gemessen.",
+                        "• Der Winkel wird zur Horizontalen gemessen. Kleinere Werte erlauben flachere Flächen.",
                         accessible_name="Informationen zur Aufweitungsbegrenzung")
                     card.content_layout.addWidget(self.expansion_option)
             if title == "Turmform und Bearbeitung":
                 from cooling_tower.gui.widgets.simulation_option import SimulationOption
                 from cooling_tower.gui.texts import FULL_INFILL_HINT_HTML, FULL_INFILL_HINT_ACCESSIBLE, SOURCE_SUPPORT_HINT_HTML
-                self.full_infill_option = SimulationOption("100% Turmfüllung simulieren", FULL_INFILL_HINT_HTML,
+                self.full_infill_option = SimulationOption("100% Turmfüllung simulieren (empfohlen)", FULL_INFILL_HINT_HTML,
                                                           accessible_hint=FULL_INFILL_HINT_ACCESSIBLE)
                 self.full_infill_checkbox = self.full_infill_option.checkbox
                 self.source_support_option = SimulationOption("Stützen für STL-Objekt simulieren", SOURCE_SUPPORT_HINT_HTML)
@@ -344,16 +359,23 @@ class ManualGenerationPanel(QWidget):
 
     def _numeric(self,name):
         label,unit,lo,hi = self.LABELS[name]
+        if name in MANUAL_ANGLE_FIELDS:
+            lo, hi = complementary_angle(hi), complementary_angle(lo)
         spin = ManualSpinBox() if name == "circle_segments" else ManualDoubleSpinBox()
         spin.setRange(lo,hi)
         if name != "circle_segments":
-            spin.setDecimals(6)
+            spin.setDecimals(12 if name in MANUAL_ANGLE_FIELDS else 6)
             spin.set_display_decimals(2)
             spin.setSingleStep(.1 if unit in {"mm","s"} else 1)
         row = ManualNumericSettingWidget(setting_name=name,label=label,editor=spin,unit=unit,
-                                   default_provider=lambda:self.default_value(name),
+                                   default_provider=lambda:(complementary_angle(self.default_value(name))
+                                                            if name in MANUAL_ANGLE_FIELDS else self.default_value(name)),
                                    info_text="Alle Breiten sind Außendurchmesser. Fußhöhe und Turmhöhe sind absolute Z-Höhen über dem Druckbett." if unit == "mm" else
-                                   "Winkel zur Vertikalen; lokale Radiussteigung. Die visuelle Prüfung verändert keine Geometrie." if unit == "°" else
+                                   SETTING_INFO_TEXTS["maximum_expansion_angle_deg" if name == "expansion_angle_deg"
+                                                      else "maximum_contraction_angle_deg"] if name in {"expansion_angle_deg","contraction_angle_deg"} else
+                                   "• Winkel zur Horizontalen, wie der Threshold angle im Slicer. "
+                                   "Flachere, nach unten gerichtete Flächen unterhalb der Schwelle benötigen "
+                                   "gegebenenfalls Stützen. Die visuelle Prüfung verändert keine Geometrie." if unit == "°" else
                                      "• Mehr Kreissegmente machen den Turm runder.\n"
                                      "• Das Modell wird komplexer und die Berechnung dauert länger.\n"
                                      "• Mehr Fahrwege vergrößern und verkomplizieren den G-Code.\n"
@@ -363,7 +385,8 @@ class ManualGenerationPanel(QWidget):
         row.reset_button.clicked.disconnect()
         row.reset_button.clicked.connect(lambda:(self.reset_value(name),row.set_error(None)))
         spin.setKeyboardTracking(False)
-        spin.valueChanged.connect(partial(self._numeric_changed,name))
+        spin.valueChanged.connect(lambda value:self._numeric_changed(
+            name, complementary_angle(value) if name in MANUAL_ANGLE_FIELDS else value))
         spin.limit_attempted.connect(lambda value:row.set_error(boundary_message(spin,value,"Segmente" if name=="circle_segments" else "Winkel" if unit=="°" else "Wert")))
         spin.lineEdit().editingFinished.connect(partial(self._detect_numeric_attempt,name))
         self.rows[name],self.editors[name] = row,spin
@@ -413,7 +436,12 @@ class ManualGenerationPanel(QWidget):
         self._color_scale_limit = manual_color_scale_limit(reference.context.layers)
         self._original_minimum_layer_time = minimum_original_layer_time(reference.context.layers)
         self.selected = self.canvas.selected = ""
-        s = settings or self.settings
+        s = settings or self.settings_for_persistence()
+        self.profile_angle_limit.state = ProfileAngleBinding(s.expansion_angle_deg)
+        threshold = getattr(reference.context, "support_threshold_angle_deg", None)
+        angle = self.profile_angle_limit.state.resolve(s.expansion_angle_deg, s.limit_expansion_to_profile, threshold)
+        s = replace(s, expansion_angle_deg=angle,
+                    expansion_enabled=s.expansion_enabled or self.profile_angle_limit.state.active)
         limit = reference.context.maximum_foot_diameter_mm
         if limit < s.minimum_diameter_mm+2-1e-9:
             raise GeometryError("maximum_foot_diameter_mm", "Für den Standfuß ist neben dem Originalobjekt nicht genügend freie Druckbettfläche vorhanden.")
@@ -465,7 +493,8 @@ class ManualGenerationPanel(QWidget):
 
     def _editor_state(self):
         return (self.draft, self.selected, self.initial, dict(self._point_defaults),
-                dict(self._control_defaults), self.canvas._revealed_control_anchor)
+                dict(self._control_defaults), self.canvas._revealed_control_anchor,
+                copy.copy(self.profile_angle_limit.state))
 
     def _refresh_history_actions(self):
         self.canvas.undo_button.setEnabled(bool(self._undo_stack) and not self._busy)
@@ -475,12 +504,13 @@ class ManualGenerationPanel(QWidget):
         if self._busy or self.draft is None or not source:
             return
         destination.append(self._editor_state())
-        draft, selected, initial, points, controls, revealed = source.pop()
+        draft, selected, initial, points, controls, revealed, angle_binding = source.pop()
         self._history_restoring = True
         try:
             self.selected = self.canvas.selected = selected
             self.initial = initial
             self._point_defaults, self._control_defaults = dict(points), dict(controls)
+            self.profile_angle_limit.state = copy.copy(angle_binding)
             self.canvas._revealed_control_anchor = revealed
             self.commit(draft)
         finally:
@@ -506,7 +536,14 @@ class ManualGenerationPanel(QWidget):
             self.rows["control_height_mm"].setVisible(control is not None)
         for name,spin in self.editors.items():
             with QSignalBlocker(spin):
+                if name == "expansion_angle_deg":
+                    threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
+                    spin.setMinimum(0.1 if s.limit_expansion_to_profile and threshold is not None else 1.0)
+                    from cooling_tower.gui.widgets.profile_angle_limit import set_angle_editor_precision
+                    set_angle_editor_precision(spin, threshold if s.limit_expansion_to_profile else None, minimum=2)
                 value = values.get(name,self.default_value(name))
+                if name in MANUAL_ANGLE_FIELDS and value is not None:
+                    value = complementary_angle(value)
                 spin.setValue(value if value is not None else 25)
             self.rows[name].refresh_reset_state()
         for name,box in self.checks.items():
@@ -520,6 +557,9 @@ class ManualGenerationPanel(QWidget):
         self._refresh_resolution_reset()
         self.preview_information.set_state(self.canvas.view,s.critical_layers_enabled)
         self._syncing = False
+        self._refresh_profile_angle_binding()
+        self.expansion_warning.setVisible(complementary_angle(s.expansion_angle_deg) <= 28.0)
+        self.rows["expansion_angle_deg"].refresh_content_height()
         self._apply_view_editability()
         self.point_editor.sync_fields(self.canvas.information_identity(),self._point_fields(),self.canvas.selected_handle_text(),not self._busy)
 
@@ -587,6 +627,52 @@ class ManualGenerationPanel(QWidget):
     def _checked(self,draft):
         self.reference.context.validate(draft)
         return draft
+
+    def settings_for_persistence(self):
+        return replace(self.settings, expansion_angle_deg=(self.profile_angle_limit.state.free_angle_deg
+                       if self.profile_angle_limit.state.active else self.settings.expansion_angle_deg))
+
+    def _refresh_profile_angle_binding(self):
+        threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
+        control = self.profile_angle_limit
+        control.refresh(self.settings.expansion_angle_deg, self.settings.limit_expansion_to_profile, threshold)
+        spin = self.editors["expansion_angle_deg"]
+        spin.setEnabled(not control.state.active)
+        if bool(spin.property("profileAngleBound")) != control.state.active:
+            spin.setProperty("profileAngleBound", control.state.active)
+            spin.style().unpolish(spin)
+            spin.style().polish(spin)
+            spin.update()
+        self.rows["expansion_angle_deg"].reset_button.setEnabled(
+            not control.state.active and self.settings.expansion_angle_deg != self.default_value("expansion_angle_deg"))
+        self.checks["expansion_enabled"].setEnabled(not control.state.active)
+
+    def _profile_angle_limit_toggled(self, checked):
+        if self._busy or self._syncing:
+            self._sync()
+            return
+        control = self.profile_angle_limit
+        previous = copy.copy(control.state)
+        threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
+        angle = control.state.resolve(self.settings.expansion_angle_deg, checked, threshold)
+        settings = replace(self.settings, limit_expansion_to_profile=checked, expansion_angle_deg=angle,
+                           expansion_enabled=self.settings.expansion_enabled or control.state.active)
+        try:
+            if self.draft is not None:
+                candidate = self._checked(replace(self.draft, settings=settings))
+            else:
+                validate_settings(settings)
+                candidate = None
+        except (GeometryError, ValueError) as error:
+            control.state = previous
+            self.feedback(error, "expansion_angle_deg")
+            self._sync()
+            return
+        if candidate is not None:
+            self.commit(candidate)
+        else:
+            self.settings = settings
+            self._sync()
 
     def change_setting(self,name,value):
         if self._syncing or self._busy:
@@ -1057,7 +1143,7 @@ class ManualGenerationPanel(QWidget):
         for name,row in self.rows.items():
             if name not in {"color_reference_time_s","overhang_angle_deg","color_deficit_time_s"}:
                 row.setEnabled(editable)
-        self.checks["expansion_enabled"].setEnabled(editable)
+        self.checks["expansion_enabled"].setEnabled(editable and not self.profile_angle_limit.state.active)
         self.reset_button.setEnabled(self.can_reset_all())
 
     def set_busy(self,busy,cancelling=False,exporting=False):

@@ -24,6 +24,10 @@ class GenerationSettings:
     properties remain as a calculation convenience so geometry code cannot
     accidentally expose radius values to users again.
 
+    Angles retain the historical vertical reference for geometry and storage.
+    User interfaces convert both expansion and contraction to the horizontal
+    reference at their input/output boundary (see ``cooling_tower.angles``).
+
     Private hollow-geometry values are accepted only as a transitional Python
     API for old in-process callers.  They are deliberately absent from
     :meth:`to_dict`, the GUI, CLI and persisted settings schema.
@@ -50,6 +54,7 @@ class GenerationSettings:
     maximum_radius_change_per_mm_z: float
     maximum_expansion_angle_deg: float
     maximum_contraction_angle_deg: float
+    limit_expansion_to_profile: bool
 
     local_reference_window: int
     # Object-bound session data; deliberately absent from global user defaults.
@@ -89,6 +94,7 @@ class GenerationSettings:
         maximum_radius_change_per_mm_z: float = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"],
         maximum_expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"],
         maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
+        limit_expansion_to_profile: bool = False,
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
         layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"],
         excluded_layer_ranges: tuple[LayerRange, ...] = (),
@@ -133,6 +139,7 @@ class GenerationSettings:
             "maximum_radius_change_per_mm_z": maximum_radius_change_per_mm_z,
             "maximum_expansion_angle_deg": maximum_expansion_angle_deg,
             "maximum_contraction_angle_deg": maximum_contraction_angle_deg,
+            "limit_expansion_to_profile": limit_expansion_to_profile,
             "local_reference_window": local_reference_window,
         }
         for name, value in public_values.items():

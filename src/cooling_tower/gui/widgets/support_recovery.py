@@ -1,6 +1,6 @@
 """Actionable first-layer advice, separate from untrusted plain error text."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class SupportRecoveryHint(QWidget):
@@ -8,8 +8,9 @@ class SupportRecoveryHint(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
         self.label = QLabel(
             'Bei fehlender oder zu kleiner Auflagefläche in der ersten Schicht '
             'aktivieren Sie <b>Stützen für STL-Objekt simulieren</b> '
@@ -19,8 +20,12 @@ class SupportRecoveryHint(QWidget):
         self.label.setWordWrap(True)
         self.button = QPushButton("Funktion jetzt aktivieren")
         self.button.clicked.connect(self.activate_requested)
-        layout.addWidget(self.label)
-        layout.addWidget(self.button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.label, 1)
+        layout.addWidget(
+            self.button,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
         self.hide()
 
     def refresh(self, message: str, *, available: bool, checked: bool, busy: bool):

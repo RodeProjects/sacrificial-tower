@@ -132,6 +132,9 @@ SETTING_COMPATIBILITY_RULES = (
         minimum=1.0, maximum=70.0,
     ),
     _generation_rule(
+        "limit_expansion_to_profile", "expansion-profile-threshold-v1", "bool",
+    ),
+    _generation_rule(
         "maximum_contraction_angle_deg", "contraction-angle-degrees-v1", "float",
         minimum=1.0, maximum=85.0,
     ),

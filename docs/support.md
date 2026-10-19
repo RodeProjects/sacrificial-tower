@@ -19,7 +19,7 @@ zwingende gesetzliche Pflichten bleiben unberührt.
 
 ## Ein Diagnosepaket prüfen und freiwillig anhängen
 
-1. In der Anwendung „Support & Diagnose“ öffnen.
+1. Im Burgermenü der Anwendung „Support Diagnose …“ öffnen.
 2. Problem und Reproduktionsschritte ohne persönliche Daten beschreiben.
 3. ZIP erstellen und über „Ordner öffnen“ aufrufen.
 4. Die ZIP entpacken und **alle drei enthaltenen Dateien** prüfen.

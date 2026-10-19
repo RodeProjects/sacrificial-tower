@@ -650,6 +650,20 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 gap(window.preparation_slicer_divider, window.slicer_columns),
                 expected_gap,
             )
+            # Compare actual text contents as well as outer widget gaps:
+            # the field-title stylesheet adds an additional top text inset.
+            def content_top(widget):
+                return widget.mapTo(window, widget.contentsRect().topLeft()).y()
+
+            def bottom(widget):
+                return widget.mapTo(window, widget.rect().bottomRight()).y()
+
+            title_gap = content_top(window.slicer_selection_label) - bottom(window.preparation_slicer_divider) - 1
+            hint = window.preparation_profile_hint
+            self.assertEqual(content_top(hint.title) - bottom(window.preparation_slicer_info_divider) - 1, title_gap + 3)
+            body_bottom = hint.body.mapTo(window, hint.body.contentsRect().bottomRight()).y()
+            self.assertEqual(content_top(window.preparation_slicer_divider) - body_bottom - 1, title_gap + 3)
+            self.assertEqual(hint.title.x() - hint.icon.geometry().right() - 1, 9)
         finally:
             window.close()
 
@@ -698,6 +712,146 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             self.assertEqual(snapshot(), stable_snapshot)
         finally:
             window.close()
+
+    def test_file_transition_does_not_distribute_stale_surplus_around_content(self):
+        from test_stl_validation import TETRAHEDRON, write_binary_stl
+
+        source = self.root / 'compact-transition.stl'
+        write_binary_stl(source, TETRAHEDRON)
+        window = self.window()
+        window.resize(1400, 1390)
+        window.show()
+        self.app.processEvents()
+
+        def compact_snapshot():
+            zone = window.drop_zone
+            layout = window.source_group.content_layout
+            blocks = [window.preparation_source_requirements,
+                      window.preparation_source_divider]
+            if not window.source_progress_bar.isHidden():
+                blocks.append(window.source_progress_bar)
+            blocks.append(zone)
+            for upper, lower in zip(blocks, blocks[1:]):
+                self.assertEqual(lower.y() - upper.geometry().bottom() - 1, layout.spacing())
+            self.assertEqual(zone.height(), zone.minimumHeight())
+            self.assertEqual(zone.maximumHeight(), zone.minimumHeight())
+            self.assertEqual(zone.info_widget.y(), zone.frameWidth() + zone.root_layout.contentsMargins().top())
+            last = zone.actions_widget if not zone.actions_widget.isHidden() else zone.info_widget
+            self.assertEqual(zone.height() - last.geometry().bottom() - 1,
+                             zone.frameWidth() + zone.root_layout.contentsMargins().bottom())
+            return tuple((widget.y(), widget.height()) for widget in blocks), (zone.info_widget.y(), zone.info_widget.height())
+
+        with patch.object(window.background_job_manager, 'start_job'):
+            self.assertTrue(window.drop_zone.set_file(source))
+            request = window._stl_validation_request_id
+            for width, height in ((1400, 1390), (760, 850), (1200, 1000)):
+                window.resize(width, height)
+                self.app.processEvents()
+                for progress in (0, 82, 100):
+                    window._on_stl_validation_progress(request, progress, 'Test')
+                    before = compact_snapshot()
+                    # Qt can temporarily retain the old empty-card rectangle.
+                    # Such surplus must stay after the content, never between it.
+                    card = window.source_group
+                    card.setFixedHeight(card.height() + 120)
+                    card.layout().setGeometry(card.rect())
+                    card.content_layout.setGeometry(card.content_widget.rect())
+                    self.assertEqual(compact_snapshot(), before)
+                    window._refresh_dynamic_preparation_layout()
+                    self.assertEqual(compact_snapshot(), before)
+            result = window.stl_validation_service.validate(source)
+            window._on_stl_validation_succeeded(request, result)
+            accepted = compact_snapshot()
+            for _ in range(4):
+                window.source_group.grab()  # Include each immediate paint boundary.
+                self.app.processEvents()
+                self.assertEqual(compact_snapshot(), accepted)
+
+    def test_source_and_acceptance_changes_do_not_expose_partial_paint_states(self):
+        from test_stl_validation import TETRAHEDRON, write_binary_stl
+
+        source = self.root / 'atomic-transition.stl'
+        write_binary_stl(source, TETRAHEDRON)
+        window = self.window()
+        window.show()
+        self.app.processEvents()
+        source_update_states = []
+        window.drop_zone.source_selected.connect(lambda *_: source_update_states.append(window.updatesEnabled()))
+        with patch.object(window.background_job_manager, 'start_job'):
+            self.assertTrue(window.drop_zone.set_file(source))
+        self.assertEqual(source_update_states, [False])
+        self.assertTrue(window.updatesEnabled())
+        result = window.stl_validation_service.validate(source)
+        original_notice = window.stl_validation_feedback.set_primary
+
+        def show_notice(*args, **kwargs):
+            self.assertFalse(window.workflow_group.updatesEnabled())
+            self.assertFalse(window.source_group.updatesEnabled())
+            # Simulate native re-entrancy during the transition. The old
+            # frame may remain visible, but no partially updated tree may paint.
+            self.app.processEvents()
+            original_notice(*args, **kwargs)
+
+        with patch.object(window.stl_validation_feedback, 'set_primary', side_effect=show_notice):
+            window._on_stl_validation_succeeded(window._stl_validation_request_id, result)
+        self.assertTrue(window.workflow_group.updatesEnabled())
+        self.assertEqual(window.drop_zone.status_value_label.text(), 'STL-Prüfung abgeschlossen')
+        self.assertFalse(window.drop_zone.actions_widget.isHidden())
+        self.assertFalse(window.stl_validation_feedback.isHidden())
+
+    def test_reentrant_completion_and_late_progress_cannot_revert_terminal_status(self):
+        from test_stl_validation import TETRAHEDRON, write_binary_stl
+
+        source = self.root / 'reentrant-completion.stl'
+        write_binary_stl(source, TETRAHEDRON)
+        window = self.window()
+        with patch.object(window.background_job_manager, 'start_job'):
+            self.assertTrue(window.drop_zone.set_file(source))
+        request = window._stl_validation_request_id
+        result = window.stl_validation_service.validate(source)
+        refresh = window._refresh_dynamic_preparation_layout
+        completed = False
+
+        def complete_during_layout():
+            nonlocal completed
+            refresh()
+            if not completed:
+                completed = True
+                window._on_stl_validation_succeeded(request, result)
+
+        with patch.object(window, '_refresh_dynamic_preparation_layout', side_effect=complete_during_layout):
+            window._on_stl_validation_progress(request, 100, 'Abschluss')
+        self.assertEqual(window.drop_zone.status_value_label.text(), 'STL-Prüfung abgeschlossen')
+        for progress in (82, 100):
+            window._on_stl_validation_progress(request, progress, 'Verspätete Meldung')
+            self.assertEqual(window.drop_zone.status_value_label.text(), 'STL-Prüfung abgeschlossen')
+        with patch.object(window.background_job_manager, 'start_job'):
+            window.reload_source()
+        request = window._stl_validation_request_id
+        window._on_stl_validation_progress(request, 20, 'Neue Prüfung')
+        self.assertEqual(window.drop_zone.status_value_label.text(), 'STL-Geometrie wird geprüft')
+        window._on_stl_validation_failed(request, 'Datei konnte nicht geprüft werden', '')
+        window._on_stl_validation_progress(request, 100, 'Verspätet nach Fehler')
+        self.assertEqual(window.drop_zone.status_value_label.text(), 'STL-Prüfung fehlgeschlagen')
+        self.assertTrue(window.source_progress_bar.isHidden())
+
+    def test_update_batch_restores_painting_after_nested_failures(self):
+        from cooling_tower.gui.update_transaction import suspended_widget_updates
+
+        widget = QWidget()
+        self.addCleanup(widget.close)
+        with self.assertRaisesRegex(RuntimeError, 'Testfehler'):
+            with suspended_widget_updates(widget):
+                with suspended_widget_updates(widget):
+                    self.assertFalse(widget.updatesEnabled())
+                self.assertFalse(widget.updatesEnabled())
+                raise RuntimeError('Testfehler')
+        self.assertTrue(widget.updatesEnabled())
+        widget.setUpdatesEnabled(False)
+        with suspended_widget_updates(widget):
+            pass
+        self.assertFalse(widget.updatesEnabled())
+        widget.setUpdatesEnabled(True)
 
     def test_preslice_and_profile_notice_never_compress_slicer_controls(
         self,

@@ -236,11 +236,12 @@ class GenerationService:
             "base_width_mm": 2.0 * solid_profile.base_outer_radius_mm,
             "automatic_base_width": settings.automatic_base_width,
             "maximum_expansion_angle_deg": (
-                settings.maximum_expansion_angle_deg
+                90.0-settings.maximum_expansion_angle_deg
             ),
             "maximum_contraction_angle_deg": (
-                settings.maximum_contraction_angle_deg
+                90.0-settings.maximum_contraction_angle_deg
             ),
+            "angle_reference": "horizontal",
             "spline_support_point_count": (
                 solid_profile.support_point_count
             ),
@@ -274,8 +275,12 @@ class GenerationService:
                     "related_setting_names": list(
                         issue.related_setting_names
                     ),
-                    "required_value": issue.required_value,
-                    "achievable_value": issue.achievable_value,
+                    "required_value": (90.0-issue.required_value
+                        if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.required_value is not None
+                        else issue.required_value),
+                    "achievable_value": (90.0-issue.achievable_value
+                        if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.achievable_value is not None
+                        else issue.achievable_value),
                 }
                 for issue in solid_profile.feasibility_issues
             ],

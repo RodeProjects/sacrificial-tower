@@ -1901,14 +1901,14 @@ class Phase18UiTests(unittest.TestCase):
         setting = window._setting_widgets["maximum_expansion_angle_deg"]
         line_edit = window.maximum_expansion_angle_spin.lineEdit()
         line_edit.setText(
-            window.maximum_expansion_angle_spin.textFromValue(71.0)
+            window.maximum_expansion_angle_spin.textFromValue(90.0)
         )
         self.app.processEvents()
         self.assertTrue(bool(window.maximum_expansion_angle_spin.property("invalid")))
-        self.assertEqual(window.maximum_expansion_angle_spin.value(), 71.0)
-        self.assertIn("Maximalwert 70,0 °", setting.message_label.text())
-        self.assertIn("Vorsicht", setting.secondary_message_label.text())
-        self.assertIn("Maximalwert 70,0 °", window.validation_label.text())
+        self.assertEqual(window.maximum_expansion_angle_spin.value(), 90.0)
+        self.assertIn("Maximalwert 89,0 °", setting.message_label.text())
+        self.assertTrue(setting.secondary_message_label.isHidden())
+        self.assertIn("Maximalwert 89,0 °", window.validation_label.text())
 
         integer_setting = window._setting_widgets["local_reference_window"]
         window.local_window_spin.lineEdit().setText("0")
@@ -1937,25 +1937,25 @@ class Phase18UiTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "error_solutions_label"))
         window.close()
 
-    def test_expansion_angle_above_70_is_preserved_but_invalid(self) -> None:
+    def test_horizontal_expansion_angle_cannot_fall_below_20(self) -> None:
         window = self.window()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
         self.assertEqual(
-            window.maximum_expansion_angle_spin.property("validationMaximum"),
-            70.0,
+            window.maximum_expansion_angle_spin.property("validationMinimum"),
+            20.0,
         )
-        window.maximum_expansion_angle_spin.setValue(85.0)
-        self.assertEqual(window.maximum_expansion_angle_spin.value(), 85.0)
-        self.assertTrue(window.maximum_expansion_angle_spin.property("invalid"))
+        window.maximum_expansion_angle_spin.setValue(5.0)
+        self.assertEqual(window.maximum_expansion_angle_spin.value(), 20.0)
+        self.assertFalse(window.maximum_expansion_angle_spin.property("invalid"))
 
         invalid = replace(
             GenerationSettings(),
             maximum_expansion_angle_deg=70.1,
         )
-        with self.assertRaisesRegex(ValueError, "at most 70 degrees"):
+        with self.assertRaisesRegex(ValueError, "Horizontalen.*außerhalb"):
             validate_solid_settings(invalid)
 
         issue = FeasibilityIssue(
@@ -1971,13 +1971,13 @@ class Phase18UiTests(unittest.TestCase):
         group = window._group_feasibility_issues((issue,))[0]
         solutions = group["solutions"]
         self.assertIn("zuletzt geänderten Aufweitungswinkel", solutions[0])
-        self.assertIn("70°", solutions[0])
+        self.assertIn("20°", solutions[0])
         self.assertFalse(any("89,5° erhöhen" in item for item in solutions))
         self.assertNotIn("Layer", group["inline"])
         self.assertNotIn("Lösungen", group["inline"])
         self.assertIn("Betroffen ist 1 Layer", group["summary"])
         self.assertIn(
-            "Erforderlich sind bis zu 89,50°. Zulässig sind höchstens 70,00°.",
+            "Erforderlich sind höchstens 0,50° zur Horizontalen. Ohne Profilbindung sind mindestens 20,00° zulässig.",
             group["summary"],
         )
         window.close()

@@ -61,6 +61,7 @@ class ManualSettings:
     circle_segments: int | None = None
     expansion_enabled: bool = False
     expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
+    limit_expansion_to_profile: bool = False
     contraction_enabled: bool = False
     contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
     overhang_enabled: bool = True
@@ -257,8 +258,10 @@ def validate_settings(s):
     if s.minimum_diameter_mm > s.maximum_foot_diameter_mm or s.foot_diameter_mm > s.maximum_foot_diameter_mm:
         raise GeometryError("maximum_foot_diameter_mm", "Die Fußgrenze reicht für Fuß und Körperanschluss nicht aus.")
     for name in ("expansion_angle_deg", "contraction_angle_deg", "overhang_angle_deg"):
-        if not 0.1 <= getattr(s, name) <= 89.0:
-            raise GeometryError(name, "Der Winkel zur Vertikalen muss zwischen 0,1° und 89° liegen.")
+        maximum = 89.9 if name == "expansion_angle_deg" and s.limit_expansion_to_profile else 89.0
+        if not 0.1 <= getattr(s, name) <= maximum:
+            minimum_text = format(90-maximum, 'g').replace('.', ',')
+            raise GeometryError(name, f"Der Winkel zur Horizontalen muss zwischen {minimum_text}° und 89,9° liegen.")
     if s.color_reference_time_s<3:
         raise GeometryError("color_reference_time_s", "Die grüne Layerzeit muss mindestens 3 s betragen.")
     if not 0 <= s.color_deficit_time_s <= s.color_reference_time_s:
@@ -328,9 +331,9 @@ def validate(draft):
             raise GeometryError("maximum_foot_diameter_mm" if i == 0 else "maximum_diameter_mm", "Die vollständige Kurve überschreitet den Maximaldurchmesser.",limits=violated_width_limits(draft))
         slopes = c.slope_extrema()
         if s.expansion_enabled and max(slopes) > math.tan(math.radians(s.expansion_angle_deg))+EPS:
-            raise GeometryError("expansion_angle_deg", "Die lokale Aufweitung überschreitet den aktivierten Winkel zur Vertikalen.")
+            raise GeometryError("expansion_angle_deg", "Die lokale Aufweitung ist flacher als der aktivierte Grenzwinkel zur Horizontalen.")
         if s.contraction_enabled and -min(slopes) > math.tan(math.radians(s.contraction_angle_deg))+EPS:
-            raise GeometryError("contraction_angle_deg", "Die lokale Verjüngung überschreitet den aktivierten Winkel zur Vertikalen.")
+            raise GeometryError("contraction_angle_deg", "Die lokale Verjüngung ist flacher als der aktivierte Grenzwinkel zur Horizontalen.")
     for i,p in enumerate(draft.points[1:-1],1):
         if p.smooth:
             a,b = draft.curves[i-1:i+1]

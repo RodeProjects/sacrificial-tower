@@ -1,5 +1,5 @@
 {
-  "settings_schema_version": 21,
+  "settings_schema_version": 22,
   "maximum_separate_slices": 6,
   "maximum_joint_slices": 12,
   "layer_time_tolerance_s": 0.25,
@@ -11,6 +11,7 @@
   "manual_base_width_mm": 20.0,
   "maximum_contraction_angle_deg": 55.0,
   "maximum_expansion_angle_deg": 50.0,
+  "limit_expansion_to_profile": false,
   "maximum_outer_diameter_mm": 40.0,
   "maximum_radius_change_per_mm_z": 0.35,
   "minimum_base_radius_mm": 10.0,

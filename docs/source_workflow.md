@@ -48,7 +48,10 @@ Voraussetzung für „Fertig“, besitzt jedoch keinen eigenen sichtbaren Status
 
 Die Vorbereitung erklärt oberhalb der Profilfelder, dass dieselben gespeicherten
 globalen Profileinstellungen wie beim tatsächlichen Objektdruck gewählt werden
-sollen. Der Profilfilter besitzt einen eigenen Hover-Hinweis; „Filter deaktivieren
+sollen. Vor „Slicer“ listet ein Hover-Info-Icon die aktiven Integrationen aus
+dem Modulregister auf. Der Fußhinweis erklärt die Einzelentwicklung und verweist
+bei Slicer-/Druckerproblemen auf „Support Diagnose …“ im Burgermenü.
+Der Profilfilter besitzt einen eigenen Hover-Hinweis; „Filter deaktivieren
 / alle Profile anzeigen“ lädt die vollständige erkannte Auswahl. Nur das
 Kontrollkästchen reagiert auf Mausklick und Hover; der Funktionstext bleibt
 passiv. Die übliche Tastaturbedienung des fokussierten Kästchens bleibt erhalten.
@@ -223,6 +226,21 @@ sichtbar. `Andere Datei auswählen` ersetzt sie, `STL neu einlesen` prüft sie
 vollständig neu und `STL entfernen` stellt als einzige Aktion wieder die leere
 Startübersicht mit Drop-Bereich her. Dieselben drei Aktionen stehen auch nach
 erfolgreicher Prüfung zur Verfügung.
+
+Bei geladener Datei wird die Box anhand der tatsächlichen Breite einschließlich
+Pfadumbrüchen auf ihre Inhaltshöhe begrenzt. Der Innenabstand bleibt ringsum
+gleich; alte Größen der leeren Ansicht dürfen weder die Faktenzeilen noch die
+Blöcke rund um die Trennlinie auseinanderziehen. Die Fortschrittsanzeige und
+neu hinzukommende Prüfergebnisse behalten ihren regulären Platz im Ablauf.
+Dateiauswahl und Prüfergebnis werden einschließlich ihrer Layoutanpassung als
+gemeinsame Darstellungsänderung veröffentlicht. Vorübergehende native
+Neuzeichnungen dürfen keine Mischung aus alten Dateizeilen und neuer
+Akzeptanzmeldung zeigen. Verschachtelung und Fehlerpfade stellen den
+vorherigen Zustand der Zeichenfreigabe wieder her.
+Abgeschlossene STL-Prüfaufträge nehmen keine weiteren Fortschrittsmeldungen
+an. Layoutarbeit steht am Ende der letzten Fortschrittsaktualisierung, damit
+ein dabei verschachtelt zugestelltes Prüfergebnis anschließend nicht wieder
+auf „wird geprüft“ zurückgesetzt wird.
 
 Die Prüfergebnisse verwenden kompakte Meldungen mit jeweils eigener Überschrift
 und einem Status-Icon. Nur diese tragen einen dezenten Farbakzent; die

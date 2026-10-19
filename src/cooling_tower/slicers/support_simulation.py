@@ -1,6 +1,5 @@
 """Explicit, request-scoped support activation without changing source presets."""
 from dataclasses import replace
-import math
 
 from cooling_tower.slicers.models import EffectiveProfile, SliceResult
 
@@ -51,25 +50,17 @@ def tower_support_warning_angle(profile: EffectiveProfile) -> float | None:
     whereas tower expansion is measured from the vertical axis. A zero
     threshold switches the slicer to overlap-based detection.
     """
-    if profile.installation.adapter_id not in {
-        "anycubic_slicer_next", "orca_slicer", "bambu_studio",
-    }:
+    key = SUPPORT_KEYS.get(profile.installation.adapter_id)
+    if key is None:
         return None
-    enabled = profile.effective_values.get("enable_support", "0")
+    enabled = profile.effective_values.get(key, "0")
     if isinstance(enabled, (list, tuple)):
         enabled = enabled[0] if enabled else "0"
     if str(enabled).strip().casefold() not in {"1", "true", "yes"}:
         return None
-    value = profile.effective_values.get("support_threshold_angle")
-    if isinstance(value, (list, tuple)):
-        value = value[0] if value else None
-    try:
-        threshold = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(threshold) or not 0 < threshold < 90:
-        return None
-    return 90.0 - threshold
+    from cooling_tower.slicers.support_angles import profile_support_threshold
+    threshold = profile_support_threshold(profile)
+    return 90.0 - threshold if threshold is not None else None
 
 
 def can_offer_support_simulation(result: SliceResult, profile: EffectiveProfile) -> bool:

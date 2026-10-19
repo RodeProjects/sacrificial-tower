@@ -157,7 +157,7 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         summary = str(grouped[0]["summary"])
         self.assertIn("Betroffen sind 800 Layer", summary)
         self.assertIn(
-            "Erforderlich sind bis zu 88,50°. Zulässig sind höchstens 70,00°.",
+            "Erforderlich sind höchstens 1,50° zur Horizontalen. Ohne Profilbindung sind mindestens 20,00° zulässig.",
             summary,
         )
         self.assertNotIn(" · ", summary)

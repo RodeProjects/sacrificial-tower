@@ -8,6 +8,7 @@ from cooling_tower.version import APP_NAME, APP_SUBTITLE, APP_VERSION_LABEL
 from cooling_tower.legal_documents import legal_profile, render_legal_document
 from cooling_tower.runtime_paths import RESOURCE_ROOT
 from cooling_tower.gui.widgets.chevron_button import ChevronButton
+from cooling_tower.gui.update_transaction import suspended_widget_updates
 
 GUI_ASSET_ROOT = Path(__file__).with_name("assets")
 ABOUT_DIALOG_MINIMUM_WIDTH_PX = 450
@@ -424,12 +425,26 @@ class AboutDialog(QDialog):
         self.content_changed.emit()
 
     def reset_document(self) -> None:
-        self._shown_document_title = None
-        self._sync_legal_button_chevrons()
-        self.about_document_label.clear()
-        self.about_placeholder_label.hide()
-        self.about_content_layout.invalidate()
-        self.content_changed.emit()
+        scroll = self.about_scroll
+        policy = scroll.verticalScrollBarPolicy()
+        with suspended_widget_updates(scroll):
+            try:
+                self._shown_document_title = None
+                self._sync_legal_button_chevrons()
+                self.about_document_label.clear()
+                self.about_placeholder_label.hide()
+                # A scrollbar from the expanded document narrows the summary,
+                # wraps its last word and thereby keeps itself alive. Measure
+                # the collapsed content once with the full available width.
+                scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                self.about_content.resize(scroll.maximumViewportSize().width(), self.about_content.height())
+                margins = self.about_content_layout.contentsMargins()
+                self.about_legal_grid._relayout(max(1, self.about_content.width() - margins.left() - margins.right()))
+                self.about_content_layout.invalidate()
+                self.about_content_layout.activate()
+                self.content_changed.emit()
+            finally:
+                scroll.setVerticalScrollBarPolicy(policy)
 
     def _sync_legal_button_chevrons(self) -> None:
         for button in self.about_legal_buttons:

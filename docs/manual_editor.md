@@ -758,14 +758,16 @@ Aufweitung und Verjüngung werden die Enden sowie sämtliche inneren Extrema von
 `dr/dz` ausgewertet. Ein schmales Überschwingen zwischen Anzeige- oder
 Druckschichten kann deshalb nicht unbemerkt bleiben.
 
-Die Winkel beziehen sich auf die Vertikale:
+Die angezeigten Winkel beziehen sich auf die Horizontale:
 
 ```
-Aufweitung:  atan(max(0,  dr/dz))
-Verjüngung:  atan(max(0, -dr/dz))
+Aufweitung:  90° − atan(max(0,  dr/dz))
+Verjüngung:  90° − atan(max(0, -dr/dz))
 ```
 
-Beide Grenzen sind zunächst deaktiviert und lassen sich unabhängig aktivieren.
+Intern bleiben die historischen vertikalen Winkel gespeichert; die Oberfläche
+rechnet an der Eingabegrenze um. Kleinere horizontale Werte erlauben flachere
+Übergänge. Beide Grenzen sind zunächst deaktiviert und lassen sich unabhängig aktivieren.
 Die Prüfung gilt für die vollständige Kurve einschließlich des Fußes. Eine
 verschärfte Grenze wird nur angenommen, wenn das unveränderte Profil sie erfüllt.
 Gekoppelte Tangenten werden bei Punkt-/Greiferänderungen atomar mitgeführt und
@@ -917,7 +919,7 @@ als Differenz abgeleitet und nicht gespeichert. Ab Schema 14 kommt das rein
 visuelle `color_scale_max_time_s` hinzu. Die Migration 11→12 erhält die
 bisher eingestellte Übergangsbreite und kehrt die Färbung entsprechend auf
 Layerzeitdefizite um; Einzelheiten und Sicherungen stehen in der
-[Migrationsdokumentation](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-18).
+[Migrationsdokumentation](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-19).
 
 Alle manuellen Darstellungswege einschließlich STL-Flächen, Silhouetten und
 Druckbahnen verwenden dieselbe Interpolation `LayerRangeCanvas.layer_time_color()`.
@@ -928,19 +930,35 @@ verwendet dieselbe Farbleiste, ihre Bedienung und die absoluten Farbgrenzen;
 seine Einfärbung bleibt unabhängig von der Mindest-Layerzeit für die Turmberechnung.
 Dort werden die Anzeigeoptionen erst mit Übernehmen in die laufende Sitzung
 übertragen; Abbrechen verwirft den Entwurf.
-Die sichere Umstellung bestehender manueller Einstellungen bis Schema 18
-ist unter [Einstellungsmigrationen](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-18)
+Die sichere Umstellung bestehender manueller Einstellungen bis Schema 19
+ist unter [Einstellungsmigrationen](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-19)
 beschrieben.
 
 „Überhangstellen visuell markieren“ ist standardmäßig aktiviert; eine gespeicherte
 Abwahl bleibt erhalten. „Alles zurücksetzen“ aktiviert die Markierung wieder.
 Die Überhangmarkierung ist rein visuell. Sie betrifft nur nach außen wachsende
 Abschnitte und prüft die lokale positive Steigung, einschließlich exakter
-Übergangspunkte am Warnwinkel. Ein interpretierbarer Orca-/Bambu-/Anycubic-Wert
-`support_threshold_angle` wird von der Horizontalen umgerechnet:
-`90° - Profilwert`. Fehlende oder mehrdeutige Werte verwenden 45° zur Vertikalen.
+Übergangspunkte am Warnwinkel. Aufweitungs-, Verjüngungs- und visuelle
+Überhangwinkel werden zur Horizontalen angezeigt. Intern bleiben die
+gespeicherten vertikalen Geometriewerte unverändert; die Eingabegrenze rechnet
+mit `90° − angezeigter Winkel`. Ein interpretierbarer Orca-/Bambu-/Anycubic-Wert
+`support_threshold_angle` bzw. Prusa-Wert `support_material_threshold` dient
+direkt als horizontaler Anzeigewert. Fehlende oder mehrdeutige Werte verwenden 45° zur Horizontalen.
 Der Profilstandard bleibt über Reset verfügbar. Die bisherigen zusätzlichen
 Profilwert- und Farbvergleichstexte entfallen aus der linken Leiste.
+
+Die Profilbegrenzung unter dem maximalen Aufweitungswinkel übernimmt denselben
+Schwellenwinkel wie im automatischen Modus. Die kompakte Beschriftung lautet
+„Auf Threshold-angle begrenzen“. Anders als automatisch darf hier auch ein
+Winkel unter 20° gewählt oder aus dem Profil übernommen werden. Bei 28° und
+flacher erscheint eine gelbe Warnung; der Kalibrierungshinweis für 35° und
+flacher bleibt im Hovertext. Sie aktiviert zugleich die
+Aufweitungsbegrenzung der Vorschau, sperrt deren Eingabe und merkt sich den
+vorherigen freien Winkel. Unvereinbare bestehende Kurven werden durch die
+atomare Geometrievalidierung mit einer verständlichen Fehlermeldung abgewiesen;
+Entwurf und bisherige Einstellung bleiben erhalten. Bei Quellen-/Profilwechsel
+wird erst der neue verifizierte Kontext verwendet. Undo/Redo und globale
+Resets beziehen die Bindungsoption in den Entwurfszustand ein.
 
 Geometriebearbeitung erneuert das Turmprofil und nutzt die zwischengespeicherte
 Originaldarstellung weiter. Räumliche Original- und Turmflächen werden als

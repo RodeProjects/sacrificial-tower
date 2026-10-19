@@ -165,7 +165,7 @@ class GenerationUiTests(unittest.TestCase):
 
         window.target_time_spin.setValue(100)
         window.manual_base_width_spin.setValue(20)
-        window.maximum_expansion_angle_spin.setValue(60)
+        window.maximum_expansion_angle_spin.setValue(27)
         window.validate_form()
         for _ in range(3):
             self.app.processEvents()
@@ -189,7 +189,7 @@ class GenerationUiTests(unittest.TestCase):
 
         window.target_time_spin.setValue(9)
         window.manual_base_width_spin.setValue(20)
-        window.maximum_expansion_angle_spin.setValue(50)
+        window.maximum_expansion_angle_spin.setValue(40)
         window.automatic_base_checkbox.setChecked(True)
         for _ in range(3):
             self.app.processEvents()
@@ -207,7 +207,7 @@ class GenerationUiTests(unittest.TestCase):
         window.automatic_base_checkbox.setChecked(False)
         window.target_time_spin.setValue(100)
         window.manual_base_width_spin.setValue(19)
-        window.maximum_expansion_angle_spin.setValue(60)
+        window.maximum_expansion_angle_spin.setValue(27)
         window.validate_form()
 
         for width, height in ((800, 900), (1952, 1279)):

@@ -136,18 +136,17 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
         setting = window.maximum_expansion_angle_setting
-        window.maximum_expansion_angle_spin.setValue(71.0)
+        window.maximum_expansion_angle_spin.setValue(90.0)
         self.app.processEvents()
 
-        self.assertEqual(window.maximum_expansion_angle_spin.value(), 71.0)
+        self.assertEqual(window.maximum_expansion_angle_spin.value(), 90.0)
         self.assertTrue(setting.editor.property("invalid"))
-        self.assertTrue(setting.editor.property("warning"))
-        self.assertIn("Maximalwert 70,0 °", setting.message_label.text())
-        self.assertIn("Vorsicht", setting.secondary_message_label.text())
-        self.assertFalse(setting.secondary_message_label.isHidden())
-        self.assertIn("Maximalwert 70,0 °", window.validation_label.text())
+        self.assertFalse(setting.editor.property("warning"))
+        self.assertIn("Maximalwert 89,0 °", setting.message_label.text())
+        self.assertTrue(setting.secondary_message_label.isHidden())
+        self.assertIn("Maximalwert 89,0 °", window.validation_label.text())
 
-        window.maximum_expansion_angle_spin.setValue(51.0)
+        window.maximum_expansion_angle_spin.setValue(28.0)
         self.app.processEvents()
         self.assertFalse(setting.editor.property("invalid"))
         self.assertTrue(setting.editor.property("warning"))
@@ -216,7 +215,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window = self.window()
         window._apply_show_setting_limits(True)
         window.target_time_spin.setValue(0.0)
-        window.maximum_expansion_angle_spin.setValue(51.0)
+        window.maximum_expansion_angle_spin.setValue(28.0)
         self.complete_source_step(window)
         window.workflow.slicer_unavailable("Kein Slicer verfügbar")
         self.app.processEvents()
@@ -376,7 +375,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             [action.text() for action in window.options_menu.actions()],
             [
                 "Allgemeine Einstellungen …",
-                "Support & Diagnose …",
+                "Support Diagnose …",
                 "Buy me a coffee …",
                 "Über Kühlturm-Generator",
             ],
@@ -660,6 +659,35 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 window.about_scroll.verticalScrollBar().maximum(), 0
             )
         window.close()
+
+    def test_about_document_collapse_restores_full_width_without_a_sticky_scrollbar(self):
+        from test_manual_gui import preview_test_application, restore_preview_test_application
+
+        app, previous_font, font_id = preview_test_application()
+        self.addCleanup(restore_preview_test_application, app, previous_font, font_id)
+        window = self.window()
+        window.resize(1400, 1390)
+        window.show()
+        window.show_about_dialog()
+        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
+        dialog = window.about_dialog
+        initial = (dialog.size(), dialog.about_content.width(), dialog.about_license_status_description.height())
+        self.assertEqual(dialog.about_scroll.verticalScrollBar().maximum(), 0)
+        for _ in range(2):
+            for button in dialog.about_legal_buttons:
+                button.click()
+                QTest.qWait(20)
+                button.click()
+                QTest.qWait(20)
+                self.assertEqual(dialog.about_scroll.verticalScrollBar().maximum(), 0)
+                self.assertEqual((dialog.size(), dialog.about_content.width(), dialog.about_license_status_description.height()), initial)
+        dialog.about_legal_buttons[0].click()
+        dialog.close()
+        window.show_about_dialog()
+        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
+        self.assertEqual(dialog.about_scroll.verticalScrollBar().maximum(), 0)
+        self.assertEqual(dialog.about_scroll.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.assertEqual(dialog.size(), initial[0])
 
     def test_startup_exposes_only_the_main_window(self) -> None:
         window = self.window()
@@ -1413,7 +1441,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
         window.target_time_spin.setValue(121.0)
-        window.maximum_expansion_angle_spin.setValue(71.0)
+        window.maximum_expansion_angle_spin.setValue(90.0)
         self.app.processEvents()
         self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
         self.assertEqual(
@@ -1429,7 +1457,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "1 Fehler",
         )
         self.assertIn(
-            "Maximalwert 70,0 °",
+            "Maximalwert 89,0 °",
             window.maximum_expansion_angle_setting.message_label.text(),
         )
         window.close()
@@ -1496,6 +1524,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "minimum_outer_diameter_mm",
             "maximum_outer_diameter_mm",
             "manual_base_width_mm",
+            "maximum_expansion_angle_deg",
+            "maximum_contraction_angle_deg",
         }
         for name, setting in window._setting_widgets.items():
             if name in dual_bounds:
@@ -1529,7 +1559,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window._joint_slice_settings_dialog.reject()
         self.assertEqual(
             window._setting_widgets["maximum_expansion_angle_deg"].range_label.text(),
-            "Max. 70,0 °",
+            "20,0 - 89,0 °",
         )
         self.assertEqual(
             window._setting_widgets[

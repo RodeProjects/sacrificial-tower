@@ -59,8 +59,8 @@ DEFAULT_BASE_HEIGHT_FACTOR = GENERATION_DEFAULTS["base_height_factor"]
 DEFAULT_BASE_MARGIN_MM = GENERATION_DEFAULTS["base_margin_mm"]
 DEFAULT_BASE_HEIGHT_MM = 1.0  # Historical Phase-3 API only; solid feet use two layers.
 DEFAULT_MANUAL_BASE_WIDTH_MM = GENERATION_DEFAULTS["manual_base_width_mm"]
-DEFAULT_EXPANSION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
-DEFAULT_CONTRACTION_ANGLE_DEG = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
+DEFAULT_EXPANSION_ANGLE_DEG = 90.0-GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
+DEFAULT_CONTRACTION_ANGLE_DEG = 90.0-GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
 DEFAULT_MAXIMUM_RADIUS_CHANGE_PER_MM_Z = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"]
 FLOAT_EPSILON = 1e-12
 
@@ -214,7 +214,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_EXPANSION_ANGLE_DEG,
         help=(
-            "Maximum spline expansion angle from the vertical in degrees. "
+            "Expansion slope limit measured from the horizontal print bed in degrees. "
+            "Smaller values allow flatter surfaces and more radial growth. "
             f"Default: {DEFAULT_EXPANSION_ANGLE_DEG}"
         ),
     )
@@ -224,7 +225,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_CONTRACTION_ANGLE_DEG,
         help=(
-            "Maximum spline contraction angle from the vertical in degrees. "
+            "Contraction slope limit measured from the horizontal print bed in degrees. "
+            "Smaller values allow flatter surfaces and faster contraction. "
             f"Default: {DEFAULT_CONTRACTION_ANGLE_DEG}"
         ),
     )
@@ -1307,8 +1309,8 @@ def main() -> int:
                 maximum_radius_change_per_mm_z=(
                     arguments.maximum_radius_change
                 ),
-                maximum_expansion_angle_deg=arguments.expansion_angle,
-                maximum_contraction_angle_deg=arguments.contraction_angle,
+                maximum_expansion_angle_deg=90.0-arguments.expansion_angle,
+                maximum_contraction_angle_deg=90.0-arguments.contraction_angle,
                 local_reference_window=arguments.local_window,
             )
             result = GenerationService(arguments.output_root).generate(

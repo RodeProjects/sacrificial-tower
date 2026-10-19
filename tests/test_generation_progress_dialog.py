@@ -410,11 +410,11 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         _settings, state = store.load()
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 21)
+        self.assertEqual(SETTINGS_SCHEMA_VERSION, 22)
         self.assertEqual(state["maximum_joint_slices"], 10)
         self.assertEqual(state["maximum_separate_slices"], 6)
         migrated = json.loads(user_path.read_text(encoding="utf-8"))
-        self.assertEqual(migrated["settings_schema_version"], 21)
+        self.assertEqual(migrated["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
         self.assertIsNotNone(store.last_migration_backup)
 
     def test_current_joint_slice_default_and_fallback_are_twelve(self) -> None:
@@ -452,7 +452,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 self.assertEqual(settings.target_layer_time_s, 9.0)
                 self.assertEqual(state['maximum_joint_slices'], 12)
                 self.assertEqual(state['maximum_separate_slices'], 6)
-                self.assertEqual(json.loads(path.read_text())['settings_schema_version'], 21)
+                self.assertEqual(json.loads(path.read_text())['settings_schema_version'], SETTINGS_SCHEMA_VERSION)
                 self.assertEqual(store.last_migration_backup.read_bytes(), original)
 
     def test_schema_21_limits_saved_manual_base_width_and_preserves_backup(self) -> None:
@@ -470,7 +470,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 settings, payload = store.load()
                 self.assertEqual(settings.manual_base_width_mm, expected)
                 self.assertEqual(payload["generation"]["manual_base_width_mm"], expected)
-                self.assertEqual(json.loads(path.read_text())["settings_schema_version"], 21)
+                self.assertEqual(json.loads(path.read_text())["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
                 self.assertEqual(store.last_migration_backup.read_bytes(), original)
 
     def test_local_window_is_only_reset_in_general_settings(self) -> None:

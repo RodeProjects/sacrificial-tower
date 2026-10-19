@@ -86,6 +86,8 @@ class ProfileFeasibilityError(ValueError):
 
 
 def validate_solid_settings(settings: GenerationSettings) -> None:
+    if not isinstance(settings.limit_expansion_to_profile, bool):
+        raise ValueError("Die Profilbegrenzung benötigt einen gültigen Ein-/Aus-Wert.")
     if not isinstance(settings.automatic_base_width, bool):
         raise ValueError("Automatic base width must be a boolean value.")
     if not isinstance(settings.simulate_full_tower_infill, bool):
@@ -94,7 +96,7 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError("Tower support simulation must be a boolean value.")
 
     for name, value in settings.to_dict().items():
-        if name in {"automatic_base_width", "simulate_full_tower_infill", "simulate_tower_without_supports"}:
+        if name in {"automatic_base_width", "simulate_full_tower_infill", "simulate_tower_without_supports", "limit_expansion_to_profile"}:
             continue
         if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
             continue
@@ -130,8 +132,7 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         <= MAXIMUM_EXPANSION_ANGLE_DEG
     ):
         raise ValueError(
-            "Maximum expansion angle must be greater than zero and at most "
-            f"{MAXIMUM_EXPANSION_ANGLE_DEG:g} degrees."
+            "Der Aufweitungswinkel zur Horizontalen liegt außerhalb des zulässigen Bereichs."
         )
     angle_to_radial_slope(settings.maximum_expansion_angle_deg)
     if not settings.simulate_full_tower_infill:
@@ -590,7 +591,7 @@ def _append_angle_issues(
             FeasibilityIssue(
                 code="EXPANSION_ANGLE_TOO_SMALL",
                 message=(
-                    "Der eingestellte Aufweitungswinkel ist zu flach, um den "
+                    "Der eingestellte Aufweitungswinkel zur Horizontalen ist zu groß, um den "
                     "benötigten Außendurchmesser rechtzeitig zu erreichen."
                 ),
                 affected_layer_index=support.layer_index,

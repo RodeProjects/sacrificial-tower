@@ -18,11 +18,11 @@ def scalar(value):
 
 
 def overhang_default(profile):
-    if profile.installation.adapter_id in {"orca_slicer", "bambu_studio", "anycubic_slicer_next"}:
-        value = scalar(profile.effective_values.get("support_threshold_angle"))
-        if value is not None and 0 < value < 90:
-            return 90-value, "Profilwert (90° − Stützenschwelle zur Horizontalen)"
-    return 45.0, "Fallback: 45° zur Vertikalen; kein verlässlich interpretierbarer Profilwinkel"
+    from cooling_tower.slicers.support_angles import profile_support_threshold
+    value = profile_support_threshold(profile)
+    if value is not None:
+        return 90-value, "Profilwert, angezeigt zur Horizontalen"
+    return 45.0, "Fallback: 45° zur Horizontalen; kein verlässlich interpretierbarer Profilwinkel"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +34,7 @@ class ManualContext:
     bed_geometry: object
     occupied_bounds: object
     brim_width_mm: float
+    support_threshold_angle_deg: float | None = None
 
     @property
     def maximum_foot_diameter_mm(self):
@@ -63,7 +64,9 @@ class ManualContext:
             adhesion = values.get("adhesion_type","")
             if isinstance(adhesion,(list,tuple)): adhesion = adhesion[0] if adhesion else ""
             brim = max(0,scalar(values.get("brim_width")) or 0) if str(adhesion).casefold() == "brim" else 0
-        return cls(key, tuple(request.snapshot.layers), height, note, bed, source_data.occupied_bounds, brim)
+        from cooling_tower.slicers.support_angles import profile_support_threshold
+        return cls(key, tuple(request.snapshot.layers), height, note, bed, source_data.occupied_bounds, brim,
+                   profile_support_threshold(request.effective_profile))
 
     def validate(self, draft):
         validate(draft)

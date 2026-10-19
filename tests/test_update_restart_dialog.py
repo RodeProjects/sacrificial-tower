@@ -68,10 +68,22 @@ class UpdateRestartCountdownDialogTests(unittest.TestCase):
 
     def test_restart_button_accepts_immediately_and_stops_timer(self) -> None:
         dialog = UpdateRestartCountdownDialog(seconds=10)
-        QTimer.singleShot(0, dialog.restart_button.click)
+        self.addCleanup(dialog.close)
+        dialog._timer.start()
+        # Measure the synchronous button handler, excluding unrelated queued
+        # GUI work left by other fixtures in the shared application event loop.
         started = time.monotonic()
-        self.assertEqual(dialog.exec_countdown(), QDialog.DialogCode.Accepted)
+        dialog.restart_button.click()
         self.assertLess(time.monotonic()-started, 0.8)
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        self.assertEqual(dialog.remaining_seconds, 10)
+        self.assertFalse(dialog._timer.isActive())
+
+    def test_restart_button_closes_the_modal_countdown_without_a_timer_tick(self) -> None:
+        dialog = UpdateRestartCountdownDialog(seconds=10)
+        self.addCleanup(dialog.close)
+        QTimer.singleShot(0, dialog.restart_button.click)
+        self.assertEqual(dialog.exec_countdown(), QDialog.DialogCode.Accepted)
         self.assertEqual(dialog.remaining_seconds, 10)
         self.assertFalse(dialog._timer.isActive())
 

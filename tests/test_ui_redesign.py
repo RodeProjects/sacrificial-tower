@@ -94,7 +94,7 @@ class UiRedesignTests(unittest.TestCase):
         self.assertEqual(len(grouped), 1)
         self.assertIn("Betroffen sind 801 Layer", grouped[0]["summary"])
         self.assertIn(
-            "Erforderlich sind bis zu 88,50°. Zulässig sind höchstens 70,00°.",
+            "Erforderlich sind höchstens 1,50° zur Horizontalen. Ohne Profilbindung sind mindestens 20,00° zulässig.",
             grouped[0]["summary"],
         )
         self.assertEqual(

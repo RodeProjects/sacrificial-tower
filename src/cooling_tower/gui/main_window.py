@@ -8,8 +8,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from html import escape
+from functools import wraps
 from pathlib import Path
 from weakref import ref
+
+from cooling_tower.angles import GENERATION_ANGLE_FIELDS, complementary_angle
+from cooling_tower.slicers.support_angles import profile_support_threshold
+from cooling_tower.gui.update_transaction import suspended_widget_updates
 
 from PySide6.QtCore import (
     QEvent,
@@ -134,6 +139,8 @@ from cooling_tower.gui.texts import (
     FULL_INFILL_HINT_HTML,
     FULL_INFILL_HINT_ACCESSIBLE,
     SOURCE_SUPPORT_HINT_HTML,
+    SUPPORT_DIAGNOSE_MENU_LABEL,
+    slicer_support_hint_html,
 )
 from cooling_tower.gui.update_restart_dialog import UpdateRestartCountdownDialog
 from cooling_tower.gui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
@@ -346,6 +353,18 @@ def open_path(path: str | Path) -> None:
 
 def open_directory(path: str | Path) -> None:
     open_path(path)
+
+
+def _atomic_preparation_update(method):
+    """Finish state and layout together before Windows can repaint the page."""
+    @wraps(method)
+    def update(self, *args, **kwargs):
+        with suspended_widget_updates(self.workflow_group):
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                self._refresh_dynamic_preparation_layout()
+    return update
 
 
 def _de_number(value: float, decimals: int = 2) -> str:
@@ -800,6 +819,7 @@ class MainWindow(QMainWindow):
         self._populating_profile_combos = False
         self.profile_preview_outdated = False
         self._stl_validation_request_id = 0
+        self._stl_validation_finished_request_id: int | None = None
         self._preslice_request_id = 0
         self._support_simulation_offer_id = None
         self._support_simulation_dialog = None
@@ -1131,7 +1151,7 @@ class MainWindow(QMainWindow):
         )
         self.support_report_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "document.svg")),
-            "Support & Diagnose …",
+            SUPPORT_DIAGNOSE_MENU_LABEL,
         )
         self.support_report_action.triggered.connect(
             self.show_support_report_dialog
@@ -1263,11 +1283,10 @@ class MainWindow(QMainWindow):
         source_group.setProperty("role", "source")
         source_group.setProperty("subsection", "fileTransfer")
         source_layout = source_group.content_layout
-        # The card itself is fitted to the exact sum of its visible blocks.
-        # A global AlignTop constraint makes QVBoxLayout retain a cached,
-        # smaller allocation for a drop-zone that grows after validation and
-        # lets the fixed-height widget protrude into the following row.
-        source_layout.setAlignment(Qt.Alignment())
+        # Anchor the blocks even while an old, taller card rectangle remains
+        # allocated during a source transition. Surplus space must stay below
+        # the content instead of spreading around the checklist and divider.
+        source_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         source_layout.setContentsMargins(20, 20, 20, 20)
         source_layout.setSpacing(_PREPARATION_CONTENT_GAP_PX)
 
@@ -1568,6 +1587,14 @@ class MainWindow(QMainWindow):
         slicer_label_row_layout = QHBoxLayout(slicer_label_row)
         slicer_label_row_layout.setContentsMargins(0, 0, 0, 0)
         slicer_label_row_layout.setSpacing(6)
+        self.slicer_support_info_button = InfoToolButton(
+            slicer_support_hint_html(),
+            slicer_label_row,
+            accessible_name="Informationen zu unterstützten Slicern",
+            object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px,
+        )
+        slicer_label_row_layout.addWidget(self.slicer_support_info_button)
         slicer_label_row_layout.addWidget(self.slicer_selection_label)
         slicer_label_row_layout.addWidget(self.slicer_auto_detected_label)
         slicer_label_row_layout.addStretch(1)
@@ -2465,7 +2492,7 @@ class MainWindow(QMainWindow):
             self.target_time_spin,
         )
         self.full_infill_checkbox = QCheckBox(
-            "100% Turmfüllung simulieren"
+            "100% Turmfüllung simulieren (empfohlen)"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
         self.full_infill_checkbox.setLayoutDirection(
@@ -2683,15 +2710,20 @@ class MainWindow(QMainWindow):
             0.0, 100.0, 4, 0.05, "maximumRadiusChange"
         )
         self.maximum_expansion_angle_spin = self._double_spin(
-            1.0,
-            MAXIMUM_EXPANSION_ANGLE_DEG,
+            90.0-MAXIMUM_EXPANSION_ANGLE_DEG,
+            89.0,
             1,
             1.0,
             "maximumExpansionAngle",
         )
         self.maximum_contraction_angle_spin = self._double_spin(
-            1.0, 85.0, 1, 1.0, "maximumContractionAngle"
+            5.0, 89.0, 1, 1.0, "maximumContractionAngle"
         )
+        for angle_editor in (self.maximum_expansion_angle_spin, self.maximum_contraction_angle_spin):
+            angle_editor.setDecimals(12)
+            angle_editor.set_display_decimals(1)
+            angle_editor.setProperty("rangeLabelShowMinimum", True)
+        self.maximum_expansion_angle_spin.setMinimum(20.0)
         manual_base_setting = self._add_numeric_setting(
             stability_fields_layout,
             "manual_base_width_mm",
@@ -2755,6 +2787,9 @@ class MainWindow(QMainWindow):
             "Maximaler Aufweitungswinkel",
             self.maximum_expansion_angle_spin,
         )
+        from cooling_tower.gui.widgets.profile_angle_limit import ProfileAngleLimitControl
+        self.profile_angle_limit = ProfileAngleLimitControl(self.maximum_expansion_angle_setting)
+        self.profile_angle_limit.checkbox.toggled.connect(self._on_profile_angle_limit_toggled)
         self._add_numeric_setting(
             overhang_layout,
             "maximum_contraction_angle_deg",
@@ -4216,6 +4251,9 @@ class MainWindow(QMainWindow):
                 self.settings_store.load_defaults(), name
             )
         )
+        if setting_name in GENERATION_ANGLE_FIELDS:
+            original_provider = default_provider
+            default_provider = lambda: complementary_angle(original_provider())
         setting_widget = NumericSettingWidget(
             setting_name=setting_name,
             label=label,
@@ -5064,6 +5102,7 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
+        self._refresh_profile_angle_binding()
         from cooling_tower.slicers.support_simulation import global_supports_disabled, OBJECT_SUPPORT_ADAPTERS
         result = self.profile_match_result
         profile = getattr(getattr(result, "selected", None), "effective_profile", None)
@@ -8360,12 +8399,12 @@ class MainWindow(QMainWindow):
                     else child.sizeHint().height()
                 )
                 child_heights.append(
-                    max(
+                    min(child.maximumHeight(), max(
                         0,
                         child.minimumHeight(),
                         child.minimumSizeHint().height(),
                         preferred_height,
-                    )
+                    ))
                 )
             body_height = (
                 margins.top()
@@ -9932,6 +9971,7 @@ class MainWindow(QMainWindow):
         self.output_root_edit.setText(str(self.default_output_root))
         self.output_root_edit.selectAll()
 
+    @_atomic_preparation_update
     def remove_source(self) -> None:
         if self.background_job_manager.has_active(JobKind.EXPORT):
             self.result_label.setText(
@@ -10052,6 +10092,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self, self._refresh_preparation_section_layout)
         self.validate_form()
 
+    @_atomic_preparation_update
     def reload_source(self) -> None:
         """Read and validate the selected source again from disk."""
 
@@ -10126,6 +10167,7 @@ class MainWindow(QMainWindow):
         self._invalidate_preview("Die Stützen-Simulation wurde geändert.")
         self.validate_form()
 
+    @_atomic_preparation_update
     def _on_source_selected(self, path: str, source_kind: str) -> None:
         kind = SourceKind(source_kind)
         if kind is not SourceKind.STL:
@@ -10214,6 +10256,7 @@ class MainWindow(QMainWindow):
         )
         self._stl_validation_request_id += 1
         request_id = self._stl_validation_request_id
+        self._stl_validation_finished_request_id = None
         self.workflow.begin_source_validation(is_stl=True)
         self.drop_zone.set_analysis_state("analyzing")
         self.source_progress_bar.setValue(0)
@@ -10246,20 +10289,26 @@ class MainWindow(QMainWindow):
         percent: int,
         status: str,
     ) -> None:
-        if request_id != self._stl_validation_request_id:
+        if (request_id != self._stl_validation_request_id
+                or request_id == self._stl_validation_finished_request_id):
             return
         self.source_progress_bar.setValue(max(0, min(100, int(percent))))
-        if percent >= 100:
-            self.source_progress_bar.hide()
-            self._refresh_dynamic_preparation_layout()
         self._set_source_progress_status(
             status,
             icon="⏳",
             state="running",
         )
+        if request_id == self._stl_validation_finished_request_id:
+            return
         self.drop_zone.set_status("STL-Geometrie wird geprüft")
+        if percent >= 100:
+            self.source_progress_bar.hide()
+            # Native layout work can deliver the completion callback here.
+            # Do not overwrite any terminal status after it returns.
+            self._refresh_dynamic_preparation_layout()
 
     @Slot(int, object)
+    @_atomic_preparation_update
     def _on_stl_validation_succeeded(
         self,
         request_id: int,
@@ -10274,6 +10323,7 @@ class MainWindow(QMainWindow):
             != self.current_source_path.resolve()
         ):
             return
+        self._stl_validation_finished_request_id = request_id
         self.stl_validation_result = result
         self.source_artifact = result.source_artifact
         self.stl_validation_feedback.clear_warning()
@@ -10484,6 +10534,7 @@ class MainWindow(QMainWindow):
             is box._rejected_stl_accept_button  # type: ignore[attr-defined]
         )
 
+    @_atomic_preparation_update
     def _complete_accepted_stl(
         self,
         request_id: int,
@@ -10587,6 +10638,7 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     @Slot(int, str, str)
+    @_atomic_preparation_update
     def _on_stl_validation_failed(
         self,
         request_id: int,
@@ -10595,6 +10647,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if request_id != self._stl_validation_request_id:
             return
+        self._stl_validation_finished_request_id = request_id
         self.stl_validation_result = None
         self.source_artifact = None
         self.stl_validation_feedback.clear_warning()
@@ -11064,7 +11117,7 @@ class MainWindow(QMainWindow):
         }
         remedies = {
             "EXPANSION_ANGLE_TOO_SMALL": (
-                "Den maximalen Aufweitungswinkel erhöhen.",
+                "Den Aufweitungswinkel zur Horizontalen verringern.",
                 "Die Ziel-Layerzeit verringern.",
                 "Den größten Außendurchmesser erhöhen.",
             ),
@@ -11118,31 +11171,34 @@ class MainWindow(QMainWindow):
                     summary += f" Betroffen sind {len(layers)} Layer."
             if exact_setting_requirements:
                 unit = "°" if code == "EXPANSION_ANGLE_TOO_SMALL" else " mm"
-                summary += (
-                    f" Erforderlich sind bis zu "
-                    f"{_de_number(max(exact_setting_requirements))}{unit}."
-                )
                 if code == "EXPANSION_ANGLE_TOO_SMALL":
                     summary += (
-                        " Zulässig sind höchstens "
-                        f"{_de_number(MAXIMUM_EXPANSION_ANGLE_DEG)}°."
+                        " Erforderlich sind höchstens "
+                        f"{_de_number(complementary_angle(max(exact_setting_requirements)))}° zur Horizontalen. "
                     )
+                    summary += (f"Die aktive Profilgrenze beträgt {_de_number(self.maximum_expansion_angle_spin.value())}°."
+                                if self.profile_angle_limit.state.active else
+                                f"Ohne Profilbindung sind mindestens {_de_number(complementary_angle(MAXIMUM_EXPANSION_ANGLE_DEG))}° zulässig.")
+                else:
+                    summary += f" Erforderlich sind bis zu {_de_number(max(exact_setting_requirements))}{unit}."
             solutions = list(remedies.get(code, ()))
             if solutions and exact_setting_requirements:
                 required_maximum = _de_number(max(exact_setting_requirements))
                 if code == "EXPANSION_ANGLE_TOO_SMALL":
-                    if (
+                    if self.profile_angle_limit.state.active:
+                        solutions[0] = "Die Profilbegrenzung deaktivieren oder den Schwellenwinkel im Prozessprofil anpassen und die Profile erneut einlesen."
+                    elif (
                         max(exact_setting_requirements)
                         <= MAXIMUM_EXPANSION_ANGLE_DEG
                     ):
                         solutions[0] = (
-                            "Den maximalen Aufweitungswinkel auf mindestens "
-                            f"{required_maximum}° erhöhen."
+                            "Den Aufweitungswinkel zur Horizontalen auf höchstens "
+                            f"{_de_number(complementary_angle(max(exact_setting_requirements)))}° verringern."
                         )
                     else:
                         solutions[0] = (
-                            "Den maximalen Aufweitungswinkel bis höchstens "
-                            f"{MAXIMUM_EXPANSION_ANGLE_DEG:g}° erhöhen."
+                            "Den Aufweitungswinkel zur Horizontalen bis auf "
+                            f"{90-MAXIMUM_EXPANSION_ANGLE_DEG:g}° verringern."
                         )
                 elif code == "BASE_WIDTH_TOO_SMALL":
                     solutions[1] = (
@@ -11189,21 +11245,23 @@ class MainWindow(QMainWindow):
         if trigger == "manual_base_width_mm":
             return "Die zuletzt geänderte manuelle Standfußbreite erhöhen."
         if trigger == "maximum_expansion_angle_deg":
+            if self.profile_angle_limit.state.active:
+                return "Die Profilbegrenzung deaktivieren oder den Schwellenwinkel im Prozessprofil anpassen und die Profile erneut einlesen."
             if (
                 required_values
                 and max(required_values) <= MAXIMUM_EXPANSION_ANGLE_DEG
             ):
-                target = _de_number(max(required_values))
+                target = _de_number(complementary_angle(max(required_values)))
                 return (
-                    "Den zuletzt geänderten Aufweitungswinkel auf mindestens "
-                    f"{target}° erhöhen."
+                    "Den zuletzt geänderten Aufweitungswinkel zur Horizontalen auf höchstens "
+                    f"{target}° verringern."
                 )
             return (
-                "Den zuletzt geänderten Aufweitungswinkel bis höchstens "
-                f"{MAXIMUM_EXPANSION_ANGLE_DEG:g}° erhöhen."
+                "Den zuletzt geänderten Aufweitungswinkel zur Horizontalen bis auf "
+                f"{90-MAXIMUM_EXPANSION_ANGLE_DEG:g}° verringern."
             )
         if trigger == "maximum_contraction_angle_deg":
-            return "Den zuletzt geänderten Verjüngungswinkel erhöhen."
+            return "Den zuletzt geänderten Verjüngungswinkel zur Horizontalen verringern."
         return None
 
     def _clear_feasibility_issues(self) -> None:
@@ -12086,11 +12144,12 @@ class MainWindow(QMainWindow):
                 self.maximum_radius_change_spin.value()
             ),
             maximum_expansion_angle_deg=(
-                self.maximum_expansion_angle_spin.value()
+                complementary_angle(self.maximum_expansion_angle_spin.value())
             ),
             maximum_contraction_angle_deg=(
-                self.maximum_contraction_angle_spin.value()
+                complementary_angle(self.maximum_contraction_angle_spin.value())
             ),
+            limit_expansion_to_profile=self.profile_angle_limit.checkbox.isChecked(),
             local_reference_window=self.local_window_spin.value(),
         )
 
@@ -12130,11 +12189,11 @@ class MainWindow(QMainWindow):
             ),
             (
                 self.maximum_expansion_angle_spin,
-                settings.maximum_expansion_angle_deg,
+                complementary_angle(settings.maximum_expansion_angle_deg),
             ),
             (
                 self.maximum_contraction_angle_spin,
-                settings.maximum_contraction_angle_deg,
+                complementary_angle(settings.maximum_contraction_angle_deg),
             ),
             (self.local_window_spin, settings.local_reference_window),
         )
@@ -12164,16 +12223,55 @@ class MainWindow(QMainWindow):
             not settings.automatic_base_width
         )
         self._automatic_base_width_active = settings.automatic_base_width
+        from cooling_tower.angles import ProfileAngleBinding
+        self.profile_angle_limit.state = ProfileAngleBinding(settings.maximum_expansion_angle_deg)
+        with QSignalBlocker(self.profile_angle_limit.checkbox):
+            self.profile_angle_limit.checkbox.setChecked(settings.limit_expansion_to_profile)
         self.automatic_base_width_label.hide()
         self.automatic_base_reset_button.setVisible(True)
         self._update_expansion_angle_warning()
         self._update_automatic_base_width_preview()
 
+    def _on_profile_angle_limit_toggled(self, _checked: bool) -> None:
+        self._last_changed_setting_name = "maximum_expansion_angle_deg"
+        self._update_expansion_angle_warning()
+        self._on_value_changed(None)
+
+    def _refresh_profile_angle_binding(self) -> None:
+        if not hasattr(self, "profile_angle_limit"):
+            return
+        result = self.profile_match_result
+        profile = getattr(getattr(result, "selected", None), "effective_profile", None)
+        threshold = profile_support_threshold(profile) if getattr(result, "user_confirmed", False) else None
+        control = self.profile_angle_limit
+        was_active = control.state.active
+        angle = control.refresh(complementary_angle(self.maximum_expansion_angle_spin.value()),
+                                control.checkbox.isChecked(), threshold, minimum=20.0)
+        spin = self.maximum_expansion_angle_spin
+        value_changed = abs(spin.value()-complementary_angle(angle)) > 1e-8
+        with QSignalBlocker(self.maximum_expansion_angle_spin):
+            from cooling_tower.gui.widgets.profile_angle_limit import set_angle_editor_precision
+            set_angle_editor_precision(spin, control.applied_threshold if control.state.active else None)
+            if value_changed or (control.state.active and not spin.hasAcceptableInput()):
+                spin.setValue(complementary_angle(angle))
+        active = control.state.active
+        spin.setEnabled(not active)
+        bounds = (20.0, 89.9) if active else (20.0, 89.0)
+        if (spin.property("validationMinimum"), spin.property("validationMaximum")) != bounds:
+            spin.setProperty("validationMinimum", bounds[0])
+            spin.setProperty("validationMaximum", bounds[1])
+            self.maximum_expansion_angle_setting.refresh_range_state()
+        if value_changed or was_active != active:
+            self.maximum_expansion_angle_setting.refresh_reset_state()
+        if active:
+            self.maximum_expansion_angle_setting.reset_button.setEnabled(False)
+
     def _update_expansion_angle_warning(self) -> None:
+        self._refresh_profile_angle_binding()
+        from cooling_tower.gui.texts import EXPANSION_ANGLE_CAUTION
         warning = (
-            "Vorsicht: Aufweitungswinkel ab 51° erzeugen steilere "
-            "Überhänge und setzen einen gut kalibrierten Drucker voraus."
-            if self.maximum_expansion_angle_spin.value() >= 51.0
+            EXPANSION_ANGLE_CAUTION
+            if self.maximum_expansion_angle_spin.value() <= 28.0
             else ""
         )
         profile_match = self.profile_match_result
@@ -12187,9 +12285,10 @@ class MainWindow(QMainWindow):
             if self.source_preslice_result.supports_simulated:
                 profile = with_simulated_supports(profile)
             threshold = tower_support_warning_angle(profile)
-            if threshold is not None and self.maximum_expansion_angle_spin.value() >= threshold:
+            horizontal_threshold = complementary_angle(threshold) if threshold is not None else None
+            if horizontal_threshold is not None and self.maximum_expansion_angle_spin.value() < horizontal_threshold-1e-9:
                 support_warning = (
-                    f"Ab {threshold:g}° Aufweitungswinkel kann das aktive "
+                    f"Unter {format(horizontal_threshold, 'g').replace('.', ',')}° zur Horizontalen kann das aktive "
                     "Slicerprofil Stützen am Turm erzeugen. Diese verlängern "
                     "die Layerzeit und verfälschen die Turmkalibrierung. "
                     "Aktiviere die Einstellung <b>„Deaktivierte Turmstützen "
@@ -12350,6 +12449,12 @@ class MainWindow(QMainWindow):
     def validate_form(self) -> bool:
         self._update_target_time_minimum()
         self._update_diameter_limits()
+        # Reconcile silent Qt corrections and signal-blocked profile updates
+        # with the current text instead of retaining historical input errors.
+        self._incomplete_setting_names = {
+            name for name, setting in self._setting_widgets.items()
+            if not setting.editor.hasAcceptableInput()
+        }
         field_records: dict[str, list[str]] = {}
         static_causes: list[str] = []
         general_errors: list[str] = []
@@ -12411,6 +12516,8 @@ class MainWindow(QMainWindow):
             }:
                 continue
             value = float(getattr(settings, name))
+            if name in GENERATION_ANGLE_FIELDS:
+                value = complementary_angle(value)
             minimum = setting.editor.property("validationMinimum")
             maximum = setting.editor.property("validationMaximum")
             unit = SETTING_UNITS.get(name, "")
@@ -12524,11 +12631,9 @@ class MainWindow(QMainWindow):
         ):
             add_error(
                 ("maximum_expansion_angle_deg",),
-                "Aufweitungswinkel muss größer als 0° und höchstens "
-                f"{MAXIMUM_EXPANSION_ANGLE_DEG:g}° sein.",
+                "Der Aufweitungswinkel zur Horizontalen liegt außerhalb des zulässigen Bereichs.",
                 (
-                    "Den Aufweitungswinkel auf höchstens "
-                    f"{MAXIMUM_EXPANSION_ANGLE_DEG:g}° verringern.",
+                    "Einen gültigen Winkel zur Horizontalen eingeben oder die Profilbegrenzung deaktivieren.",
                     "Den Standardwert wiederherstellen.",
                 ),
             )
@@ -14194,10 +14299,13 @@ class MainWindow(QMainWindow):
     def _save_user_settings(self, *, strict: bool = False) -> None:
         self.manual_controller.save_settings(strict=strict)
         try:
+            settings = self.collect_settings()
+            if self.profile_angle_limit.state.active:
+                settings = replace(settings, maximum_expansion_angle_deg=self.profile_angle_limit.state.free_angle_deg)
             window_geometry = self.normalGeometry()
             window_position = self.pos()
             self.settings_store.save(
-                self.collect_settings(),
+                settings,
                 output_root=self.output_root_edit.text(),
                 window_width=window_geometry.width(),
                 window_height=window_geometry.height(),

@@ -7,8 +7,9 @@ from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 21
+SETTINGS_SCHEMA_VERSION = 22
 _CONFIG_METADATA_KEYS = {
+    "angle_storage_reference",
     "settings_schema_version",
     "default_output_root",
     "maximum_joint_slices",
@@ -29,6 +30,9 @@ def load_generation_settings(path: str | Path) -> GenerationSettings:
     generation = values.get("generation", values)
     if not isinstance(generation, dict):
         raise ValueError("The generation settings must be a JSON object.")
+    if any(container.get("angle_storage_reference", "vertical") != "vertical"
+           for container in (values, generation)):
+        raise ValueError("Die gespeicherten Winkel besitzen einen unbekannten Bezug; erwartet wird der vertikale Speicherbezug.")
     filtered = {
         key: value
         for key, value in generation.items()
@@ -47,6 +51,7 @@ def save_generation_settings(
     with settings_path.open("w", encoding="utf-8", newline="\n") as handle:
         payload = {
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+            "angle_storage_reference": "vertical",
             **settings.to_dict(),
         }
         json.dump(payload, handle, indent=2, sort_keys=True)

@@ -584,8 +584,10 @@ initialen Geometrie einschließlich Fuß ab und verwaltet danach eine eigene
 editierbare Kreissegmentzahl. Beide Auflösungen bleiben unabhängig.
 
 Das manuelle Radiusprofil besteht aus kubischen Bézierkurven mit analytisch
-geprüften Durchmesser- und Steigungsextrema. Die Winkel verwenden `atan(dr/dz)`
-zur Vertikalen; Aufweitung und Verjüngung sind getrennt aktivierbar. Die
+geprüften Durchmesser- und Steigungsextrema. Die Geometrie verwendet intern
+weiterhin `atan(dr/dz)` zur Vertikalen. Eingabefelder, CLI und Layer-CSV zeigen
+den Ergänzungswinkel `90° − interner Winkel` zur Horizontalen. Aufweitung und
+Verjüngung sind getrennt aktivierbar. Die
 STL-Tessellierung begrenzt den vertikalen radialen Kurvenfehler auf 0,02 mm;
 Kreispolygonfehler und Drucklayer sind separate Größen. Das Mesh beginnt bei
 Z=0 und besitzt geschlossenen Boden und Deckel. Fachliche Invarianten,
@@ -600,11 +602,33 @@ Der aktuelle Standard des lokalen Zeitfensters ist 51 Layer; explizit gespeicher
 Benutzerwerte bleiben erhalten. Das Speicherformat und die Bedeutung des Feldes
 ändern sich dadurch nicht. Der globale Reset lässt den Wert unverändert.
 
-Die Aufweitung wird zur Vertikalen gemessen. Bei Orca-, Bambu- und
-Anycubic-Profilen ist `support_threshold_angle` dagegen zur Horizontalen
-definiert. Nach einem erfolgreichen Pre-Slice wird bei aktiven Stützen ab
-`90° − support_threshold_angle` am Aufweitungswinkel gewarnt. Der Hinweis
+Aufweitungs- und Verjüngungswinkel werden in der Oberfläche zur Horizontalen
+(Druckbett) angegeben: 90° steht für eine senkrechte Fläche; kleinere Werte
+erlauben flachere Übergänge mit stärkerer Radiusänderung je Schicht. Die
+Standardanzeigen sind 40° und 35°. Bei Orca-, Bambu- und Anycubic-Profilen hat
+`support_threshold_angle` denselben Bezug, beim PrusaSlicer gilt das für
+`support_material_threshold`. Bei nach unten gerichteten Flächen **unterhalb**
+der Schwelle kann der Slicer Stützen erzeugen. Nach einem erfolgreichen
+Pre-Slice wird bei aktiven Stützen entsprechend am Aufweitungswinkel gewarnt. Der Hinweis
 entfällt bei deaktivierten Stützen oder aktivierter Simulation ohne Stützen.
+
+Die kleine Zusatzzeile „Auf Threshold-angle des Slicer-Profils begrenzen“
+übernimmt bei Aktivierung den expliziten Schwellenwinkel des bestätigten
+Prozessprofils. Das Eingabefeld zeigt ihn gesperrt an; beim Ausschalten kehrt
+der vorherige freie Wert zurück. Die Zeile liegt unter der Feldbeschriftung
+ohne Teilnahme am Formularraster; Hauptzeile und Folgefelder behalten ihre
+Position. Nur bei schmalen Spalten wird der nachgestellte Erklärungsteil
+gekürzt; die vollständige Beschriftung bleibt über den Hinweis verfügbar.
+Fehlende/ungültige Werte und automatische Schwellen (0°) werden nicht geraten:
+die gespeicherte Bindung wartet auf ein geeignetes bestätigtes Profil und der
+freie Winkel bleibt verwendbar. Im automatischen Modus gilt auch bei einer
+Profilbindung mindestens 20° zur Horizontalen. Flachere Profilwerte werden auf
+20° begrenzt; der Hoverhinweis nennt Profilwert und angewendeten Winkel.
+Im manuellen Modus sind weiterhin kleinere Winkel möglich.
+Der allgemeine Kalibrierungshinweis für 35° und flachere Winkel steht ausschließlich
+im Hovertext. Erst bei 28° und flacher erscheint eine gelbe Warnung vor möglichen
+Druckproblemen. Die separate Warnung vor Stützen durch das aktive Profil bleibt erhalten.
+
 Die Simulation steht direkt unter „100% Turmfüllung simulieren“ und schreibt
 ausschließlich temporäre Profilkopien und objektspezifische Einstellungen
 im programmeigenen gemeinsamen 3MF bzw. in

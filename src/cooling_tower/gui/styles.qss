@@ -2356,14 +2356,17 @@ QWidget#layerTimeColorControls QPushButton[rangeCompactReset="true"] {
     min-height: 0; padding: 0;
 }
 
-QDoubleSpinBox#manualBaseWidth[automaticPreview="true"] {
+QDoubleSpinBox#manualBaseWidth[automaticPreview="true"],
+QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]:disabled {
     color: #667684;
     background: #f1f4f6;
     border-color: #d6dee4;
 }
 
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::up-button,
-QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::down-button {
+QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::down-button,
+QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]::up-button:disabled,
+QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]::down-button:disabled {
     background: #edf1f4;
     border-color: #d6dee4;
 }

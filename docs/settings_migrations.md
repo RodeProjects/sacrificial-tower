@@ -31,7 +31,8 @@ einfacheres Format behalten.
 - [Schema 19: maximale getrennte Slices](#schema-19-maximale-getrennte-slices)
 - [Schema 20: Simulation ohne Turmstützen](#schema-20-simulation-ohne-turmstützen)
 - [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
-- [Getrennte manuelle Einstellungen (eigenes Schema 18)](#getrennte-manuelle-einstellungen-eigenes-schema-18)
+- [Schema 22: Profilbindung des Aufweitungswinkels](#schema-22-profilbindung-des-aufweitungswinkels)
+- [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
 
 ## Speicherorte und parallele Installationen
@@ -370,13 +371,34 @@ und bleibt zwischen 25 und 80 mm. Die Migration sichert die Originaldatei
 vor dem atomaren Schreiben. Bei Downgrade-Übernahmen werden Werte über 80 mm
 verworfen.
 
-## Getrennte manuelle Einstellungen (eigenes Schema 18)
+## Schema 22: Profilbindung des Aufweitungswinkels
+
+21→22 ergänzt `generation.limit_expansion_to_profile` als strikt boolesche,
+anfangs deaktivierte Option. Bestehende Winkel werden **nicht** numerisch
+umgeschrieben: Gespeicherte Werte und Geometrie-APIs behalten ihren vertikalen
+Bezug; Oberfläche und CLI rechnen an der Ein-/Ausgabe zur Horizontalen um.
+Dadurch ändern Upgrade, Downgrade oder Rücksetzen keine vorhandene Turmform.
+Die bisherigen Kompatibilitätskennungen der Winkel bleiben gültig.
+
+Bei aktiver Bindung wird der freie Winkel gespeichert; der effektive Winkel
+wird erst aus dem bestätigten aktuellen Prozessprofil abgeleitet. Damit kann
+ein alter Profilwert keinen anderen Slicer-/Profilkontext überschreiben. Die
+neue Option besitzt eine eigene stabile Kompatibilitätskennung. Unbekannte
+neuere Dateien, externe Änderungen und beschädigte Dateien behalten die
+bisherigen Schutzregeln einschließlich Sicherung und atomarem Schreiben.
+
+## Getrennte manuelle Einstellungen (eigenes Schema 19)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
-automatische Format bleibt bei Schema 21. `ManualSettingsStore` normalisiert
+automatische Format verwendet Schema 22. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
 gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
+18→19 ergänzt die zunächst deaktivierte Option `limit_expansion_to_profile`.
+Auch hier bleiben gespeicherte Winkel vertikal, und bei aktiver Bindung wird
+der freie Wert gespeichert. Neue und bestehende Dateien werden ausschließlich
+über `VersionedJsonStore` verarbeitet; die Originaldatei wird vor Migrationen
+gesichert.
 Die explizite Legacy-Migration 0→1 ergänzt den Schemaschlüssel. 1→2 ersetzt
 `target_layer_time_s` durch `color_reference_time_s` und entfernt
 `layer_time_tolerance_s`. Die bisherige Zielzeit dient damit ausschließlich als

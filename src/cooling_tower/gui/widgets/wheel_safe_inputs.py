@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QLocale, Qt, QTimer
+from PySide6.QtCore import QEvent, QLocale, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -83,6 +83,14 @@ class WheelSafeSpinBox(QSpinBox):
 
 class WheelSafeDoubleSpinBox(QDoubleSpinBox):
     """Keep decimal values stable when the surrounding form is scrolled."""
+
+    input_reinterpreted = Signal()
+
+    def stepBy(self, steps: int) -> None:  # noqa: N802
+        super().stepBy(steps)
+        # Qt may silently restore the last valid text without changing the
+        # value or emitting either textChanged signal after an invalid edit.
+        self.input_reinterpreted.emit()
 
     def set_display_decimals(self, decimals: int) -> None:
         """Round only the visible text; keep Qt's value precision unchanged."""

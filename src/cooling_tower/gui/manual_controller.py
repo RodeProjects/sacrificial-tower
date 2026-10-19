@@ -272,6 +272,7 @@ class ManualGenerationController(QObject):
         self.refresh()
 
     def invalidate_context(self):
+        self.panel.settings = self.panel.settings_for_persistence()
         if self.job_id is not None:
             self.cancelled = True
             self.window.background_job_manager.cancel_job(self.job_id,reason="manual_context_changed")
@@ -282,6 +283,7 @@ class ManualGenerationController(QObject):
         self.panel.draft = self.panel.canvas.draft = None
         self.panel.canvas.invalidate_reference()
         self.panel.reference = None
+        self.panel._sync()
         self.panel.result_label.clear()
         self._result_warnings_label.clear()
         self._result_notice.reset_collapsed()
@@ -517,7 +519,7 @@ class ManualGenerationController(QObject):
             self.panel.reset_all()
 
     def save_settings(self, *, strict=False):
-        try: self.store.save(self.panel.settings)
+        try: self.store.save(self.panel.settings_for_persistence())
         except (OSError,ValueError) as error:
             self.panel.status_label.setText(str(error))
             if strict: raise

@@ -423,6 +423,16 @@ def _migrate_settings_20_to_21(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_21_to_22(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add opt-in profile binding, preserving vertical angle storage."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    generation["limit_expansion_to_profile"] = False
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -567,6 +577,7 @@ _USER_SETTINGS_MIGRATIONS = {
     18: _migrate_settings_18_to_19,
     19: _migrate_settings_19_to_20,
     20: _migrate_settings_20_to_21,
+    21: _migrate_settings_21_to_22,
 }
 
 

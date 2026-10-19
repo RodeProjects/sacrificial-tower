@@ -87,11 +87,13 @@ class ProfileFeasibilityError(ValueError):
 
 
 def validate_hollow_settings(settings: GenerationSettings) -> WallPathBounds:
+    if not isinstance(settings.limit_expansion_to_profile, bool):
+        raise ValueError("Die Profilbegrenzung benötigt einen gültigen Ein-/Aus-Wert.")
     if not isinstance(settings.automatic_base_width, bool):
         raise ValueError("Automatic base width must be a boolean value.")
 
     for name, value in settings.to_dict().items():
-        if name == "automatic_base_width":
+        if name in {"automatic_base_width", "limit_expansion_to_profile"}:
             continue
         if not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Generation setting {name} must be finite.")
@@ -121,8 +123,7 @@ def validate_hollow_settings(settings: GenerationSettings) -> WallPathBounds:
         <= MAXIMUM_EXPANSION_ANGLE_DEG
     ):
         raise ValueError(
-            "Maximum expansion angle must be greater than zero and at most "
-            f"{MAXIMUM_EXPANSION_ANGLE_DEG:g} degrees."
+            "Der Aufweitungswinkel zur Horizontalen liegt außerhalb des zulässigen Bereichs."
         )
     angle_to_radial_slope(settings.maximum_expansion_angle_deg)
     angle_to_radial_slope(settings.maximum_contraction_angle_deg)
@@ -759,7 +760,7 @@ def _append_angle_issues(
             FeasibilityIssue(
                 code="EXPANSION_ANGLE_TOO_SMALL",
                 message=(
-                    "Der eingestellte Zunahmewinkel ist zu flach, um den "
+                    "Der eingestellte Aufweitungswinkel zur Horizontalen ist zu groß, um den "
                     "benötigten Außenradius rechtzeitig zu erreichen."
                 ),
                 affected_layer_index=support.layer_index,

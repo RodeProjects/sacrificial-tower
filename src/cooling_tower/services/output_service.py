@@ -181,6 +181,7 @@ class OutputService:
             "outer_diameter_mm",
             "expansion_angle_deg",
             "contraction_angle_deg",
+            "angle_reference",
             "estimated_added_time_s",
             "target_reached",
             "profile_region",
@@ -215,11 +216,12 @@ class OutputService:
                             layer.outer_diameter_mm
                         ),
                         "expansion_angle_deg": _format_float(
-                            layer.expansion_angle_deg
+                            90.0-layer.expansion_angle_deg
                         ),
                         "contraction_angle_deg": _format_float(
-                            layer.contraction_angle_deg
+                            90.0-layer.contraction_angle_deg
                         ),
+                        "angle_reference": "horizontal",
                         "estimated_added_time_s": (
                             ""
                             if layer.estimated_added_time_s is None

@@ -64,7 +64,7 @@ class ManualNumericInputTests(unittest.TestCase):
         spin=self.panel.editors["expansion_angle_deg"]
         for text in ("12.5","12,5"):
             self.enter(spin,text)
-            self.assertEqual(self.panel.settings.expansion_angle_deg,12.5)
+            self.assertEqual(self.panel.settings.expansion_angle_deg,77.5)
             self.assertIn("12,50",spin.text())
             self.assertNotIn(".",spin.text())
 

@@ -40,10 +40,12 @@ class ProfilePreparationHint(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(f"color: {self.COLOR}; background: transparent;")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(6)
+        # The field-title text inset plus 3 px extra breathing room on both
+        # sides of the blue text; the shared outer divider gaps stay unchanged.
+        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setHorizontalSpacing(9)
         layout.setVerticalSpacing(0)
         # Prevent surplus height from stretching the heading away from the body.
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)

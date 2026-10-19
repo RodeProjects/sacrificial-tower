@@ -279,7 +279,14 @@ class RefinedEditorTests(unittest.TestCase):
         panel.source_support_option.info.ensurePolished()
         self.assertEqual(window.show_all_profiles_info_button.objectName(), panel.source_support_option.info.objectName())
         self.assertEqual(window.show_all_profiles_info_button.font().pointSizeF(), panel.source_support_option.info.font().pointSizeF())
-        self.assertIn("Bei aktivierter Einstellung werden die Stützen objektspezifisch für das übergebene STL-Objekt simuliert.", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Stützen simulieren</b>", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("OrcaSlicer: „Baum (automatisch)“", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Stil „Organisch“", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("übrigen Stützparameter des gewählten Prozessprofils bleiben unverändert erhalten", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Stützen anpassen</b>", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Speichere das Profil und lies die Profile im Kühlturm-Generator erneut ein", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("angepassten Stützparameter werden dann für die Simulation übernommen", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Originalprofile bleiben unverändert", SOURCE_SUPPORT_HINT_HTML)
 
     def filter_checkbox(self):
         box = IndicatorOnlyCheckBox("Filter deaktivieren / alle Profile anzeigen")

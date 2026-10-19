@@ -19,7 +19,7 @@ if str(SRC_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
@@ -101,6 +101,46 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 window.status_label.text(),
                 f"Export fehlgeschlagen: {reason}",
             )
+        finally:
+            window.close()
+
+    def test_generic_slicer_errors_are_omitted_from_preview_footer(self) -> None:
+        from cooling_tower.gui.main_window import _preview_failure_footer_reason
+        from cooling_tower.gui.user_messages import german_user_message
+
+        message = (
+            "Das gemeinsame Objekt-/Turm-Projekt konnte nicht sicher geslicet "
+            "werden. Slicer-Ausgabe: Errors"
+        )
+        expected = (
+            "Das gemeinsame Objekt-/Turm-Projekt konnte nicht sicher geslicet werden."
+        )
+        self.assertEqual(
+            _preview_failure_footer_reason(message),
+            expected,
+        )
+        self.assertEqual(german_user_message(message), expected)
+        self.assertIn(
+            "Bambu Studio konnte dem gemeinsamen Projekt keine gültige Düse zuordnen.",
+            _preview_failure_footer_reason(
+                "Das Projekt konnte nicht geslicet werden. "
+                "Slicer-Ausgabe: No valid nozzle found"
+            ),
+        )
+        self.assertIn(
+            "Slicer-Ausgabe: Unexpected profile key mismatch",
+            _preview_failure_footer_reason(
+                "Das Projekt konnte nicht geslicet werden. "
+                "Slicer-Ausgabe: Unexpected profile key mismatch"
+            ),
+        )
+
+        window = self.window()
+        try:
+            window._preview_request_id = 10
+            window._on_preview_failed(10, message, "")
+            self.assertNotIn("Slicer-Ausgabe: Errors", window.status_label.text())
+            self.assertNotIn("Slicer-Ausgabe: Errors", window.preview_dialog.state_label.text())
         finally:
             window.close()
 
@@ -496,6 +536,42 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertFalse(label.alignment() & Qt.AlignmentFlag.AlignRight)
         window.close()
 
+    def test_slicer_support_hint_precedes_title_and_opens_on_hover(self) -> None:
+        window = self.window()
+        window.resize(1400, 1000)
+        window.show()
+        icon = window.slicer_support_info_button
+        label = window.slicer_selection_label
+        layout = label.parentWidget().layout()
+        self.assertEqual(layout.indexOf(icon), 0)
+        self.assertEqual(layout.indexOf(label), 1)
+        self.assertEqual(icon.height(), METRICS.setting_info_diameter_px)
+        self.app.sendEvent(icon, QEvent(QEvent.Type.Enter))
+        popover = window._bounded_hint_popover
+        self.assertFalse(popover.isHidden())
+        for product in ("Anycubic Slicer Next", "Bambu Studio", "PrusaSlicer", "OrcaSlicer"):
+            self.assertIn(product, popover.label.text())
+        for placeholder in ("Cura", "Creality Print", "Simplify3D"):
+            self.assertNotIn(placeholder, popover.label.text())
+        for phrase in ("1-Personen-Entwicklung", "Verständnis", "GitHub-Issue", "Support Diagnose …", "Burgermenü"):
+            self.assertIn(phrase, popover.label.text())
+        self.app.sendEvent(icon, QEvent(QEvent.Type.Leave))
+        self.assertTrue(popover.isHidden())
+        self.assertEqual(window.support_report_action.text(), "Support Diagnose …")
+        window.support_report_action.trigger()
+        self.assertTrue(window.support_report_dialog.isVisible())
+        window.close()
+
+    def test_slicer_support_hint_tracks_active_modules_and_escapes_names(self) -> None:
+        from cooling_tower.gui.texts import slicer_support_hint_html
+
+        modules = (SimpleNamespace(product_name="Neuer Slicer <Test>", implemented=True),
+                   SimpleNamespace(product_name="Platzhalter", implemented=False))
+        with patch('cooling_tower.slicers.detection.registry.detection_modules', return_value=modules):
+            hint = slicer_support_hint_html()
+        self.assertIn("Neuer Slicer &lt;Test&gt;", hint)
+        self.assertNotIn("Platzhalter", hint)
+
     def test_slicer_header_stays_compact_and_profiles_remain_accessible(self) -> None:
         window = self.window()
         window.machine_profile_combo.addItem("Kobra 3 V2")
@@ -865,20 +941,20 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertEqual(window.preview_button.text(), "Kühlturm generieren")
 
         self.assertEqual(
-            window.maximum_expansion_angle_spin.property("validationMaximum"),
-            70.0,
+            window.maximum_expansion_angle_spin.property("validationMinimum"),
+            20.0,
         )
-        window.maximum_expansion_angle_spin.setValue(50.0)
+        window.maximum_expansion_angle_spin.setValue(40.0)
         self.assertTrue(
             window.maximum_expansion_angle_setting.message_label.isHidden()
         )
-        window.maximum_expansion_angle_spin.setValue(51.0)
+        window.maximum_expansion_angle_spin.setValue(28.0)
         self.app.processEvents()
         warning = window.maximum_expansion_angle_setting.message_label
         self.assertFalse(warning.isHidden())
         self.assertIn("Vorsicht", warning.text())
-        self.assertIn("gut kalibrierten Drucker", warning.text())
-        window.maximum_expansion_angle_spin.setValue(70.0)
+        self.assertIn("Haftungs- und Formprobleme", warning.text())
+        window.maximum_expansion_angle_spin.setValue(20.0)
         self.assertTrue(window.validate_form())
         window.close()
 

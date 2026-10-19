@@ -548,8 +548,8 @@ class Phase10OutputAndMeshTests(unittest.TestCase):
             )
             self.assertTrue(window.automatic_base_checkbox.isChecked())
             self.assertFalse(window.manual_base_width_spin.isEnabled())
-            self.assertEqual(window.maximum_expansion_angle_spin.value(), 50.0)
-            self.assertEqual(window.maximum_contraction_angle_spin.value(), 55.0)
+            self.assertEqual(window.maximum_expansion_angle_spin.value(), 40.0)
+            self.assertEqual(window.maximum_contraction_angle_spin.value(), 35.0)
             window.close()
         application.processEvents()
 

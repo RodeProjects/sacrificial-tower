@@ -9,6 +9,7 @@ from unittest.mock import PropertyMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from cooling_tower.models import OccupiedBounds
 from cooling_tower.preview import LineSegment3D, Point3D
@@ -198,6 +199,12 @@ class SupportSimulationTests(unittest.TestCase):
                 self.assertEqual(not hint.isHidden(),offered)
                 self.assertIn('<b>Stützen für STL-Objekt simulieren</b>',hint.label.text())
                 self.assertNotIn('<a',hint.label.text())
+                layout = hint.layout()
+                self.assertEqual(layout.count(), 2)
+                self.assertEqual(layout.itemAt(0).widget(), hint.label)
+                self.assertEqual(layout.itemAt(1).widget(), hint.button)
+                self.assertEqual(layout.direction().name, 'LeftToRight')
+                self.assertTrue(layout.itemAt(1).alignment() & Qt.AlignmentFlag.AlignRight)
                 self.assertEqual(window.status_label.text(),message)
                 if offered:
                     window._set_main_status('Zeitlimit überschritten',state='error')
@@ -252,21 +259,21 @@ class SupportSimulationTests(unittest.TestCase):
         self.addCleanup(lambda: setattr(window, 'source_preslice_result', None))
         spin = window.maximum_expansion_angle_spin
         spin.blockSignals(True)
-        spin.setValue(66)
+        spin.setValue(23)
         window._update_expansion_angle_warning()
-        self.assertFalse(any('67°' in text for text in
+        self.assertFalse(any('23°' in text for text in
                              window.maximum_expansion_angle_setting._warning_messages))
-        spin.setValue(67)
+        spin.setValue(22.9)
         spin.blockSignals(False)
         window._update_expansion_angle_warning()
-        self.assertTrue(any('67°' in text for text in
+        self.assertTrue(any('23°' in text for text in
                             window.maximum_expansion_angle_setting._warning_messages))
         checkbox = window.simulate_tower_without_supports_checkbox
         checkbox.blockSignals(True)
         checkbox.setChecked(True)
         checkbox.blockSignals(False)
         window._update_expansion_angle_warning()
-        self.assertFalse(any('67°' in text for text in
+        self.assertFalse(any('23°' in text for text in
                              window.maximum_expansion_angle_setting._warning_messages))
 
     def test_support_warning_reflows_after_repeated_checkbox_changes(self):
@@ -308,7 +315,7 @@ class SupportSimulationTests(unittest.TestCase):
         row = window.maximum_expansion_angle_setting
         following = window._setting_widgets['maximum_contraction_angle_deg']
         checkbox = window.simulate_tower_without_supports_checkbox
-        spin.setValue(69)
+        spin.setValue(21)
         self.app.processEvents()
         self.assertIn(
             'Aktiviere die Einstellung <b>„Deaktivierte Turmstützen simulieren“</b>, '
@@ -320,11 +327,11 @@ class SupportSimulationTests(unittest.TestCase):
         expanded_card_height = window.geometry_settings_group.height()
         self.assertLess(row.geometry().bottom(), following.geometry().top())
 
-        for checked, angle in ((True, 67), (False, 67), (True, 69), (False, 69)):
+        for checked, angle in ((True, 22), (False, 22), (True, 21), (False, 21)):
             checkbox.setChecked(checked)
             spin.setValue(angle)
             self.app.processEvents()
-            self.assertEqual('67°' in row.message_label.text(), not checked)
+            self.assertEqual('23°' in row.message_label.text(), not checked)
             self.assertLess(row.geometry().bottom(), following.geometry().top())
             self.assertLessEqual(row.message_container.geometry().bottom(), row.height())
             if checked:

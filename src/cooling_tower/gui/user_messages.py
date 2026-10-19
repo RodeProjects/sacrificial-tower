@@ -38,7 +38,7 @@ _EXACT_TRANSLATIONS = {
         "Die Simulation der vollständigen Turmfüllung besitzt einen ungültigen Schaltzustand."
     ),
     "Maximum expansion angle must be greater than zero and at most 70 degrees.": (
-        "Der Aufweitungswinkel muss größer als 0° und darf höchstens 70° sein."
+        "Der Aufweitungswinkel zur Horizontalen muss mindestens 20° und weniger als 90° betragen."
     ),
     "No printable layers were detected in the G-code.": (
         "Im erzeugten G-Code wurden keine druckbaren Layer erkannt."
@@ -110,6 +110,9 @@ def german_user_message(message: object) -> str:
     text = str(message).strip()
     if not text:
         return "Die angeforderte Aktion konnte nicht abgeschlossen werden."
+    prefix, separator, diagnostic = text.partition(" Slicer-Ausgabe:")
+    if separator and diagnostic.strip().strip(".! ").casefold() == "errors":
+        text = prefix.rstrip()
     folded = text.casefold()
     if "no valid nozzle found" in folded:
         return (

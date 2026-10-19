@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 from cooling_tower.models import SourceKind
 from cooling_tower.services import SourceRecognitionError, recognize_source
+from cooling_tower.gui.update_transaction import suspended_widget_updates
 
 
 class SourceDropZone(QFrame):
@@ -191,6 +192,13 @@ class SourceDropZone(QFrame):
         except (OSError, SourceRecognitionError, ValueError) as error:
             self.file_rejected.emit(str(error))
             return False
+        # Include the connected preparation-page update in the same native
+        # paint batch; even a very fast validation must not reveal half a state.
+        with suspended_widget_updates(self.window()):
+            self._apply_recognized_source(recognized)
+        return True
+
+    def _apply_recognized_source(self, recognized) -> None:
         self._selected_path = recognized.path
         self._selected_kind = recognized.source_kind
         self.setProperty("loaded", True)
@@ -212,7 +220,6 @@ class SourceDropZone(QFrame):
         self.source_selected.emit(
             str(self._selected_path), recognized.source_kind.value
         )
-        return True
 
     def set_status(self, status: str) -> None:
         self.status_value_label.setText(status)
@@ -222,12 +229,16 @@ class SourceDropZone(QFrame):
 
         self.notice_layout.addWidget(widget)
         self.notice_widget.show()
+        if self._display_state != "empty":
+            self._reserve_loaded_content_height()
 
     def add_details_widget(self, widget: QWidget) -> None:
         """Keep technical disclosures as the final block of the drop zone."""
 
         self.details_layout.addWidget(widget)
         self.details_widget.show()
+        if self._display_state != "empty":
+            self._reserve_loaded_content_height()
 
     def set_analysis_state(self, state: str) -> None:
         """Switch between the empty, analyzing, failed and ready presentations."""
@@ -354,17 +365,25 @@ class SourceDropZone(QFrame):
         required_height = max(
             0,
             self.root_layout.minimumSize().height(),
-            self.root_layout.sizeHint().height(),
         )
         if self.root_layout.hasHeightForWidth():
+            # The unconstrained size hint may assume another wrapped path
+            # line even when the real width fits it. Use the measured width
+            # instead, otherwise that phantom line becomes bottom padding.
             required_height = max(
                 required_height,
                 self.root_layout.heightForWidth(layout_width),
             )
+        else:
+            required_height = max(required_height, self.root_layout.sizeHint().height())
         required_height += frame_height
-        if self.minimumHeight() != required_height:
-            self.setMinimumHeight(required_height)
+        if self.minimumHeight() != required_height or self.maximumHeight() != required_height:
+            # A minimum alone lets the former empty-state allocation survive
+            # for a frame. Qt then distributes that surplus above/below the
+            # facts until the parent card catches up with the loaded content.
+            self.setFixedHeight(required_height)
             self.updateGeometry()
+        self.root_layout.setGeometry(self.contentsRect())
 
     def _apply_display_state(self, state: str) -> None:
         self._display_state = state
@@ -394,6 +413,7 @@ class SourceDropZone(QFrame):
             spacer_policy,
         )
         self.root_layout.setSpacing(18 if empty else 6)
+        self.root_layout.setAlignment(Qt.Alignment() if empty else Qt.AlignmentFlag.AlignTop)
         self.setProperty("completed", ready)
         self._sync_prompt_presentation()
         self.info_widget.setVisible(not empty)

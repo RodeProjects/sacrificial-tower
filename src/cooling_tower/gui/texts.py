@@ -1,5 +1,39 @@
 from __future__ import annotations
 
+from html import escape
+
+
+SUPPORT_DIAGNOSE_MENU_LABEL = "Support Diagnose …"
+
+
+def slicer_support_hint_html() -> str:
+    """List active integrations from the same registry as runtime support."""
+    from cooling_tower.slicers.detection.registry import detection_modules
+
+    products = "".join(
+        f"<li>{escape(module.product_name)}</li>"
+        for module in detection_modules() if module.implemented
+    )
+    return (
+        "<p><b>Aktuell unterstützte Slicer</b></p>"
+        f"<ul>{products}</ul>"
+        '<p style="font-size:8pt;">Dieses Programm ist eine 1-Personen-Entwicklung. '
+        "Ich bitte um Verständnis, falls ein Drucker nicht korrekt erkannt wird "
+        "oder seine Einstellungen nicht vollständig kompatibel sind. Slicer und "
+        "ihre unterstützten Drucker unterscheiden sich teilweise stark. Alle "
+        "Kombinationen fehlerfrei abzudecken, ist schwer möglich – ich gebe "
+        "stets mein Bestes.<br><br>"
+        "Bei Problemen mit einem Slicer oder Drucker kannst du gerne ein "
+        "GitHub-Issue eröffnen. Nutze dazu den Menüpunkt "
+        f"„{SUPPORT_DIAGNOSE_MENU_LABEL}“ im Burgermenü.</p>"
+    )
+
+
+EXPANSION_ANGLE_CAUTION = (
+    "Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang. "
+    "Beim Drucken können Haftungs- und Formprobleme entstehen."
+)
+
 
 SETTING_INFO_TEXTS = {
     "layer_time_tolerance_s": (
@@ -35,15 +69,31 @@ SETTING_INFO_TEXTS = {
         "Mindestens 20 mm und höchstens 80 mm sind zulässig."
     ),
     "maximum_expansion_angle_deg": (
-        "Größter zulässiger Winkel, mit dem sich der Turm nach außen "
-        "linear aufweiten darf, gemessen zur Vertikalen."
+        "<p><b>Aufweitung begrenzen</b></p>"
+        "<p>• Der Winkel wird zur Horizontalen (Druckbett) gemessen.<br>"
+        "• Ein kleinerer Wert erlaubt flachere Außenflächen und mehr Aufweitung "
+        "je Schicht; ein größerer Wert erzwingt steilere Außenflächen.<br>"
+        "• Bei 35° und flacheren Winkeln zur Horizontalen sind ein gut kalibrierter "
+        "Drucker und geeignete Druckeinstellungen besonders wichtig. Ab 28° und "
+        "flacher erscheint zusätzlich ein Vorsichtshinweis im Programm.<br>"
+        "• Der Bezug entspricht dem „Threshold angle“ bzw. „Schwellenwinkel“ im Slicer. "
+        "Bei nach unten gerichteten Flächen unterhalb dieser Schwelle erkennt der "
+        "Slicer einen Stützbedarf und versucht bei aktivierten Stützen dort "
+        "Stützmaterial zu erzeugen. Weitere Stützeinstellungen beeinflussen das Ergebnis.</p>"
     ),
     "maximum_contraction_angle_deg": (
-        "Größter zulässiger Winkel, mit dem sich der Turm nach innen "
-        "entlang einer konkaven Kurve verjüngen darf, gemessen zur Vertikalen. "
-        "Bei 100 % Turmfüllung wird diese Winkelgrenze vollständig ignoriert. "
+        "<p><b>Verjüngung begrenzen</b></p>"
+        "<p>• Der Winkel wird zur Horizontalen (Druckbett) gemessen.<br>"
+        "• Ein kleinerer Wert erlaubt eine flachere, stärkere Verjüngung je Schicht; "
+        "ein größerer Wert erzwingt steilere Übergänge.<br>"
+        "• Der Winkelbezug entspricht dem „Threshold angle“ bzw. „Schwellenwinkel“ "
+        "des Slicers. Dessen Stütz-Erkennung betrifft nach unten gerichtete "
+        "Flächen unterhalb der Schwelle; bei aktivierten Stützen versucht der "
+        "Slicer dort Stützmaterial zu erzeugen. Die Verjüngungsgrenze selbst "
+        "bleibt eine Einstellung der Turmform.<br>"
+        "• Bei 100 % Turmfüllung wird diese Winkelgrenze vollständig ignoriert. "
         "Direkte Absätze nach innen sind dann nur vor einem Objektlayer "
-        "mit ausreichender eigener Layerzeit möglich."
+        "mit ausreichender eigener Layerzeit möglich.</p>"
     ),
     "local_reference_window": (
         "Ungerade Anzahl benachbarter Layer für die lokale Zeitreferenz. "
@@ -105,7 +155,10 @@ FULL_INFILL_HINT_ACCESSIBLE = (
 )
 
 SOURCE_SUPPORT_HINT_HTML = """
-<p style="margin-top:0; margin-bottom:8px;"><b>Im Prozessprofil sind globale Stützen deaktiviert.</b></p>
-<p style="margin-top:0; margin-bottom:8px;">Bei aktivierter Einstellung werden die Stützen objektspezifisch für das übergebene STL-Objekt simuliert. Sie werden bei der Turmgenerierung und beim gemeinsamen Prüfslice berücksichtigt und im exportierten 3MF für das Originalobjekt aktiviert.</p>
-<p style="margin-top:0; margin-bottom:0;">Die Originalprofile bleiben unverändert. Die Vorschauen bleiben gleich; nur die gemeinsam geslicte automatische Vorschau zeigt die simulierten Stützen.</p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Stützen simulieren</b></p>
+<p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn verfügbar, werden für die Simulation Baumstützen aktiviert (OrcaSlicer: „Baum (automatisch)“; PrusaSlicer ab Version 2.6: Stil „Organisch“). Die übrigen Stützparameter des gewählten Prozessprofils bleiben unverändert erhalten.</p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Stützen anpassen</b></p>
+<p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn die Stützen deinen Anforderungen nicht entsprechen, passe sie im Slicer direkt im gewählten Prozessprofil an. Speichere das Profil und lies die Profile im Kühlturm-Generator erneut ein. Die angepassten Stützparameter werden dann für die Simulation übernommen; soweit verfügbar, bleibt der Baumstützenstil aktiv.</p>
+<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Vorschau und Export</b></p>
+<p style="margin-top:0; margin-bottom:0;">&#8226; Die Stützen werden bei der Turmgenerierung und beim gemeinsamen Prüfslice berücksichtigt und im exportierten 3MF für das Originalobjekt aktiviert. Die Originalprofile bleiben unverändert. Nur die gemeinsam geslicte automatische Vorschau zeigt die simulierten Stützen.</p>
 """.strip()

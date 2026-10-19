@@ -6,7 +6,7 @@ from pathlib import Path
 from cooling_tower.manual.geometry import GeometryError, ManualSettings, MINIMUM_TOWER_DIAMETER_MM, MAXIMUM_MANUAL_CIRCLE_SEGMENTS, validate_settings
 from cooling_tower.persistence.versioned_json import VersionedJsonStore, VersionedDocumentError
 
-MANUAL_SCHEMA_VERSION = 18
+MANUAL_SCHEMA_VERSION = 19
 
 
 def migrate_manual_v1(payload):
@@ -238,6 +238,14 @@ def migrate_manual_v17(payload):
     return {**payload,"manual_settings_schema_version":18,"manual":manual}
 
 
+def migrate_manual_v18(payload):
+    """Keep stored vertical angles; profile binding starts disabled."""
+    raw = payload.get("manual", {})
+    manual = dict(raw) if isinstance(raw, dict) else {}
+    manual["limit_expansion_to_profile"] = False
+    return {**payload, "manual_settings_schema_version": 19, "manual": manual}
+
+
 class ManualSettingsStore:
     def __init__(self, path: Path):
         self.store = VersionedJsonStore(path, schema_key="manual_settings_schema_version",
@@ -259,7 +267,8 @@ class ManualSettingsStore:
                                                     14: migrate_manual_v14,
                                                     15: migrate_manual_v15,
                                                     16: migrate_manual_v16,
-                                                    17: migrate_manual_v17},
+                                                    17: migrate_manual_v17,
+                                                    18: migrate_manual_v18},
                                         normalizer=normalize_manual_settings,
                                         document_name="Die manuellen Einstellungen")
         self.warning = None

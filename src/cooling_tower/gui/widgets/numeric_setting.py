@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
+from cooling_tower.gui.widgets.wheel_safe_inputs import WheelSafeDoubleSpinBox
 
 
 NumericEditor = QDoubleSpinBox | QSpinBox
@@ -229,11 +230,15 @@ class NumericSettingWidget(QWidget):
         layout.setColumnStretch(2, 0)
         layout.setColumnStretch(3, 0)
 
+        self._input_acceptable = editor.hasAcceptableInput()
         line_edit = editor.lineEdit()
         if line_edit is not None:
             line_edit.installEventFilter(self)
             line_edit.textChanged.connect(self._on_text_changed)
         editor.valueChanged.connect(self._update_modified_state)
+        editor.editingFinished.connect(self.refresh_input_state)
+        if isinstance(editor, WheelSafeDoubleSpinBox):
+            editor.input_reinterpreted.connect(self.refresh_input_state)
         self._position_unit_label()
         self._render_messages()
         self._update_reset_metadata()
@@ -548,10 +553,17 @@ class NumericSettingWidget(QWidget):
         return "Der Zahlenwert ist unvollständig oder ungültig."
 
     def _on_text_changed(self, _text: str) -> None:
+        self._input_acceptable = self.editor.hasAcceptableInput()
         self.input_state_changed.emit(
             self.setting_name,
-            self.editor.hasAcceptableInput(),
+            self._input_acceptable,
         )
+
+    def refresh_input_state(self) -> None:
+        """Report corrections that Qt applied without a text-change signal."""
+
+        if self.editor.hasAcceptableInput() != self._input_acceptable:
+            self._on_text_changed("")
 
     def _update_reset_metadata(self) -> None:
         value = self.default_provider()
