@@ -22,6 +22,8 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
 | G-Code-/STL-Prüfung, Profile, Preslice und Cache | [Quellenablauf](source_workflow.md) |
 | Slicer-Erkennung und neue Adapter | [Erkennungsmodule](slicer_detection_modules.md) |
+| OrcaSlicer, eigene JSON-Kataloge, Store/Portable und reale Abnahme | [OrcaSlicer](orca_slicer.md) |
+| PrusaSlicer, native Projekte, Füllungsprüfung und Vorschau | [PrusaSlicer](prusa_slicer.md) |
 | Prozessisolation, QProcess und Abbruch | [Slicer-Prozesse](slicer_qprocess_compatibility.md) |
 | Einstellungen, Schema, Migrationen und Downgrade | [Persistenz](settings_migrations.md) |
 | Python-/C++-Analyse, Parität und Fallback | [Native Analyse](native_analysis.md) |

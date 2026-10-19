@@ -272,6 +272,30 @@ class PlacementAndProjectTests(unittest.TestCase):
         self.assertEqual(values[2]["enable_support"], "1")
         self.assertEqual(values[4]["enable_support"], "0")
 
+    def test_orca_source_tree_settings_are_retained_and_validated(self):
+        from cooling_tower.slicers.orca_supports import simulated_support_settings
+        source, tower = self.root / 'source.stl', self.root / 'tower.stl'
+        trimesh.creation.box(extents=(10,10,5)).export(source)
+        trimesh.creation.box(extents=(6,6,5)).export(tower)
+        placement = TowerPlacement(80,80,4,BedBounds(0,200,0,200),25)
+        template, final = self.root / 'template.3mf', self.root / 'final.3mf'
+        options = dict(occupied=OccupiedBounds(40,50,40,50),placement=placement,tower_full_infill=True)
+        build_joint_project(source,tower,template,**options)
+        expected = simulated_support_settings()
+        finalize_slicer_project(template,source,tower,final,**options,
+                               source_supports_enabled=True,source_support_settings=expected)
+        validate_joint_project(final,tower_full_infill=True,source_supports_enabled=True,
+                               source_support_settings=expected)
+        with zipfile.ZipFile(final) as archive:
+            values = {o.get('id'):{m.get('key'):m.get('value') for m in o.findall('metadata')}
+                      for o in ElementTree.fromstring(archive.read(MODEL_SETTINGS_PATH)).findall('object')}
+        for key,value in expected.items():
+            self.assertEqual(values['2'].get(key),value)
+            self.assertNotIn(key,values['4'])
+        with self.assertRaises(JointProjectError):
+            validate_joint_project(final,tower_full_infill=True,source_supports_enabled=True,
+                                   source_support_settings={**expected,'support_type':'normal(auto)'})
+
     def test_slicer_project_finalization_reassigns_positions_by_role(self) -> None:
         source = self.root / "source.stl"
         tower = self.root / "tower.stl"
@@ -503,6 +527,23 @@ class PlacementAndProjectTests(unittest.TestCase):
             encoding="utf-8",
         )
         validate_tower_infill_adoption(bambu)
+
+        orca = self.root / "orca_solid.gcode"
+        for feature in ("Internal solid infill", "Sparse infill"):
+            orca.write_text(
+                "; printing object Source object id:0 copy 0\n"
+                ";TYPE:Sparse infill\n"
+                "; stop printing object Source object id:0 copy 0\n"
+                "; printing object Cooling tower id:12 copy 0\n"
+                f";TYPE:{feature}\nG1 X1 Y1 E1\n"
+                "; stop printing object Cooling tower id:12 copy 0\n",
+                encoding="utf-8",
+            )
+            if feature == "Sparse infill":
+                with self.assertRaisesRegex(JointProjectError, "Sparse Infill"):
+                    validate_tower_infill_adoption(orca)
+            else:
+                validate_tower_infill_adoption(orca)
 
     def test_bambu_numeric_object_label_is_matched_to_tower_position(self) -> None:
         positioned = self.root / "bambu_positioned.gcode"

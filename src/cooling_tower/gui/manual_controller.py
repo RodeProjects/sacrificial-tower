@@ -336,6 +336,10 @@ class ManualGenerationController(QObject):
         message_layout.setContentsMargins(0,0,0,0)
         p.preview_container.layout().removeWidget(p.status_label)
         message_layout.addWidget(p.status_label)
+        from cooling_tower.gui.widgets.support_recovery import SupportRecoveryHint
+        self.support_recovery = SupportRecoveryHint()
+        self.support_recovery.activate_requested.connect(lambda: w._activate_source_support_recovery(manual=True))
+        message_layout.addWidget(self.support_recovery)
         w.footer_messages_layout.addWidget(self._footer_message_widget)
         self._footer_message_widget.hide()
         self._result_notice = FooterNoticeDropdown("Hinweise zum Ergebnis",severity="warning",parent=host)
@@ -465,6 +469,7 @@ class ManualGenerationController(QObject):
 
     def refresh_footer(self,*_):
         w,p = self.window,self.panel
+        w._refresh_support_recovery()
         if w.generation_mode is not self.mode or not hasattr(self,"_footer_status_widget"):
             return
         visible = not w.footer.isHidden()

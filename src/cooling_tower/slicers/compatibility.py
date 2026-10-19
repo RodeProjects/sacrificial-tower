@@ -39,7 +39,7 @@ SLICER_COMPATIBILITY_MATRIX: tuple[SlicerCompatibility, ...] = (
         ("orca-slicer.exe", "OrcaSlicer.exe"),
         "--datadir, --load-settings, optional --load-filaments, --arrange, --ensure-on-bed, --slice, --outputdir, model",
         "isolated per-job root",
-        "temporary machine/process/filament copies; isolated --datadir",
+        "resolved temporary role profiles; native joint 3MF uses embedded settings; isolated --datadir",
         (".gcode", ".gcode.metadata", ".metadata"),
         "0 success; every non-zero value and CrashExit are failures",
         "stdout and stderr are independent and UTF-8 decoded with replacement",

@@ -175,11 +175,19 @@ class CalibrationService:
             source_artifact.original_path
             if source_artifact is not None
             and source_artifact.source_kind is SourceKind.STL
-            and profile.installation.adapter_id in {
+            and (getattr(adapter, "supports_joint_project", False) or profile.installation.adapter_id in {
                 "anycubic_slicer_next", "orca_slicer", "bambu_studio"
-            }
+            })
             else None
         )
+        if (source_artifact is not None and source_artifact.source_kind is SourceKind.STL
+                and config.perform_joint_final_slice and joint_source_stl is None):
+            return self._failure(
+                config, CalibrationState.UNSUPPORTED, source_hash,
+                CalibrationFailureCode.PROFILE_INCOMPLETE,
+                "Für diesen Slicer ist noch kein gemeinsamer Objekt-/Turm-Slice verfügbar. "
+                "Die automatische Erstellung kann deshalb kein geprüftes gemeinsames Ergebnis liefern.",
+            )
         if settings.simulate_source_supports and (joint_source_stl is None or not config.perform_joint_final_slice):
             return self._failure(
                 config, CalibrationState.UNSUPPORTED, source_hash,

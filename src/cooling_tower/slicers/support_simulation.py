@@ -13,7 +13,19 @@ SUPPORT_KEYS = {
     "cura": "support_enable",
 }
 
-OBJECT_SUPPORT_ADAPTERS = frozenset({"anycubic_slicer_next", "orca_slicer", "bambu_studio"})
+OBJECT_SUPPORT_ADAPTERS = frozenset({"anycubic_slicer_next", "orca_slicer", "bambu_studio", "prusa_slicer"})
+
+
+def simulated_support_settings(profile: EffectiveProfile) -> dict[str, str]:
+    """Use each integration's policy without modifying any source preset."""
+    identifier = profile.installation.adapter_id
+    if identifier == "orca_slicer":
+        from cooling_tower.slicers.orca_supports import simulated_support_settings as settings
+        return settings()
+    if identifier == "prusa_slicer":
+        from cooling_tower.slicers.prusa_supports import simulated_support_settings as settings
+        return settings(profile.installation.version)
+    return {SUPPORT_KEYS[identifier]: "1"}
 
 
 def global_supports_disabled(profile: EffectiveProfile) -> bool:
@@ -28,9 +40,8 @@ def global_supports_disabled(profile: EffectiveProfile) -> bool:
 
 
 def with_simulated_supports(profile: EffectiveProfile) -> EffectiveProfile:
-    key = SUPPORT_KEYS[profile.installation.adapter_id]
     return replace(profile, supports_simulated=True,
-                   effective_values={**profile.effective_values, key: "1"})
+                   effective_values={**profile.effective_values, **simulated_support_settings(profile)})
 
 
 def tower_support_warning_angle(profile: EffectiveProfile) -> float | None:

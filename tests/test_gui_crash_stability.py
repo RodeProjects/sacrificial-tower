@@ -410,6 +410,7 @@ class GuiCrashStabilityTests(unittest.TestCase):
     def test_slicer_detection_and_profile_matching_never_share_adapter_work(self) -> None:
         profile_service = SlowFailingProfileService(delay_s=0.08)
         window = self.make_window(profile_service)
+        self.assertFalse(window._source_support_recovery_available())
         slicer_service = RepeatedSlicerService(
             window.slicer_discovery_result,
             profile_service=profile_service,

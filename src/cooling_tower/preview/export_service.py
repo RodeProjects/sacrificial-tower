@@ -34,6 +34,11 @@ class PreviewExportService:
         request: PreviewRequest,
         output_root: str | Path,
     ) -> PreviewExportResult:
+        validate_output = getattr(
+            getattr(request, "adapter", None), "validate_output_directory", None
+        )
+        if callable(validate_output):
+            validate_output(request.effective_profile, output_root)
         current_signature = request.signature()
         if current_signature != preview.request_signature:
             raise StalePreviewError(

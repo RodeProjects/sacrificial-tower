@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from cooling_tower.preview.source_cache import PreviewSourceData
 
 
-PRESLICE_ADAPTER_VERSION = 3
+PRESLICE_ADAPTER_VERSION = 4
 DEFAULT_PRESLICE_TIMEOUT_S = 8 * 60.0
 _WORKSPACE_PREFIX = "cooling_tower_source_preslice_"
 _WORKSPACE_MARKER = ".cooling_tower_preslice_workspace"

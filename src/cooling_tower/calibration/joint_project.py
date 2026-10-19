@@ -9,6 +9,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Mapping
 from xml.etree import ElementTree
 
 import numpy as np
@@ -16,6 +17,7 @@ import trimesh
 
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.gcode.parser import ParsedGCodeLine, iter_parsed_gcode_lines
+from cooling_tower.gcode.object_labels import FirmwareObjectLabels
 from cooling_tower.models import OccupiedBounds, TowerPlacement
 
 
@@ -581,6 +583,7 @@ def validate_joint_project(
     tower_full_infill: bool,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
+    source_support_settings: Mapping[str, str] | None = None,
 ) -> tuple[int, int]:
     candidate = Path(path).resolve()
     try:
@@ -642,6 +645,10 @@ def validate_joint_project(
         raise JointProjectError("Die Stützen des Kühlturms wurden nicht deaktiviert.")
     if source_supports_enabled and source_values.get("enable_support") != "1":
         raise JointProjectError("Die objektspezifischen Stützen des Originalobjekts fehlen.")
+    if source_supports_enabled and any(
+        source_values.get(key) != value for key, value in (source_support_settings or {}).items()
+    ):
+        raise JointProjectError("Die simulierte Stützenart des Originalobjekts wurde nicht vollständig übernommen.")
     return source_id, tower_id
 
 
@@ -723,6 +730,7 @@ def finalize_slicer_project(
     tower_full_infill: bool,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
+    source_support_settings: Mapping[str, str] | None = None,
 ) -> JointProjectResult:
     """Apply verified positions and tower settings to a slicer-native 3MF."""
 
@@ -824,7 +832,8 @@ def finalize_slicer_project(
                     and identifier == tower_id
                 ):
                     object_element.remove(metadata)
-                elif source_supports_enabled and identifier == source_id and metadata.get("key") == "enable_support":
+                elif (source_supports_enabled and identifier == source_id
+                      and metadata.get("key") in {"enable_support", *(source_support_settings or {})}):
                     object_element.remove(metadata)
                 elif metadata.get("key") == "name" and identifier in {
                     source_id, tower_id
@@ -835,7 +844,8 @@ def finalize_slicer_project(
                         if identifier == source_id else "Cooling tower",
                     )
             if identifier == source_id and source_supports_enabled:
-                ElementTree.SubElement(object_element, "metadata", {"key": "enable_support", "value": "1"})
+                for key, value in {**(source_support_settings or {}), "enable_support": "1"}.items():
+                    ElementTree.SubElement(object_element, "metadata", {"key": key, "value": value})
             if identifier == tower_id and tower_full_infill:
                 for key, value in (
                     (TOWER_INFILL_KEY, "100%"),
@@ -898,6 +908,7 @@ def finalize_slicer_project(
         tower_full_infill=tower_full_infill,
         tower_supports_disabled=tower_supports_disabled,
         source_supports_enabled=source_supports_enabled,
+        source_support_settings=source_support_settings,
     )
     if source_before != sha256_file(source_path) or tower_before != sha256_file(tower_path):
         raise JointProjectError("Eine STL-Quelldatei wurde unerwartet verändert.")
@@ -1040,6 +1051,7 @@ class TowerInfillEvidenceCollector:
     active_label: int | None = None
     label_bounds: dict[int, list[float]] = field(default_factory=dict)
     sparse_labels: set[int] = field(default_factory=set)
+    firmware_labels: FirmwareObjectLabels = field(default_factory=FirmwareObjectLabels, compare=False, repr=False)
 
     def consume_native(self, product: object) -> None:
         """Adopt compact object/feature evidence from the native analyzer."""
@@ -1059,9 +1071,17 @@ class TowerInfillEvidenceCollector:
 
     def consume(self, parsed: ParsedGCodeLine) -> None:
         command = parsed.command or ""
+        if self.firmware_labels.consume(parsed):
+            name = (self.firmware_labels.active_name or "").casefold()
+            self.inside_tower = "cooling_tower" in name or "cooling tower" in name
+            self.bambu_object_block = self.firmware_labels.active_index is not None
+            if self.inside_tower and "S" in parsed.parameters:
+                self.tower_block_count += 1
+            return
         if command == "EXCLUDE_OBJECT_START":
             self.bambu_object_block = False
-            self.inside_tower = "cooling_tower" in parsed.code_text.casefold()
+            label = parsed.code_text.casefold()
+            self.inside_tower = "cooling_tower" in label or "cooling tower" in label
             if self.inside_tower:
                 self.tower_block_count += 1
             return
@@ -1076,7 +1096,7 @@ class TowerInfillEvidenceCollector:
         folded = comment.casefold()
         if folded.startswith("printing object "):
             self.bambu_object_block = True
-            self.inside_tower = "cooling_tower" in folded
+            self.inside_tower = "cooling_tower" in folded or "cooling tower" in folded
             if self.inside_tower:
                 self.tower_block_count += 1
             return

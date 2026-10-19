@@ -86,6 +86,8 @@ def analyze_native_gcode(
     maximum_preview_segments: int = 60_000,
     collect_infill: bool = False,
     cancellation_callback: CancellationCallback | None = None,
+    orca_policy=None,
+    prusa_policy=None,
 ) -> NativeAnalysisResult:
     if not native_full_analysis_available():
         return NativeAnalysisResult(
@@ -98,7 +100,7 @@ def analyze_native_gcode(
             message="The native full-analysis extension is unavailable.",
         )
     try:
-        payload = _native_timing.analyze_file(
+        arguments = (
             str(source),
             bool(bambu_compatible),
             bool(anycubic_slicer_next_compatible),
@@ -108,6 +110,16 @@ def analyze_native_gcode(
             int(maximum_preview_segments),
             cancellation_callback,
         )
+        if orca_policy is not None:
+            arguments += ({"marlin2": orca_policy.uses_junction_deviation, "limits": orca_policy.limits},)
+        elif prusa_policy is not None:
+            # An old extension must fall back instead of silently selecting
+            # the Orca policy for Prusa's different junction equations.
+            if getattr(_native_timing, "ENGINE_VERSION", 0) < 3:
+                raise TypeError("Prusa timing requires native engine version 3.")
+            arguments += ({"producer": "prusa", "marlin2": prusa_policy.uses_junction_deviation,
+                           "limits": prusa_policy.limits},)
+        payload = _native_timing.analyze_file(*arguments)
     except (OverflowError, RuntimeError, TypeError, ValueError) as error:
         return NativeAnalysisResult(
             analysis=None,

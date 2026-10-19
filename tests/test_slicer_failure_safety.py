@@ -45,7 +45,7 @@ from gui_lifecycle import dispose_test_widget
 def installation(root: Path, adapter_id: str = "test") -> SlicerInstallation:
     product_names = {
         "prusa_slicer": "PrusaSlicer",
-        "orca_slicer": "OrcaSlicer",
+        "creality_print": "Creality Print",
     }
     return SlicerInstallation(
         adapter_id=adapter_id,
@@ -76,7 +76,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
 
     def test_all_registered_placeholders_are_closed_despite_legacy_full_flags(self):
-        for adapter_id in ("cura", "orca_slicer", "creality_print"):
+        for adapter_id in ("cura", "creality_print"):
             with self.subTest(adapter_id=adapter_id):
                 item = installation(self.root, adapter_id)
                 self.assertFalse(item.can_slice)
@@ -92,6 +92,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
             "anycubic_slicer_next",
             "bambu_studio",
             "prusa_slicer",
+            "orca_slicer",
             "custom",
         ):
             with self.subTest(adapter_id=adapter_id):
@@ -113,7 +114,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
     def test_unsupported_and_mismatched_inventory_never_scans_reads_or_caches(self):
         service = ProfileInventoryService(self.root / "cache.json")
         adapter = Mock(adapter_id="test")
-        for item in (installation(self.root, "orca_slicer"), installation(self.root, "other")):
+        for item in (installation(self.root, "creality_print"), installation(self.root, "other")):
             with self.subTest(adapter_id=item.adapter_id), patch.object(service, "snapshot_file_states") as scan:
                 with self.assertRaises(SlicerIntegrationUnavailableError):
                     service.load(adapter, item, force=True)
@@ -137,7 +138,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
         self.assertFalse(request.output_directory.exists())
 
     def test_saved_unsupported_choice_does_not_outrank_working_installation(self):
-        unsupported = installation(self.root, "orca_slicer")
+        unsupported = installation(self.root, "creality_print")
         working = installation(self.root, "anycubic_slicer_next")
         store = SlicerPreferenceStore(self.root / "preferences.json")
         store.set_last_selected(unsupported.identity_key)
@@ -148,7 +149,7 @@ class SlicerSupportBoundaryTests(unittest.TestCase):
     def test_missing_registered_adapter_is_reported_as_unavailable(self):
         service = SlicerDiscoveryService(adapters=(Mock(adapter_id="other"),))
         with self.assertRaises(SlicerIntegrationUnavailableError):
-            service.adapter_for(installation(self.root, "orca_slicer"))
+            service.adapter_for(installation(self.root, "creality_print"))
 
     def test_unknown_empty_and_private_errors_have_actionable_generic_feedback(self):
         for error in (RuntimeError(), NotImplementedError(), KeyError("private profile"), ValueError("<private>")):
@@ -171,7 +172,7 @@ class SlicerFailureWorkerTests(unittest.TestCase):
         return failed, succeeded
 
     def test_catalog_and_matching_workers_reject_unsupported_before_service_call(self):
-        item = installation(PROJECT_ROOT, "orca_slicer")
+        item = installation(PROJECT_ROOT, "creality_print")
         service = Mock()
         for worker in (
             ProfileCatalogWorker(1, service, item, object()),
@@ -231,7 +232,7 @@ class _SlicerGuiFixture:
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.working = installation(self.root)
-        self.unsupported = installation(self.root, "orca_slicer")
+        self.unsupported = installation(self.root, "creality_print")
         records = []
         for kind in (ProfileKind.MACHINE, ProfileKind.PROCESS, ProfileKind.FILAMENT):
             path = self.root / f"{kind.value}.json"
@@ -297,7 +298,7 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
         self.wait_for(lambda: window.profile_status_label.property("state") == "error")
         self.idle(window)
         self.assert_failed(window)
-        self.assertIn("OrcaSlicer", window.profile_status_label.text())
+        self.assertIn("Creality Print", window.profile_status_label.text())
         self.assertIn("nur erkannt", window.slicer_combo.currentText())
         self.profiles.catalog.assert_not_called()
         self.service.adapter_for.assert_not_called()

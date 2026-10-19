@@ -24,7 +24,7 @@ namespace {
 constexpr double MOVEMENT_EPSILON = 1e-9;
 constexpr double ARC_EPSILON = 1e-7;
 constexpr std::size_t ROW_WIDTH = 33;
-constexpr std::uint64_t ENGINE_VERSION = 2;
+constexpr std::uint64_t ENGINE_VERSION = 3;
 constexpr std::size_t DEFAULT_CACHE_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 enum RowIndex : std::size_t {
@@ -1622,6 +1622,7 @@ PyObject* native_result_to_dict(
 PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
     PyObject* path_object = nullptr;
     PyObject* cancellation = Py_None;
+    PyObject* orca_policy = Py_None;
     int bambu = 0;
     int anycubic_slicer_next = 0;
     int explicit_layers = 0;
@@ -1630,7 +1631,7 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
     Py_ssize_t maximum_preview_segments = 60000;
     if (!PyArg_ParseTuple(
         arguments,
-        "Opppppn|O:analyze_file",
+        "Opppppn|OO:analyze_file",
         &path_object,
         &bambu,
         &anycubic_slicer_next,
@@ -1638,7 +1639,8 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
         &collect_preview,
         &collect_infill,
         &maximum_preview_segments,
-        &cancellation
+        &cancellation,
+        &orca_policy
     )) {
         return nullptr;
     }
@@ -1677,6 +1679,34 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
 #endif
 
     cooling_tower::native_analysis::Options options;
+    if (orca_policy != Py_None) {
+        if (!PyDict_Check(orca_policy)) {
+            PyErr_SetString(PyExc_TypeError, "Orca timing policy must be a dictionary.");
+            return nullptr;
+        }
+        options.orca_compatible = true;
+        PyObject* producer = PyDict_GetItemString(orca_policy, "producer");
+        if (producer && PyUnicode_Check(producer) && PyUnicode_CompareWithASCIIString(producer, "prusa") == 0) {
+            options.orca_compatible = false;
+            options.prusa_compatible = true;
+        }
+        PyObject* flavor = PyDict_GetItemString(orca_policy, "marlin2");
+        options.orca_marlin2 = flavor == Py_True;
+        PyObject* limits = PyDict_GetItemString(orca_policy, "limits");
+        if (!limits || !PyDict_Check(limits)) {
+            PyErr_SetString(PyExc_TypeError, "Orca machine limits must be a dictionary.");
+            return nullptr;
+        }
+        PyObject *key, *value; Py_ssize_t position = 0;
+        while (PyDict_Next(limits, &position, &key, &value)) {
+            if (!PyUnicode_Check(key)) { PyErr_SetString(PyExc_TypeError, "Machine limit names must be text."); return nullptr; }
+            const char* name = PyUnicode_AsUTF8(key);
+            const double number = PyFloat_AsDouble(value);
+            if (!name || PyErr_Occurred()) return nullptr;
+            if (!std::isfinite(number) || number < 0.0) { PyErr_SetString(PyExc_ValueError, "Invalid Orca machine limit."); return nullptr; }
+            options.orca_limits[name] = number;
+        }
+    }
     options.bambu_compatible = bambu != 0;
     options.anycubic_slicer_next_compatible = anycubic_slicer_next != 0;
     options.use_explicit_layer_markers = explicit_layers != 0;

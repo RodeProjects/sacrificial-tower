@@ -335,6 +335,8 @@ class PrusaSlicerIntegrationTests(unittest.TestCase):
             (
                 "--load",
                 str(temporary_config),
+                "--datadir",
+                str(working / "prusa_data"),
                 "--export-gcode",
                 "--output",
                 str(output / "model.gcode"),
@@ -620,7 +622,7 @@ class InstalledPrusaIntegrationTests(unittest.TestCase):
                     force_tower=True,
                 )
                 self.assertTrue(
-                    automatic_result.success,
+                    automatic_result.has_usable_improvement,
                     (
                         automatic_result.state,
                         automatic_result.failures,
@@ -628,6 +630,8 @@ class InstalledPrusaIntegrationTests(unittest.TestCase):
                     ),
                 )
                 self.assertTrue(automatic_result.iterations)
+                self.assertTrue(automatic_result.best_iteration.joint_slice)
+                self.assertTrue(automatic_result.project_path and automatic_result.project_path.is_file())
                 self.assertTrue(
                     automatic_result.stl_path
                     and automatic_result.stl_path.is_file()
@@ -668,14 +672,18 @@ class InstalledPrusaIntegrationTests(unittest.TestCase):
                     profile_source_hashes=manual_reference.profile_source_hashes,
                 )
                 manual_result = manual_service.prepare(manual_request)
-                self.assertFalse(manual_result.joint_sliced)
+                self.assertTrue(manual_result.joint_sliced)
+                self.assertTrue(manual_result.project_path and manual_result.project_path.is_file())
                 self.assertTrue(manual_result.artifact_path.is_file())
                 self.assertTrue(manual_result.manual_evaluation.layer_times)
                 manual_gcode = manual_result.manual_evaluation.gcode_path.read_bytes()
                 self.assertNotEqual(manual_gcode[:4], b"GCDE")
                 manual_text = manual_gcode.decode("utf-8", errors="replace")
-                self.assertIn("; fill_density = 100%", manual_text)
-                self.assertIn("; fill_pattern = rectilinear", manual_text)
+                # The source keeps its saved density; only the tower has the
+                # object-specific 100-% override in the actual shared 3MF.
+                from cooling_tower.slicers.prusa_joint_project import validate_prusa_joint_project
+                validate_prusa_joint_project(manual_result.project_path, tower_full_infill=True)
+                self.assertIn("M486 Acooling_tower", manual_text)
             finally:
                 if manual_result is not None:
                     manual_result.dispose()

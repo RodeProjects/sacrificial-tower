@@ -1,4 +1,6 @@
 #include "native_analysis.hpp"
+#include "orca_timing.hpp"
+#include "prusa_timing.hpp"
 
 #include <algorithm>
 #include <array>
@@ -29,7 +31,7 @@ constexpr double EXTRUSION_EPSILON_MM = 1e-9;
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr std::size_t LOOKAHEAD_MOVEMENTS = 64;
 constexpr std::size_t REFRESH_THRESHOLD_MOVEMENTS = 4096;
-constexpr std::size_t ROW_WIDTH = 33;
+constexpr std::size_t ROW_WIDTH = 38;
 
 double missing() noexcept {
     return std::numeric_limits<double>::quiet_NaN();
@@ -395,6 +397,8 @@ enum RowIndex : std::size_t {
     MAXIMUM_FEEDRATE_E, MINIMUM_EXTRUDING_FEEDRATE,
     MINIMUM_TRAVEL_FEEDRATE, EXTRUSION_FACTOR,
     CENTRIPETAL_ACCELERATION, IS_ARC,
+    JUNCTION_DEVIATION, MAXIMUM_ACCELERATION_X, MAXIMUM_ACCELERATION_Y,
+    MAXIMUM_ACCELERATION_Z, MAXIMUM_ACCELERATION_E,
 };
 
 using Row = std::array<double, ROW_WIDTH>;
@@ -465,6 +469,7 @@ struct MachineState {
     double jerk_y = missing();
     double jerk_z = missing();
     double jerk_e = missing();
+    double junction_deviation = 0.0;
     double square_corner_velocity = missing();
     bool xyz_relative = false;
     bool extrusion_relative = false;
@@ -474,6 +479,46 @@ struct MachineState {
     bool movement_seen = false;
     std::uint64_t anycubic_startup_macro_count = 0;
 };
+
+void apply_orca_limits(MachineState& state, const Options& options, const double jd, const bool initialize) {
+    auto limit = [&options](const std::string& key, const double fallback = missing()) {
+        const auto found = options.orca_limits.find(key);
+        return found == options.orca_limits.end() ? fallback : found->second;
+    };
+    const std::array<double*, 4> acceleration_caps = {&state.maximum_acceleration_x, &state.maximum_acceleration_y, &state.maximum_acceleration_z, &state.maximum_acceleration_e};
+    const std::array<double*, 4> speed_caps = {&state.maximum_feedrate_x, &state.maximum_feedrate_y, &state.maximum_feedrate_z, &state.maximum_feedrate_e};
+    const std::array<double*, 4> jerks = {&state.jerk_x, &state.jerk_y, &state.jerk_z, &state.jerk_e};
+    const std::array<std::string, 4> axes = {"x", "y", "z", "e"};
+    if (initialize) {
+        state.print_acceleration = limit("machine_max_acceleration_extruding", 1500.0);
+        state.travel_acceleration = limit("machine_max_acceleration_travel", 1250.0);
+        state.retract_acceleration = limit("machine_max_acceleration_retracting", 1500.0);
+        if (state.print_acceleration <= 0) state.print_acceleration = 1500.0;
+        if (state.travel_acceleration <= 0) state.travel_acceleration = 1250.0;
+        if (state.retract_acceleration <= 0) state.retract_acceleration = 1500.0;
+        state.minimum_extruding_feedrate = limit("machine_min_extruding_rate");
+        state.minimum_travel_feedrate = limit("machine_min_travel_rate");
+        for (std::size_t axis = 0; axis < 4; ++axis) {
+            *acceleration_caps[axis] = limit("machine_max_acceleration_" + axes[axis]);
+            *speed_caps[axis] = limit(std::string(options.prusa_compatible ? "machine_max_feedrate_" : "machine_max_speed_") + axes[axis]);
+            *jerks[axis] = limit("machine_max_jerk_" + axes[axis]);
+        }
+    }
+    if (options.prusa_compatible) return;
+    const std::array<double*, 3> categories = {&state.print_acceleration, &state.travel_acceleration, &state.retract_acceleration};
+    const std::array<std::string, 3> category_keys = {"extruding", "travel", "retracting"};
+    for (std::size_t category = 0; category < 3; ++category) {
+        const double cap = limit("machine_max_acceleration_" + category_keys[category]);
+        if (present(cap) && cap > 0) *categories[category] = std::min(*categories[category], cap);
+    }
+    if (options.orca_marlin2 && jd > 0) {
+        for (std::size_t axis = 0; axis < 4; ++axis) {
+            const double cap = *acceleration_caps[axis];
+            const double acceleration = present(cap) && cap > 0 ? std::min(state.print_acceleration, cap) : state.print_acceleration;
+            *jerks[axis] = std::sqrt(2.5 * jd * acceleration);
+        }
+    }
+}
 
 struct ArcGeometry {
     double path_length = missing();
@@ -899,6 +944,11 @@ Movement create_movement(
     row[JERK_Y] = state.jerk_y;
     row[JERK_Z] = state.jerk_z;
     row[JERK_E] = state.jerk_e;
+    row[JUNCTION_DEVIATION] = state.junction_deviation;
+    row[MAXIMUM_ACCELERATION_X] = state.maximum_acceleration_x;
+    row[MAXIMUM_ACCELERATION_Y] = state.maximum_acceleration_y;
+    row[MAXIMUM_ACCELERATION_Z] = state.maximum_acceleration_z;
+    row[MAXIMUM_ACCELERATION_E] = state.maximum_acceleration_e;
     row[SQUARE_CORNER_VELOCITY] = state.square_corner_velocity;
     row[ENTRY_DIRECTION_X] = entry[0];
     row[ENTRY_DIRECTION_Y] = entry[1];
@@ -933,7 +983,7 @@ bool safe_ignored_command(const std::string& command) {
     static const std::set<std::string> commands = {
         "M17", "M18", "M73", "M75", "M76", "M77",
         "M84", "M104", "M105", "M106", "M107", "M109", "M117",
-        "M140", "M190", "M300", "M400",
+        "M140", "M190", "M300", "M400", "M486",
         "M620", "M621", "M900", "M960", "M971", "M972", "M975",
         "M976", "M977", "M991", "M1002", "M1403",
         "SET_PRESSURE_ADVANCE", "SET_PRINT_STATS_INFO",
@@ -970,7 +1020,9 @@ std::optional<Event> process_machine_line(
     const ParsedLine& line,
     const bool bambu,
     const bool anycubic_slicer_next,
-    bool& unsupported
+    bool& unsupported,
+    const bool bambu_firmware,
+    const bool prusa
 ) {
     unsupported = false;
     if (!line.has_command) {
@@ -978,9 +1030,19 @@ std::optional<Event> process_machine_line(
         return std::nullopt;
     }
     const std::string& command = line.command;
+    if (prusa) {
+        // Prusa's viewer excludes these firmware preparation/check and
+        // shutdown commands from the motion estimate. Keep this allowlist
+        // independent from Bambu's device macros.
+        static const std::set<std::string> commands = {
+            "G29", "M74", "M115", "M142", "M302", "M555", "M569", "M572", "M593",
+            "M862.1", "M862.2", "M862.3", "M862.4", "M862.5", "M862.6", "M862.7",
+        };
+        if (commands.find(command) != commands.end()) return std::nullopt;
+    }
     if (!line.unparsed.empty()
         && !safe_ignored_command(command)
-        && !(bambu && bambu_ignored_command(command))
+        && !(bambu_firmware && bambu_ignored_command(command))
         && !(bambu && command == "G28")
         && !(anycubic_slicer_next && command == "G9111")
         && command != "EXCLUDE_OBJECT_START"
@@ -1126,7 +1188,7 @@ std::optional<Event> process_machine_line(
         else unsupported = true;
     } else if (
         !safe_ignored_command(command)
-        && !(bambu && bambu_ignored_command(command))
+        && !(bambu_firmware && bambu_ignored_command(command))
     ) {
         unsupported = true;
     }
@@ -1310,7 +1372,7 @@ Planned planned_timing(const Row& row, const double distance, const double targe
     return {feedrate, distance, duration, entry, cruise, exit};
 }
 
-std::vector<Planned> calculate_plan(const std::vector<Row>& rows, const double start, const bool bambu, const Row* previous) {
+std::vector<Planned> calculate_plan(const std::vector<Row>& rows, const double start, const bool bambu, const Row* previous, const bool orca = false, const bool prusa = false) {
     const std::size_t count = rows.size();
     std::vector<Kinematics> values(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -1320,33 +1382,73 @@ std::vector<Planned> calculate_plan(const std::vector<Row>& rows, const double s
         values[index].acceleration = optional_zero(rows[index][ACCELERATION]);
         values[index].direction = movement_direction(rows[index]);
         if (bambu) values[index].safe = bambu_safe(rows[index], values[index].target);
+        if (prusa && rows[index][JUNCTION_DEVIATION] > 0) values[index].safe = 0;
     }
     std::vector<double> boundaries(count + 1, 0.0);
     if (bambu) {
         std::vector<double> maximum_entries(count, 0.0);
         std::vector<bool> nominal(count, false);
         for (std::size_t index = 0; index < count; ++index) {
-            const double maximum = index == 0
+            double maximum = index == 0
                 ? (start > MOVEMENT_EPSILON ? start : values[index].safe)
                 : bambu_junction(rows[index-1], rows[index], values[index-1], values[index]);
+            if (orca && index > 0) {
+                const auto& before = values[index-1]; const auto& after = values[index];
+                maximum = std::min(before.target, after.target) <= MOVEMENT_EPSILON ? after.safe
+                    : cooling_tower::orca_timing::junction_speed(
+                        axis_feedrates(rows[index-1], std::min(before.target, after.target)),
+                        axis_feedrates(rows[index], after.target),
+                        {rows[index][JERK_X], rows[index][JERK_Y], rows[index][JERK_Z], rows[index][JERK_E]},
+                        std::min(before.target, after.target), before.safe, after.safe);
+            }
+            if (prusa && index > 0) {
+                const auto& row = rows[index];
+                // Unit vectors here include E without flow scaling.
+                auto before = axis_feedrates(rows[index-1], 1.0);
+                auto after = axis_feedrates(row, 1.0);
+                const double previous_flow = rows[index-1][EXTRUSION_FACTOR];
+                const double current_flow = row[EXTRUSION_FACTOR];
+                if (row[JUNCTION_DEVIATION] > 0) {
+                    for (std::size_t axis = 0; axis < 4; ++axis) {
+                        before[axis] = rows[index-1][DELTA_X + axis] / values[index-1].distance;
+                        after[axis] = row[DELTA_X + axis] / values[index].distance;
+                    }
+                } else {
+                    before[3] = rows[index-1][DELTA_E] / values[index-1].distance;
+                    after[3] = row[DELTA_E] / values[index].distance;
+                }
+                auto classic_before = before, classic_after = after;
+                if (!(row[JUNCTION_DEVIATION] > 0)) {
+                    classic_before[3] *= previous_flow;
+                    classic_after[3] *= current_flow;
+                }
+                maximum = cooling_tower::prusa_timing::junction_speed(
+                    classic_before, classic_after,
+                    {row[MAXIMUM_ACCELERATION_X], row[MAXIMUM_ACCELERATION_Y], row[MAXIMUM_ACCELERATION_Z], row[MAXIMUM_ACCELERATION_E]},
+                    {row[JERK_X], row[JERK_Y], row[JERK_Z], row[JERK_E]},
+                    values[index].acceleration, row[JUNCTION_DEVIATION], values[index].distance,
+                    values[index-1].target, values[index].target, values[index-1].safe, values[index].safe);
+            }
             const double allowable = std::sqrt(std::max(0.0, values[index].safe*values[index].safe + 2.0*values[index].acceleration*values[index].distance));
             maximum_entries[index] = maximum;
             boundaries[index] = std::min(maximum, allowable);
             nominal[index] = values[index].target <= allowable;
         }
         boundaries[count] = values.back().safe;
-        for (std::size_t index = 0; index + 1 < count; ++index) {
+        auto forward_pass = [&]() { for (std::size_t index = 0; index + 1 < count; ++index) {
             if (!nominal[index] && boundaries[index] < boundaries[index+1]) {
                 boundaries[index+1] = std::min(boundaries[index+1], std::sqrt(std::max(0.0, boundaries[index]*boundaries[index] + 2.0*values[index].acceleration*values[index].distance)));
             }
-        }
-        for (std::size_t reverse = count; reverse-- > 0;) {
+        }};
+        auto reverse_pass = [&]() { for (std::size_t reverse = (orca || prusa) ? count-1 : count; reverse-- > 0;) {
             const std::size_t index = reverse;
             if (boundaries[index] == maximum_entries[index]) continue;
             if (!nominal[index] && maximum_entries[index] > boundaries[index+1]) {
                 boundaries[index] = std::min(maximum_entries[index], std::sqrt(std::max(0.0, boundaries[index+1]*boundaries[index+1] + 2.0*values[index].acceleration*values[index].distance)));
             } else boundaries[index] = maximum_entries[index];
-        }
+        }};
+        if (orca || prusa) { reverse_pass(); forward_pass(); }
+        else { forward_pass(); reverse_pass(); }
     } else {
         boundaries[0] = std::min(std::max(0.0, start), values[0].target);
         boundaries[count] = 0.0;
@@ -1376,8 +1478,8 @@ bool is_plannable(const Movement& movement) {
 
 class MotionPlanner {
 public:
-    MotionPlanner(const bool bambu, Diagnostics& diagnostics)
-        : bambu_(bambu), diagnostics_(diagnostics) {}
+    MotionPlanner(const bool bambu, Diagnostics& diagnostics, const bool orca = false, const bool prusa = false)
+        : bambu_(bambu || orca || prusa), orca_(orca), prusa_(prusa), diagnostics_(diagnostics) {}
 
     template <typename Emit>
     void process(Event event, Emit emit) {
@@ -1400,7 +1502,7 @@ public:
         pending_.push_back(std::move(event));
         ++pending_physical_;
         diagnostics_.peak_pending_movements = std::max<std::uint64_t>(diagnostics_.peak_pending_movements, pending_physical_);
-        if (pending_physical_ > REFRESH_THRESHOLD_MOVEMENTS) {
+        if (pending_physical_ > ((orca_ || prusa_) ? 256 : REFRESH_THRESHOLD_MOVEMENTS)) {
             flush_prefix(pending_physical_ - LOOKAHEAD_MOVEMENTS, emit);
         }
     }
@@ -1416,7 +1518,7 @@ private:
         }
         if (rows.empty()) return pending_;
         const Row* previous = previous_.has_value() ? &previous_->row : nullptr;
-        const std::vector<Planned> planned = calculate_plan(rows, start_speed_, bambu_, previous);
+        const std::vector<Planned> planned = calculate_plan(rows, start_speed_, bambu_, previous, orca_, prusa_);
         std::vector<Event> result = pending_;
         std::size_t planned_index = 0;
         for (Event& event : result) {
@@ -1467,6 +1569,8 @@ private:
     }
 
     bool bambu_ = false;
+    bool orca_ = false;
+    bool prusa_ = false;
     Diagnostics& diagnostics_;
     std::vector<Event> pending_;
     std::size_t pending_physical_ = 0;
@@ -1655,8 +1759,15 @@ public:
         if (spool_ != nullptr) std::fclose(spool_);
     }
     bool valid() const { return !enabled_ || spool_ != nullptr; }
+    void observe(const ParsedLine& line) {
+        if (!enabled_ || !line.has_comment) return;
+        const std::string comment = trim(line.comment);
+        if (starts_with(lowercase(comment), "generated by prusaslicer ")) prusa_startup_ = true;
+        if (prusa_startup_ && comment == "LAYER_CHANGE") prusa_layer_started_ = true;
+    }
     void consume(const Movement& movement) {
         if (!enabled_ || movement.category != Category::deposition) return;
+        if (prusa_startup_ && !prusa_layer_started_) return;
         minimum_x_ = std::min({minimum_x_, movement.start_x, movement.end_x});
         maximum_x_ = std::max({maximum_x_, movement.start_x, movement.end_x});
         minimum_y_ = std::min({minimum_y_, movement.start_y, movement.end_y});
@@ -1747,6 +1858,7 @@ private:
         }
         pending_.reset();
     }
+    bool prusa_startup_ = false, prusa_layer_started_ = false;
     bool enabled_; std::size_t maximum_; Diagnostics& diagnostics_;
     std::FILE* spool_; std::optional<PreviewSegment> pending_; double pending_layer_=0.0; std::int64_t pending_line_=0;
     std::uint64_t source_count_=0; double minimum_x_=std::numeric_limits<double>::infinity(),maximum_x_=-std::numeric_limits<double>::infinity(),minimum_y_=std::numeric_limits<double>::infinity(),maximum_y_=-std::numeric_limits<double>::infinity();
@@ -1757,11 +1869,28 @@ public:
     explicit InfillCollector(const bool enabled) : enabled_(enabled) {}
     void consume(const ParsedLine& line) {
         if (!enabled_) return;
-        if (line.command=="EXCLUDE_OBJECT_START") { bambu_object_=false; inside_=lowercase(line.code).find("cooling_tower")!=std::string::npos; if (inside_) ++result_.tower_block_count; return; }
+        if (line.command == "M486") {
+            if (has_parameter(line, "S")) {
+                const double index = parameter(line, "S");
+                marlin_index_ = std::isfinite(index) && index >= 0
+                    && index <= std::numeric_limits<int>::max() && index == std::floor(index)
+                    ? static_cast<int>(index) : -1;
+            }
+            bambu_object_ = marlin_index_ >= 0;
+            const auto name_position = line.code.find(" A");
+            if (name_position != std::string::npos && marlin_index_ >= 0)
+                marlin_names_[marlin_index_] = lowercase(trim(line.code.substr(name_position + 2)));
+            const auto name = marlin_names_.find(marlin_index_);
+            inside_ = marlin_index_ >= 0 && name != marlin_names_.end()
+                && (name->second.find("cooling_tower") != std::string::npos || name->second.find("cooling tower") != std::string::npos);
+            if (inside_ && has_parameter(line, "S")) ++result_.tower_block_count;
+            return;
+        }
+        if (line.command=="EXCLUDE_OBJECT_START") { bambu_object_=false; const auto label=lowercase(line.code); inside_=label.find("cooling_tower")!=std::string::npos || label.find("cooling tower")!=std::string::npos; if (inside_) ++result_.tower_block_count; return; }
         if (line.command=="EXCLUDE_OBJECT_END") { inside_=false; return; }
         if (!line.has_comment) { coordinates(line); return; }
         const std::string folded=lowercase(line.comment);
-        if (starts_with(folded,"printing object ")) { bambu_object_=true; inside_=folded.find("cooling_tower")!=std::string::npos; if (inside_) ++result_.tower_block_count; return; }
+        if (starts_with(folded,"printing object ")) { bambu_object_=true; inside_=folded.find("cooling_tower")!=std::string::npos || folded.find("cooling tower")!=std::string::npos; if (inside_) ++result_.tower_block_count; return; }
         if (starts_with(folded,"start printing object, unique label id:")) { const std::string id=trim(folded.substr(folded.find(':')+1)); bool digits=!id.empty(); for(char c:id) digits=digits&&ascii_digit(c); if(digits){active_label_=std::stoll(id);bambu_object_=true;} return; }
         if (starts_with(folded,"stop printing object")) {inside_=false;bambu_object_=false;active_label_.reset();return;}
         if (folded=="type:sparse infill") {if(active_label_.has_value()) sparse_labels_.insert(*active_label_);if(inside_)result_.sparse_tower_infill=true;}
@@ -1771,6 +1900,7 @@ public:
     InfillEvidence finish() { result_.sparse_labels.assign(sparse_labels_.begin(),sparse_labels_.end()); return std::move(result_); }
 private:
     void coordinates(const ParsedLine& line){if(!active_label_.has_value()||!has_parameter(line,"X")||!has_parameter(line,"Y"))return;const double x=parameter(line,"X"),y=parameter(line,"Y");auto& b=result_.label_bounds[*active_label_];if(b.empty())b={x,x,y,y};else{b[0]=std::min(b[0],x);b[1]=std::max(b[1],x);b[2]=std::min(b[2],y);b[3]=std::max(b[3],y);}}
+    int marlin_index_ = -1; std::map<int, std::string> marlin_names_;
     bool enabled_=false,inside_=false,bambu_object_=false;std::optional<std::int64_t>active_label_;std::set<std::int64_t>sparse_labels_;InfillEvidence result_;
 };
 
@@ -1798,8 +1928,22 @@ Result analyze_file(const std::filesystem::path& path,const Options& options){
     std::ifstream input(path,std::ios::binary);
     if(!input){result.status=Status::io_error;result.message="Unable to open G-code file.";return result;}
     MachineState machine;
+    double orca_jd = 0.0;
+    if (options.orca_compatible || options.prusa_compatible) {
+        const auto found = options.orca_limits.find("machine_max_junction_deviation");
+        if (found != options.orca_limits.end()) orca_jd = found->second;
+        apply_orca_limits(machine, options, orca_jd, true);
+        if (options.prusa_compatible && options.orca_marlin2) machine.junction_deviation = orca_jd;
+    }
+    std::array<double, 4> orca_classic_jerks;
+    const std::array<double*, 4> orca_jerk_fields = {&machine.jerk_x, &machine.jerk_y, &machine.jerk_z, &machine.jerk_e};
+    for (std::size_t axis = 0; axis < 4; ++axis) {
+        const std::string key = "machine_max_jerk_" + std::string(1, "xyze"[axis]);
+        const auto found = options.orca_limits.find(key);
+        orca_classic_jerks[axis] = found == options.orca_limits.end() ? missing() : found->second;
+    }
     LayerCollector layers(options.use_explicit_layer_markers);
-    MotionPlanner planner(options.bambu_compatible,result.diagnostics);
+    MotionPlanner planner(options.bambu_compatible,result.diagnostics, options.orca_compatible, options.prusa_compatible);
     PreviewCollector preview(options.collect_preview,options.maximum_preview_segments,result.diagnostics);
     if (!preview.valid()) {
         result.status=Status::invalid_result;
@@ -1822,8 +1966,15 @@ Result analyze_file(const std::filesystem::path& path,const Options& options){
             result.status=Status::cancelled;result.message="G-Code analysis was cancelled.";return result;
         }
         ParsedLine line=parse_line(raw,line_number);
+        preview.observe(line);
         append_metadata(result,line);
         infill.consume(line);
+        if (options.orca_compatible && line.command == "M4899" && has_parameter(line, "T") && parameter(line, "T") == 3.0) continue;
+        if (options.orca_compatible && line.command == "M205" && has_parameter(line, "J")) orca_jd = parameter(line, "J") * machine.unit_scale_mm;
+        if (options.prusa_compatible && options.orca_marlin2 && line.command == "M205" && has_parameter(line, "J"))
+            machine.junction_deviation = std::max(0.0, parameter(line, "J") * machine.unit_scale_mm);
+        if (options.orca_compatible && line.command == "M205")
+            for (std::size_t axis = 0; axis < 4; ++axis) *orca_jerk_fields[axis] = orca_classic_jerks[axis];
         if(options.use_explicit_layer_markers&&line.has_comment){
             const std::string comment=trim(line.comment);
             if(comment=="CHANGE_LAYER"){pending_marker_line=line.number;pending_marker_z.reset();}
@@ -1835,13 +1986,30 @@ Result analyze_file(const std::filesystem::path& path,const Options& options){
             }
         }
         bool unsupported=false;
+        const double previous_retract_acceleration = machine.retract_acceleration;
         std::optional<Event> event=process_machine_line(
             machine,
             line,
-            options.bambu_compatible,
+            options.bambu_compatible || options.orca_compatible || options.prusa_compatible,
             options.anycubic_slicer_next_compatible,
-            unsupported
+            unsupported,
+            options.bambu_compatible,
+            options.prusa_compatible
         );
+        if (options.orca_compatible && line.command == "SET_VELOCITY_LIMIT") {
+            machine.retract_acceleration = previous_retract_acceleration;
+            if (has_parameter(line, "SQUARE_CORNER_VELOCITY")) {
+                const double jerk = parameter(line, "SQUARE_CORNER_VELOCITY") * machine.unit_scale_mm;
+                machine.jerk_x = machine.jerk_y = jerk;
+                orca_classic_jerks[0] = orca_classic_jerks[1] = jerk;
+            }
+            if (has_parameter(line, "VELOCITY"))
+                machine.maximum_feedrate_x = machine.maximum_feedrate_y = parameter(line, "VELOCITY") * machine.unit_scale_mm;
+        }
+        if (options.orca_compatible && line.command == "M205")
+            for (std::size_t axis = 0; axis < 4; ++axis) orca_classic_jerks[axis] = *orca_jerk_fields[axis];
+        if (options.orca_compatible && (line.command == "M201" || line.command == "M204" || line.command == "M205" || line.command == "SET_VELOCITY_LIMIT"))
+            apply_orca_limits(machine, options, orca_jd, false);
         if(unsupported){result.status=Status::unsupported_syntax;result.message="Potentially state-changing G-code is not supported by the native analyzer.";result.fallback_line=line.number;result.fallback_command=line.has_command?line.command:line.unparsed;return result;}
         if(!event.has_value())continue;
         if(std::holds_alternative<Movement>(*event)){++result.diagnostics.movement_count;preview.consume(std::get<Movement>(*event));}

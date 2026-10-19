@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -54,7 +55,7 @@ class WindowsPackageCandidateTests(unittest.TestCase):
         )
         self.assertTrue(all(item.discovery_source is SlicerDiscoverySource.APP_PACKAGE for item in candidates))
 
-    def test_packaged_orca_is_only_detected_and_never_executed(self):
+    def test_packaged_orca_is_supported_and_never_executed_during_detection(self):
         candidate, = _package_candidates([self.record], self.known)
         runner = Mock()
         adapter = OrcaSlicerAdapter(runner=runner)
@@ -62,9 +63,9 @@ class WindowsPackageCandidateTests(unittest.TestCase):
             result = adapter.verify_installation(candidate)
         self.assertEqual(result.version, "2.4.3.0")
         self.assertTrue(result.automatically_discovered)
-        self.assertFalse(result.can_slice)
-        self.assertEqual(result.support_level, SlicerSupportLevel.DETECTION_ONLY)
-        self.assertIn("nur erkannt", result.display_name)
+        self.assertTrue(result.can_slice)
+        self.assertEqual(result.support_level, SlicerSupportLevel.FULL)
+        self.assertNotIn("nur erkannt", result.display_name)
         runner.run.assert_not_called()
 
     def test_vfs_and_unicode_install_paths_are_supported(self):
@@ -127,7 +128,7 @@ class WindowsPackageCandidateTests(unittest.TestCase):
 
 
 class WindowsPackageGuiSafetyTests(_SlicerGuiFixture, unittest.TestCase):
-    def test_store_slicer_is_visible_but_cannot_start_profile_processing(self):
+    def test_explicitly_detection_only_store_slicer_cannot_start_profile_processing(self):
         executable = self.root / "orca-slicer.exe"
         executable.write_bytes(b"MZ")
         record = {
@@ -138,6 +139,7 @@ class WindowsPackageGuiSafetyTests(_SlicerGuiFixture, unittest.TestCase):
         adapter = OrcaSlicerAdapter(runner=Mock())
         with patch.dict(os.environ, {"APPDATA": str(self.root / "user-data")}):
             item = adapter.verify_installation(candidate)
+        item = replace(item, support_level=SlicerSupportLevel.DETECTION_ONLY, capabilities=frozenset())
         self.service.discover_installations.return_value = discovery_result(self.working, item)
         window = self.start()
         before = self.profiles.catalog.call_count
@@ -160,9 +162,9 @@ class InstalledStoreSlicerTests(unittest.TestCase):
         before = (candidate.executable_path.stat().st_size, candidate.executable_path.stat().st_mtime_ns)
         adapter = OrcaSlicerAdapter(runner=Mock())
         item = adapter.verify_installation(candidate)
-        self.assertFalse(item.can_slice)
+        self.assertTrue(item.can_slice)
         self.assertTrue(item.verified)
-        self.assertIn("nur erkannt", item.display_name)
+        self.assertNotIn("nur erkannt", item.display_name)
         self.assertEqual(before, (candidate.executable_path.stat().st_size, candidate.executable_path.stat().st_mtime_ns))
         adapter.runner.run.assert_not_called()
 

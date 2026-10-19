@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from cooling_tower.slicers.models import ProfileRecord
 
@@ -42,6 +42,10 @@ class SlicerDetectionModule:
     executable_names: tuple[str, ...] = ()
     product_markers: tuple[str, ...] = ()
     installation_directories: tuple[str, ...] = ()
+
+    def active_preset_payload(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Normalize slicer-owned JSON selection layouts before common parsing."""
+        return payload
 
     def profile_roots_for(
         self,

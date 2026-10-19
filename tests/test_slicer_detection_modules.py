@@ -58,7 +58,7 @@ class SlicerDetectionModuleRegistryTests(unittest.TestCase):
             },
         )
 
-    def test_prusa_is_operational_while_other_placeholders_remain_closed(self) -> None:
+    def test_prusa_and_orca_are_operational_while_placeholders_remain_closed(self) -> None:
         implemented = {
             module.adapter_id
             for module in detection_modules()
@@ -66,11 +66,10 @@ class SlicerDetectionModuleRegistryTests(unittest.TestCase):
         }
         self.assertEqual(
             implemented,
-            {"anycubic_slicer_next", "bambu_studio", "prusa_slicer"},
+            {"anycubic_slicer_next", "bambu_studio", "prusa_slicer", "orca_slicer"},
         )
         for adapter_id in (
             "cura",
-            "orca_slicer",
             "creality_print",
         ):
             with self.subTest(adapter_id=adapter_id):

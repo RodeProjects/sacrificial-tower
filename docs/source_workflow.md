@@ -78,8 +78,9 @@ Windows-Absturz zu behaupten. Ein Kontrollslice mit Stützen war erfolgreich;
 auch die Testdatei mit abrupten Flächenänderungen läuft ohne Stützen durch.
 Die Anwendung fragt bei passenden Slicerfehlern in einem zentrierten Popup,
 ob der Pre-Slice mit simulierten Stützen wiederholt werden soll. Erst nach
-Zustimmung aktiviert sie Stützen in ihrer Profilkopie für diese STL; alle
-anderen Stützenparameter bleiben unverändert. Abbrechen belässt die
+Zustimmung aktiviert sie Stützen in ihrer Profilkopie für diese STL. Bei
+Anycubic bleiben die anderen Stützenparameter unverändert; für Orca und Prusa
+gelten die unten erläuterten Vorgaben zur Stützenart. Abbrechen belässt die
 fehlgeschlagene Analyse unverändert. Original-STL und Slicerprofile bleiben
 immer schreibgeschützt. Untersuchung: 16.09.2026.
 Der [Anycubic-Quellcode](https://github.com/ANYCUBIC-3D/AnycubicSlicerNext/blob/main/src/libslic3r/GCode.cpp)
@@ -125,6 +126,51 @@ temporären Profilkopien und beim Erzeugen des gemeinsamen 3MF-Projekts.
 Die ursprüngliche Profilbestätigung und Überwachung der Quelldateien bleiben
 auf die unveränderten Originale bezogen. Beim Laden einer anderen Quelle
 oder Profilauswahl wird das Pre-Slice-Ergebnis einschließlich Simulation verworfen.
+
+Für OrcaSlicer und PrusaSlicer liegen die Einstellungen simulierter Stützen in
+eigenen Integrationsmodulen (`orca_supports.py`, `prusa_supports.py`). Orca nutzt
+`tree(auto)` mit kompatiblem Standardstil und deaktivierter unabhängiger
+Stützenschichthöhe; Prusa aktiviert automatische Stützen und ab Version 2.6
+den Stil `organic`. Diese Vorgaben gelten sowohl für die temporäre
+Pre-Slice-Profilkopie als auch für die Quellobjekt-Einstellungen im gemeinsamen
+Prüf-/Exportprojekt. Bereits aktivierte Profilstützen bleiben unverändert.
+Die Schlüssel und ihre Bedeutung sind in den offiziellen Konfigurationsdefinitionen
+von [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer/blob/v2.4.0/src/libslic3r/PrintConfig.cpp)
+und [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.3/src/libslic3r/PrintConfig.cpp)
+nachvollziehbar; es wird daraus kein fremder Implementierungscode übernommen.
+Die Anycubic-/Bambu-Simulationsvorgaben bleiben ebenfalls unverändert.
+Geometriebedingt können trotz Baumstützen einzelne zusätzliche Kontaktlagen
+entstehen; tatsächlich gedruckte Schichten werden bei der Zeitbewertung nicht
+ausgeblendet. Der Pre-Slice-Adapterstand 4 trennt alte Cacheergebnisse von der
+neuen Simulation.
+
+Bei Generierungsfehlern mit einem Hinweis auf die erste Schicht/Auflagefläche
+ergänzt die GUI einen fett hervorgehobenen Verweis auf „Stützen für STL-Objekt
+simulieren“ und den Button „Funktion jetzt aktivieren“. Das gilt nur bei
+bestätigtem STL-Profil mit ausdrücklich erkanntem Stützen-Aus-Wert und
+unterstütztem objektspezifischen Projekt. Unbekannte oder bereits aktivierte
+Stützeneinstellungen erhalten kein Angebot. Während eines laufenden Auftrags
+bleibt der Button gesperrt; beim Klick wird der aktuelle Kontext erneut geprüft.
+Er aktiviert die vorhandene Option, ohne automatisch eine Generierung zu starten.
+Freie Slicerfehlermeldungen bleiben als Klartext getrennt vom festen HTML-Hinweis.
+
+Die reale Abnahme in `tests/test_source_support_regressions.py` wird mit
+`COOLING_TOWER_RUN_SUPPORT_REGRESSION=1` ausdrücklich eingeschaltet. Sie benötigt
+die benannten lokalen Testprofile und die vollständige Test-STL (optional über
+`COOLING_TOWER_SUPPORT_STL` angegeben). Sie prüft automatischen und manuellen
+Prüfslice, die Quellobjekt-Metadaten im 3MF, erneutes Slicen des Exports,
+Layerzahl/Zeitübereinstimmung und unveränderte Slicerquelldateien.
+Standardmäßig beginnt dieser Test ohne Stützen im Vorslice und schaltet die
+Objektsimulation erst für die Generierung ein. Mit
+`COOLING_TOWER_SUPPORT_PRESLICE_SIMULATED=1` prüft er zusätzlich den Ausgang
+mit bereits simulierten Stützen im Vorslice.
+
+Im manuellen Modus gehört `verification.gcode` bei jedem Slicer zum Export.
+Es ist die unveränderte Ausgabe des Prüfslices, auf dem die angegebenen Zeiten
+beruhen; der Bericht enthält Pfad und SHA-256. Beim automatischen Export wird
+diese zusätzliche Belegdatei derzeit nicht ausgegeben. Eine Verwendung als
+Druckdatei erfordert dieselbe Prüfung von Maschine, Profilen und Projekt wie
+jeder andere Slicer-G-Code.
 
 Das abschließende Zusammenfassungsfenster und die Exportberichte kennzeichnen
 simulierte Stützen. Nur eine tatsächlich exportierte 3MF übernimmt deren
@@ -311,6 +357,18 @@ Projektfähigkeit entsteht ausschließlich eine deutlich gekennzeichnete
 Zeitprognose, niemals eine behauptete gemeinsame Verifikation.
 Ein erfolgreich geprüftes natives gemeinsames 3MF bewahrt exakt die geslicte
 Form und feste Anordnung. Einzelheiten stehen im [manuellen Editor](manual_editor.md).
+
+Für unterstützte native Projekte, einschließlich PrusaSlicer, führt die
+Automatik zuerst die eingestellte Anzahl isolierter Turmslices und danach die
+gemeinsamen Objekt-/Turmslices aus. Eine vorzeitige Übernahme ist erst nach
+mindestens drei erfolgreich geprüften gemeinsamen Slices möglich; höhere
+konfigurierte Mindestzahlen bleiben verbindlich. Nach jedem gemeinsamen Slice
+wird die Seitenvorschau aktualisiert. Der beste geprüfte gemeinsame Stand bleibt
+bei Zielerreichung, zulässiger Übernahme oder späterer Stagnation verfügbar.
+Ein ausschließlich isolierter Turmslice darf bei angefordertem gemeinsamen
+STL-Projekt keine erfolgreiche gemeinsame Fertigstellung vortäuschen.
+Fehlende native Projektunterstützung wird verständlich gemeldet. Zu einem
+erfolgreich gemeinsam geprüften STL-Ergebnis gehört das geprüfte 3MF im Export.
 
 Die normalen Tests verwenden synthetische STL-Fälle, die bereitgestellten
 Regressionen, Fake-Slicer sowie temporäre Verzeichnisse. Der reale

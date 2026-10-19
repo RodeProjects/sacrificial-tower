@@ -30,6 +30,8 @@ def joint_gcode(style):
     lines = ["G90", "M83", "G1 Z0.2 F600"]
     for layer in range(2):
         for name, label, x in (("Source_object", 47, 5), ("Cooling_tower", 58, 80)):
+            if style == "orca_named":
+                name = name.replace("_", " ")
             if style == "bambu":
                 lines.append(f"; start printing object, unique label id: {label}")
             elif style == "exclude":
@@ -47,7 +49,7 @@ class JointSourceToolpathTests(unittest.TestCase):
     def test_original_supports_are_kept_and_tower_excluded_for_all_marker_styles(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/"joint.gcode"
-            for style in ("bambu", "exclude", "named"):
+            for style in ("bambu", "exclude", "named", "orca_named"):
                 with self.subTest(style=style):
                     path.write_text(joint_gcode(style), encoding="utf-8")
                     before = sha256_file(path)
@@ -87,6 +89,20 @@ class JointSourceToolpathTests(unittest.TestCase):
 
 
 class RefinedPreviewServiceTests(unittest.TestCase):
+    def test_successful_isolated_slice_cannot_claim_complete_stl_project(self):
+        from cooling_tower.models import SourceArtifact
+        from cooling_tower.preview import PreviewBuildError
+
+        fixture = preview_fixtures.PreviewSourceCacheIntegrationTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        original = fixture.root / "original.stl"
+        original.write_bytes(b"solid original\nendsolid original\n")
+        request = fixture.request(source_artifact=SourceArtifact.capture(original))
+        calibrator = preview_fixtures.SyntheticSuccessfulCalibrator()
+        with self.assertRaisesRegex(PreviewBuildError, "kein vollständiger gemeinsamer.*Slice"):
+            PreviewService(calibrator).prepare(request)
+
     @staticmethod
     def calibrator():
         basic = preview_fixtures.SyntheticSuccessfulCalibrator()

@@ -105,6 +105,12 @@ class SyntheticSuccessfulCalibrator:
         root.mkdir(parents=True, exist_ok=True)
         artifact = root / "tower.stl"
         artifact.write_text("solid tower\nendsolid tower\n", encoding="utf-8")
+        project = None
+        if kwargs.get("source_artifact") is not None and kwargs["config"].perform_joint_final_slice:
+            # A successful native STL calibration must supply its verified
+            # project. This stand-in tests UI/export flow, not archive parsing.
+            project = root / "joint.3mf"
+            project.write_bytes(b"synthetic verified project")
         profile = SimpleNamespace(
             points=(
                 SimpleNamespace(outer_radius_mm=5.0, z_mm=0.2),
@@ -128,7 +134,7 @@ class SyntheticSuccessfulCalibrator:
             failures=(),
             gcode_path=None,
             stl_path=artifact,
-            project_path=None,
+            project_path=project,
             iterations=(),
             best_iteration=None,
             configured_iteration_count=kwargs["config"].maximum_iterations,

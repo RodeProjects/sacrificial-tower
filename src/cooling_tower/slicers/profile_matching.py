@@ -327,6 +327,9 @@ class ProfileMatchingService:
             resolved,
             (ProfileRole.FILAMENT,),
         )
+        visible_filament_paths = self._filament_visibility_paths(
+            adapter, installation, all_filament_options,
+        )
         active = read_active_presets(installation)
         active_context = ProfileFilterContext(
             source="slicer",
@@ -485,6 +488,7 @@ class ProfileMatchingService:
             resolved,
             filter_context,
             include_all_profiles=include_all_profiles,
+            visible_filament_paths=visible_filament_paths,
             all_options=(
                 all_machine_options,
                 all_process_options,
@@ -630,6 +634,9 @@ class ProfileMatchingService:
             resolved,
             (ProfileRole.FILAMENT,),
         )
+        visible_filament_paths = self._filament_visibility_paths(
+            adapter, installation, all_filament_options,
+        )
         selected_profile_ids = _resolve_selected_profile_ids(
             requested_profile_selections,
             machine_options=all_machine_options,
@@ -661,6 +668,7 @@ class ProfileMatchingService:
             resolved,
             filter_context,
             include_all_profiles=include_all_profiles,
+            visible_filament_paths=visible_filament_paths,
             all_options=(
                 all_machine_options,
                 all_process_options,
@@ -686,6 +694,12 @@ class ProfileMatchingService:
                 resolved,
                 filter_context,
                 include_all_profiles=False,
+                # An explicit material chosen from the expanded catalogue is
+                # usable; expansion alone must not change automatic proposals.
+                visible_filament_paths=(
+                    None if selected_profile_ids.get("filament")
+                    else visible_filament_paths
+                ),
                 all_options=(
                     all_machine_options,
                     all_process_options,
@@ -1015,6 +1029,7 @@ class ProfileMatchingService:
                 resolved,
                 display_filter_context,
                 include_all_profiles=include_all_profiles,
+                visible_filament_paths=visible_filament_paths,
                 all_options=(
                     all_machine_options,
                     all_process_options,
@@ -1416,6 +1431,19 @@ class ProfileMatchingService:
                 result.append(item)
         return tuple(result)
 
+    @staticmethod
+    def _filament_visibility_paths(
+        adapter: SlicerAdapter,
+        installation: SlicerInstallation,
+        options: tuple[ProfileRecord, ...],
+    ) -> frozenset[Path] | None:
+        # Optional adapter policy affects selectors and automatic candidates,
+        # never the inventory/resolver. Other integrations retain their rules.
+        filter_options = getattr(adapter, "filter_filament_options", None)
+        if not callable(filter_options):
+            return None
+        return frozenset(record.path for record in filter_options(installation, options))
+
     @classmethod
     def _filter_profile_options(
         cls,
@@ -1423,6 +1451,7 @@ class ProfileMatchingService:
         context: ProfileFilterContext,
         *,
         include_all_profiles: bool,
+        visible_filament_paths: frozenset[Path] | None = None,
         all_options: tuple[
             tuple[ProfileRecord, ...],
             tuple[ProfileRecord, ...],
@@ -1546,6 +1575,11 @@ class ProfileMatchingService:
             and _is_selectable_profile(item)
             and item.role is ProfileRole.FILAMENT
             and role_is_visible(item)
+            and (
+                include_all_profiles
+                or visible_filament_paths is None
+                or item.record.path in visible_filament_paths
+            )
         )
         process_options = cls._selectable_options(
             process_resolved,

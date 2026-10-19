@@ -492,6 +492,14 @@ class PreviewService:
                     )
                 )
                 if has_usable_improvement:
+                    if (request.source_artifact is not None
+                            and request.source_artifact.source_kind.value == "stl"
+                            and request.calibration_config.perform_joint_final_slice
+                            and getattr(calibration, "project_path", None) is None):
+                        raise PreviewBuildError(
+                            "Es wurde noch kein vollständiger gemeinsamer Objekt-/Turm-Slice geprüft. "
+                            "Die automatische Erstellung kann deshalb noch kein verwendbares 3MF-Ergebnis liefern."
+                        )
                     profile = calibration.profile
                     placement = calibration.placement
                     calibrated = calibration.success

@@ -81,6 +81,10 @@ struct Diagnostics {
 
 struct Options {
     bool bambu_compatible = false;
+    bool orca_compatible = false;
+    bool prusa_compatible = false;
+    bool orca_marlin2 = false;
+    std::map<std::string, double> orca_limits;
     bool anycubic_slicer_next_compatible = false;
     bool use_explicit_layer_markers = false;
     bool collect_preview = false;

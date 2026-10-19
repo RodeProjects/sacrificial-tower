@@ -27,11 +27,11 @@ Aktuell implementiert sind:
 - Anycubic Slicer Next
 - Bambu Studio
 - PrusaSlicer
+- OrcaSlicer
 
 Als ausdrückliche, nicht aktive Platzhalter existieren:
 
 - UltiMaker Cura
-- OrcaSlicer
 - Creality Print
 
 PrusaSlicer besitzt mit `PrusaSlicerAdapter` und `PrusaProfileCatalog` eine
@@ -72,8 +72,9 @@ App-Manifeste und ordnet die deklarierten Programmeinstiege anhand der bekannten
 ausführbaren Slicerdateien den vorhandenen Adaptern zu. Dies gilt für alle
 bekannten Slicer und setzt keinen bestimmten Paketnamen oder Herausgebernamen
 voraus. VFS-Unterverzeichnisse und abweichende Schreibweisen werden unterstützt.
-OrcaSlicers Store-Installation wird damit als „nur erkannt“ sichtbar; daraus
-folgt keine Freigabe der Profil- oder Slicing-Verarbeitung.
+OrcaSlicers Store-Installation verwendet denselben eigenen Profil- und
+Slicing-Adapter wie die klassische Installation. Seine Katalogregeln,
+Versionslayouts und Abnahmetests stehen in [OrcaSlicer](orca_slicer.md).
 
 Die Abfrage verwendet einmalig Windows PowerShell und die lesenden Cmdlets
 `Get-AppxPackage`/`Get-AppxPackageManifest`, mit zwölf Sekunden Zeitlimit. Sie

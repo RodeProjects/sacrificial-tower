@@ -3481,6 +3481,10 @@ class MainWindow(QMainWindow):
         self.footer_status_layout.setSpacing(6)
         self.footer_status_layout.addWidget(self.progress_bar)
         self.footer_status_layout.addLayout(main_status_layout)
+        from cooling_tower.gui.widgets.support_recovery import SupportRecoveryHint
+        self.source_support_recovery = SupportRecoveryHint()
+        self.source_support_recovery.activate_requested.connect(self._activate_source_support_recovery)
+        self.footer_status_layout.addWidget(self.source_support_recovery)
         self.footer_status_layout.addWidget(self.result_label)
 
         self._footer_notice_panels = {
@@ -5075,6 +5079,7 @@ class MainWindow(QMainWindow):
             for checkbox in (self.simulate_source_supports_checkbox, self.manual_generation_panel.source_supports_checkbox):
                 with QSignalBlocker(checkbox):
                     checkbox.setChecked(False)
+        self._refresh_support_recovery()
         self._refresh_workflow_navigation_actions()
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.refresh()
@@ -8589,6 +8594,48 @@ class MainWindow(QMainWindow):
             text,
             state,
         )
+        self._refresh_support_recovery()
+        self._schedule_footer_height_update()
+
+    def _source_support_recovery_available(self) -> bool:
+        from cooling_tower.slicers.support_simulation import global_supports_disabled, OBJECT_SUPPORT_ADAPTERS
+        result = self.profile_match_result
+        profile = getattr(getattr(result, "selected", None), "effective_profile", None)
+        return bool(not self._closing and self.current_source_kind is SourceKind.STL
+                    and result is not None
+                    and getattr(result, "user_confirmed", False)
+                    and profile is not None
+                    and profile.installation.adapter_id in OBJECT_SUPPORT_ADAPTERS
+                    and global_supports_disabled(profile))
+
+    def _refresh_support_recovery(self) -> None:
+        if not hasattr(self, "source_support_recovery"):
+            return
+        available = self._source_support_recovery_available()
+        controller = getattr(self, "manual_controller", None)
+        busy = self.background_job_manager.has_active(JobKind.PREVIEW) or bool(
+            controller is not None and controller.job_id is not None)
+        self.source_support_recovery.refresh(
+            self.status_label.text() if self.status_label.property("state") == "error" else "",
+            available=available, checked=self.simulate_source_supports_checkbox.isChecked(), busy=busy)
+        if controller is not None and hasattr(controller, "support_recovery"):
+            message = controller.panel.status_label.text()
+            controller.support_recovery.refresh(
+                message if message.startswith("Neuer manueller Lauf fehlgeschlagen:") else "",
+                available=available, checked=controller.panel.source_supports_checkbox.isChecked(), busy=busy)
+
+    def _activate_source_support_recovery(self, *, manual: bool = False) -> None:
+        # Recheck live state: an old error must never activate a different profile.
+        if not self._source_support_recovery_available():
+            self._refresh_support_recovery()
+            return
+        if self.background_job_manager.has_active(JobKind.PREVIEW) or self.manual_controller.job_id is not None:
+            return
+        option = (self.manual_generation_panel.source_support_option if manual else self.source_support_option)
+        if option.isHidden() or not option.checkbox.isEnabled():
+            return
+        option.checkbox.setChecked(True)
+        self._refresh_support_recovery()
         self._schedule_footer_height_update()
 
     def _schedule_footer_height_update(self) -> None:

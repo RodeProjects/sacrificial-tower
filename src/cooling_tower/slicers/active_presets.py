@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from cooling_tower.slicers.detection.base import ActivePresetSchema
+from cooling_tower.slicers.detection.base import ActivePresetSchema, SlicerDetectionModule
 from cooling_tower.slicers.detection.registry import detection_module_for
 from cooling_tower.slicers.models import SlicerInstallation
 
@@ -144,7 +144,8 @@ def _read_config(
         allow_implicit_global_section=adapter_id == "prusa_slicer",
     )
     if values is None:
-        values = _parse_json_values(text, schema)
+        module = detection_module_for(adapter_id, implemented_only=True)
+        values = _parse_json_values(text, schema, module=module)
     if values is None:
         return None
     return ActivePresetSelection(
@@ -230,6 +231,8 @@ def _parse_ini_values(
 def _parse_json_values(
     text: str,
     schema: ActivePresetSchema,
+    *,
+    module: SlicerDetectionModule | None = None,
 ) -> dict[str, tuple[Any, ...]] | None:
     try:
         payload = _load_json_with_checksum_footer(text)
@@ -237,6 +240,8 @@ def _parse_json_values(
         return None
     if not isinstance(payload, Mapping):
         return None
+    if module is not None:
+        payload = module.active_preset_payload(payload)
     normalized = {str(key).casefold(): value for key, value in payload.items()}
     nested_presets = normalized.get("presets")
     if isinstance(nested_presets, Mapping):

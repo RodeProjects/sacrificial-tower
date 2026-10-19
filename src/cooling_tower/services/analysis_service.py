@@ -17,6 +17,12 @@ from cooling_tower.gcode.block_cache import (
 from cooling_tower.gcode.layer_detector import LayerAnalysis, LayerDetector
 from cooling_tower.gcode.metadata_parser import GCodeMetadataCollector
 from cooling_tower.gcode.slicer_layer_times import read_slicer_layer_times
+from cooling_tower.gcode.orca_timing import (
+    OrcaMachineStateTracker, OrcaMotionTimingPlanner, read_orca_timing_policy,
+)
+from cooling_tower.gcode.prusa_timing import (
+    PrusaMachineStateTracker, PrusaMotionTimingPlanner, read_prusa_timing_policy,
+)
 from cooling_tower.gcode.native_analysis import (
     NativeAnalysisCancelled,
     NativeAnalysisResult,
@@ -234,6 +240,8 @@ class GCodeAnalysisService:
         native_cache_before = native_timing_cache_info()
         bambu_timing = _uses_bambu_studio_timing(source)
         anycubic_slicer_next = _uses_anycubic_slicer_next(source)
+        orca_policy = read_orca_timing_policy(source)
+        prusa_policy = read_prusa_timing_policy(source)
         explicit_bambu_layers = _uses_bambu_studio_layer_markers(source)
         (
             preview_owner,
@@ -260,6 +268,8 @@ class GCodeAnalysisService:
                     maximum_preview_segments=maximum_preview_segments,
                     collect_infill=infill_owner is not None,
                     cancellation_callback=cancelled,
+                    **({"orca_policy": orca_policy} if orca_policy is not None else {}),
+                    **({"prusa_policy": prusa_policy} if prusa_policy is not None else {}),
                 )
             except NativeAnalysisCancelled as error:
                 raise AnalysisCancelled(str(error)) from error
@@ -328,6 +338,8 @@ class GCodeAnalysisService:
                 cancelled=cancelled,
                 line_observer=line_observer,
                 event_observers=event_observers,
+                orca_policy=orca_policy,
+                prusa_policy=prusa_policy,
             )
 
         if cancelled():
@@ -492,12 +504,19 @@ class GCodeAnalysisService:
         cancelled: CancellationCallback,
         line_observer: ParsedLineObserver | None,
         event_observers: tuple[AnalysisEventObserver, ...],
+        orca_policy=None,
+        prusa_policy=None,
     ) -> tuple[LayerAnalysis, GCodeMetadata, TimingEvidence]:
         """Run the unchanged reference semantics after a native fallback."""
-        tracker = MachineStateTracker(bambu_compatible=bambu_timing)
-        motion_planner = MotionTimingPlanner(
+        tracker = (OrcaMachineStateTracker(orca_policy) if orca_policy is not None
+                   else MachineStateTracker(bambu_compatible=bambu_timing))
+        motion_planner = OrcaMotionTimingPlanner() if orca_policy is not None else MotionTimingPlanner(
             bambu_compatible=bambu_timing
         )
+        if prusa_policy is not None:
+            contexts = {}
+            tracker = PrusaMachineStateTracker(prusa_policy, contexts)
+            motion_planner = PrusaMotionTimingPlanner(contexts)
         detector = LayerDetector(
             use_explicit_markers=explicit_bambu_layers
         )
@@ -507,11 +526,13 @@ class GCodeAnalysisService:
         processed_bytes = 0
         last_reported_percent = 0
         parsed_lines = iter_parsed_gcode_lines(source)
-        for parsed_line, event in self._exact_block_cache.iter_events(
-            parsed_lines,
-            tracker,
-            workload_bytes=workload_bytes,
-        ):
+        events = (
+            ((line, tracker.process_line(line)) for line in parsed_lines)
+            if orca_policy is not None or prusa_policy is not None else self._exact_block_cache.iter_events(
+                parsed_lines, tracker, workload_bytes=workload_bytes,
+            )
+        )
+        for parsed_line, event in events:
             if parsed_line.number % 256 == 0 and cancelled():
                 raise AnalysisCancelled("G-Code analysis was cancelled.")
             if line_observer is not None:

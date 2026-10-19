@@ -104,6 +104,7 @@ setup(
                 str(ROOT / "native" / "native_timing.cpp"),
                 str(ROOT / "native" / "native_analysis.cpp"),
             ],
+            depends=[str(path) for path in sorted((ROOT / "native").glob("*.hpp"))],
             include_dirs=(
                 [str(ROOT / "native")]
                 + VC_INCLUDE_DIRS

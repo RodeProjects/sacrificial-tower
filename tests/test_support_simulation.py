@@ -19,7 +19,7 @@ from cooling_tower.services import SourcePreSliceError, build_preslice_cache_key
 from cooling_tower.slicers import ProfileConfirmation, ProfileCatalog
 from cooling_tower.slicers.support_simulation import (
     can_offer_support_simulation, tower_support_warning_angle,
-    with_simulated_supports,
+    with_simulated_supports, simulated_support_settings,
 )
 from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.preview import PreviewExportResult, OutputMode
@@ -149,6 +149,92 @@ class SupportSimulationTests(unittest.TestCase):
         window.confirmed_profile_context = f.confirmation
         window._preslice_request_id = 12
         return window
+
+    def test_modular_support_style_policies_and_legacy_preservation(self):
+        profile = self.fixture.match.selected.effective_profile
+        for adapter_id, version, expected in (
+            ('orca_slicer', '2.4.2', {'enable_support':'1', 'support_type':'tree(auto)',
+                                   'support_style':'default', 'independent_support_layer_height':'0'}),
+            ('prusa_slicer', '2.9.6', {'support_material':'1', 'support_material_auto':'1',
+                                    'support_material_style':'organic'}),
+            ('prusa_slicer', '2.5.2', {'support_material':'1', 'support_material_auto':'1'}),
+            ('bambu_studio', '2.0', {'enable_support':'1'}),
+            ('anycubic_slicer_next', '1.3', {'enable_support':'1'}),
+        ):
+            with self.subTest(adapter=adapter_id, version=version):
+                changed = replace(profile, installation=replace(profile.installation,
+                                  adapter_id=adapter_id, version=version))
+                self.assertEqual(simulated_support_settings(changed), expected)
+                simulated = with_simulated_supports(changed)
+                self.assertEqual(simulated.effective_values, {**profile.effective_values, **expected})
+                self.assertFalse(changed.supports_simulated)
+
+    def recovery_window(self, adapter='orca_slicer', value='0', confirmed=True):
+        window = self.make_window()
+        self.addCleanup(window.close)
+        selected = window.profile_match_result.selected
+        key = 'support_material' if adapter == 'prusa_slicer' else 'enable_support'
+        values = {} if value is None else {key:value}
+        profile = replace(selected.effective_profile,
+            installation=replace(selected.effective_profile.installation,adapter_id=adapter,version='2.9.6'),
+            effective_values=values)
+        window.profile_match_result = replace(window.profile_match_result, user_confirmed=confirmed,
+                                             selected=replace(selected,effective_profile=profile))
+        window._refresh_phase17_actions()
+        return window
+
+    def test_first_layer_recovery_advice_is_conditional_and_does_not_parse_error_html(self):
+        for adapter,value,confirmed,offered in (
+            ('orca_slicer','0',True,True), ('prusa_slicer','0',True,True),
+            ('orca_slicer','1',True,False), ('orca_slicer',None,True,False),
+            ('orca_slicer','unknown',True,False), ('orca_slicer','0',False,False),
+            ('unsupported','0',True,False),
+        ):
+            with self.subTest(adapter=adapter,value=value,confirmed=confirmed):
+                window = self.recovery_window(adapter,value,confirmed)
+                message = 'Vorschau fehlgeschlagen: Erste Schicht ohne Auflagefläche <a href="bad">Fehler</a>'
+                window._set_main_status(message,state='error')
+                hint = window.source_support_recovery
+                self.assertEqual(not hint.isHidden(),offered)
+                self.assertIn('<b>Stützen für STL-Objekt simulieren</b>',hint.label.text())
+                self.assertNotIn('<a',hint.label.text())
+                self.assertEqual(window.status_label.text(),message)
+                if offered:
+                    window._set_main_status('Zeitlimit überschritten',state='error')
+                    self.assertTrue(hint.isHidden())
+                    window._set_main_status('Erste Schicht wird geprüft',state='running')
+                    self.assertTrue(hint.isHidden())
+
+    def test_recovery_button_activates_existing_option_and_rechecks_changed_profile(self):
+        window = self.recovery_window('prusa_slicer')
+        window._set_main_status('Erste Schicht hat keine Auflagefläche',state='error')
+        with patch.object(window,'_invalidate_preview') as invalidate:
+            window.source_support_recovery.button.click()
+            self.assertTrue(window.simulate_source_supports_checkbox.isChecked())
+            invalidate.assert_called_once()
+        self.assertTrue(window.source_support_recovery.isHidden())
+        window.simulate_source_supports_checkbox.setChecked(False)
+        window.profile_match_result = replace(window.profile_match_result,user_confirmed=False)
+        window.source_support_recovery.button.click()
+        self.assertFalse(window.simulate_source_supports_checkbox.isChecked())
+
+    def test_manual_recovery_and_running_job_guard(self):
+        window = self.recovery_window()
+        controller = window.manual_controller
+        controller.panel.status_label.setText('Neuer manueller Lauf fehlgeschlagen: Erste Schicht ohne Auflagefläche')
+        window._refresh_support_recovery()
+        hint = controller.support_recovery
+        self.assertFalse(hint.isHidden())
+        with patch.object(window.background_job_manager,'has_active',return_value=True):
+            window._refresh_support_recovery()
+            self.assertFalse(hint.button.isEnabled())
+            window._activate_source_support_recovery(manual=True)
+            self.assertFalse(controller.panel.source_supports_checkbox.isChecked())
+        window._refresh_support_recovery()
+        hint.button.click()
+        self.assertTrue(controller.panel.source_supports_checkbox.isChecked())
+        self.assertFalse(window.simulate_source_supports_checkbox.isChecked())
+        self.assertTrue(hint.isHidden())
 
     def test_angle_warning_appears_at_threshold_and_respects_override(self):
         window = self.make_window()

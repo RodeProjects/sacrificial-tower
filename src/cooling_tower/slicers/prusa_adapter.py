@@ -53,6 +53,8 @@ class PrusaSlicerAdapter(BaseSlicerAdapter):
     executable_names = ("prusa-slicer.exe", "PrusaSlicer.exe")
     product_markers = ("PrusaSlicer", "Prusa Slicer")
     capabilities = PRUSA_CAPABILITIES
+    supports_joint_project = True
+    prefer_native_joint_project = True
 
     def __init__(
         self,
@@ -180,6 +182,8 @@ class PrusaSlicerAdapter(BaseSlicerAdapter):
         output_directory: Path,
         working_root: Path,
     ) -> tuple[Path, tuple[str, ...]]:
+        self.validate_output_directory(request.profile, working_root)
+        self.validate_output_directory(request.profile, output_directory)
         if (
             request.profile.machine is None
             or request.profile.process is None
@@ -236,14 +240,32 @@ class PrusaSlicerAdapter(BaseSlicerAdapter):
             lines.append(f"{key} = {rendered}")
         temporary_config.write_text("\n".join(lines) + "\n", encoding="utf-8")
         output_path = output_directory / f"{model_path.stem}.gcode"
+        native_project = request.preserve_model_positions and model_path.suffix.casefold() == ".3mf"
         return request.profile.installation.executable_path, (
-            "--load",
-            str(temporary_config),
+            *(("--load", str(temporary_config)) if not native_project else ()),
+            "--datadir", str(working_root / "prusa_data"),
+            *(("--dont-arrange",) if request.preserve_model_positions else ()),
+            *(("--center", ",".join(str(value) for value in request.placement_xy_mm))
+              if request.placement_xy_mm is not None and not request.preserve_model_positions else ()),
             "--export-gcode",
             "--output",
             str(output_path),
             str(model_path),
         )
+
+    def validate_output_directory(self, profile: EffectiveProfile, destination) -> None:
+        from cooling_tower.write_policy import ensure_writable_output
+        roots = {profile.installation.executable_path.parent, *profile.installation.profile_roots}
+        for root in profile.installation.profile_roots:
+            if root.name.casefold() in {"printer", "print", "filament", "vendor"}:
+                roots.add(root.parent)
+        ensure_writable_output(destination, protected_roots=roots, protected_files=profile.source_paths)
+
+    def create_joint_project(self, request, source_model_path, tower_model_path,
+                             destination, **options):
+        from cooling_tower.slicers.prusa_joint_project import build_prusa_joint_project
+        return build_prusa_joint_project(self, request, source_model_path, tower_model_path,
+                                         destination, **options)
 
     def finalize_slice(
         self,
