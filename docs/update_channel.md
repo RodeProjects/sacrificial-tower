@@ -67,15 +67,34 @@ und gibt ausschließlich den öffentlichen Anteil aus.
 
 ## Veröffentlichung einer neuen Version
 
-1. `APP_VERSION` in `src/cooling_tower/version.py` erhöhen.
-2. Änderungen vollständig testen, committen und auf `main` übernehmen.
-3. Den GitHub-Actions-Workflow `Tests` für exakt diesen `main`-Commit
-   erfolgreich abschließen lassen; für die unten beschriebene, ausdrücklich
-   freigegebene Zeitlimit-Ausnahme gilt der lokale Kompletttest.
-4. Veröffentlichungsart wählen und das Skript im normalen
-   Windows-Benutzerkontext ausführen:
+1. `APP_VERSION` in `src/cooling_tower/version.py` für die logische Änderung erhöhen.
+2. Den freigegebenen Release-Commit auf einem `codex/`-Prüfbranch bereitstellen
+   und einen PR nach `main` als Entwurf anlegen, mit `ci:hosted-release` markieren
+   und anschließend bereit markieren.
+   Den zentralen `Complete-CheckedPush.ps1` mit `-HostedFirst`, PR-Nummer und
+   exakter SHA ausführen. Er prüft zuerst auf GitHub-Hardware und bei Fehlschlag
+   automatisch einmal auf dem lokalen offiziellen Runner. Erst nach Erfolg
+   übernimmt er denselben Commit unmittelbar nach `main`. Normale Pushes lassen
+   Label und Schalter weg und verwenden ausschließlich lokale offizielle Actions.
+3. Den dadurch gestarteten `Tests`-Lauf für exakt diesen `main`-Commit erfolgreich
+   abschließen lassen. Zwischen Prüfung und Veröffentlichung darf `main` nicht wechseln.
+4. Veröffentlichungsart wählen und das Skript im normalen Windows-Benutzerkontext
+   mit PowerShell 7 ausführen:
    - Regulär kostenlos freigegeben: `scripts/publish_update.ps1`
    - Kostenlose Entwicklungsversion: `scripts/publish_update.ps1 -DevelopmentRelease`
+
+Das Veröffentlichungsskript verwendet den zentralen `Invoke-ReleaseWorkflow.ps1`
+unter `D:\Entwicklung Software\_Tools\github_actions_runner` (bei anderem Standort
+`-RunnerToolsRoot` übergeben). Vollständige Tests und anschließend Installer-Build
+laufen jeweils zuerst mit `github_hosted=true`. Bei `failure`, `timed_out`,
+`startup_failure` oder eindeutigem Kontingent-/Abrechnungslimit startet derselbe
+Workflow ohne Rückfrage genau einmal lokal mit `github_hosted=false` auf derselben
+SHA. Auch eine unbekannte Fehlerursache löst diesen Rückfall aus. Der ursprüngliche
+Fehler bleibt sichtbar; der Ersatzlauf ist als alternative Freigabe dokumentiert.
+Ein lokaler Fehler blockiert die Veröffentlichung. Absichtliche Abbrüche, geänderte
+Refs oder unklare Dispatch-Antworten ohne Lauf-ID führen nicht zu blinden Neustarts.
+Die Prüfergebnisse beider Versuche liegen im zentralen `state/release-runs/`.
+Es gibt keine zusätzliche eigene lokale Testsuite vor dem Push.
 
 Nach einem durch das CI-Zeitlimit abgebrochenen `Tests`-Lauf kann ein
 ausdrücklich freigegebenes Entwicklungsrelease mit
@@ -116,6 +135,9 @@ wird diese CI-Prüfung übersprungen und der Grund im Workflow protokolliert.
 Die vollständige Testsuite wird deshalb nicht ein zweites Mal im
 Installer-Workflow ausgeführt. Die nativen Prozess-Stresstests bleiben
 zusätzlich im eigenständigen Workflow `Windows-Prozess-Stresstests` isoliert.
+Dieser Workflow läuft nur manuell; die wöchentliche Automatik entfällt.
+Standardmäßig führt der offizielle selbst gehostete Runner die drei Seeds aus;
+mit dem manuellen Eingang `github_hosted=true` läuft die Matrix auf GitHub-Hardware.
 
 Schlägt die Veröffentlichung des Manifests nach dem Erstellen des Releases
 fehl, entfernt das Skript das unvollständige Release wieder. Es verwendet nur

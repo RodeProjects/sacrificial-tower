@@ -88,6 +88,17 @@ class CiChangeClassifierTests(unittest.TestCase):
 
         self.assertFalse(full_tests_required)
 
+    def test_static_patch_increment_accepts_crlf_without_global_git_config(self) -> None:
+        self._git("config", "core.autocrlf", "false")
+        path = self.repository / "src/cooling_tower/version.py"
+        path.write_bytes(self._version_content("0.6.9").replace("\n", "\r\n").encode("utf-8"))
+        self._git("add", "--all")
+        self._git("commit", "--allow-empty", "-m", "CRLF-Basis")
+        self.base = self._git("rev-parse", "HEAD")
+        path.write_bytes(self._version_content("0.6.10").replace("\n", "\r\n").encode("utf-8"))
+        full_tests_required, reason = self._classify_head()
+        self.assertFalse(full_tests_required, reason)
+
     def test_rules_documentation_and_static_patch_increment_are_administrative(
         self,
     ) -> None:
@@ -203,6 +214,12 @@ class WorkflowDefinitionTests(unittest.TestCase):
         )
 
         self.assertIn("classify:\n", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("github_hosted:", workflow)
+        self.assertIn("expected_sha:", workflow)
+        self.assertIn("'ci:hosted-release'", workflow)
+        self.assertIn("github.event_name != 'workflow_dispatch'", workflow)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", workflow)
         self.assertIn("fetch-depth: 0", workflow)
         self.assertIn("scripts/classify_ci_changes.py", workflow)
         self.assertIn("gate-files-changed == 'true'", workflow)
@@ -216,7 +233,11 @@ class WorkflowDefinitionTests(unittest.TestCase):
         self.assertIn(
             "needs.classify.outputs.full-tests-required != 'false'", workflow
         )
-        self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("runs-on: [self-hosted, Windows, X64, rodeprojects-local]", workflow)
+        self.assertIn("fromJSON(inputs.github_hosted", workflow)
+        self.assertIn('["windows-latest"]', workflow)
+        self.assertIn("python -m venv .ci-venv", workflow)
+        self.assertIn("persist-credentials: false", workflow)
         self.assertIn('python-version: "3.13"', workflow)
         self.assertIn("python -m pip install --require-hashes -r requirements-windows.lock", workflow)
         self.assertIn("python setup_native.py build_ext --inplace", workflow)

@@ -29,7 +29,7 @@ ROOT_DOCUMENTATION = {
 VERSION_ASSIGNMENT = re.compile(
     r"^(?P<prefix>APP_VERSION[ \t]*=[ \t]*)"
     r"(?P<quote>['\"])(?P<version>[0-9]+\.[0-9]+\.[0-9]+)(?P=quote)"
-    r"(?P<trailing>[ \t]*)$",
+    r"(?P<trailing>[ \t]*\r?)$",
     re.MULTILINE,
 )
 

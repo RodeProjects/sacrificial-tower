@@ -2,7 +2,8 @@ param(
     [string]$SourceRepository = "RodeProjects/sacrificial-tower",
     [string]$UpdateRepository = "RodeProjects/sacrificial-tower-updates",
     [switch]$DevelopmentRelease,
-    [switch]$AllowTimedOutCI
+    [switch]$AllowTimedOutCI,
+    [string]$RunnerToolsRoot = (Join-Path $PSScriptRoot '..\..\_Tools\github_actions_runner')
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,36 +80,29 @@ if ($localCommit -ne $remoteCommit) {
     throw "Der lokale Commit entspricht nicht dem veröffentlichten main-Branch."
 }
 
-& $gh workflow run build-update.yml `
-    --repo $SourceRepository `
-    --ref main `
-    -f "version=$version" `
-    -f "release_kind=$releaseKind" `
-    -f "allow_timed_out_ci=$($AllowTimedOutCI.IsPresent.ToString().ToLowerInvariant())"
-Assert-NativeSuccess "Das Starten des Build-Workflows"
-
-$run = $null
-for ($attempt = 0; $attempt -lt 20 -and $null -eq $run; $attempt++) {
-    Start-Sleep -Seconds 2
-    $runsJson = & $gh run list `
-        --repo $SourceRepository `
-        --workflow build-update.yml `
-        --event workflow_dispatch `
-        --limit 10 `
-        --json databaseId,headSha,createdAt
-    Assert-NativeSuccess "Das Lesen der Build-Workflow-Läufe"
-    $runs = $runsJson | ConvertFrom-Json
-    $run = $runs |
-        Where-Object { $_.headSha -eq $localCommit } |
-        Sort-Object createdAt -Descending |
-        Select-Object -First 1
+$releaseWorkflowHelper = Join-Path $RunnerToolsRoot 'scripts\Invoke-ReleaseWorkflow.ps1'
+if (-not (Test-Path -LiteralPath $releaseWorkflowHelper -PathType Leaf)) {
+    throw "Der zentrale offizielle Runner-Releasehelfer fehlt: $releaseWorkflowHelper"
 }
-if ($null -eq $run) {
-    throw "Der gestartete Build-Workflow wurde nicht gefunden."
+if (-not $AllowTimedOutCI) {
+    $releaseTests = & $releaseWorkflowHelper `
+        -Repository $SourceRepository -Workflow 'tests.yml' `
+        -Ref main -ExpectedSha $localCommit
+    if ($releaseTests.conclusion -ne 'success' -or $releaseTests.headSha -ne $localCommit) {
+        throw 'Die vollständige Releaseprüfung bestätigt den Release-Commit nicht.'
+    }
 }
-
-& $gh run watch $run.databaseId --repo $SourceRepository --compact --exit-status --interval 15
-Assert-NativeSuccess "Der Build-Workflow"
+$run = & $releaseWorkflowHelper `
+    -Repository $SourceRepository -Workflow 'build-update.yml' `
+    -Ref main -ExpectedSha $localCommit `
+    -Inputs @{
+        version = $version
+        release_kind = $releaseKind
+        allow_timed_out_ci = $AllowTimedOutCI.IsPresent
+    }
+if ($run.conclusion -ne 'success' -or $run.headSha -ne $localCommit) {
+    throw 'Der Build-Workflow bestätigt den Release-Commit nicht.'
+}
 
 $temporaryRoot = Join-Path (
     [System.IO.Path]::GetTempPath()

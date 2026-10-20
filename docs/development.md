@@ -52,9 +52,12 @@ Bezeichnung passende Tests im gleichen Fachbereich wählen. Beispiel:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-Die Vollsuite ist nach übergreifenden Änderungen und vor einem ausführungsrelevanten
-Push nach `main` erforderlich. Die Regeln zur vorherigen/nachfolgenden CI-Prüfung
-stehen in `AGENTS.md`. Externe Slicer und Installer-Tests besitzen eigene Voraussetzungen;
+Die Vollsuite läuft nach ausführungsrelevanten Pushes in GitHub Actions auf dem
+offiziellen selbst gehosteten Runner. Eine zusätzliche lokale Vollprüfung oder
+die frühere eigene CI-Nachbildung ist vor einem Push nicht erforderlich.
+Gezielte Tests während der Entwicklung bleiben möglich. Die Push- und
+Release-Regeln stehen in `AGENTS.md`.
+Externe Slicer und Installer-Tests besitzen eigene Voraussetzungen;
 ein übersprungener Test ersetzt keine echte Integrationsabnahme. Vorhandene
 Windows-Stressskripte und CI separat für Thread-/Prozessänderungen verwenden.
 
@@ -88,6 +91,50 @@ GUI-Fixtures müssen ihre eigenen Fenster nach dem Test auch nativ freigeben:
 und verarbeitet ausschließlich dessen verzögerte Qt-Löschung. Ein bloßes
 `close()` versteckt das Fenster, lässt aber seine Qt-Objekte im gemeinsamen
 Testprozess bestehen. Andere, noch verwendete Testwidgets bleiben erhalten.
+
+## Offizieller selbst gehosteter GitHub-Runner
+
+Die zentrale Installation liegt unter
+`D:\Entwicklung Software\_Tools\github_actions_runner`. GitHub Actions führt
+normale Prüfjobs mit den Labels `self-hosted`, `Windows`, `X64` und
+`rodeprojects-local` auf eigener Hardware aus. Auch der Klassifizierungsjob
+verwendet diese Hardware. Actions werden unverändert durch den offiziellen
+Runner verarbeitet; eine eigene Workflow-Nachbildung wird nicht mehr verwendet.
+Es gibt keine `.local-ci.json` und keinen zusätzlichen lokalen Push-Prüflauf.
+
+Für **jeden normalen Push** zuerst einen `codex/`-Prüfbranch mit Pull Request
+nach `main` verwenden. Alle normalen PR-Jobs laufen ausschließlich lokal auf dem
+offiziellen Runner. Nach erfolgreicher Prüfung übernimmt der zentrale Helfer
+denselben Commit automatisch per SSH-Fast-Forward nach `main`, ohne zweite
+Freigabe. Änderungen an Commit oder Basis verhindern die Übernahme und erfordern
+erneute Prüfung. Anschließend auch den gestarteten `main`-Lauf beobachten.
+Der konservative Klassifikator darf nur sicher administrative Änderungen von der
+Vollsuite ausnehmen; fehlende oder vollständig übersprungene Prüfungen genügen nicht.
+
+```powershell
+& 'D:\Entwicklung Software\_Tools\github_actions_runner\runtime\pwsh\pwsh.exe' -NoProfile -File `
+  'D:\Entwicklung Software\_Tools\github_actions_runner\scripts\Complete-CheckedPush.ps1' `
+  -RepositoryPath '<sauberer Prüfbranch-Arbeitsordner>' `
+  -Repository RodeProjects/sacrificial-tower -PullRequest <Nummer> -ExpectedSha <Commit-SHA>
+```
+
+Nur für Release-Pushes dieses Projekts gilt `-HostedFirst` mit dem vor der Bereitmarkierung
+gesetzten PR-Label `ci:hosted-release`. Dann prüft der zentrale Helfer
+den Prüfbranch zuerst vollständig auf GitHub-Hardware, bei Fehlschlag einmal
+vollständig auf dem lokalen offiziellen Runner. Ohne diese Projektregel bleibt
+auch für Releases anderer Projekte lokale Ausführung der Standard.
+Details zur Veröffentlichung und zum automatischen Rückfall: [Update-Kanal](update_channel.md).
+
+Jeder Testjob erstellt eine neue `.ci-venv`. Zentrale Runner-Hooks richten private
+Profil-/Tempverzeichnisse ein und sperren Jobs aus fremden Forks. Der Runner
+bleibt ein Prozess auf dem eigenen Windows-Host und ist keine Sicherheits-VM.
+Bei offline geschaltetem Rechner warten lokale Jobs; es gibt keinen automatischen
+Wechsel auf kostenpflichtige gehostete Runner. Der bisherige wöchentliche
+gehostete Stresslauf bleibt deaktiviert; bei Prozess-/Threadänderungen die
+Stressmatrix gezielt auf der gepushten SHA starten.
+
+Autostart, weitere Repository-Registrierungen, Status, Wartung und Grenzen:
+[Runner-Dokumentation](../../_Tools/github_actions_runner/README.md).
 
 ## Native Erweiterung und Windows-Paket
 
