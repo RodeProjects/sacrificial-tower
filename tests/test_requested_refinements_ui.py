@@ -159,6 +159,7 @@ class RequestedRefinementsUiTests(unittest.TestCase):
             remove_rule = re.search(
                 r"QPushButton#removeSourceButton\s*,\s*"
                 r"QPushButton#supportSimulationCancelButton\s*,\s*"
+                r"QPushButton#emptyLayerContinueWithoutSupportsButton\s*,\s*"
                 r"QPushButton#presliceCancelButton\s*,\s*"
                 r"QPushButton#updateCancelButton\s*,\s*"
                 r"QPushButton#updateRestartCancelButton\s*\{([^}]*)\}",
