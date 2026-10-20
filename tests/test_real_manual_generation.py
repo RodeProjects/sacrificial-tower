@@ -8,12 +8,13 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject,Slot
 from PySide6.QtGui import QFont,QFontDatabase
-from cooling_tower.slicers import (BambuStudioAdapter,AnycubicSlicerNextAdapter,SlicerCandidate,SlicerDiscoverySource,
+from cooling_tower.slicers import (BambuStudioAdapter,AnycubicSlicerNextAdapter,
                                   ProfileMatchingService,ProfileMatchingContext,ProfileInventoryService,ProfileMappingStore,ProfileConfirmation)
 from cooling_tower.services import GCodeAnalysisService,StlValidationService,SourcePreSliceService
 from cooling_tower.models import GenerationSettings,CalibrationConfig
@@ -25,6 +26,7 @@ from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.gui.background_jobs import BackgroundJobManager,JobKind
 from cooling_tower.gui.manual_worker import ManualWorker
 from cooling_tower.file_integrity import sha256_file
+from slicer_acceptance_support import require_slicer_installation
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -60,25 +62,24 @@ class RealManualGenerationTests(unittest.TestCase):
         QFontDatabase.addApplicationFont(r"C:\Windows\Fonts\seguisym.ttf")
         cls.app.setFont(QFont("Segoe UI",10))
 
-    def run_isolated_adapter(self,adapter,executable,name,test_name):
+    def run_isolated_adapter(self,adapter,name,test_name):
         """Give each installed product a fresh Python/Qt process; never retry."""
-        if not executable.is_file():self.skipTest(f"Installed slicer unavailable: {executable}")
+        installation=require_slicer_installation(adapter)
         if os.environ.get("COOLING_TOWER_MANUAL_ACCEPTANCE_CHILD")==name:
-            return self.run_adapter(adapter,executable,name)
+            return self.run_adapter(adapter,installation,name)
         environment=dict(os.environ,COOLING_TOWER_MANUAL_ACCEPTANCE_CHILD=name,PYTHONIOENCODING="utf-8")
         outcome=subprocess.run((sys.executable,str(Path(__file__).resolve()),f"RealManualGenerationTests.{test_name}","-q"),
                                cwd=ROOT,env=environment,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=420)
         print(outcome.stdout,flush=True)
         self.assertEqual(outcome.returncode,0,outcome.stderr+outcome.stdout[-5000:])
 
-    def run_adapter(self,adapter,executable,name):
-        if not executable.is_file():self.skipTest(f"Installed slicer unavailable: {executable}")
+    def run_adapter(self,adapter,installation,name):
+        executable=installation.executable_path
         root=ROOT/".tmp"/f"manual_acceptance_{name}"
         root.mkdir(parents=True,exist_ok=True)
         source=ROOT/"input"/"Test-STL (manifold).stl"
         validation=StlValidationService().validate(source)
         self.assertTrue(validation.valid,validation.technical_summary)
-        installation=adapter.verify_installation(SlicerCandidate(executable,SlicerDiscoverySource.KNOWN_PATH,adapter_hint=adapter.adapter_id))
         matching=ProfileMatchingService(inventory_service=ProfileInventoryService(root/"inventory.json"),mapping_store=ProfileMappingStore(root/"mappings.json"))
         match=matching.match(ProfileMatchingContext.from_stl(validation.source_artifact),installation,adapter,force_inventory=True)
         self.assertIsNotNone(match.selected,match.message)
@@ -194,10 +195,10 @@ class RealManualGenerationTests(unittest.TestCase):
         print(json.dumps(record),flush=True)
 
     def test_bambu_fixed_joint_form(self):
-        self.run_isolated_adapter(BambuStudioAdapter(),Path(r"C:\Program Files\Bambu Studio\bambu-studio.exe"),"bambu",self._testMethodName)
+        self.run_isolated_adapter(BambuStudioAdapter(),"bambu",self._testMethodName)
 
     def test_anycubic_fixed_joint_form(self):
-        self.run_isolated_adapter(AnycubicSlicerNextAdapter(),Path(r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"),"anycubic",self._testMethodName)
+        self.run_isolated_adapter(AnycubicSlicerNextAdapter(),"anycubic",self._testMethodName)
 
 
 if __name__=="__main__":unittest.main()

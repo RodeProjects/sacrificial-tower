@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cooling_tower.slicers import (
     EffectiveProfile,
@@ -27,6 +28,10 @@ from cooling_tower.slicers import (
 )
 from cooling_tower.slicers.detection.prusa_slicer import (
     PrusaSlicerDetectionModule,
+)
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
 )
 from cooling_tower.slicers.prusa_profile_catalog import PrusaProfileCatalog
 
@@ -421,34 +426,26 @@ class InstalledPrusaIntegrationTests(unittest.TestCase):
         )
         from cooling_tower.slicers.prusa_profile_catalog import PrusaProfileCatalog
 
-        executable = Path(
-            r"C:\Program Files\Prusa3D\PrusaSlicer\prusa-slicer.exe"
-        )
-        self.assertTrue(executable.is_file())
         adapter = PrusaSlicerAdapter(runner=SecureSlicerProcessRunner())
-        installation = adapter.verify_installation(executable)
+        installation = require_slicer_installation(adapter)
+        executable = installation.executable_path
         build_root = PROJECT_ROOT / "build"
         build_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=build_root) as temporary:
             root = Path(temporary)
             adapter._profile_catalog = PrusaProfileCatalog()
-            inventory = adapter.discover_profiles(installation)
-            user_records = [item for item in inventory if item.source == "user"]
-            names = {item.name for item in user_records}
-            self.assertIn(
-                "Original Prusa MK4S HF0.4 nozzle - Eigenes Maschinenprofil",
-                names,
+            selected_records = require_profile_records(
+                self,
+                test_key="prusa_confirmation_preslice",
+                adapter=adapter,
+                installation=installation,
+                roles=("machine", "process", "filament"),
+                expected_sources={
+                    "machine": "user",
+                    "process": "user",
+                    "filament": "user",
+                },
             )
-            self.assertIn("Eigenes Prozessprofil 1", names)
-            self.assertIn("Eigenes Filament 2", names)
-            selected = {item.name: item for item in user_records}
-            selected_records = {
-                "machine": selected[
-                    "Original Prusa MK4S HF0.4 nozzle - Eigenes Maschinenprofil"
-                ],
-                "process": selected["Eigenes Prozessprofil 1"],
-                "filament": selected["Eigenes Filament 2"],
-            }
             references = {
                 role: ProfileSelectionReference(record.profile_id, record.path)
                 for role, record in selected_records.items()

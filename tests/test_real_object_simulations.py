@@ -7,16 +7,17 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_real_manual_generation as acceptance
+from slicer_acceptance_support import require_slicer_installation
 from cooling_tower.calibration.joint_project import validate_joint_project
 from cooling_tower.preview.joint_source_toolpath import analyze_joint_source_toolpaths
 
 
 @unittest.skipUnless(os.environ.get("COOLING_TOWER_RUN_REAL_SLICER_TESTS") == "1", "Installed slicer acceptance is opt-in.")
 class RealObjectSimulationTests(unittest.TestCase):
-    def run_adapter(self, adapter, executable, name):
-        if not executable.is_file():
-            self.skipTest(f"Installed slicer unavailable: {executable}")
+    def run_adapter(self, adapter, name):
+        installation = require_slicer_installation(adapter)
         if os.environ.get("COOLING_TOWER_SIMULATION_CHILD") != name:
             environment = dict(os.environ, COOLING_TOWER_SIMULATION_CHILD=name,
                                COOLING_TOWER_MANUAL_ACCEPTANCE_CHILD=name, PYTHONIOENCODING="utf-8")
@@ -64,14 +65,14 @@ class RealObjectSimulationTests(unittest.TestCase):
 
         with patch.object(acceptance, "ManualRequest", side_effect=request), \
              patch.object(acceptance.ManualExportService, "export", new=export):
-            harness.run_adapter(adapter, executable, name + "_simulations")
+            harness.run_adapter(adapter, installation, name + "_simulations")
         self.assertEqual(len(exports), 1)
 
     def test_bambu_object_supports_and_full_tower_infill(self):
-        self.run_adapter(acceptance.BambuStudioAdapter(), Path(r"C:\Program Files\Bambu Studio\bambu-studio.exe"), "bambu")
+        self.run_adapter(acceptance.BambuStudioAdapter(), "bambu")
 
     def test_anycubic_object_supports_and_full_tower_infill(self):
-        self.run_adapter(acceptance.AnycubicSlicerNextAdapter(), Path(r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"), "anycubic")
+        self.run_adapter(acceptance.AnycubicSlicerNextAdapter(), "anycubic")
 
 
 if __name__ == "__main__":

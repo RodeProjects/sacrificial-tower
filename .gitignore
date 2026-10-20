@@ -66,3 +66,4 @@ config/user_settings.json
 config/profile_inventory_cache.json
 config/profile_mappings.json
 config/slicer_settings.json
+tests/slicer_acceptance.local.json

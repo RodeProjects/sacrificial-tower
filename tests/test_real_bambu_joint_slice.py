@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cooling_tower.calibration import (
     CalibrationService,
@@ -50,11 +52,10 @@ from cooling_tower.slicers import (
     ProfileMatchingService,
     ProfileRole,
     SliceRequest,
-    SlicerCandidate,
-    SlicerDiscoverySource,
     protect_profile_sources,
 )
 from cooling_tower.slicers.process import SecureSlicerProcessRunner
+from slicer_acceptance_support import require_slicer_installation
 
 
 @unittest.skipUnless(
@@ -63,21 +64,11 @@ from cooling_tower.slicers.process import SecureSlicerProcessRunner
 )
 class RealBambuJointSliceTests(unittest.TestCase):
     def test_joint_slice_preserves_slowdowns_and_profile_sources(self) -> None:
-        executable = Path(
-            r"C:\Program Files\Bambu Studio\bambu-studio.exe"
-        )
         source = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
-        self.assertTrue(executable.is_file(), executable)
         self.assertTrue(source.is_file(), source)
 
         adapter = BambuStudioAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
+        installation = require_slicer_installation(adapter)
         validation = StlValidationService().validate(source)
         self.assertTrue(validation.valid, validation.technical_summary)
 
@@ -339,18 +330,10 @@ class RealBambuJointSliceTests(unittest.TestCase):
     def _verify_real_joint_candidate(self, *, exclude_first_layers: bool = False) -> None:
         """Regress the stale-native-project Bambu timing failure end to end."""
 
-        executable = Path(r"C:\Program Files\Bambu Studio\bambu-studio.exe")
         source = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
-        self.assertTrue(executable.is_file(), executable)
         self.assertTrue(source.is_file(), source)
         adapter = BambuStudioAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
+        installation = require_slicer_installation(adapter)
         validation = StlValidationService().validate(source)
         self.assertTrue(validation.valid, validation.technical_summary)
         source_hash = hashlib.sha256(source.read_bytes()).digest()

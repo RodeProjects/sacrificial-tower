@@ -60,6 +60,8 @@ Release-Regeln stehen in `AGENTS.md`.
 Externe Slicer und Installer-Tests besitzen eigene Voraussetzungen;
 ein übersprungener Test ersetzt keine echte Integrationsabnahme. Vorhandene
 Windows-Stressskripte und CI separat für Thread-/Prozessänderungen verwenden.
+Die lokale Auswahl erkannter Slicer, Profile und Eingabedateien steht zentral in
+[den Slicer-Abnahmetests](slicer_acceptance_tests.md).
 
 `test_update_handoff_native.py` verwendet den vorhandenen Inno-Compiler aus
 `INNO_ROOT`, `build/tools/InnoSetup` oder `build/inno-portable/compiler`. Die

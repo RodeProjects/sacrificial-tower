@@ -158,7 +158,15 @@ class WindowsPackageGuiSafetyTests(_SlicerGuiFixture, unittest.TestCase):
 class InstalledStoreSlicerTests(unittest.TestCase):
     def test_registered_store_orca_is_detected_read_only(self):
         candidates = discover_windows_app_packages(default_adapters())
-        candidate = next(item for item in candidates if item.adapter_hint == "orca_slicer")
+        candidate = next(
+            (item for item in candidates if item.adapter_hint == "orca_slicer"),
+            None,
+        )
+        if candidate is None:
+            self.skipTest(
+                "Kein registrierter OrcaSlicer aus dem Microsoft Store gefunden; "
+                "Store-Slicer-Abnahme übersprungen."
+            )
         before = (candidate.executable_path.stat().st_size, candidate.executable_path.stat().st_mtime_ns)
         adapter = OrcaSlicerAdapter(runner=Mock())
         item = adapter.verify_installation(candidate)

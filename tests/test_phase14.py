@@ -18,6 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.main_window import MainWindow
@@ -51,6 +53,10 @@ from cooling_tower.slicers import (
     SlicerVerificationTimeoutError,
     StaticCandidateDiscovery,
     UnsupportedSlicerExecutableError,
+)
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
 )
 from cooling_tower.slicers.base import BaseSlicerAdapter
 from cooling_tower.slicers.errors import SlicerProcessError
@@ -1539,28 +1545,26 @@ class Phase14GuiTests(unittest.TestCase):
 )
 class Phase14RealAnycubicIntegrationTest(unittest.TestCase):
     def test_17_anycubic_base_profiles_slice_a_real_stl(self) -> None:
-        executable = Path(
-            r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"
+        adapter = AnycubicSlicerNextAdapter()
+        installation = require_slicer_installation(adapter)
+        executable = installation.executable_path
+        selected_profiles = require_profile_records(
+            self,
+            test_key="phase14_anycubic_base_slice",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "system",
+                "process": "system",
+                "filament": "system",
+            },
         )
-        profile_root = executable.parent / "resources" / "profiles" / "Anycubic"
-        machine_path = profile_root / "machine" / "Anycubic Kobra 3 V2 0.4 nozzle.json"
-        process_path = profile_root / "process" / "0.20mm Standard @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        filament_path = profile_root / "filament" / "Anycubic PLA @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        for path in (executable, machine_path, process_path, filament_path):
-            self.assertTrue(path.is_file(), path)
+        profile_paths = tuple(record.path for record in selected_profiles.values())
         profile_hashes_before = {
             path: hashlib.sha256(path.read_bytes()).digest()
-            for path in (machine_path, process_path, filament_path)
+            for path in profile_paths
         }
-
-        adapter = AnycubicSlicerNextAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
 
         def record(path: Path, kind: ProfileKind) -> ProfileRecord:
             return ProfileRecord(
@@ -1574,9 +1578,9 @@ class Phase14RealAnycubicIntegrationTest(unittest.TestCase):
 
         profile = EffectiveProfile(
             installation=installation,
-            machine=record(machine_path, ProfileKind.MACHINE),
-            process=record(process_path, ProfileKind.PROCESS),
-            filaments=(record(filament_path, ProfileKind.FILAMENT),),
+            machine=record(selected_profiles["machine"].path, ProfileKind.MACHINE),
+            process=record(selected_profiles["process"].path, ProfileKind.PROCESS),
+            filaments=(record(selected_profiles["filament"].path, ProfileKind.FILAMENT),),
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -1601,7 +1605,7 @@ class Phase14RealAnycubicIntegrationTest(unittest.TestCase):
             self.assertTrue(all(value > 0 for value in layer_times))
         profile_hashes_after = {
             path: hashlib.sha256(path.read_bytes()).digest()
-            for path in profile_hashes_before
+            for path in profile_paths
         }
         self.assertEqual(profile_hashes_after, profile_hashes_before)
 

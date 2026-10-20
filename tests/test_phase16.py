@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cooling_tower.calibration import (
     CalibrationService,
@@ -60,6 +62,10 @@ from cooling_tower.slicers import (
     SlicerSupportLevel,
     SlicerSourceMutationError,
     protect_profile_sources,
+)
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
 )
 from cooling_tower.tower.hollow_profile import build_hollow_tower_profile
 from cooling_tower.tower.profile import TowerProfileConfig, build_tower_radius_profile
@@ -2172,24 +2178,23 @@ class Phase16RealAnycubicTest(unittest.TestCase):
             protect_profile_sources,
         )
 
-        executable = Path(r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe")
-        system_root = executable.parent / "resources" / "profiles" / "Anycubic"
-        user_root = Path(os.environ["APPDATA"]) / "AnycubicSlicerNext" / "user" / "489681"
-        machine_path = system_root / "machine" / "Anycubic Kobra 3 V2 0.4 nozzle.json"
-        process_path = user_root / "process" / "High Quality (OwnSettings v4).json"
-        filament_path = user_root / "filament" / "PLA (201C° CalibrationSettings v2 - mit z-hop).json"
-        for path in (executable, machine_path, process_path, filament_path):
-            self.assertTrue(path.is_file(), path)
-        originals = (machine_path, process_path, filament_path)
+        adapter = AnycubicSlicerNextAdapter()
+        installation = require_slicer_installation(adapter)
+        selected_profiles = require_profile_records(
+            self,
+            test_key="phase16_sparse_user_profile",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "system",
+                "process": "user",
+                "filament": "user",
+            },
+        )
+        originals = tuple(record.path for record in selected_profiles.values())
         hashes = {path: hashlib.sha256(path.read_bytes()).digest() for path in originals}
         modified = {path: path.stat().st_mtime_ns for path in originals}
-        adapter = AnycubicSlicerNextAdapter()
-        installation = SlicerInstallation(
-            adapter.adapter_id, adapter.product_name, "1.4.1.2", executable, True,
-            adapter.capabilities, SlicerDiscoverySource.KNOWN_PATH,
-            family=adapter.family, support_level=SlicerSupportLevel.FULL,
-            profile_roots=(system_root, user_root), engine_path=executable,
-        )
 
         def record(path, kind):
             payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -2209,9 +2214,9 @@ class Phase16RealAnycubicTest(unittest.TestCase):
         profile = adapter.resolve_profile_bundle(
             ProfileCandidate(
                 installation,
-                machine=record(machine_path, ProfileKind.MACHINE),
-                process=record(process_path, ProfileKind.PROCESS),
-                filaments=(record(filament_path, ProfileKind.FILAMENT),),
+                machine=record(selected_profiles["machine"].path, ProfileKind.MACHINE),
+                process=record(selected_profiles["process"].path, ProfileKind.PROCESS),
+                filaments=(record(selected_profiles["filament"].path, ProfileKind.FILAMENT),),
             )
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -2327,29 +2332,30 @@ class Phase16RealAnycubicTest(unittest.TestCase):
     def test_real_anycubic_calibration_slice_preserves_profiles(self) -> None:
         from cooling_tower.slicers import AnycubicSlicerNextAdapter
 
-        executable = Path(r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe")
-        root = executable.parent / "resources" / "profiles" / "Anycubic"
-        machine_path = root / "machine" / "Anycubic Kobra 3 V2 0.4 nozzle.json"
-        process_path = root / "process" / "0.20mm Standard @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        filament_path = root / "filament" / "Anycubic PLA @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        for path in (executable, machine_path, process_path, filament_path):
-            self.assertTrue(path.is_file(), path)
-        hashes = {path: hashlib.sha256(path.read_bytes()).digest() for path in (machine_path, process_path, filament_path)}
         adapter = AnycubicSlicerNextAdapter()
-        installation = SlicerInstallation(
-            adapter.adapter_id, adapter.product_name, "1.4.1.2", executable, True,
-            adapter.capabilities, SlicerDiscoverySource.KNOWN_PATH,
-            family=adapter.family, support_level=SlicerSupportLevel.FULL,
-            profile_roots=(root,), engine_path=executable,
+        installation = require_slicer_installation(adapter)
+        selected_profiles = require_profile_records(
+            self,
+            test_key="phase16_system_profile_slice",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "system",
+                "process": "system",
+                "filament": "system",
+            },
         )
+        profile_paths = tuple(record.path for record in selected_profiles.values())
+        hashes = {path: hashlib.sha256(path.read_bytes()).digest() for path in profile_paths}
         def record(path, kind):
             return ProfileRecord(adapter.adapter_id, path.stem, path.stem, kind, path, "system")
         profile = adapter.resolve_profile_bundle(
             type("Candidate", (), {
                 "installation": installation,
-                "machine": record(machine_path, ProfileKind.MACHINE),
-                "process": record(process_path, ProfileKind.PROCESS),
-                "filaments": (record(filament_path, ProfileKind.FILAMENT),),
+                "machine": record(selected_profiles["machine"].path, ProfileKind.MACHINE),
+                "process": record(selected_profiles["process"].path, ProfileKind.PROCESS),
+                "filaments": (record(selected_profiles["filament"].path, ProfileKind.FILAMENT),),
                 "definitions": (),
             })()
         )
@@ -2380,7 +2386,7 @@ class Phase16RealAnycubicTest(unittest.TestCase):
             )
             self.assertTrue(result.stl_path.is_file())
         self.assertEqual(
-            {path: hashlib.sha256(path.read_bytes()).digest() for path in hashes}, hashes
+            {path: hashlib.sha256(path.read_bytes()).digest() for path in profile_paths}, hashes
         )
 
 if __name__ == "__main__":

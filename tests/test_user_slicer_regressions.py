@@ -12,6 +12,13 @@ from threading import Event
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src")]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
+    require_test_path,
+)
 
 
 @unittest.skipUnless(os.environ.get("COOLING_TOWER_RUN_USER_SLICER_REGRESSION") == "1",
@@ -27,13 +34,16 @@ class UserSlicerRegressionTests(unittest.TestCase):
         from test_manual_gui import restore_preview_test_application
         restore_preview_test_application(cls._app, cls._previous_font, cls._font_id)
 
-    @unittest.skipUnless(os.environ.get("COOLING_TOWER_ORCA_REFERENCE_GCODE"),
-                         "The G-Code re-sliced from the reported Orca project is opt-in.")
     def test_orca_reported_14_4_second_regression_and_native_total(self):
         from cooling_tower.services import GCodeAnalysisService
         from cooling_tower.file_integrity import sha256_file
 
-        path = Path(os.environ["COOLING_TOWER_ORCA_REFERENCE_GCODE"])
+        path = require_test_path(
+            self,
+            test_key="user_slicer_regressions",
+            adapter_id="orca_slicer",
+            field="reference_gcode",
+        )
         before = sha256_file(path)
         snapshot = GCodeAnalysisService().analyze(path, force=True)
         # The user's screenshot is the independent Orca viewer reference.
@@ -64,24 +74,19 @@ class UserSlicerRegressionTests(unittest.TestCase):
         from cooling_tower.preview import PreviewService, PreviewRequest, OutputMode, PreviewExportService
         from cooling_tower.gui.preview_dialog import PreviewDialog
 
-        source = Path(os.environ["COOLING_TOWER_REGRESSION_STL"]).resolve(strict=True)
+        source = require_test_path(
+            self,
+            test_key="user_slicer_regressions",
+            field="source_stl",
+        )
         build = ROOT / "build"
         build.mkdir(exist_ok=True)
         runner = SecureSlicerProcessRunner()
         if adapter_id == "prusa_slicer":
             adapter = PrusaSlicerAdapter(runner=runner)
-            executable = Path("C:/Program Files/Prusa3D/PrusaSlicer/prusa-slicer.exe")
-            names = ("Original Prusa MK4S HF0.4 nozzle - Eigenes Maschinenprofil",
-                     "Eigenes Prozessprofil 1", "Eigenes Filament 2")
         else:
-            from cooling_tower.slicers.windows_app_packages import discover_windows_app_packages
             adapter = OrcaSlicerAdapter(runner=runner)
-            installations = discover_windows_app_packages((adapter,)) or adapter.known_candidates()
-            self.assertTrue(installations)
-            executable = installations[0]
-            names = ("Anker M5 0.4 nozzle - Eigenes Maschinenprofil 1",
-                     "Eigenes Prozessprofil 2 (ohne Stützen)", "Eigenes Filamentprofil 2")
-        installation = adapter.verify_installation(executable)
+        installation = require_slicer_installation(adapter)
         original_paths = {installation.executable_path, source}
         active = read_active_presets(installation)
         if active.source_path:
@@ -100,9 +105,22 @@ class UserSlicerRegressionTests(unittest.TestCase):
             try:
                 validation = StlValidationService().validate(source)
                 self.assertTrue(validation.accepted, validation.technical_summary)
-                inventory = {p.name: p for p in adapter.discover_profiles(installation) if p.source == "user"}
-                references = {role: ProfileSelectionReference(inventory[name].profile_id, inventory[name].path)
-                              for role, name in zip(("machine", "process", "filament"), names)}
+                selected_profiles = require_profile_records(
+                    self,
+                    test_key="user_slicer_regressions",
+                    adapter=adapter,
+                    installation=installation,
+                    roles=("machine", "process", "filament"),
+                    expected_sources={
+                        "machine": "user",
+                        "process": "user",
+                        "filament": "user",
+                    },
+                )
+                references = {
+                    role: ProfileSelectionReference(record.profile_id, record.path)
+                    for role, record in selected_profiles.items()
+                }
                 matching = ProfileMatchingService(inventory_service=ProfileInventoryService(),
                                                   mapping_store=ProfileMappingStore(work / "mappings.json"))
                 match = matching.match(ProfileMatchingContext.from_stl(validation.source_artifact), installation,

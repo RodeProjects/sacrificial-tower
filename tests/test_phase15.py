@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -45,6 +47,7 @@ from cooling_tower.slicers import (
     StructuralProfileValidator,
     write_profile_match_report,
 )
+from slicer_acceptance_support import require_slicer_installation
 from cooling_tower.slicers.process import ProcessOutcome
 from cooling_tower.slicers.profile_inventory import ProfileInheritanceResolver
 
@@ -1563,20 +1566,10 @@ class Phase15RealTemporaryProbeTest(unittest.TestCase):
 )
 class Phase15RealAnycubicProfileTest(unittest.TestCase):
     def test_real_reference_configuration_is_profile_validated(self) -> None:
-        executable = Path(
-            r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"
-        )
         source_stl = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
-        self.assertTrue(executable.is_file(), executable)
         self.assertTrue(source_stl.is_file(), source_stl)
         adapter = AnycubicSlicerNextAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
+        installation = require_slicer_installation(adapter)
         context = ProfileMatchingContext.from_stl(
             SourceArtifact.capture(source_stl)
         )

@@ -8,9 +8,14 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cooling_tower.slicers import (
     OrcaSlicerAdapter, ProfileInventoryService, ProfileMatchingService,
     SliceRequest,
+)
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
 )
 
 @unittest.skipUnless(
@@ -25,13 +30,10 @@ class InstalledOrcaIntegrationTests(unittest.TestCase):
             ProfileMatchingContext, ProfileSelectionReference, SecureSlicerProcessRunner,
         )
         from cooling_tower.slicers.profile_safety import fingerprint_profile_paths
-        from cooling_tower.slicers.windows_app_packages import discover_windows_app_packages
         from cooling_tower.slicers import read_active_presets
 
         adapter = OrcaSlicerAdapter(runner=SecureSlicerProcessRunner())
-        candidates = discover_windows_app_packages((adapter,)) or adapter.known_candidates()
-        self.assertTrue(candidates)
-        installation = adapter.verify_installation(candidates[0])
+        installation = require_slicer_installation(adapter)
         paths = {p for root in installation.profile_roots for p in root.rglob("*") if p.is_file()}
         config_path = read_active_presets(installation).source_path
         self.assertIsNotNone(config_path)
@@ -43,10 +45,17 @@ class InstalledOrcaIntegrationTests(unittest.TestCase):
             with tempfile.TemporaryDirectory(dir=build_root) as temporary:
                 root = Path(temporary)
                 matching = ProfileMatchingService(inventory_service=ProfileInventoryService(), mapping_store=ProfileMappingStore(root / "mappings.json"))
-                choices = {record.name: record for record in adapter.discover_profiles(installation)}
-                machine = choices["Anker M5 0.4 nozzle - Eigenes Maschinenprofil 1"]
-                process = choices["Eigenes Prozessprofil 2 (ohne Stützen)"]
-                filament = choices["Generic PLA High Speed @System"]
+                selected = require_profile_records(
+                    self,
+                    test_key="orca_unselected_system_filament",
+                    adapter=adapter,
+                    installation=installation,
+                    roles=("machine", "process", "filament"),
+                    expected_sources={"filament": "system"},
+                )
+                machine = selected["machine"]
+                process = selected["process"]
+                filament = selected["filament"]
                 reference = ProfileSelectionReference(machine.profile_id, machine.path)
                 filtered = matching.catalog(installation, adapter, selected_machine=reference)
                 self.assertNotIn(filament.path, {r.path for r in filtered.filament_options})
@@ -104,34 +113,25 @@ class InstalledOrcaIntegrationTests(unittest.TestCase):
             ProfileSelectionReference,
             SecureSlicerProcessRunner,
         )
-        from cooling_tower.slicers.windows_app_packages import discover_windows_app_packages
-
         adapter = OrcaSlicerAdapter(runner=SecureSlicerProcessRunner())
-        candidates = discover_windows_app_packages((adapter,)) or adapter.known_candidates()
-        self.assertTrue(candidates, "An installed OrcaSlicer is required for this opt-in test.")
-        installation = adapter.verify_installation(candidates[0])
+        installation = require_slicer_installation(adapter)
         executable = installation.executable_path
         build_root = PROJECT_ROOT / "build"
         build_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=build_root) as temporary:
             root = Path(temporary)
-            inventory = adapter.discover_profiles(installation)
-            user_records = [item for item in inventory if item.source == "user"]
-            names = {item.name for item in user_records}
-            self.assertIn(
-                "Anker M5 0.4 nozzle - Eigenes Maschinenprofil 1",
-                names,
+            selected_records = require_profile_records(
+                self,
+                test_key="orca_confirmation_preslice",
+                adapter=adapter,
+                installation=installation,
+                roles=("machine", "process", "filament"),
+                expected_sources={
+                    "machine": "user",
+                    "process": "user",
+                    "filament": "user",
+                },
             )
-            self.assertIn("Eigenes Prozessprofil 2 (ohne Stützen)", names)
-            self.assertIn("Eigenes Filamentprofil 2", names)
-            selected = {item.name: item for item in user_records}
-            selected_records = {
-                "machine": selected[
-                    "Anker M5 0.4 nozzle - Eigenes Maschinenprofil 1"
-                ],
-                "process": selected["Eigenes Prozessprofil 2 (ohne Stützen)"],
-                "filament": selected["Eigenes Filamentprofil 2"],
-            }
             references = {
                 role: ProfileSelectionReference(record.profile_id, record.path)
                 for role, record in selected_records.items()
@@ -179,7 +179,7 @@ class InstalledOrcaIntegrationTests(unittest.TestCase):
                 enabled = set(saved["filaments"])
                 self.assertTrue(enabled, "This opt-in fixture expects enabled system materials.")
                 self.assertEqual({r.name for r in catalog.filament_options if r.source == "system"}, enabled)
-                self.assertIn("Eigenes Filamentprofil 2", {r.name for r in catalog.filament_options if r.source == "user"})
+                self.assertIn(references["filament"].path, {r.path for r in catalog.filament_options if r.source == "user"})
                 expanded = matching.catalog(installation, adapter, selected_machine=references["machine"], include_all_profiles=True)
                 expanded_system = {r.name for r in expanded.filament_options if r.source == "system"}
                 self.assertLess(enabled, expanded_system)

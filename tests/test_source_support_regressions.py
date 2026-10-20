@@ -1,17 +1,27 @@
-"""Opt-in real CLI checks for simulated supports on the user's full test STL."""
+"""Opt-in real CLI checks for simulated supports on the repository test STL."""
 from __future__ import annotations
 
 from dataclasses import replace
 import json
 import os
+import sys
 from pathlib import Path
 import unittest
 from xml.etree import ElementTree as ET
 import zipfile
 
+TESTS_ROOT = Path(__file__).resolve().parent
+if str(TESTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TESTS_ROOT))
+
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
+)
+
 
 @unittest.skipUnless(os.environ.get("COOLING_TOWER_RUN_SUPPORT_REGRESSION") == "1",
-                     "Real installed slicers and the user's full STL are opt-in")
+                     "Real installed slicers and the repository test STL are opt-in")
 class InstalledSourceSupportTests(unittest.TestCase):
     def exercise(self, identifier):
         from cooling_tower.slicers import (
@@ -29,19 +39,21 @@ class InstalledSourceSupportTests(unittest.TestCase):
         evidence = 'support-preslice-acceptance' if simulated_preslice else 'support-activation-acceptance'
         root = Path(__file__).resolve().parents[1] / 'build' / evidence / identifier
         root.mkdir(parents=True, exist_ok=True)
-        source = Path(os.environ.get("COOLING_TOWER_SUPPORT_STL", "C:/Users/Flo/Desktop/Test-STL (manifold).stl"))
-        if identifier == 'orca_slicer':
-            adapter = OrcaSlicerAdapter()
-            from cooling_tower.slicers.windows_app_packages import discover_windows_app_packages
-            executable = discover_windows_app_packages((adapter,))[0]
-            names = ('Anker M5 0.4 nozzle - Eigenes Maschinenprofil 1',
-                     'Eigenes Prozessprofil 2 (ohne Stützen)', 'Eigenes Filamentprofil 2')
-        else:
-            adapter = PrusaSlicerAdapter()
-            executable = Path('C:/Program Files/Prusa3D/PrusaSlicer/prusa-slicer.exe')
-            names = ('Original Prusa MK4S HF0.4 nozzle - Eigenes Maschinenprofil',
-                     'Eigenes Prozessprofil 2 (ohne Stützen)', 'Eigenes Filament 2')
-        installation = adapter.verify_installation(executable)
+        source = Path(__file__).resolve().parents[1] / "input" / "Test-STL (manifold).stl"
+        adapter = OrcaSlicerAdapter() if identifier == 'orca_slicer' else PrusaSlicerAdapter()
+        installation = require_slicer_installation(adapter)
+        selected_profiles = require_profile_records(
+            self,
+            test_key="source_support_regressions",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "user",
+                "process": "user",
+                "filament": "user",
+            },
+        )
         originals = {source, installation.executable_path}
         active = read_active_presets(installation)
         if active.source_path:
@@ -50,9 +62,12 @@ class InstalledSourceSupportTests(unittest.TestCase):
             originals.update(path for path in directory.rglob('*') if path.is_file())
         before = fingerprint_profile_paths(originals)
         try:
-            records = {r.name:r for r in adapter.discover_profiles(installation) if r.source == 'user'}
             profile = adapter.resolve_profile_bundle(ProfileCandidate(
-                installation, records[names[0]], records[names[1]], (records[names[2]],)))
+                installation,
+                selected_profiles["machine"],
+                selected_profiles["process"],
+                (selected_profiles["filament"],),
+            ))
             self.assertTrue(global_supports_disabled(profile))
             # Use the exact preview control path: source settings remain disabled
             # globally; only the source object in the shared project gets supports.

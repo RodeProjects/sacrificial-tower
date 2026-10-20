@@ -17,6 +17,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Manueller Béziereditor, Slicervoraussetzungen, feste Slicerprüfung, Zustände und Abnahme | [Manueller Editor](manual_editor.md) |
 | Direkte Vorschauaktionen sowie entfernte und verbleibende Einstellungen links | [Manuelle Bedienelemente](manual_controls_analysis.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
+| Konfiguration und Start optionaler Abnahmen mit installierten Slicern | [Slicer-Abnahmetests](slicer_acceptance_tests.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Kostenlose Nutzung, Source-Available-Lizenz, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
 | Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |

@@ -158,9 +158,11 @@ Er aktiviert die vorhandene Option, ohne automatisch eine Generierung zu starten
 Freie Slicerfehlermeldungen bleiben als Klartext getrennt vom festen HTML-Hinweis.
 
 Die reale Abnahme in `tests/test_source_support_regressions.py` wird mit
-`COOLING_TOWER_RUN_SUPPORT_REGRESSION=1` ausdrücklich eingeschaltet. Sie benötigt
-die benannten lokalen Testprofile und die vollständige Test-STL (optional über
-`COOLING_TOWER_SUPPORT_STL` angegeben). Sie prüft automatischen und manuellen
+`COOLING_TOWER_RUN_SUPPORT_REGRESSION=1` ausdrücklich eingeschaltet. Sie verwendet
+die vollständige Test-STL `input/Test-STL (manifold).stl` aus dem Repository
+und benötigt die benannten Testprofile in einer installierten Slicer-Umgebung.
+Der Dateipfad wird relativ zum Projektverzeichnis bestimmt und muss nach einem
+Klon nicht angepasst werden. Die Abnahme prüft automatischen und manuellen
 Prüfslice, die Quellobjekt-Metadaten im 3MF, erneutes Slicen des Exports,
 Layerzahl/Zeitübereinstimmung und unveränderte Slicerquelldateien.
 Standardmäßig beginnt dieser Test ohne Stützen im Vorslice und schaltet die
@@ -442,10 +444,14 @@ $env:COOLING_TOWER_RUN_REAL_SLICER_TESTS="1"
 python -m unittest tests.test_real_source_preslice.RealSourcePreSliceAnycubicTests -v
 ```
 
-Er verwendet eine deterministische, streng validierte Würfel-STL und die
-installierten Kobra-3-V2-/Standard-/PLA-Profile. Zusätzlich wird die
-bereitgestellte Manifold-Regressions-STL mit den in der Anycubic-GUI erzeugten
-Benutzerpresets vollständig über Profilmatching, Bestätigung, Pre-Slice,
-G-Code-Analyse und Metadatenabgleich geführt. Geprüft werden außerdem ein
-kontrollierter Referenzlauf, Cache-Wiederverwendung, Abbruch, Bereinigung sowie
-byteidentische Quelle und Profile.
+Er verwendet eine deterministische, streng validierte Würfel-STL. Die
+Systemprofile für den kontrollierten Referenzlauf und die lokal ausgewählten
+Benutzerprofile für die GUI-Regressionsfälle werden in
+`tests/slicer_acceptance.local.json` ausgewählt. Es werden keine persönlichen
+Profile mit dem Projekt verteilt. Fehlen Installation oder benötigte
+Profilangaben, überspringt der jeweilige optionale Test sich mit einer klaren
+Meldung. Profilquellen bleiben unverändert; temporäre Arbeitskopien liegen
+außerhalb der Slicer-Verzeichnisse. Geprüft werden kontrollierter Referenzlauf,
+Cache-Wiederverwendung, Abbruch, Bereinigung sowie byteidentische Quelle und
+Profile. Die gemeinsame Einrichtung steht unter
+[optionale Slicer-Abnahmetests](slicer_acceptance_tests.md).

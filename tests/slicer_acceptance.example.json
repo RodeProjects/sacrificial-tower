@@ -1,0 +1,148 @@
+{
+  "_comment": [
+    "Vorlage für optionale Slicer-Tests. Als tests/slicer_acceptance.local.json kopieren; die lokale Datei ist ignoriert.",
+    "Ändert keine Slicer-Profile und aktiviert keine Tests.",
+    "_comment und _examples sind nur Hinweise und werden nicht ausgewertet."
+  ],
+  "_examples": {
+    "_comment": "Formatbeispiele: Profilnamen durch vorhandene, kompatible Namen ersetzen. Windows-Pfade können / verwenden.",
+    "slicers.prusa_slicer.executable": "C:/Program Files/Prusa3D/PrusaSlicer/prusa-slicer.exe",
+    "profiles": {
+      "machine": "Beispieldrucker 0.4 nozzle",
+      "process": "0.20mm Standard @Beispieldrucker 0.4 nozzle",
+      "filament": "Generic PLA @Beispieldrucker"
+    },
+    "tests.user_slicer_regressions.source_stl": "input/Test-STL (manifold).stl",
+    "tests.user_slicer_regressions.orca_slicer.reference_gcode": "D:/Slicer-Testdaten/Orca-Referenz.gcode"
+  },
+  "slicers": {
+    "_comment": "executable: vollständiger Programmdateipfad. Leer oder fehlend: automatische Erkennung. Ein eingetragener Pfad hat Vorrang; ohne passende Installation wird der Test übersprungen.",
+    "anycubic_slicer_next": {
+      "executable": ""
+    },
+    "bambu_studio": {
+      "executable": ""
+    },
+    "orca_slicer": {
+      "executable": ""
+    },
+    "prusa_slicer": {
+      "executable": ""
+    }
+  },
+  "tests": {
+    "_comment": [
+      "Jeder Test wird einzeln konfiguriert. Fehlen Pflichtangaben, wird er mit Hinweis übersprungen.",
+      "machine, process und filament erwarten exakte Profilnamen, keine Dateipfade.",
+      "Profile müssen zusammenpassen (Drucker, Düse, Prozess, Filament und Temperaturen); Testvorgaben wie System- oder Benutzerprofile beachten."
+    ],
+    "source_support_regressions": {
+      "_comment": "Benutzerprofile wählen; im Prozessprofil globale Stützen deaktivieren.",
+      "orca_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      },
+      "prusa_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "orca_unselected_system_filament": {
+      "orca_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "orca_confirmation_preslice": {
+      "orca_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "prusa_confirmation_preslice": {
+      "prusa_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "phase14_anycubic_base_slice": {
+      "anycubic_slicer_next": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "phase16_sparse_user_profile": {
+      "anycubic_slicer_next": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "phase16_system_profile_slice": {
+      "anycubic_slicer_next": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "real_source_preslice_reference": {
+      "anycubic_slicer_next": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "real_source_preslice_user_presets": {
+      "anycubic_slicer_next": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      }
+    },
+    "user_slicer_regressions": {
+      "_comment": "source_stl und reference_gcode erwarten Dateipfade; relative Pfade gelten ab Projektordner. Der Test prüft Referenzergebnisse, keine beliebigen Daten. Manifold- und non-manifold-STLs sind verschieden.",
+      "orca_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        },
+        "reference_gcode": ""
+      },
+      "prusa_slicer": {
+        "profiles": {
+          "machine": "",
+          "process": "",
+          "filament": ""
+        }
+      },
+      "source_stl": ""
+    }
+  }
+}

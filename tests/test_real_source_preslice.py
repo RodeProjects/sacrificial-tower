@@ -17,6 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cooling_tower.calibration import CalibrationService
 from cooling_tower.models import CalibrationConfig, GenerationSettings, SlicerFamily
@@ -41,14 +43,15 @@ from cooling_tower.slicers import (
     ProfileMappingStore,
     ProfileMatchResult,
     ProfileMatchState,
-    ProfileRecord,
     ProfileValidationState,
     SliceRequest,
-    SlicerCandidate,
-    SlicerDiscoverySource,
     protect_profile_sources,
 )
 from cooling_tower.slicers.profile_models import stable_json_fingerprint
+from slicer_acceptance_support import (
+    require_profile_records,
+    require_slicer_installation,
+)
 
 
 REAL_TESTS_ENABLED = os.environ.get("COOLING_TOWER_RUN_REAL_SLICER_TESTS") == "1"
@@ -69,27 +72,19 @@ class CountingAdapter:
 class RealSourcePreSliceAnycubicTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.executable = Path(
-            r"C:\Program Files\AnycubicSlicerNext\AnycubicSlicerNext.exe"
-        )
-        cls.profile_root = (
-            cls.executable.parent / "resources" / "profiles" / "Anycubic"
-        )
-        cls.machine_path = (
-            cls.profile_root
-            / "machine"
-            / "Anycubic Kobra 3 V2 0.4 nozzle.json"
-        )
-        cls.process_path = (
-            cls.profile_root
-            / "process"
-            / "0.20mm Standard @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        )
-        cls.filament_path = (
-            cls.profile_root
-            / "filament"
-            / "Anycubic PLA @Anycubic Kobra 3 V2 0.4 nozzle.json"
-        )
+        cls.adapter = AnycubicSlicerNextAdapter()
+        cls.installation = require_slicer_installation(cls.adapter)
+        cls.executable = cls.installation.executable_path
+        cls.profile_roots = tuple(cls.installation.profile_roots)
+
+    def _profile_tree_snapshot(self) -> dict[str, tuple[int, int]]:
+        return {
+            str(path): (path.stat().st_size, path.stat().st_mtime_ns)
+            for root in self.profile_roots
+            if root.is_dir()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
     @staticmethod
     def _hash(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -126,39 +121,28 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
                 handle.write(struct.pack("<H", 0))
 
     def _context(self):
-        for path in (
-            self.executable,
-            self.machine_path,
-            self.process_path,
-            self.filament_path,
-            self.source,
-        ):
-            self.assertTrue(path.is_file(), path)
-        adapter = AnycubicSlicerNextAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                self.executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
+        self.assertTrue(self.source.is_file(), self.source)
+        adapter = self.adapter
+        installation = self.installation
+        selected = require_profile_records(
+            self,
+            test_key="real_source_preslice_reference",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "system",
+                "process": "system",
+                "filament": "system",
+            },
         )
-
-        def record(path: Path, kind: ProfileKind) -> ProfileRecord:
-            return ProfileRecord(
-                adapter_id=adapter.adapter_id,
-                profile_id=path.stem,
-                name=path.stem,
-                kind=kind,
-                path=path,
-                source="system",
-            )
-
+        self.profile_paths = tuple(record.path for record in selected.values())
         effective = adapter.resolve_profile_bundle(
             ProfileCandidate(
                 installation=installation,
-                machine=record(self.machine_path, ProfileKind.MACHINE),
-                process=record(self.process_path, ProfileKind.PROCESS),
-                filaments=(record(self.filament_path, ProfileKind.FILAMENT),),
+                machine=selected["machine"],
+                process=selected["process"],
+                filaments=(selected["filament"],),
             )
         )
         bundle = ProfileBundleMatch(
@@ -193,11 +177,7 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
             inventory_fingerprint=stable_json_fingerprint(
                 {
                     str(path): self._hash(path)
-                    for path in (
-                        self.machine_path,
-                        self.process_path,
-                        self.filament_path,
-                    )
+                    for path in self.profile_paths
                 }
             ),
             source_profile_fingerprint=None,
@@ -226,20 +206,9 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
         original_hash = self._hash(self.source)
         profile_states = {
             path: (self._hash(path), path.stat().st_mtime_ns)
-            for path in (
-                self.machine_path,
-                self.process_path,
-                self.filament_path,
-            )
+            for path in self.profile_paths
         }
-        profile_tree_before = {
-            str(path.relative_to(self.profile_root)): (
-                path.stat().st_size,
-                path.stat().st_mtime_ns,
-            )
-            for path in self.profile_root.rglob("*")
-            if path.is_file()
-        }
+        profile_tree_before = self._profile_tree_snapshot()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             counting = CountingAdapter(adapter)
@@ -326,46 +295,25 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
             },
             profile_states,
         )
-        profile_tree_after = {
-            str(path.relative_to(self.profile_root)): (
-                path.stat().st_size,
-                path.stat().st_mtime_ns,
-            )
-            for path in self.profile_root.rglob("*")
-            if path.is_file()
-        }
+        profile_tree_after = self._profile_tree_snapshot()
         self.assertEqual(profile_tree_after, profile_tree_before)
 
     def test_real_cli_slices_supplied_manifold_stl_with_gui_user_presets(self) -> None:
-        appdata = Path(os.environ["APPDATA"])
-        user_roots = tuple(
-            (appdata / "AnycubicSlicerNext" / "user").glob("*")
+        adapter = self.adapter
+        installation = self.installation
+        selected_profiles = require_profile_records(
+            self,
+            test_key="real_source_preslice_user_presets",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "user",
+                "process": "user",
+                "filament": "user",
+            },
         )
-        relative_paths = (
-            Path("machine")
-            / "Anycubic Kobra 3 V2 0.4 nozzle - (Settings v2).json",
-            Path("process") / "PLA - Tecbears - Schwarz (matt).json",
-            Path("filament") / "PLA - Tecbears - Schwarz (matt).json",
-        )
-        profile_paths = next(
-            (
-                tuple(root / relative for relative in relative_paths)
-                for root in user_roots
-                if all((root / relative).is_file() for relative in relative_paths)
-            ),
-            None,
-        )
-        if profile_paths is None:
-            self.skipTest("Die referenzierten Anycubic-Benutzerprofile fehlen.")
-
-        adapter = AnycubicSlicerNextAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                self.executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
+        profile_paths = tuple(record.path for record in selected_profiles.values())
         model = (
             PROJECT_ROOT
             / "tests"
@@ -495,32 +443,21 @@ class RealSourcePreSliceAnycubicTests(unittest.TestCase):
     ) -> None:
         """Regress the complete Anycubic scenario reported from the GUI."""
 
-        appdata = Path(os.environ["APPDATA"])
-        relative_paths = (
-            Path("machine")
-            / "Anycubic Kobra 3 V2 0.4 nozzle - (Settings v2).json",
-            Path("process") / "PLA - Tecbears - Schwarz (matt).json",
-            Path("filament") / "PLA - Tecbears - Schwarz (matt).json",
+        adapter = self.adapter
+        installation = self.installation
+        selected_profiles = require_profile_records(
+            self,
+            test_key="real_source_preslice_user_presets",
+            adapter=adapter,
+            installation=installation,
+            roles=("machine", "process", "filament"),
+            expected_sources={
+                "machine": "user",
+                "process": "user",
+                "filament": "user",
+            },
         )
-        profile_paths = next(
-            (
-                tuple(root / relative for relative in relative_paths)
-                for root in (appdata / "AnycubicSlicerNext" / "user").glob("*")
-                if all((root / relative).is_file() for relative in relative_paths)
-            ),
-            None,
-        )
-        if profile_paths is None:
-            self.skipTest("Die referenzierten Anycubic-Benutzerprofile fehlen.")
-
-        adapter = AnycubicSlicerNextAdapter()
-        installation = adapter.verify_installation(
-            SlicerCandidate(
-                self.executable,
-                SlicerDiscoverySource.KNOWN_PATH,
-                adapter_hint=adapter.adapter_id,
-            )
-        )
+        profile_paths = tuple(record.path for record in selected_profiles.values())
         source = PROJECT_ROOT / "input" / "Test-STL (manifold).stl"
         validation = StlValidationService().validate(source)
         self.assertTrue(validation.valid, validation.technical_summary)
