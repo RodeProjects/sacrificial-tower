@@ -76,8 +76,8 @@ und gibt ausschließlich den öffentlichen Anteil aus.
    automatisch einmal auf dem lokalen offiziellen Runner. Erst nach Erfolg
    übernimmt er denselben Commit unmittelbar nach `main`. Normale Pushes lassen
    Label und Schalter weg und verwenden ausschließlich lokale offizielle Actions.
-3. Den dadurch gestarteten `Tests`-Lauf für exakt diesen `main`-Commit erfolgreich
-   abschließen lassen. Zwischen Prüfung und Veröffentlichung darf `main` nicht wechseln.
+3. Den dadurch gestarteten schlanken `Tests`-Lauf für exakt diesen `main`-Commit
+   den ursprünglichen Prüferfolg bestätigen lassen; keine zweite Vollsuite. Zwischen Prüfung und Veröffentlichung darf `main` nicht wechseln.
 4. Veröffentlichungsart wählen und das Skript im normalen Windows-Benutzerkontext
    mit PowerShell 7 ausführen:
    - Regulär kostenlos freigegeben: `scripts/publish_update.ps1`
@@ -86,7 +86,10 @@ und gibt ausschließlich den öffentlichen Anteil aus.
 Das Veröffentlichungsskript verwendet den zentralen `Invoke-ReleaseWorkflow.ps1`
 unter `D:\Entwicklung Software\_Tools\github_actions_runner` (bei anderem Standort
 `-RunnerToolsRoot` übergeben). Vollständige Tests und anschließend Installer-Build
-laufen jeweils zuerst mit `github_hosted=true`. Bei `failure`, `timed_out`,
+laufen jeweils zuerst mit `github_hosted=true`. Eine bereits auf dem Release-Prüfbranch erfolgreich
+abgenommene vollständige Releaseprüfung derselben SHA wird erneut gegen GitHub
+bestätigt und wiederverwendet. Ein normaler ausschließlich lokaler PR-Erfolg
+ersetzt die projektspezifische zusätzliche Releaseprüfung nicht. Bei `failure`, `timed_out`,
 `startup_failure` oder eindeutigem Kontingent-/Abrechnungslimit startet derselbe
 Workflow ohne Rückfrage genau einmal lokal mit `github_hosted=false` auf derselben
 SHA. Auch eine unbekannte Fehlerursache löst diesen Rückfall aus. Der ursprüngliche
@@ -129,7 +132,9 @@ bereits im privaten Build signierte `latest.json`.
 
 Der Installer-Workflow prüft im Normalfall über die GitHub-API, dass der
 Workflow `Tests` für exakt denselben Commit auf `main` als erfolgreicher
-Push-Lauf abgeschlossen wurde. Ein Lauf eines anderen Commits, Branches oder
+Push-Lauf abgeschlossen wurde. Dieser Lauf kann den ursprünglichen erfolgreichen
+Prüfbranch-Lauf derselben SHA bestätigen, ohne die Suite erneut auszuführen.
+Ein Lauf eines anderen Commits, Branches oder
 Ereignisses genügt nicht. Nur bei expliziter Entwicklungsrelease-Ausnahme
 wird diese CI-Prüfung übersprungen und der Grund im Workflow protokolliert.
 Die vollständige Testsuite wird deshalb nicht ein zweites Mal im

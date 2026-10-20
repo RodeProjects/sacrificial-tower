@@ -25,6 +25,8 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 jobs:
   classify:
@@ -36,7 +38,7 @@ jobs:
       BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
       HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     outputs:
-      full-tests-required: ${{ steps.gate.outputs.gate-files-changed == 'true' && 'true' || steps.scope.outputs.full-tests-required }}
+      full-tests-required: ${{ steps.confirm.outputs.confirmed == 'true' && 'false' || (steps.gate.outputs.gate-files-changed == 'true' && 'true' || steps.scope.outputs.full-tests-required) }}
     steps:
       - name: Check out repository history
         uses: actions/checkout@v5
@@ -44,13 +46,30 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Bereits erfolgreich geprüften Commit bestätigen
+        id: confirm
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $helper = if ($env:RODE_RUNNER_ROOT) { Join-Path $env:RODE_RUNNER_ROOT 'scripts/Confirm-CheckedCommit.ps1' } else { $null }
+          if ($helper -and (Test-Path -LiteralPath $helper -PathType Leaf)) {
+            & $helper -Repository $env:GH_REPO -Workflow tests.yml -ExpectedSha $env:HEAD_SHA -BaseSha $env:BASE_SHA -RepositoryPath $env:GITHUB_WORKSPACE
+          } else {
+            'confirmed=false' >> $env:GITHUB_OUTPUT
+          }
+
       - name: Set up Python for classification
+        if: steps.confirm.outputs.confirmed != 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Force full tests for CI gate changes
         id: gate
+        if: steps.confirm.outputs.confirmed != 'true'
         shell: pwsh
         run: |
           git diff --quiet $env:BASE_SHA $env:HEAD_SHA -- .github/workflows/tests.yml scripts/classify_ci_changes.py tests/test_ci_change_classifier.py
@@ -65,7 +84,7 @@ jobs:
 
       - name: Classify changed content
         id: scope
-        if: steps.gate.outputs.gate-files-changed != 'true'
+        if: steps.confirm.outputs.confirmed != 'true' && steps.gate.outputs.gate-files-changed != 'true'
         run: >-
           python scripts/classify_ci_changes.py
           --base "$env:BASE_SHA"

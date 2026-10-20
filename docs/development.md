@@ -107,7 +107,10 @@ nach `main` verwenden. Alle normalen PR-Jobs laufen ausschließlich lokal auf de
 offiziellen Runner. Nach erfolgreicher Prüfung übernimmt der zentrale Helfer
 denselben Commit automatisch per SSH-Fast-Forward nach `main`, ohne zweite
 Freigabe. Änderungen an Commit oder Basis verhindern die Übernahme und erfordern
-erneute Prüfung. Anschließend auch den gestarteten `main`-Lauf beobachten.
+erneute Prüfung. Der anschließende `main`-Lauf bestätigt nur den ursprünglichen
+GitHub-Prüferfolg derselben SHA und Basis; die Vollsuite läuft nicht nochmals.
+Die kurze Bestätigung bis zum Abschluss beobachten. Fehlt ein verifizierbarer
+Nachweis, ist eine vollständige Prüfung weiterhin erforderlich.
 Der konservative Klassifikator darf nur sicher administrative Änderungen von der
 Vollsuite ausnehmen; fehlende oder vollständig übersprungene Prüfungen genügen nicht.
 
