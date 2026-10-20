@@ -1,4 +1,4 @@
-# Projektdokumentation
+# Sacrificial Tower: Dokumentation für 3D-Druck, Kühltürme und G-Code-Analyse
 
 Sacrificial Tower analysiert lokale G-Code-/STL-Daten und erzeugt einen
 druckzeitabhängigen Hilfskörper. Einstieg und Startbefehle stehen im
@@ -10,6 +10,8 @@ getrennt unter „Nachweise und historische Einordnung“.
 
 | Thema | Maßgebliches Dokument |
 |---|---|
+| English FAQ: minimum layer time, sacrificial cooling towers, supported slicers and downloads | [FAQ](faq.md) |
+| Öffentliche Projekttexte, GitHub-Metadaten und Auffindbarkeit in Such-/KI-Systemen | [Auffindbarkeit und Veröffentlichung](discoverability.md) |
 | Komponenten, Verantwortlichkeiten, Datenfluss und Erweiterung | [Architektur](architecture.md) |
 | Turmhöhe, lineare Verbreiterung, konkave Verjüngung und Absätze | [Turmgeometrie](tower_geometry.md) |
 | Manueller Béziereditor, Slicervoraussetzungen, feste Slicerprüfung, Zustände und Abnahme | [Manueller Editor](manual_editor.md) |

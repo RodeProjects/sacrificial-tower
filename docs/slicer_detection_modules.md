@@ -7,6 +7,31 @@ oder Verzeichnisse voraussetzen.
 
 ## Modulvertrag
 
+### Zuletzt erfolgreich getestete Versionen
+
+Stand der Nachweisprüfung: **20.10.2026**. Die Unterstützung bezieht sich auf
+die folgenden durch reale lokale Slices/Exporte belegten Referenzstände:
+
+| Slicer | Getestete Version | Nachweis |
+|---|---|---|
+| Anycubic Slicer Next | 2.0.0.3 | Gemeinsamer manueller Prüfslice und Export mit Stützensimulation am 15.10.2026 |
+| Bambu Studio | 02.08.02.61 | Gemeinsamer manueller Prüfslice und Export mit Stützensimulation am 15.10.2026 |
+| PrusaSlicer | 2.9.6 | Automatischer/manueller Export und Wieder-Slice am 19.10.2026; zusätzlicher Leerlagen-Kontrollslice am 20.10.2026 |
+| OrcaSlicer | 2.4.2 (Microsoft-Store-Paket 2.4.3.0) | Automatischer/manueller Export und Wieder-Slice am 19.10.2026 |
+
+Orcas Paketversion und die vom CLI/G-Code gemeldete Version unterscheiden sich;
+beide Werte beschreiben dieselbe geprüfte Installation. Bambu meldet die
+Version mit führenden Nullen. Andere Versionsstände sind durch diese Abnahmen
+nicht automatisch bestätigt. Details zu Umfang und Grenzen stehen bei
+[OrcaSlicer](orca_slicer.md), [PrusaSlicer](prusa_slicer.md),
+[manueller Abnahme](tower_geometry.md) und [Vorslice/Leerlagen](source_workflow.md).
+Die lokalen Exportberichte liegen unter
+`.tmp/manual_acceptance_{anycubic,bambu}_simulations/exports/` sowie
+`build/support-activation-acceptance/{prusa_slicer,orca_slicer}/`; sie sind
+Entwicklungsnachweise und kein Bestandteil der Distribution.
+
+### Modulschnittstelle
+
 Ein Modul ist eine Implementierung von `SlicerDetectionModule` und liefert:
 
 - stabile Adapter- und Produktkennungen,
@@ -20,7 +45,7 @@ Adapter akzeptieren ein kompatibles Ersatzmodul per Dependency Injection. Ein
 Ersatz muss dieselbe Adapterkennung tragen und als implementiert markiert sein.
 Dadurch kann eine Erkennung ausgetauscht werden, ohne Profilabgleich, UI oder
 andere Slicer-Module anzupassen. Nicht implementierte Platzhalter werden von
-der Laufzeit abgewiesen.
+der Suche und der Laufzeit abgewiesen.
 
 Aktuell implementiert sind:
 
@@ -69,8 +94,8 @@ Die Windows-Suche berücksichtigt neben klassischen Installationen auch die
 für den aktuellen Benutzer registrierten MSIX-/AppX-Pakete, einschließlich
 Microsoft-Store-Installationen. `slicers.windows_app_packages` liest deren
 App-Manifeste und ordnet die deklarierten Programmeinstiege anhand der bekannten
-ausführbaren Slicerdateien den vorhandenen Adaptern zu. Dies gilt für alle
-bekannten Slicer und setzt keinen bestimmten Paketnamen oder Herausgebernamen
+ausführbaren Slicerdateien den vorhandenen Adaptern zu. Dies gilt für die vier
+unterstützten Slicer und setzt keinen bestimmten Paketnamen oder Herausgebernamen
 voraus. VFS-Unterverzeichnisse und abweichende Schreibweisen werden unterstützt.
 OrcaSlicers Store-Installation verwendet denselben eigenen Profil- und
 Slicing-Adapter wie die klassische Installation. Seine Katalogregeln,
@@ -89,16 +114,41 @@ Regression: `test_windows_app_packages`; die zusätzliche Prüfung mit dem lokal
 installierten Store-OrcaSlicer wird mit
 `COOLING_TOWER_RUN_INSTALLED_STORE_SLICER_TEST=1` aktiviert.
 
+## Vorauswahl und fehlende Installation
+
+Eine verfügbare, im Turmprogramm zuletzt ausdrücklich ausgewählte Installation
+hat Vorrang. Dropdownwechsel und die Bestätigung von Slicer/Profilen speichern
+diese Wahl über den vorhandenen `last_selected_key`. Im Dropdown erhält nur
+diese Installation bei mehreren Einträgen „– zuletzt ausgewählt“; automatische
+Vorauswahl allein schreibt keine Benutzerentscheidung. Die gespeicherte
+Dokumentstruktur und Schema-Version bleiben unverändert.
+
+Ohne verfügbare gespeicherte Wahl wird der Slicer mit dem eindeutig neuesten
+lokalen Nutzungsmarker vorausgewählt. Diese Marker sind eine konservative
+Näherung an die letzte Öffnung: es werden nur die Änderungszeiten der jeweils
+ausdrücklich benannten Hauptkonfigurationen gelesen, keine Nutzungsprotokolle.
+Gleiche Zeitstempel verschiedener Produkte, fehlende Marker oder mehrere mit
+demselben Marker verbundene Installationen gelten als uneindeutig. Dann wird
+alphabetisch nach Produktname ausgewählt. Externe Nutzung erhält keinen
+„zuletzt ausgewählt“-Zusatz und überschreibt keine gespeicherte Programmwahl.
+
+Ohne erkannte Installation erklärt ein Hinweis die fehlgeschlagene automatische
+Erkennung und listet die vier unterstützten Slicer auf. Er bietet die manuelle
+EXE-Auswahl an. Falls noch keiner installiert ist, verweist er auf Installation
+eines unterstützten Slicers und die vorherige Einrichtung des eigenen Druckers.
+
 ## Laufzeitfreigabe und Fehlergrenzen
 
 `slicers.support` ist die gemeinsame Freigabegrenze. Ein registriertes Modul
-mit `implemented=False` bleibt unabhängig von älteren Adapterfähigkeiten oder
-gespeicherten Installationsdaten ausschließlich erkennbar. Solche Installationen
-erscheinen mit „nur erkannt“ in der Auswahl. Ihre Auswahl in Schritt 2 erklärt,
-dass die automatische Verarbeitung noch nicht unterstützt wird. Inventar- und
-Slice-Einstiegspunkte weisen sie vor Dateisuche, Cachezugriff oder Prozessstart ab.
-Eine gespeicherte solche Auswahl verdrängt keinen verfügbaren unterstützten
-Slicer bei der automatischen Vorauswahl.
+mit `implemented=False` wird unabhängig von älteren Adapterfähigkeiten oder
+gespeicherten Installationsdaten nicht gesucht oder als Installation angeboten.
+Die Standardsuche enthält ausschließlich Anycubic Slicer Next, Bambu Studio,
+PrusaSlicer und OrcaSlicer. Der gemeinsame Discovery-Dienst filtert zusätzlich
+Platzhalter und reine Erkennungsadapter vor der Suche; gespeicherte Pfade und
+manuelle EXE-Auswahl können diese Grenze nicht umgehen. Inventar- und
+Slice-Einstiegspunkte weisen nicht unterstützte Installationen weiterhin vor
+Dateisuche, Cachezugriff oder Prozessstart ab. Die Modulplatzhalter bleiben
+als Erweiterungspunkte im Quellcode erhalten.
 
 Die normale GUI führt Installationssuche und Profiloperationen über
 `slicers.operation_process` in eigenen Python-Hilfsprozessen aus. Jeder Auftrag
@@ -115,6 +165,13 @@ Windows besitzt der Elternprozess einen Job Object mit `KILL_ON_JOB_CLOSE`;
 der Hilfsprozess darf erst nach erfolgreicher Zuordnung mit der Arbeit beginnen.
 Abbruch, Zeitlimit und normales Auftragsende schließen auch diesen Prozessbaum.
 Qt-Arbeitsthreads werden regulär beendet und niemals gewaltsam terminiert.
+Beim Wechsel des Slicers im Dropdown wird ein aktiver Profilauftrag sofort
+abgebrochen und seine Auftragskennung ungültig. Die Prozessgrenze beendet
+auch einen nicht kooperierenden Profilparser. Erst nach regulärer Freigabe
+des bisherigen Threads startet die Profilsuche für die neueste Auswahl;
+zwischenzeitliche Auswahlen, verspätete Ergebnisse/Fehler und bereits
+eingeplante Starts mit veralteter Kennung werden verworfen. Gemeinsame
+Profil- und Cache-Dienste werden weiterhin seriell verwendet.
 Die bestehenden Adapter und ihre Profilfilter/Vererbungsregeln bleiben die
 Fachimplementierung. Die Hilfsprozesse verwenden dieselben persistenten
 Inventar-/Zuordnungscaches. Flüchtige Dienst-Caches leben jeweils nur für den

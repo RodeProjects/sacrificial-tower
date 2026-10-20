@@ -410,6 +410,90 @@ class SlicerFailureGuiTests(_SlicerGuiFixture, unittest.TestCase):
         self.assert_failed(window)
         self.assertTrue(window.slicer_refresh_button.isEnabled())
 
+    def test_switch_cancels_uncooperative_profile_process_before_starting_new_catalog(self):
+        window = self.start()
+        second = installation(self.root, "prusa_slicer")
+        window.slicer_discovery_result = discovery_result(self.working, second)
+        window._populating_slicer_combo = True
+        window.slicer_combo.addItem(second.display_name, second.identity_key)
+        window._populating_slicer_combo = False
+        window._profile_process_config = {}
+        marker = self.root / "catalog-process.txt"
+        calls = []
+
+        def isolated(operation, config, args, kwargs, cancelled):
+            selected = args[0]
+            calls.append(selected.identity_key)
+            if selected == self.working:
+                # The child never cooperates; cancellation must end its process.
+                return run_bounded_operation(hang_process, marker, timeout_s=60,
+                                             cancellation_event=cancelled)
+            return replace(self.catalog, execution_slicer=selected)
+
+        with patch("cooling_tower.gui.profile_worker.isolated_slicer_call", side_effect=isolated):
+            window.start_profile_catalog_loading()
+            self.wait_for(marker.is_file)
+            old_request = window._profile_request_id
+            old_job = window.background_job_manager.job_for_request(JobKind.PROFILE_MATCH, old_request)
+            before = time.monotonic()
+            window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(second.identity_key))
+            self.assertTrue(old_job.cancel_requested)
+            self.assertEqual(old_job.cancel_reason, "slicer_selection_changed")
+            window._on_profile_catalog_succeeded(old_request, self.catalog)
+            window._on_profile_catalog_failed(old_request, "obsolete failure", "")
+            self.assertIsNone(window.profile_catalog)
+            heartbeat = []
+            QTimer.singleShot(0, lambda: heartbeat.append(True))
+            self.wait_for(lambda: window.profile_catalog is not None)
+            self.idle(window)
+            self.assertLess(time.monotonic() - before, 5)
+            self.assertTrue(heartbeat)
+        self.assertEqual(window.profile_catalog.execution_slicer, second)
+        self.assertEqual(calls, [self.working.identity_key, second.identity_key])
+        self.assertNotEqual(window.profile_status_label.property("state"), "error")
+
+    def test_rapid_switch_only_starts_latest_pending_catalog(self):
+        window = self.start()
+        others = tuple(installation(self.root, name) for name in ("prusa_slicer", "orca_slicer"))
+        window.slicer_discovery_result = discovery_result(self.working, *others)
+        window._populating_slicer_combo = True
+        for item in others:
+            window.slicer_combo.addItem(item.display_name, item.identity_key)
+        window._populating_slicer_combo = False
+        window._profile_process_config = {}
+        entered = threading.Event()
+        calls = []
+
+        def isolated(operation, config, args, kwargs, cancelled):
+            selected = args[0]
+            calls.append(selected.identity_key)
+            if selected == self.working:
+                entered.set()
+                cancelled.wait(5)
+            return replace(self.catalog, execution_slicer=selected)
+
+        with patch("cooling_tower.gui.profile_worker.isolated_slicer_call", side_effect=isolated):
+            window.start_profile_catalog_loading()
+            self.wait_for(entered.is_set)
+            for selected in others:
+                window.slicer_combo.setCurrentIndex(window.slicer_combo.findData(selected.identity_key))
+            self.wait_for(lambda: window.profile_catalog is not None)
+            self.idle(window)
+        self.assertEqual(calls, [self.working.identity_key, others[-1].identity_key])
+        self.assertEqual(window.profile_catalog.execution_slicer, others[-1])
+
+    def test_queued_catalog_start_is_discarded_after_another_selection(self):
+        window = self.start()
+        window._pending_profile_match = {"catalog_only": True, "selected_machine": "obsolete"}
+        with patch("cooling_tower.gui.main_window.QTimer.singleShot") as schedule:
+            window._on_background_job_released(SimpleNamespace(kind=JobKind.PROFILE_MATCH))
+            callback = schedule.call_args.args[-1]
+        with patch.object(window, "start_profile_catalog_loading") as start:
+            window._on_slicer_selection_changed(0)
+            self.assertEqual(start.call_count, 1)
+            callback()
+            self.assertEqual(start.call_count, 1)
+
     def test_repeated_unsupported_selection_never_starts_work_or_prevents_close(self):
         window = self.start()
         for _ in range(20):

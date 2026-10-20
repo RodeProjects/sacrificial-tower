@@ -86,7 +86,37 @@ class ManualGenerationTests(unittest.TestCase):
         self.assertFalse(report["summary"]["calibration_attempted"])
         self.assertEqual(report["manual_evaluation"]["slice_count"],1)
         self.assertIn("Prognose",exported.user_report_path.read_text(encoding="utf-8"))
-        self.assertTrue((exported.run_directory/"verification.gcode").is_file())
+        self.assertFalse(list(exported.run_directory.rglob("*.gcode")))
+        self.assertNotIn("verification_gcode", report)
+        self.assertTrue(report["manual_evaluation"]["evaluated_gcode_sha256"])
+        self.assertIsNone(result.manual_evaluation.gcode_path)
+
+    def test_successful_export_removes_temporary_gcode_and_allows_checked_reexport(self):
+        f,service,reference,request,adapter=create_fixture(self)
+        result=service.prepare(request)
+        self.addCleanup(result.dispose)
+        temporary_gcode=result.manual_evaluation.gcode_path
+        self.assertTrue(temporary_gcode.is_file())
+        ManualExportService().export(result,request,f.root/"exports")
+        self.assertFalse(temporary_gcode.exists())
+        repeated=ManualExportService().export(result,request,f.root/"exports_again")
+        self.assertEqual(repeated.output_sha256,result.artifact_sha256)
+        f.process.write_text("changed")
+        with self.assertRaisesRegex(ValueError,"Slicerprofile"):
+            ManualExportService().export(result,request,f.root/"invalid")
+
+    def test_failed_export_preserves_verification_for_retry_and_rejects_tampering(self):
+        f,service,reference,request,adapter=create_fixture(self)
+        result=service.prepare(request)
+        self.addCleanup(result.dispose)
+        temporary_gcode=result.manual_evaluation.gcode_path
+        changed=replace(request,draft=move_point(request.draft,"base",diameter_mm=8))
+        with self.assertRaises(StalePreviewError):
+            ManualExportService().export(result,changed,f.root/"invalid")
+        self.assertTrue(temporary_gcode.is_file())
+        temporary_gcode.write_text("changed")
+        with self.assertRaisesRegex(ValueError,"G-Code"):
+            ManualExportService().export(result,request,f.root/"invalid")
 
     def test_native_joint_slice_and_export_preserve_mesh_profile_and_source(self):
         f,service,ref,request,adapter=create_fixture(self,joint=True)

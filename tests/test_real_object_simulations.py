@@ -42,16 +42,16 @@ class RealObjectSimulationTests(unittest.TestCase):
             return request_type(**kwargs)
 
         def export(service, preview, request, output_root):
-            result = export_method(service, preview, request, output_root)
-            validate_joint_project(result.project_path, tower_full_infill=True, source_supports_enabled=True)
-            self.assertEqual(request.effective_profile.effective_values["enable_support"], "0")
-            self.assertTrue(result.source_supports_simulated)
-            self.assertTrue(result.full_tower_infill_simulated)
             source_paths = analyze_joint_source_toolpaths(
                 preview.manual_evaluation.gcode_path,
                 tower_center_xy_mm=preview.scene.tower_center_xy_mm,
                 expected_layer_count=request.snapshot.layer_count,
             )
+            result = export_method(service, preview, request, output_root)
+            validate_joint_project(result.project_path, tower_full_infill=True, source_supports_enabled=True)
+            self.assertEqual(request.effective_profile.effective_values["enable_support"], "0")
+            self.assertTrue(result.source_supports_simulated)
+            self.assertTrue(result.full_tower_infill_simulated)
             self.assertGreater(len(source_paths.object_segments), 1000)
             self.assertLessEqual(len(source_paths.object_segments), 60_000)
             bounds = source_paths.occupied_bounds

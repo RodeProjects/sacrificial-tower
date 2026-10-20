@@ -1,12 +1,51 @@
-# Sacrificial Tower
+# Sacrificial Tower – 3D Printing Cooling Tower & G-code Analyzer
 
-Kostenlose Windows-Anwendung zur Analyse lokaler Druckdaten und zur Erzeugung
-eines adaptiven, geschlossenen Kühlturms. Der aktuelle Turm besitzt keinen
-modellierten inneren Hohlraum; das tatsächliche Infill bestimmt der Slicer.
-Ziel-Layerzeit, Außendurchmesser, Übergangswinkel und Standfuß begrenzen die
-Geometrie. Slicerbasierte Vorschau und Kalibrierung prüfen den ausgewählten
-Kandidaten vor dem Export. Wenn kein Turm benötigt wird, ist das ein erfolgreicher
-Analyseausgang ohne unnötige STL.
+**Sacrificial Tower** ist ein kostenloses Windows-Programm für den FDM-/FFF-3D-Druck.
+Es analysiert die **minimale Schichtzeit (minimum layer time)** und erzeugt einen
+zusätzlichen **Kühlturm (sacrificial cooling tower)**, damit kleine Druckschichten
+mehr Zeit zum Abkühlen erhalten. Die Turmform lässt sich automatisch berechnen
+oder manuell bearbeiten und mit dem gewählten Slicer prüfen.
+
+**English:** Sacrificial Tower is a free Windows **3D printing sacrificial tower
+tool** and **G-code analyzer**. It works as a **minimum layer time cooling optimizer**
+by generating a separate printable cooling tower for short FDM/FFF layers.
+Analyze STL models through your installed slicer, inspect layer times and export
+a tower STL or a supported native 3MF project. Existing text G-code can be analyzed
+with the separate command-line interface.
+
+[Windows-Entwicklungsversion herunterladen](https://github.com/RodeProjects/sacrificial-tower-updates/releases/latest)
+· [Getestete Slicer](#unterstützte-slicer-und-getestete-versionen)
+· [FAQ / English answers](docs/faq.md)
+· [Dokumentation](docs/README.md)
+
+## Funktionen für 3D-Druck und minimale Schichtzeit
+
+- Lokale STL-Analyse mit bestätigten Drucker-, Prozess- und Filamentprofilen;
+  G-Code-Analyse über die CLI.
+- Automatischer Kühlturm mit Ziel-Layerzeit oder manueller Béziereditor mit
+  festem Prüfslice und tatsächlicher Zeitbewertung.
+- Gemeinsame Objekt-/Turmvorschau, STL-Export und native 3MF-Projekte für die
+  unterstützten Integrationen.
+- Hinweise auf erkannte leere Schichten und optionale objektspezifische
+  Stützensimulation bei erkanntem, global ausgeschaltetem Stützenprofil.
+- Originalmodelle und installierte Slicerprofile bleiben unverändert;
+  abgeleitete Dateien entstehen in eigenen Arbeitsbereichen.
+
+Außendurchmesser, Übergangswinkel und Standfuß begrenzen die Turmgeometrie.
+Der geschlossene Turmkörper hat keinen modellierten inneren Hohlraum; das
+tatsächliche Infill bestimmt der Slicer. Wenn die Analyse keinen Turm benötigt,
+ist das ein erfolgreicher Ausgang ohne zusätzliche STL. Die Anwendung ist
+kostenlos und **Source Available**; die [Projektlizenz](LICENSE.md) beschreibt
+Nutzungs- und Weitergaberechte.
+
+## Windows-Download und Voraussetzungen
+
+Die [offiziellen GitHub-Releases](https://github.com/RodeProjects/sacrificial-tower-updates/releases)
+enthalten den Windows-Installer. Aktuelle Fassungen sind **Entwicklungsversionen
+für Tests und Evaluation**. Für den STL-Ablauf zuerst einen unterstützten Slicer
+installieren und darin den eigenen Drucker, das Filament und ein Prozessprofil
+einrichten. Danach die Profile im Slicer speichern und im Turmprogramm auswählen.
+Die Verwendung des Windows-Installers erfordert keine eigene Python-Installation.
 
 ## Start unter Windows
 
@@ -23,7 +62,22 @@ kann mit `scripts/create_dev_shortcut.ps1` erzeugt werden; `start_gui.pyw` ist d
 GUI-/PyInstaller-Einstieg. Native Analyse und Buildvoraussetzungen stehen unter
 [Entwicklung und Tests](docs/development.md).
 
-## Bedienung
+## Unterstützte Slicer und getestete Versionen
+
+Zuletzt erfolgreich getestete Referenzstände:
+
+| Slicer | Getestete Version |
+|---|---|
+| Anycubic Slicer Next | 2.0.0.3 |
+| Bambu Studio | 02.08.02.61 |
+| PrusaSlicer | 2.9.6 |
+| OrcaSlicer | 2.4.2 (Microsoft-Store-Paket 2.4.3.0) |
+
+Das sind getestete Referenzstände, keine pauschale Freigabe aller älteren oder
+zukünftigen Versionen. Nachweise und Grenzen stehen unter
+[Slicer-Unterstützung](docs/slicer_detection_modules.md#zuletzt-erfolgreich-getestete-versionen).
+
+## Bedienung: Kühlturm aus einer STL erstellen
 
 1. STL auswählen. Quellen werden inhaltlich geprüft und unverändert behalten.
 2. Slicer, Drucker-, Prozess- und Filamentprofile auswählen und ausdrücklich bestätigen.
@@ -35,6 +89,21 @@ Der dabei erzeugte G-Code wird lokal analysiert; vorhandenen G-Code verarbeitet 
 und schreibt weder Profile noch Installationsdateien eines Slicers um. Bekannte
 und erkannte Slicer-Verzeichnisse sind als Ausgabeziele gesperrt. Der detaillierte
 [Quellenablauf](docs/source_workflow.md) beschreibt Grenzen und Cacheverhalten.
+
+## Häufige Fragen zu Kühltürmen und G-Code
+
+**Wann hilft ein sacrificial cooling tower?** Bei sehr kurzen Druckschichten
+kann ein zusätzlicher Druckkörper den zeitlichen Abstand bis zur nächsten
+Schicht am Originalobjekt erhöhen. Die Wirkung hängt vom verwendeten Drucker,
+Material und Slicerprofil ab.
+
+**Ersetzt der Kühlturm Stützen am Originalmodell?** Stützen werden weiterhin
+für die Geometrie des Originalobjekts benötigt. Die optionale Stützensimulation
+kann sie in den eigenen Profilkopien und im gemeinsamen Projekt aktivieren.
+
+**Kann ich vorhandenen G-Code analysieren?** Ja, die CLI analysiert vorhandenen
+textuellen G-Code; die grafische Oberfläche beginnt mit einer STL.
+Ausführlichere englische Antworten stehen in der [Sacrificial Tower FAQ](docs/faq.md).
 
 ## Kommandozeile
 

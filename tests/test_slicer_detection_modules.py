@@ -4,6 +4,7 @@ import ast
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 
 
@@ -18,10 +19,38 @@ from cooling_tower.slicers.detection import (
     detection_module_for,
     detection_modules,
 )
-from cooling_tower.slicers import AnycubicSlicerNextAdapter
+from cooling_tower.slicers import (
+    AnycubicSlicerNextAdapter, CuraAdapter, IdeaMakerAdapter, Simplify3DAdapter,
+    SlicerCandidate, SlicerDiscoveryService, SlicerDiscoverySource, SlicerPreferenceStore,
+    UnsupportedSlicerExecutableError, default_adapters,
+)
 
 
 class SlicerDetectionModuleRegistryTests(unittest.TestCase):
+    def test_default_search_only_uses_the_four_supported_slicers(self):
+        self.assertEqual({adapter.adapter_id for adapter in default_adapters()},
+                         {"anycubic_slicer_next", "bambu_studio", "prusa_slicer", "orca_slicer"})
+
+    def test_unsupported_adapters_and_saved_paths_are_never_probed_or_added(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "cura.exe"
+            path.write_bytes(b"MZ")
+            store = SlicerPreferenceStore(root / "preferences.json")
+            store.confirm_path(path)
+            discovery = Mock()
+            discovery.discover.return_value = (
+                SlicerCandidate(path, SlicerDiscoverySource.KNOWN_PATH, adapter_hint="cura"),
+            )
+            unsupported = tuple(adapter(runner=Mock()) for adapter in (CuraAdapter, IdeaMakerAdapter, Simplify3DAdapter))
+            service = SlicerDiscoveryService(adapters=unsupported, discovery=discovery, preference_store=store)
+            self.assertFalse(service.discover_installations().installations)
+            discovery.discover.assert_called_once_with(())
+            with self.assertRaises(UnsupportedSlicerExecutableError):
+                service.add_manual_installation(path)
+            for adapter in unsupported:
+                adapter.runner.run.assert_not_called()
+
     def test_detection_package_has_no_external_runtime_dependency(self) -> None:
         package_root = (
             SRC_ROOT / "cooling_tower" / "slicers" / "detection"

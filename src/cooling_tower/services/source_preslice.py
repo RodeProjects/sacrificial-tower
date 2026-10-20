@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 
 from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.gcode.empty_layers import (
+    EmptyLayerEvidence, empty_layer_message, inspect_empty_layers, reports_empty_layers,
+)
 from cooling_tower.models import (
     GCodeOrigin,
     PreSliceProvenance,
@@ -39,7 +42,8 @@ from cooling_tower.slicers import (
 )
 from cooling_tower.slicers.profile_models import stable_json_fingerprint
 from cooling_tower.slicers.support_simulation import (
-    can_offer_support_simulation, with_simulated_supports,
+    can_offer_support_simulation, global_supports_disabled, global_supports_enabled,
+    OBJECT_SUPPORT_ADAPTERS, with_simulated_supports,
 )
 from cooling_tower.slicers.draft_shield import with_simulated_draft_shield_disabled
 from cooling_tower.slicers.profile_matching import metadata_values
@@ -56,7 +60,7 @@ if TYPE_CHECKING:
     from cooling_tower.preview.source_cache import PreviewSourceData
 
 
-PRESLICE_ADAPTER_VERSION = 4
+PRESLICE_ADAPTER_VERSION = 5
 DEFAULT_PRESLICE_TIMEOUT_S = 8 * 60.0
 _WORKSPACE_PREFIX = "cooling_tower_source_preslice_"
 _WORKSPACE_MARKER = ".cooling_tower_preslice_workspace"
@@ -93,6 +97,7 @@ class SourcePreSliceResult:
     preview_source_data: PreviewSourceData | None = None
     supports_simulated: bool = False
     draft_shield_simulated: bool = False
+    empty_layers: EmptyLayerEvidence = EmptyLayerEvidence()
 
     def cleanup(self) -> None:
         _safe_cleanup_workspace(self.workspace_root)
@@ -249,9 +254,19 @@ class SourcePreSliceService:
             if cancelled.is_set() or slice_result.cancelled:
                 raise SourcePreSliceCancelled("Der Pre-Slice wurde abgebrochen.")
             if not slice_result.success:
+                profile = selected.effective_profile
+                output = f"{slice_result.stdout}\n{slice_result.stderr}\n{slice_result.failure_reason or ''}"
+                empty_layers = EmptyLayerEvidence(reports_empty_layers(output))
+                message = slice_result.failure_reason or "Der Slicer konnte keinen G-Code erzeugen."
+                if empty_layers.detected and not (slice_result.timed_out or slice_result.crashed):
+                    message = empty_layer_message(
+                        empty_layers,
+                        simulation_available=(not simulate_supports and global_supports_disabled(profile)
+                                              and profile.installation.adapter_id in OBJECT_SUPPORT_ADAPTERS),
+                        supports_active=simulate_supports or global_supports_enabled(profile),
+                    )
                 raise SourcePreSliceError(
-                    slice_result.failure_reason
-                    or "Der Slicer konnte keinen G-Code erzeugen.",
+                    message,
                     technical_details=self._slice_failure_details(slice_result),
                     support_simulation_available=(not simulate_supports and
                         can_offer_support_simulation(slice_result, selected.effective_profile)),
@@ -290,6 +305,7 @@ class SourcePreSliceService:
                 )
             notify(90, "Slicer- und Profilmetadaten werden abgeglichen", False)
             self._verify_generated_metadata(snapshot, profile_match)
+            empty_layers = self._inspect_empty_layers(snapshot, cancelled, slice_result)
             if sha256_file(source.original_path) != source.original_sha256:
                 raise SourcePreSliceError(
                     "Sicherheitsabbruch: Die Original-STL wurde während "
@@ -312,7 +328,8 @@ class SourcePreSliceService:
                 ),
                 preslice_provenance=provenance,
             )
-            if self.cache is not None:
+            # CLI-only warnings cannot be reconstructed from a cached G-code.
+            if self.cache is not None and not empty_layers.reported_by_slicer:
                 try:
                     self.cache.put(
                         cache_key=cache_key,
@@ -335,6 +352,7 @@ class SourcePreSliceService:
                 supports_simulated=simulate_supports,
                 draft_shield_simulated=simulate_draft_shield,
                 preview_source_data=preview_source_data,
+                empty_layers=empty_layers,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError) as error:
             _safe_cleanup_workspace(workspace)
@@ -344,6 +362,16 @@ class SourcePreSliceService:
             _safe_cleanup_workspace(workspace)
             self._raise_if_source_changed(source, cause=error)
             raise SourcePreSliceError(str(error)) from error
+
+    @staticmethod
+    def _inspect_empty_layers(snapshot, cancelled, result=None) -> EmptyLayerEvidence:
+        def check_cancel():
+            if cancelled.is_set():
+                raise SourcePreSliceCancelled("Die Pre-Slice-Analyse wurde abgebrochen.")
+        return inspect_empty_layers(
+            snapshot, check_cancel=check_cancel,
+            slicer_output=f"{result.stdout}\n{result.stderr}" if result is not None else "",
+        )
 
     @staticmethod
     def _forward_analysis_progress(
@@ -578,6 +606,7 @@ class SourcePreSliceService:
                     "Der gespeicherte Pre-Slice enthält keine druckbaren Layer."
                 )
             self._verify_generated_metadata(snapshot, profile_match)
+            empty_layers = self._inspect_empty_layers(snapshot, cancellation_event)
             if not source.matches_current_file(verify_content=True):
                 raise SourcePreSliceError(
                     "Die STL wurde nach ihrer Validierung verändert."
@@ -621,6 +650,7 @@ class SourcePreSliceService:
                 preview_source_data=preview_source_data,
                 supports_simulated=simulate_supports,
                 draft_shield_simulated=simulate_draft_shield,
+                empty_layers=empty_layers,
             )
         except (SourcePreSliceCancelled, SourcePreSliceError):
             _safe_cleanup_workspace(workspace)

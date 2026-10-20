@@ -10,7 +10,7 @@ from unittest.mock import PropertyMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 from cooling_tower.models import OccupiedBounds
 from cooling_tower.preview import LineSegment3D, Point3D
 from cooling_tower.gui.main_window import MainWindow
@@ -18,6 +18,7 @@ from cooling_tower.models import SourceKind
 from cooling_tower.persistence import PreSliceCache
 from cooling_tower.services import SourcePreSliceError, build_preslice_cache_key
 from cooling_tower.slicers import ProfileConfirmation, ProfileCatalog
+from cooling_tower.slicers.profile_models import stable_json_fingerprint
 from cooling_tower.slicers.support_simulation import (
     can_offer_support_simulation, tower_support_warning_angle,
     with_simulated_supports, simulated_support_settings,
@@ -49,12 +50,14 @@ class SupportSimulationTests(unittest.TestCase):
         self.fixture.setUp()
         f = self.fixture
         installation = replace(f.installation, adapter_id='anycubic_slicer_next')
-        profile = replace(f.match.selected.effective_profile, installation=installation)
+        profile = replace(f.match.selected.effective_profile, installation=installation,
+                          effective_values={**f.match.selected.effective_profile.effective_values, 'enable_support': '0'})
         f.process.path.write_text(json.dumps({'name': 'process', 'enable_support': '0',
             'support_type': 'tree(auto)', 'support_threshold_angle': '23',
             'support_top_z_distance': '0.18'}), encoding='utf-8')
         f.match = replace(f.match, execution_slicer=installation,
-                          selected=replace(f.match.selected, effective_profile=profile))
+                          selected=replace(f.match.selected, effective_profile=profile),
+                          effective_profile_fingerprint=stable_json_fingerprint(profile.effective_values))
         f.confirmation = ProfileConfirmation.from_result(f.match, f.validation.source_artifact)
         self.originals = {p: p.read_bytes() for p in (f.source, *profile.source_paths)}
 
@@ -101,6 +104,185 @@ class SupportSimulationTests(unittest.TestCase):
             finally:
                 result.cleanup()
         self.assertEqual(len(adapter.requests), 2)
+
+    def test_retry_offer_requires_explicitly_disabled_supports(self):
+        profile = self.fixture.match.selected.effective_profile
+        failure = replace(FakeSliceAdapter._result(None, None, success=False),
+                          stderr="Empty layers detected, the output would not be printable.")
+        self.assertTrue(can_offer_support_simulation(failure, profile))
+        for value in (None, "", "unknown", "1", True):
+            values = dict(profile.effective_values)
+            if value is None:
+                values.pop('enable_support')
+            else:
+                values['enable_support'] = value
+            self.assertFalse(can_offer_support_simulation(failure, replace(profile, effective_values=values)))
+
+    def test_empty_layer_popup_matches_support_state_and_visible_option(self):
+        from cooling_tower.gcode.empty_layers import EmptyLayerEvidence
+        from gui_lifecycle import dispose_test_widget
+        for value, simulated in (("0", False), ("1", False), (None, False), ("0", True)):
+            with self.subTest(value=value, simulated=simulated):
+                window = self.make_window()
+                try:
+                    profile = window.profile_match_result.selected.effective_profile
+                    values = dict(profile.effective_values)
+                    values.pop('enable_support', None)
+                    if value is not None:
+                        values['enable_support'] = value
+                    window.profile_match_result = replace(window.profile_match_result,
+                        selected=replace(window.profile_match_result.selected,
+                                         effective_profile=replace(profile, effective_values=values)))
+                    window._refresh_phase17_actions()
+                    result = SimpleNamespace(empty_layers=EmptyLayerEvidence(True), supports_simulated=simulated)
+                    window._show_empty_layer_notice(result)
+                    self.app.processEvents()
+                    dialog = window.findChild(QMessageBox, "emptyLayerNotice")
+                    self.assertIsNotNone(dialog)
+                    offered = value == "0" and not simulated
+                    self.assertEqual('Stützen simulieren' in dialog.text(), offered)
+                    self.assertEqual(dialog.findChild(QPushButton, "emptyLayerSimulateSupportsButton") is not None, offered)
+                    self.assertEqual(dialog.standardButtons(), QMessageBox.StandardButton.NoButton)
+                    continue_button = dialog.findChild(QPushButton, "emptyLayerContinueWithoutSupportsButton")
+                    self.assertEqual(continue_button.text(), "Weiter ohne Stützen")
+                    self.assertIs(dialog.defaultButton(), continue_button)
+                    self.assertIs(dialog.escapeButton(), continue_button)
+                    self.assertEqual('bereits aktiviert' in dialog.text(), value == "1" or simulated)
+                    self.assertEqual(window.source_support_option.isHidden(), value != "0")
+                    dialog.accept()
+                finally:
+                    dispose_test_widget(window)
+
+    def show_empty_layer_dialog(self, window):
+        from cooling_tower.gcode.empty_layers import EmptyLayerEvidence
+        window._refresh_phase17_actions()
+        window._show_empty_layer_notice(SimpleNamespace(
+            empty_layers=EmptyLayerEvidence(True), supports_simulated=False))
+        self.app.processEvents()
+        return window.findChild(QMessageBox, "emptyLayerNotice")
+
+    def test_empty_layer_buttons_keep_text_space_when_dialog_gains_focus(self):
+        from PySide6.QtWidgets import QStyle, QStyleOptionButton
+        from gui_lifecycle import dispose_test_widget
+        window = self.make_window()
+        try:
+            dialog = self.show_empty_layer_dialog(window)
+            for name in ("emptyLayerSimulateSupportsButton", "emptyLayerContinueWithoutSupportsButton"):
+                with self.subTest(button=name):
+                    button = dialog.findChild(QPushButton, name)
+                    text_rects = []
+                    for focused in (False, True):
+                        option = QStyleOptionButton()
+                        option.initFrom(button)
+                        option.state &= ~(QStyle.StateFlag.State_Active | QStyle.StateFlag.State_HasFocus
+                                          | QStyle.StateFlag.State_KeyboardFocusChange)
+                        if focused:
+                            option.state |= (QStyle.StateFlag.State_Active | QStyle.StateFlag.State_HasFocus
+                                             | QStyle.StateFlag.State_KeyboardFocusChange)
+                        text_rects.append(button.style().subElementRect(
+                            QStyle.SubElement.SE_PushButtonContents, option, button))
+                    self.assertEqual(text_rects[0], text_rects[1])
+                    self.assertGreaterEqual(text_rects[1].width(), button.fontMetrics().horizontalAdvance(button.text()))
+        finally:
+            dispose_test_widget(window)
+
+    def test_empty_layer_action_enables_both_methods_before_manual_editor_is_ready(self):
+        from cooling_tower.gui.generation_session import GenerationMode
+        from gui_lifecycle import dispose_test_widget
+        from test_manual_generation import create_fixture
+        _, _, reference, _, _ = create_fixture(self, joint=True)
+        for mode in (None, GenerationMode.AUTOMATIC, GenerationMode.MANUAL):
+            with self.subTest(mode=mode):
+                window = self.make_window()
+                try:
+                    window.generation_mode = mode
+                    window.manual_controller.refresh()
+                    dialog = self.show_empty_layer_dialog(window)
+                    self.assertIsNone(window.manual_generation_panel.reference)
+                    self.assertFalse(window.manual_generation_panel.source_supports_checkbox.isEnabled())
+                    with patch.object(window, "start_source_preslice") as preslice, \
+                            patch.object(window.manual_controller, "ensure_context") as prepare, \
+                            patch.object(window.background_job_manager, "start_job") as start_job:
+                        dialog.findChild(QPushButton, "emptyLayerSimulateSupportsButton").click()
+                        self.assertTrue(window.simulate_source_supports_checkbox.isChecked())
+                        self.assertTrue(window.manual_generation_panel.source_supports_checkbox.isChecked())
+                        self.assertFalse(dialog.isVisible())
+                        preslice.assert_not_called()
+                        prepare.assert_not_called()
+                        start_job.assert_not_called()
+                    window.manual_generation_panel.initialize(reference)
+                    window.manual_generation_panel.set_busy(False)
+                    self.assertTrue(window.manual_generation_panel.source_supports_checkbox.isChecked())
+                finally:
+                    dispose_test_widget(window)
+
+    def test_empty_layer_dismissal_preserves_settings(self):
+        from PySide6.QtTest import QTest
+        from gui_lifecycle import dispose_test_widget
+        for automatic, manual in ((False, False), (True, False), (False, True), (True, True)):
+            for action in ("continue", "escape", "close"):
+                with self.subTest(automatic=automatic, manual=manual, action=action):
+                    window = self.make_window()
+                    try:
+                        window._refresh_phase17_actions()
+                        window.simulate_source_supports_checkbox.setChecked(automatic)
+                        window.manual_generation_panel.source_supports_checkbox.setChecked(manual)
+                        dialog = self.show_empty_layer_dialog(window)
+                        with patch.object(window, "_invalidate_preview") as invalidate, \
+                                patch.object(window.manual_controller, "draft_changed") as draft_changed:
+                            if action == "continue":
+                                dialog.findChild(QPushButton, "emptyLayerContinueWithoutSupportsButton").click()
+                            elif action == "escape":
+                                QTest.keyClick(dialog, Qt.Key.Key_Escape)
+                            else:
+                                dialog.close()
+                            self.assertEqual(window.simulate_source_supports_checkbox.isChecked(), automatic)
+                            self.assertEqual(window.manual_generation_panel.source_supports_checkbox.isChecked(), manual)
+                            invalidate.assert_not_called()
+                            draft_changed.assert_not_called()
+                    finally:
+                        dispose_test_widget(window)
+
+    def test_empty_layer_action_ignores_stale_context_and_running_work(self):
+        from cooling_tower.gui.background_jobs import JobKind
+        from gui_lifecycle import dispose_test_widget
+        for changed in ("source", "profile", "confirmation", "request", "preview", "export", "manual"):
+            with self.subTest(changed=changed):
+                window = self.make_window()
+                try:
+                    dialog = self.show_empty_layer_dialog(window)
+                    if changed == "source":
+                        window.source_artifact = replace(window.source_artifact)
+                    elif changed == "profile":
+                        window.profile_match_result = replace(window.profile_match_result)
+                    elif changed == "confirmation":
+                        window.confirmed_profile_context = replace(window.confirmed_profile_context)
+                    elif changed == "request":
+                        window._preslice_request_id += 1
+                    elif changed == "manual":
+                        window.manual_controller.job_id = "busy"
+                    busy_kind = {"preview": JobKind.PREVIEW, "export": JobKind.EXPORT}.get(changed)
+                    with patch.object(window.background_job_manager, "has_active", side_effect=lambda kind: kind == busy_kind):
+                        dialog.findChild(QPushButton, "emptyLayerSimulateSupportsButton").click()
+                    self.assertFalse(window.simulate_source_supports_checkbox.isChecked())
+                    self.assertFalse(window.manual_generation_panel.source_supports_checkbox.isChecked())
+                finally:
+                    window.manual_controller.job_id = None
+                    dispose_test_widget(window)
+
+    def test_initial_window_height_and_saved_height(self):
+        from gui_lifecycle import dispose_test_widget
+        window = self.make_window()
+        try:
+            self.assertEqual(window.height(), 1220)
+            window.resize(1250, 950)
+        finally:
+            dispose_test_widget(window)
+        restored = self.make_window()
+        try:
+            self.assertEqual(restored.height(), 950)
+        finally:
+            dispose_test_widget(restored)
 
     def test_calibration_copies_retain_approved_supports(self):
         f = self.fixture

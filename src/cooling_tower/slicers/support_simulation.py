@@ -38,6 +38,14 @@ def global_supports_disabled(profile: EffectiveProfile) -> bool:
     return value is not None and str(value).strip().casefold() in {"0", "false", "no"}
 
 
+def global_supports_enabled(profile: EffectiveProfile) -> bool:
+    key = SUPPORT_KEYS.get(profile.installation.adapter_id)
+    value = profile.effective_values.get(key)
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return profile.supports_simulated or str(value).strip().casefold() in {"1", "true", "yes"}
+
+
 def with_simulated_supports(profile: EffectiveProfile) -> EffectiveProfile:
     return replace(profile, supports_simulated=True,
                    effective_values={**profile.effective_values, **simulated_support_settings(profile)})
@@ -65,7 +73,7 @@ def tower_support_warning_angle(profile: EffectiveProfile) -> float | None:
 
 def can_offer_support_simulation(result: SliceResult, profile: EffectiveProfile) -> bool:
     key = SUPPORT_KEYS.get(profile.installation.adapter_id)
-    if not key or profile.supports_simulated or result.success or (
+    if not key or not global_supports_disabled(profile) or profile.supports_simulated or result.success or (
         result.cancelled or result.timed_out or result.crashed
     ):
         return False
@@ -82,7 +90,8 @@ def can_offer_support_simulation(result: SliceResult, profile: EffectiveProfile)
         and result.return_code is not None
         and result.return_code & 0xFFFFFFFF == 0xFFFFFF9C
     )
-    return generic_geometry_error or any(marker in output for marker in (
+    from cooling_tower.gcode.empty_layers import reports_empty_layers
+    return generic_geometry_error or reports_empty_layers(output) or any(marker in output for marker in (
         "empty initial layer", "empty first layer", "enable supports",
         "no extrusions on the first layer",
     ))

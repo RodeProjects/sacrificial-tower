@@ -3424,6 +3424,7 @@ QPushButton#layerRangeCancelButton,
 QPushButton#layerRangeRemoveButton,
 QPushButton#removeSourceButton,
 QPushButton#supportSimulationCancelButton,
+QPushButton#emptyLayerContinueWithoutSupportsButton,
 QPushButton#presliceCancelButton,
 QPushButton#updateCancelButton,
 QPushButton#updateRestartCancelButton {
@@ -3438,6 +3439,7 @@ QPushButton#layerRangeCancelButton:hover,
 QPushButton#layerRangeRemoveButton:hover,
 QPushButton#removeSourceButton:hover,
 QPushButton#supportSimulationCancelButton:hover,
+QPushButton#emptyLayerContinueWithoutSupportsButton:hover,
 QPushButton#presliceCancelButton:hover,
 QPushButton#updateCancelButton:hover,
 QPushButton#updateRestartCancelButton:hover {
@@ -3451,6 +3453,7 @@ QPushButton#layerRangeCancelButton:pressed,
 QPushButton#layerRangeRemoveButton:pressed,
 QPushButton#removeSourceButton:pressed,
 QPushButton#supportSimulationCancelButton:pressed,
+QPushButton#emptyLayerContinueWithoutSupportsButton:pressed,
 QPushButton#presliceCancelButton:pressed,
 QPushButton#updateCancelButton:pressed,
 QPushButton#updateRestartCancelButton:pressed {
@@ -3464,6 +3467,8 @@ QPushButton#removeSourceButton:disabled,
 QPushButton#supportSimulationCancelButton:disabled,
 QPushButton#supportSimulationReloadButton:disabled,
 QPushButton#supportSimulationProceedButton:disabled,
+QPushButton#emptyLayerContinueWithoutSupportsButton:disabled,
+QPushButton#emptyLayerSimulateSupportsButton:disabled,
 QPushButton#presliceCancelButton:disabled,
 QPushButton#updateCancelButton:disabled,
 QPushButton#updateRestartCancelButton:disabled {
@@ -3499,20 +3504,30 @@ QPushButton#supportSimulationReloadButton:pressed {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #c8deef, stop: 1 #eaf5fc);
 }
-QPushButton#supportSimulationProceedButton {
+/* The shared focus rule adds one border pixel per side. Compensate the
+   padding so dialog activation cannot shrink or clip either button label. */
+QPushButton#emptyLayerSimulateSupportsButton:focus,
+QPushButton#emptyLayerContinueWithoutSupportsButton:focus {
+    padding: 6px 12px;
+}
+
+QPushButton#supportSimulationProceedButton,
+QPushButton#emptyLayerSimulateSupportsButton {
     color: #23704c;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #f4fbf6, stop: 1 #e0f2e7);
     border-color: #b9d8c5;
     font-weight: 600;
 }
-QPushButton#supportSimulationProceedButton:hover {
+QPushButton#supportSimulationProceedButton:hover,
+QPushButton#emptyLayerSimulateSupportsButton:hover {
     color: #1b5e3f;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #e9f6ee, stop: 1 #cee8d8);
     border-color: #97bfa7;
 }
-QPushButton#supportSimulationProceedButton:pressed {
+QPushButton#supportSimulationProceedButton:pressed,
+QPushButton#emptyLayerSimulateSupportsButton:pressed {
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 #c7e3d2, stop: 1 #eef9f1);
 }

@@ -278,7 +278,7 @@ class Phase17Tests(unittest.TestCase):
         self.assertEqual(window.slicer_combo.currentData(), verified.identity_key)
         window.close()
 
-    def test_02_last_used_slicer_is_preselected_and_labelled(self) -> None:
+    def test_02_externally_used_slicer_is_preselected_without_selection_label(self) -> None:
         window = self.window()
         first = self.installation(self.root, "First")
         second = self.installation(self.root, "Second")
@@ -290,7 +290,8 @@ class Phase17Tests(unittest.TestCase):
         window._slicer_request_id = 1
         window._on_slicer_discovery_succeeded(1, result)
         self.assertEqual(window.slicer_combo.currentData(), second.identity_key)
-        self.assertIn("zuletzt verwendet", window.slicer_combo.currentText())
+        self.assertNotIn("zuletzt verwendet", window.slicer_combo.currentText())
+        self.assertNotIn("zuletzt ausgewählt", window.slicer_combo.currentText())
         self.assertNotIn("empfohlen", window.slicer_combo.currentText())
         window.close()
 
@@ -342,7 +343,67 @@ class Phase17Tests(unittest.TestCase):
         )
 
         self.assertEqual(window.slicer_combo.currentData(), second.identity_key)
-        self.assertIn("zuletzt verwendet", window.slicer_combo.currentText())
+        self.assertNotIn("zuletzt verwendet", window.slicer_combo.currentText())
+        self.assertNotIn("zuletzt ausgewählt", window.slicer_combo.currentText())
+        window.close()
+
+    def test_saved_selection_precedes_external_usage_and_label_follows_dropdown_choice(self):
+        window = self.window()
+        first = self.installation(self.root, "Alpha")
+        second = self.installation(self.root, "Beta")
+        result = SlicerDiscoveryResult(
+            (second, first), second.identity_key, SlicerGuiState.AVAILABLE,
+            "Slicer verfügbar", last_used_key=second.identity_key, last_selected_key=first.identity_key,
+        )
+        window._slicer_request_id = 8
+        with patch.object(window, "start_profile_catalog_loading"):
+            window._on_slicer_discovery_succeeded(8, result)
+            self.assertEqual(window.slicer_combo.currentData(), first.identity_key)
+            self.assertEqual(window.slicer_combo.currentText(), first.display_name + " – zuletzt ausgewählt")
+            self.assertEqual(window.slicer_combo.itemData(0), first.identity_key)
+            with patch.object(window.slicer_service, "remember_selection") as remember:
+                window.slicer_combo.setCurrentIndex(1)
+                remember.assert_called_once_with(second.identity_key)
+            self.assertEqual(window.slicer_combo.currentText(), second.display_name + " – zuletzt ausgewählt")
+            self.assertEqual(window.slicer_combo.itemText(0), first.display_name)
+            self.assertEqual(window.slicer_discovery_result.last_selected_key, second.identity_key)
+        window.close()
+
+    def test_first_automatic_preselection_does_not_save_a_user_choice(self):
+        window = self.window()
+        first = self.installation(self.root, "Alpha")
+        second = self.installation(self.root, "Beta")
+        result = SlicerDiscoveryResult((second, first), second.identity_key,
+            SlicerGuiState.AVAILABLE, "Slicer verfügbar", last_used_key=second.identity_key)
+        window._slicer_request_id = 9
+        with patch.object(window, "start_profile_catalog_loading"), \
+             patch.object(window.slicer_service, "remember_selection") as remember:
+            window._on_slicer_discovery_succeeded(9, result)
+            remember.assert_not_called()
+        self.assertEqual(window.slicer_combo.currentData(), second.identity_key)
+        self.assertTrue(all("zuletzt" not in window.slicer_combo.itemText(i)
+                            for i in range(window.slicer_combo.count())))
+        window.close()
+
+    def test_no_slicer_notice_lists_supported_products_and_opens_manual_exe_selection(self):
+        window = self.window()
+        window._slicer_request_id = 10
+        result = SlicerDiscoveryResult((), None, SlicerGuiState.NOT_FOUND, "Kein Slicer erkannt")
+        window._on_slicer_discovery_succeeded(10, result)
+        window._on_slicer_discovery_succeeded(10, result)
+        dialogs = window.findChildren(QMessageBox, "missingSlicerNotice")
+        self.assertEqual(len(dialogs), 1)
+        dialog = dialogs[0]
+        for name in ("Anycubic Slicer Next", "Bambu Studio", "PrusaSlicer", "OrcaSlicer"):
+            self.assertIn("• " + name, dialog.text())
+        for text in ("automatische Erkennung", "EXE-Datei", "installiere", "Drucker"):
+            self.assertIn(text, dialog.text())
+        executable = self.root / "prusa-slicer.exe"
+        with patch("cooling_tower.gui.main_window.QFileDialog.getOpenFileName",
+                   return_value=(str(executable), "")), \
+             patch.object(window, "start_slicer_discovery") as discover:
+            next(button for button in dialog.buttons() if button.text().startswith("EXE-Datei")).click()
+            discover.assert_called_once_with(manual_path=executable)
         window.close()
 
     def test_03_user_can_select_another_slicer(self) -> None:

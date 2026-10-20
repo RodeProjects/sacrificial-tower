@@ -1186,10 +1186,14 @@ Layernummer, Z-Höhe und erreichte Zeit ohne Ziel-/Defizitfelder.
 Der Export übergibt dem bestehenden Integritätsvertrag den **gespeicherten
 erfolgreichen Auftrag**, auch wenn der aktuelle Entwurf inzwischen anders
 aussieht. Er kopiert dessen geprüftes STL, gegebenenfalls natives gemeinsames
-3MF, `verification.gcode`, Slicer-/Projektdiagnosen, technischen JSON-Bericht und
+3MF, Slicer-/Projektdiagnosen, technischen JSON-Bericht und
 Benutzerzusammenfassung in einen eindeutigen Laufordner. Keine neue Generierung
-und kein neuer Slice findet statt. Quellen, Profile, STL, 3MF und G-Code werden
-erneut auf unveränderte Identität bzw. Prüfsummen geprüft. Unvollständige
+und kein neuer Slice findet statt. Quellen, Profile, STL, 3MF und beim ersten
+Export der temporäre Prüfslice werden erneut auf unveränderte Identität bzw.
+Prüfsummen geprüft. Anschließend wird die temporäre Prüf-G-Code-Datei gelöscht;
+Messwerte und SHA-256 verbleiben im Bericht. Einzelheiten zum
+[temporären Prüfslice](source_workflow.md#temporärer-manueller-prüfslice).
+Unvollständige
 Exportordner werden entfernt. Ein identischer Ergebnisstand kann innerhalb
 seiner Sitzung nur einmal exportiert werden; beide Methoden führen diese
 Identität getrennt. Der letzte Exportbericht bleibt als gemeinsamer Verlauf

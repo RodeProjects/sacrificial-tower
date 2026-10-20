@@ -107,7 +107,7 @@ unverträgliche Kombination lässt sich daraus nicht bestimmen.
 `SourcePreSliceError.support_simulation_available` beschreibt ein mögliches
 Wiederherstellungsangebot, keine sichere Fehlerdiagnose. Es wird bei einem
 Hinweis auf eine leere erste Schicht oder Anycubics unspezifischem Slicingfehler
-`-100` angeboten, sofern Stützen noch deaktiviert sind. Abstürze, Zeitlimits,
+`-100` angeboten, sofern Stützen ausdrücklich als deaktiviert erkannt wurden. Abstürze, Zeitlimits,
 Abbrüche und ein bereits mit Simulation fehlgeschlagener Versuch lösen das
 Angebot nicht aus. Der vorhandene Thread wird vor dem erneuten Start freigegeben.
 Eine veraltete Zustimmung nach Quellen-/Profilwechsel oder beim Beenden wird verworfen.
@@ -168,12 +168,57 @@ Objektsimulation erst für die Generierung ein. Mit
 `COOLING_TOWER_SUPPORT_PRESLICE_SIMULATED=1` prüft er zusätzlich den Ausgang
 mit bereits simulierten Stützen im Vorslice.
 
-Im manuellen Modus gehört `verification.gcode` bei jedem Slicer zum Export.
-Es ist die unveränderte Ausgabe des Prüfslices, auf dem die angegebenen Zeiten
-beruhen; der Bericht enthält Pfad und SHA-256. Beim automatischen Export wird
-diese zusätzliche Belegdatei derzeit nicht ausgegeben. Eine Verwendung als
-Druckdatei erfordert dieselbe Prüfung von Maschine, Profilen und Projekt wie
-jeder andere Slicer-G-Code.
+### Leere Schichten im Vorslice
+
+Auch ein erfolgreicher Slice kann leere Schichten enthalten, etwa wenn sehr
+dünne Querschnitte keine Druckbahn ergeben. `gcode.empty_layers` übernimmt
+ausdrückliche Leerlagenwarnungen aus stdout/stderr und prüft den G-Code
+zusätzlich unabhängig davon: bestätigte Materialablagen werden mit den
+Schicht-/Extrusionshöhenkommentaren des Slicers verglichen. Eindeutige Lücken
+und explizite leere Zwischenschichten werden als Hinweis übernommen.
+Variable Schichthöhen, bloße Z-Hops, fehlende/ungültige Höhenangaben und
+vorgesehene Stützen-/Raft-Kontaktabstände begründen keine geometrische Diagnose.
+Die Prüfung untersucht vollständige Ablageebenen; lokal fehlende Flächen bei
+anderweitig bedruckter Ebene benötigen eine ausdrückliche Slicerwarnung.
+Sie ersetzt keine allgemeine Tragfähigkeits- oder Überhangprüfung.
+
+Die erfolgreiche Analyse bleibt nutzbar und zeigt einen Warnhinweis mit
+gegebenenfalls erkannten Höhenbereichen. Er empfiehlt Stützen für das
+Originalobjekt. „Stützen simulieren“ aktiviert direkt die bestehende Option
+für die automatische und manuelle Turmerstellung, auch vor dem ersten Öffnen
+des manuellen Editors; ein neuer Lauf wird damit noch nicht gestartet.
+Der grüne Button wird nur bei bestätigtem, unterstütztem Profil mit erkanntem
+Stützen-Aus-Wert angeboten. Die Aktion prüft den Quellen-/Profilkontext erneut.
+„Weiter ohne Stützen“, Escape und Schließen verwerfen nur den Dialog und
+behalten alle Einstellungen bei. Die Buttons verwenden die vorhandenen
+hellgrünen/hellroten Verläufe einschließlich Hover-/Druckzuständen. Bereits
+aktivierte/simulierte Stützen führen stattdessen zum Hinweis, ihre Abdeckung
+im Slicer zu prüfen. Bei einem fehlgeschlagenen Slice wird die Leerlagendiagnose
+in der Fehleranzeige erklärt; der vorhandene Wiederholungsdialog bleibt nutzbar.
+
+Geometrische Evidenz wird auch bei Cachetreffern aus dem G-Code rekonstruiert.
+Slices mit ausdrücklicher CLI-Leerlagenwarnung werden nicht gecacht, damit eine
+nur im Prozessprotokoll enthaltene Warnung bei späterem Laden nicht verloren
+geht. Adapterstand 5 trennt frühere Cacheeinträge von dieser Prüfung.
+Regression: `test_empty_layers`, `test_support_simulation`. Reale Kontrolle
+am 20.10.2026 mit `input/Test-STL (manifold).stl` und PrusaSlicer: ohne Stützen
+Warnung bei erfolgreichem Slice, mit simulierten Stützen keine Warnung;
+625 überwachte Quelldateien einschließlich STL und Slicerprofilen unverändert.
+Die Kommentarformate wurden anhand des
+[PrusaSlicer-G-Code-Generators](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.3/src/libslic3r/GCode.cpp)
+geprüft; die Erkennung ist eigenständig implementiert.
+
+### Temporärer manueller Prüfslice
+
+Der manuelle Prüfslice liefert die gemessenen Layerzeiten und wird ausschließlich
+im eigenen temporären Arbeitsbereich gehalten. Der Export enthält STL, ggf.
+3MF, Berichte und Diagnosen, jedoch keine zusätzliche `verification.gcode`.
+Nach erfolgreichem Export wird die temporäre Prüf-G-Code-Datei gelöscht.
+Messwerte und SHA-256 bleiben im technischen Bericht erhalten. Wiederholte
+Exporte benötigen keinen neuen Slice und prüfen weiterhin Quellen, Profile,
+STL und Projekt. Bei fehlgeschlagenem Export bleibt die temporäre Prüfdatei
+für einen erneuten Versuch erhalten; das Verwerfen des Ergebnisses räumt
+den gesamten temporären Auftrag auf.
 
 Das abschließende Zusammenfassungsfenster und die Exportberichte kennzeichnen
 simulierte Stützen. Nur eine tatsächlich exportierte 3MF übernimmt deren

@@ -97,8 +97,11 @@ class InstalledSourceSupportTests(unittest.TestCase):
                                      profile_source_hashes=reference.profile_source_hashes)
             manual = manual_service.prepare(manual_request)
             try:
+                temporary_gcode = manual.manual_evaluation.gcode_path
                 exported = ManualExportService().export(manual,manual_request,root / 'manual_export')
-                self.assertTrue((exported.run_directory / 'verification.gcode').is_file())
+                self.assertFalse((exported.run_directory / 'verification.gcode').exists())
+                self.assertFalse(temporary_gcode.exists())
+                self.assertIsNone(manual.manual_evaluation.gcode_path)
                 manual_summary = self.verify_export(adapter,profile,exported,manual.minimum_verified_layer_time_s,
                     root / 'manual_reopen',simulated_support_settings(profile))
             finally:

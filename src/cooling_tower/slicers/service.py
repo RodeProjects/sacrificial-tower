@@ -29,6 +29,7 @@ from cooling_tower.slicers.models import (
     SlicerDiscoverySource,
     SlicerGuiState,
     SlicerInstallation,
+    SlicerSupportLevel,
 )
 from cooling_tower.slicers.preferences import SlicerPreferenceStore
 from cooling_tower.slicers.support import detected_installation, require_profile_support
@@ -55,11 +56,23 @@ class SlicerDiscoveryService:
         discovery: CandidateDiscovery | None = None,
         preference_store: SlicerPreferenceStore | None = None,
     ) -> None:
-        self.adapters = tuple(adapters or default_adapters())
+        self.adapters = tuple(
+            adapter for adapter in (default_adapters() if adapters is None else adapters)
+            if self._supports_discovery(adapter)
+        )
         self.discovery = discovery or WindowsSlicerDiscovery()
         self.preference_store = preference_store
         self._installations: tuple[SlicerInstallation, ...] | None = None
         self._diagnostics: tuple[str, ...] = ()
+
+    @staticmethod
+    def _supports_discovery(adapter: SlicerAdapter) -> bool:
+        module = detection_module_for(adapter.adapter_id)
+        if module is not None:
+            return module.implemented
+        # Explicitly injected custom integrations retain their contract;
+        # legacy detection-only adapters must never join installation searches.
+        return getattr(adapter, "support_level", SlicerSupportLevel.FULL) is SlicerSupportLevel.FULL
 
     def discover_installations(
         self,
@@ -207,6 +220,7 @@ class SlicerDiscoveryService:
             self._installations = self._deduplicate_installations(current)
             if self.preference_store is not None:
                 self.preference_store.confirm_path(path)
+                self.preference_store.set_last_selected(installation.identity_key)
             record_diagnostic(
                 "slicer_candidate_verified",
                 diagnostic_event_schema_version=(
@@ -226,6 +240,7 @@ class SlicerDiscoveryService:
                 self._installations,
                 source_slicer,
                 self._diagnostics,
+                selected_key=installation.identity_key,
             )
         message = (
             "Die ausgewählte Datei ist kein unterstützter Slicer."
@@ -315,9 +330,11 @@ class SlicerDiscoveryService:
         installations: tuple[SlicerInstallation, ...],
         source_slicer: SlicerIdentity | None,
         diagnostics: tuple[str, ...],
+        *,
+        selected_key: str | None = None,
     ) -> SlicerDiscoveryResult:
         preferences = self.preference_store.load() if self.preference_store else None
-        last_selected = preferences.last_selected_key if preferences else None
+        last_selected = selected_key or (preferences.last_selected_key if preferences else None)
         last_used = self._last_used_installation(installations)
         recommended = self._recommend(
             installations,
@@ -341,6 +358,7 @@ class SlicerDiscoveryService:
             last_used_key=(
                 last_used.identity_key if last_used is not None else None
             ),
+            last_selected_key=last_selected,
         )
 
     @staticmethod
@@ -389,14 +407,9 @@ class SlicerDiscoveryService:
             for item in installations
             if item.adapter_id == latest_adapter
         )
-        return max(
-            candidates,
-            key=lambda item: (
-                _version_tuple(item.version),
-                str(item.executable_path).casefold(),
-            ),
-            default=None,
-        )
+        # A shared product configuration cannot identify which of several
+        # installed versions was opened. Do not guess from its version number.
+        return candidates[0] if len(candidates) == 1 else None
 
     @staticmethod
     def _recommend(
@@ -416,7 +429,11 @@ class SlicerDiscoveryService:
             )
             if match is not None:
                 return match
-        return next(iter(selectable), None)
+        return min(selectable, key=lambda item: (
+            item.product_name.casefold(),
+            tuple(-part for part in _version_tuple(item.version)),
+            str(item.executable_path).casefold(),
+        ), default=None)
 
     @staticmethod
     def _gui_state(

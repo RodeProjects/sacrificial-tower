@@ -1018,7 +1018,7 @@ class MainWindow(QMainWindow):
         window = ui_state.get("window", {})
         self.resize(
             int(window.get("width", 1250)),
-            int(window.get("height", 1080)),
+            int(window.get("height", 1220)),
         )
         self._restore_initial_window_position(window)
         self.update_wall_path_preview()
@@ -5433,15 +5433,18 @@ class MainWindow(QMainWindow):
             return
         previous_key = self.slicer_combo.currentData()
         self.slicer_discovery_result = result
+        missing_notice = self.findChild(QMessageBox, "missingSlicerNotice")
+        if missing_notice is not None and any(item.verified for item in result.installations):
+            missing_notice.accept()
         self._populating_slicer_combo = True
         try:
             self.slicer_combo.clear()
             selected_index = -1
-            verified_installations = tuple(
+            verified_installations = tuple(sorted((
                 installation
                 for installation in result.installations
                 if installation.verified
-            )
+            ), key=lambda installation: installation.product_name.casefold()))
             usable_installations = tuple(
                 item for item in verified_installations if item.can_slice
             ) or verified_installations
@@ -5453,6 +5456,7 @@ class MainWindow(QMainWindow):
                         previous_key
                         if getattr(self, "_profile_rescan_selections", None)
                         else None,
+                        result.last_selected_key,
                         result.recommended_key,
                         result.last_used_key,
                     )
@@ -5460,14 +5464,14 @@ class MainWindow(QMainWindow):
                 ),
                 usable_installations[0].identity_key if usable_installations else None,
             )
-            show_last_used_suffix = len(verified_installations) > 1
+            show_last_selected_suffix = len(verified_installations) > 1
             for index, installation in enumerate(verified_installations):
                 label = installation.display_name
                 if (
-                    show_last_used_suffix
-                    and installation.identity_key == result.last_used_key
+                    show_last_selected_suffix
+                    and installation.identity_key == result.last_selected_key
                 ):
-                    label += " – zuletzt verwendet"
+                    label += " – zuletzt ausgewählt"
                 self.slicer_combo.addItem(
                     label,
                     installation.identity_key,
@@ -5501,6 +5505,7 @@ class MainWindow(QMainWindow):
             selected.identity_key
             if (
                 selected is not None
+                and selected.identity_key != result.last_selected_key
                 and selected.automatically_discovered
                 and selected.identity_key == result.recommended_key
                 and (
@@ -5521,9 +5526,14 @@ class MainWindow(QMainWindow):
                     "Automatische Slicer-Verarbeitung verfügbar.",
                 ),
                 (
-                    selected.identity_key == result.last_used_key,
-                    "zuletzt verwendeter slicer",
-                    "Zuletzt verwendeter Slicer wurde vorausgewählt.",
+                    selected.identity_key == result.last_selected_key,
+                    "zuletzt ausgewählter slicer",
+                    "Zuletzt im Turmprogramm ausgewählter Slicer wurde vorausgewählt.",
+                ),
+                (
+                    result.last_selected_key is None and selected.identity_key == result.last_used_key,
+                    "zuletzt geöffneter slicer",
+                    "Slicer mit dem eindeutig neuesten lokalen Nutzungshinweis wurde vorausgewählt.",
                 ),
                 (
                     result.last_used_key is None
@@ -5579,7 +5589,59 @@ class MainWindow(QMainWindow):
                 "Für STL ist ein automatisch aufrufbarer Slicer erforderlich"
             )
             self._update_preparation_requirements()
+            self._show_missing_slicer_notice()
         self._refresh_prediction()
+
+    def _show_missing_slicer_notice(self) -> None:
+        existing = self.findChild(QMessageBox, "missingSlicerNotice")
+        if existing is not None:
+            return
+        from cooling_tower.slicers.detection import detection_modules
+        names = [module.product_name for module in detection_modules() if module.implemented]
+        dialog = QMessageBox(self)
+        dialog.setObjectName("missingSlicerNotice")
+        dialog.setWindowTitle("Kein unterstützter Slicer erkannt")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(
+            "Die automatische Erkennung konnte keinen installierten unterstützten Slicer finden.\n\n"
+            "Unterstützt werden:\n" + "\n".join(f"• {name}" for name in names)
+            + "\n\nWenn einer dieser Slicer installiert ist, wähle den Speicherort seiner EXE-Datei manuell aus."
+            "\n\nFalls keiner dieser Slicer installiert ist, installiere zunächst einen davon "
+            "und richte darin bitte zuerst deinen Drucker ein."
+        )
+        choose = dialog.addButton("EXE-Datei auswählen …", QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton(QMessageBox.StandardButton.Ok)
+        choose.clicked.connect(dialog.accept)
+        choose.clicked.connect(self.select_manual_slicer)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._show_internal_dialog_without_flash(dialog, lambda: self._place_dialog_centered(dialog))
+
+    def _remember_current_slicer_selection(self) -> None:
+        identity_key = self.slicer_combo.currentData()
+        if not isinstance(identity_key, str):
+            return
+        if self.slicer_discovery_result is None or self.slicer_discovery_result.last_selected_key != identity_key:
+            try:
+                self.slicer_service.remember_selection(identity_key)
+            except Exception as error:
+                self._record_slicer_operation_error(error, "remember_selection")
+        self._automatically_selected_slicer_key = None
+        if self.slicer_discovery_result is not None:
+            self.slicer_discovery_result = replace(self.slicer_discovery_result, last_selected_key=identity_key)
+            installations = {item.identity_key: item for item in self.slicer_discovery_result.installations}
+            with QSignalBlocker(self.slicer_combo):
+                for index in range(self.slicer_combo.count()):
+                    key = self.slicer_combo.itemData(index)
+                    item = installations.get(key)
+                    if item is not None:
+                        suffix = " – zuletzt ausgewählt" if key == identity_key and self.slicer_combo.count() > 1 else ""
+                        self.slicer_combo.setItemText(index, item.display_name + suffix)
+            self._update_slicer_combo_widths()
+        selected = self.selected_slicer_installation
+        if selected is not None:
+            self.slicer_status_label.setText("Zuletzt im Turmprogramm ausgewählter Slicer: " + selected.display_name)
 
     @Slot(int, str, str)
     def _on_slicer_discovery_failed(
@@ -5614,18 +5676,19 @@ class MainWindow(QMainWindow):
     def _on_slicer_selection_changed(self, _index: int) -> None:
         if self._populating_slicer_combo:
             return
+        # Invalidate queued signals before cancellation can release the worker.
+        # Its isolated process is disposable; the QThread is released normally
+        # before the latest selection starts using the shared profile services.
+        self._profile_request_id += 1
+        self._profile_catalog_preserve_selection_requests.clear()
+        self._profile_rescan_selections = {}
+        self._deferred_profile_catalog_request = None
+        self.background_job_manager.cancel_jobs(
+            JobKind.PROFILE_MATCH, reason="slicer_selection_changed",
+        )
         # A direct combo change is a manual choice, even when its installation
         # originally came from automatic discovery.
-        self._automatically_selected_slicer_key = None
-        identity_key = self.slicer_combo.currentData()
-        try:
-            self.slicer_service.remember_selection(
-                identity_key if isinstance(identity_key, str) else None
-            )
-        except Exception as error:
-            # A failed convenience preference must not prevent switching
-            # away from a broken/unsupported slicer.
-            self._record_slicer_operation_error(error, "remember_selection")
+        self._remember_current_slicer_selection()
         self._update_slicer_detail()
         selected = self.selected_slicer_installation
         if selected is not None:
@@ -6484,6 +6547,7 @@ class MainWindow(QMainWindow):
             )
             return False
         self.profile_catalog_confirmation = confirmation
+        self._remember_current_slicer_selection()
         for role, selected_identifier in selections.items():
             self._remember_profile_selection(role, selected_identifier)
         self.profile_confirm_button.setEnabled(False)
@@ -7300,6 +7364,7 @@ class MainWindow(QMainWindow):
             )
             return
         self.profile_match_result = confirmed
+        self._remember_current_slicer_selection()
         for role, combo in (
             ("machine", self.machine_profile_combo),
             ("process", self.process_profile_combo),
@@ -7591,6 +7656,58 @@ class MainWindow(QMainWindow):
         self._finish_preparation()
         self._show_original_object_preview()
         self._update_expansion_angle_warning()
+        if result.empty_layers.detected:
+            self._show_empty_layer_notice(result)
+
+    def _show_empty_layer_notice(self, result: SourcePreSliceResult) -> None:
+        from cooling_tower.gcode.empty_layers import empty_layer_message
+        from cooling_tower.slicers.support_simulation import global_supports_enabled
+        match = self.profile_match_result
+        profile = match.selected.effective_profile
+        source = self.source_artifact
+        confirmation = self.confirmed_profile_context
+        request_id = self._preslice_request_id
+        simulation_available = self._source_support_recovery_available() and not result.supports_simulated
+        dialog = QMessageBox(self)
+        dialog.setObjectName("emptyLayerNotice")
+        dialog.setWindowTitle("Leere Schichten im Originalobjekt")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(empty_layer_message(
+            result.empty_layers,
+            simulation_available=simulation_available,
+            supports_active=result.supports_simulated or global_supports_enabled(profile),
+            direct_simulation_action=True,
+        ))
+        if simulation_available:
+            simulate_button = dialog.addButton("Stützen simulieren", QMessageBox.ButtonRole.AcceptRole)
+            simulate_button.setObjectName("emptyLayerSimulateSupportsButton")
+
+            def activate_supports() -> None:
+                # A notice from an older source/profile must never change the current settings.
+                if (request_id != self._preslice_request_id or self.source_artifact is not source
+                        or self.profile_match_result is not match
+                        or self.confirmed_profile_context is not confirmation
+                        or not self._source_support_recovery_available()
+                        or self.background_job_manager.has_active(JobKind.PREVIEW)
+                        or self.background_job_manager.has_active(JobKind.EXPORT)
+                        or self.manual_controller.job_id is not None):
+                    return
+                # The manual editor may still be disabled until its reference is prepared.
+                # Set its option now as well, so a later method change retains this choice.
+                self.simulate_source_supports_checkbox.setChecked(True)
+                self.manual_generation_panel.source_supports_checkbox.setChecked(True)
+                self._refresh_support_recovery()
+                self._schedule_footer_height_update()
+
+            simulate_button.clicked.connect(activate_supports)
+        continue_button = dialog.addButton("Weiter ohne Stützen", QMessageBox.ButtonRole.RejectRole)
+        continue_button.setObjectName("emptyLayerContinueWithoutSupportsButton")
+        dialog.setDefaultButton(continue_button)
+        dialog.setEscapeButton(continue_button)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._show_internal_dialog_without_flash(dialog, lambda: self._place_dialog_centered(dialog))
 
     @Slot(int, str, str)
     def _on_source_preslice_failed(
@@ -8007,7 +8124,7 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(
                         0,
                         self,
-                        lambda: self.start_profile_catalog_loading(
+                        lambda request_id=self._profile_request_id: self.start_profile_catalog_loading(
                             force_inventory=bool(
                                 pending.get("force_inventory", False)
                             ),
@@ -8032,13 +8149,13 @@ class MainWindow(QMainWindow):
                                     False,
                                 )
                             ),
-                        ),
+                        ) if request_id == self._profile_request_id and not self._closing else None,
                     )
                 else:
                     QTimer.singleShot(
                         0,
                         self,
-                        lambda: self.start_profile_matching(
+                        lambda request_id=self._profile_request_id: self.start_profile_matching(
                             selected_profile_ids=pending[
                                 "selected_profile_ids"
                             ],
@@ -8049,7 +8166,7 @@ class MainWindow(QMainWindow):
                             include_all_profiles=bool(
                                 pending["include_all_profiles"]
                             ),
-                        ),
+                        ) if request_id == self._profile_request_id and not self._closing else None,
                     )
         elif finished_kind in {"preview", "prediction", "export"}:
             if (finished_kind == "preview" and getattr(self, "_restart_preview_after_release", False)

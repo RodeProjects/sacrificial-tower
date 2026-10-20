@@ -394,7 +394,4 @@ def default_adapters():
         OrcaSlicerAdapter(),
         BambuStudioAdapter(),
         PrusaSlicerAdapter(),
-        CuraAdapter(),
-        IdeaMakerAdapter(),
-        Simplify3DAdapter(),
     )

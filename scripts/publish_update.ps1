@@ -158,16 +158,21 @@ try {
         --installer $installer.FullName
     Assert-NativeSuccess "Die kryptografische Prüfung des Update-Manifests"
 
+    $releaseSummary = (
+        "Sacrificial Tower is a free Windows 3D printing cooling tower tool and G-code analyzer " +
+        "for minimum layer time optimization. Supports Anycubic Slicer Next, Bambu Studio, " +
+        "PrusaSlicer and OrcaSlicer. Configure your printer in a supported slicer before use."
+    )
     if ($DevelopmentRelease) {
         $releaseTitle = "Sacrificial Tower $version (Entwicklungsversion)"
         $releaseNotes = (
-            "Kostenlose Entwicklungsversion " +
+            $releaseSummary + "`n`nKostenlose Entwicklungsversion " +
             "für Tests und Evaluation. Offene Anbieter- und Vertriebsangaben " +
             "werden vor einer regulären kostenlosen Veröffentlichung nachgetragen."
         )
     } else {
         $releaseTitle = "Sacrificial Tower $version"
-        $releaseNotes = "Sacrificial-Tower-Update auf Version $version."
+        $releaseNotes = $releaseSummary + "`n`nSacrificial-Tower-Update auf Version $version."
     }
     $releaseArguments = @(
         "release", "create", $tag, $installer.FullName,

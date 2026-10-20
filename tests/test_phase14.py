@@ -10,6 +10,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -320,6 +321,39 @@ class Phase14DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.recommended.executable_path, exact.resolve())
         self.assertEqual(result.gui_state, SlicerGuiState.AVAILABLE_AND_RECOMMENDED)
 
+    def test_alphabetical_fallback_does_not_depend_on_discovery_order(self):
+        adapters = tuple(FakeAdapter(name.lower(), name, SlicerFamily.OTHER) for name in ("Zeta", "alpha", "Beta"))
+        candidates = tuple(SlicerCandidate(make_executable(self.root / item.adapter_id, item.adapter_id + ".exe"),
+                           SlicerDiscoverySource.KNOWN_PATH, item.adapter_id) for item in adapters)
+        result = self.service(adapters, candidates).discover_installations()
+        shuffled = tuple(reversed(result.installations))
+        self.assertEqual(SlicerDiscoveryService._recommend(shuffled, None, None).product_name, "alpha")
+
+    def test_manually_chosen_executable_becomes_the_saved_selection(self):
+        adapter = FakeAdapter("choice", "Choice", SlicerFamily.OTHER)
+        first = make_executable(self.root / "first", "choice.exe")
+        second = make_executable(self.root / "second", "choice.exe")
+        service = self.service((adapter,), (SlicerCandidate(first, SlicerDiscoverySource.KNOWN_PATH, "choice"),))
+        initial = service.discover_installations()
+        service.remember_selection(initial.recommended_key)
+        manual = service.add_manual_installation(second)
+        self.assertEqual(manual.recommended.executable_path, second.resolve())
+        self.assertEqual(manual.last_selected_key, manual.recommended_key)
+        self.assertEqual(self.preferences.load().last_selected_key, manual.recommended_key)
+
+    def test_ambiguous_external_usage_never_guesses_an_installation(self):
+        adapters = tuple(FakeAdapter(name, name, SlicerFamily.OTHER) for name in ("anycubic_slicer_next", "bambu_studio"))
+        candidates = tuple(SlicerCandidate(make_executable(self.root / str(index), "slicer.exe"),
+                           SlicerDiscoverySource.KNOWN_PATH, adapters[index % 2].adapter_id)
+                           for index in range(3))
+        result = self.service(adapters, candidates).discover_installations()
+        with patch("cooling_tower.slicers.service.detection_module_for",
+                   return_value=SimpleNamespace(latest_usage_timestamp_ns=lambda **kwargs: 42)):
+            self.assertIsNone(SlicerDiscoveryService._last_used_installation(result.installations))
+            same_product = tuple(item for item in result.installations if item.adapter_id == "anycubic_slicer_next")
+            self.assertEqual(len(same_product), 2)
+            self.assertIsNone(SlicerDiscoveryService._last_used_installation(same_product))
+
     def test_06_missing_source_slicer_is_not_claimed_as_matching(self) -> None:
         adapter = FakeAdapter("other", "Other", SlicerFamily.CURA)
         path = make_executable(self.root, "other.exe")
@@ -387,7 +421,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UnsupportedSlicerExecutableError, "timed out"):
             self.service((adapter,)).add_manual_installation(path)
 
-    def test_18_detection_only_adapter_is_never_presented_as_integrated(self) -> None:
+    def test_18_detection_only_adapter_is_excluded_from_search(self) -> None:
         adapter = FakeAdapter(
             "detect",
             "Detection Only",
@@ -399,9 +433,8 @@ class Phase14DiscoveryTests(unittest.TestCase):
             (adapter,),
             (SlicerCandidate(path, SlicerDiscoverySource.KNOWN_PATH, "detect"),),
         ).discover_installations()
-        self.assertEqual(result.gui_state, SlicerGuiState.UNSUPPORTED)
-        self.assertFalse(result.installations[0].can_slice)
-        self.assertIn("nur erkannt", result.installations[0].display_name)
+        self.assertFalse(result.installations)
+        self.assertFalse(result.recommended_key)
 
     def test_last_confirmed_selection_is_restored_without_a_usage_label(self) -> None:
         adapter = FakeAdapter("choice", "Choice", SlicerFamily.OTHER)
@@ -502,6 +535,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
             stale_selection = service.discover_installations()
 
         self.assertEqual(initial.recommended, initial.last_used)
+        self.assertIsNone(initial.last_selected_key)
         self.assertEqual(
             refreshed.last_used.adapter_id,
             "anycubic_slicer_next",
@@ -511,6 +545,7 @@ class Phase14DiscoveryTests(unittest.TestCase):
             "bambu_studio",
         )
         self.assertEqual(reopened.recommended_key, bambu.identity_key)
+        self.assertEqual(reopened.last_selected_key, bambu.identity_key)
         self.assertEqual(stale_selection.recommended, stale_selection.last_used)
         self.assertEqual(
             {path: path.read_bytes() for path in before},
@@ -538,8 +573,11 @@ class Phase14DiscoveryTests(unittest.TestCase):
             ),
         )
         initial = service.discover_installations()
-        self.assertFalse(initial.installations[0].can_slice)
-        service.remember_selection(initial.installations[0].identity_key)
+        self.assertEqual([item.adapter_id for item in initial.installations], ["slice"])
+        detector_installation = detector.verify_installation(
+            SlicerCandidate(self.root / "detect" / "detect.exe", SlicerDiscoverySource.SAVED_PATH)
+        )
+        service.remember_selection(detector_installation.identity_key)
         self.assertEqual(service.discover_installations().recommended.adapter_id, "slice")
 
     def test_profile_choices_survive_sessions_and_remain_isolated_per_slicer(

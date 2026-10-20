@@ -107,7 +107,7 @@ class ManualEvaluation:
     layer_times: tuple[tuple[int, float, float], ...]  # ID, Z, total
     time_source: str
     diagnostics: tuple[str, ...]
-    gcode_path: Path
+    gcode_path: Path | None
     gcode_sha256: str
 
     @property
@@ -345,25 +345,30 @@ class ManualExportService(PreviewExportService):
         if not request.profiles_are_current():
             raise ValueError("Die bestätigten Slicerprofile wurden nach der Prüfung verändert.")
         e = preview.manual_evaluation
-        if e is None or not e.gcode_path.is_file() or sha256_file(e.gcode_path) != e.gcode_sha256:
+        if e is None or (e.gcode_path is not None and (
+                not e.gcode_path.is_file() or sha256_file(e.gcode_path) != e.gcode_sha256)):
             raise ValueError("Der vollständig geprüfte G-Code ist nicht mehr unverändert verfügbar.")
         result = super().export(preview, request, output_root)
         try:
-            # Retain exact timing evidence and adapter diagnostics alongside STL/3MF.
-            evidence = result.run_directory / "verification.gcode"
-            shutil.copy2(e.gcode_path, evidence)
-            if sha256_file(evidence) != e.gcode_sha256:
-                raise ValueError("Die Prüfdaten wurden während des Exports verändert.")
+            # Timing values and the evaluated hash are already in the report.
+            # Printer instructions belong only to this disposable verification job.
             root = preview.diagnostics_directory
             for name in ("diagnostics", "project_diagnostics"):
                 source = root / name
                 if source.is_dir():
                     shutil.copytree(source, result.run_directory / name)
-            report = json.loads(result.report_path.read_text(encoding="utf-8"))
-            report["verification_gcode"] = {"path": str(evidence), "sha256": e.gcode_sha256}
-            result.report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
             if not request.profiles_are_current() or not request.original_source_is_current() or sha256_file(request.source_path) != preview.source_sha256:
                 raise ValueError("Quelle oder Profile wurden während des Exports verändert.")
+            if e.gcode_path is not None:
+                owner = preview._temporary_owner
+                if owner is None or not e.gcode_path.resolve().is_relative_to(Path(owner.name).resolve()):
+                    raise ValueError("Der Prüfslice liegt außerhalb des temporären Arbeitsbereichs.")
+                if sha256_file(e.gcode_path) != e.gcode_sha256:
+                    raise ValueError("Die Prüfdaten wurden während des Exports verändert.")
+                e.gcode_path.unlink()
+                # Re-exports use the retained measurements and still verify the
+                # source, profiles, geometry and project through the base service.
+                preview.manual_evaluation = replace(e, gcode_path=None)
         except Exception:
             shutil.rmtree(result.run_directory, ignore_errors=True)
             raise

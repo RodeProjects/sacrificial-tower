@@ -268,6 +268,7 @@ class SlicerDiscoveryResult:
     source_slicer: SlicerIdentity | None = None
     diagnostics: tuple[str, ...] = ()
     last_used_key: str | None = None
+    last_selected_key: str | None = None
 
     @property
     def recommended(self) -> SlicerInstallation | None:
