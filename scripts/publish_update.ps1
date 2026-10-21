@@ -124,12 +124,13 @@ New-Item -ItemType Directory -Path $resolvedTemporaryRoot | Out-Null
 $releaseCreated = $false
 $manifestPublished = $false
 try {
-    $artifactName = 'approved-build'
-    & $gh run download $run.databaseId `
-        --repo $run.repository `
-        --name $artifactName `
-        --dir $resolvedTemporaryRoot
-    Assert-NativeSuccess "Das Herunterladen des Build-Artefakts"
+    $artifactHelper = Join-Path $RunnerToolsRoot 'scripts/Get-PrivateBuildArtifacts.ps1'
+    if (-not (Test-Path -LiteralPath $artifactHelper -PathType Leaf)) {
+        throw 'Der geschützte zentrale Artefaktübernahmehelfer fehlt.'
+    }
+    & $artifactHelper -Repository $SourceRepository -ExpectedSha $localCommit `
+        -RunId $run.databaseId -Operation 'build-update.yml' `
+        -Destination $resolvedTemporaryRoot
 
     $metadataPath = Join-Path $resolvedTemporaryRoot "update-metadata.json"
     $manifestPath = Join-Path $resolvedTemporaryRoot "latest.json"

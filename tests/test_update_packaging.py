@@ -342,6 +342,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertNotIn("UPDATE_MANIFEST_SIGNING_KEY_BASE64", workflow)
         self.assertNotIn("create_update_manifest.py", workflow)
         self.assertIn("Sign-UpdateManifest.ps1", publisher)
+        self.assertIn("Get-PrivateBuildArtifacts.ps1", publisher)
         self.assertIn("verify_update_manifest.py", publisher)
 
     def test_packaged_resources_and_persistent_files_use_separate_roots(self) -> None:

@@ -4,8 +4,12 @@ Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
 Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
 bleiben bis zur vollständigen Abnahme gesperrt.
 
-Private Steuerung 1.0.3 (`200a4d2`) ist über PR 3 offiziell geprüft und
-installiert. Lokale Infrastrukturabnahme unter 1.0.2 (`39627221957`): 25
+Private Steuerung 1.0.4 (`d9347f2`) wurde über PR 4 offiziell geprüft und
+installiert. Die kontingentunabhängige lokale Übernahme ist mit dem echten
+Node-Build `39639843854` vollständig abgenommen: erfolgreicher offizieller Export,
+ursprünglicher GitHub-Schrittlog, gebundene Identitäten, tatsächliche Größen-/Hashes
+und übernommener Inhalt; kein zusätzliches SDK und kein Actions-Artefaktspeicher.
+Lokale Infrastrukturabnahme unter 1.0.2 (`39627221957`): 25
 Sicherheitsfälle, neun ungefährliche Fallbacksimulationen, zwei Node-Tests und
 tatsächliche Zugriffsproben unter dem getrennten Standardkonto erfolgreich.
 Der anschließend behobene gehostete Quelltransport ist unter 1.0.3 tatsächlich
@@ -13,8 +17,14 @@ erfolgreich abgenommen (`39632111266`), einschließlich exaktem Checkout und
 denselben Sicherheits-/Node-Prüfungen. Kurzlebige Vorabreleases bleiben im
 vorher auf Identität und private Sichtbarkeit geprüften CI-Repository und sind
 mit reinen Job-Leserechten zugänglich; nach Erfolg werden sie entfernt.
-Der vollständige Anwendungslauf, die automatische Übernahme und reale
-Installerabnahme bleiben für die Phase-1-Freigabe erforderlich.
+Der Anwendungslauf `39632436611` hat alle 1961 Einzeltests bestanden; PR 8 wurde
+mit exakt `fcd4b85` übernommen und der ursprüngliche Nachweis nochmals bestätigt.
+Installerlauf `39635205372` hat Build und Installerprüfungen bestanden, jedoch
+wegen GitHubs Artefaktspeicherkontingent keinen vollständigen Erfolg erreicht.
+Die kontrollierte lokale Fehlerbehandlung und Artefaktübernahme sind deshalb
+gezielt korrigiert und praktisch geprüft. Version 0.9.20 verwendet diesen
+geschützten Übernahmehelfer; ihre vollständige Projekt-/Releaseabnahme unter der
+neuen Steuerung bleibt erforderlich. Phase 1 ist noch nicht abgeschlossen.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind
@@ -96,6 +106,17 @@ derselben SHA. Installer-Builds verwenden ebenfalls diese Reihenfolge. Ein
 absichtlicher Abbruch, veränderter Ref oder unklarer Dispatch wird nicht durch
 einen blinden zweiten Start übergangen. Beide tatsächlichen Ergebnisse bleiben
 im geschützten zentralen `state/release-runs/` dokumentiert.
+
+Gehostete Builds nutzen `approved-build`. Lokale Builds exportieren stattdessen
+die konfigurierten Dateien in einen nach Freigabe und Lauf benannten Runnerbereich.
+Ein eigener erfolgreicher offizieller Schritt protokolliert relative Dateinamen,
+Größen, SHA-256 und die zugehörigen Commit-/Laufidentitäten. Der geschützte
+`Get-PrivateBuildArtifacts.ps1` liest ausschließlich diesen Export-Schrittlog,
+bestätigt den ursprünglichen Build über GitHub und übernimmt nur passende Dateien
+in einen leeren Verwaltungsordner. Änderungen, Pfadumleitungen, fehlende oder
+mehrdeutige Nachweise blockieren. Damit braucht der lokale Ersatzlauf weder den
+Actions-Artefaktspeicher noch einen zusätzlichen Schreibzugang. Dies ist ein
+Datenübernahmeweg nach offiziellen Actions, keine zusätzliche lokale CI.
 
 Builds erhalten keine Signierschlüssel. Nach erfolgreicher Prüfung lädt der
 Verwaltungsprozess das dem ursprünglichen Lauf zugeordnete Build-Artefakt,
