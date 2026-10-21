@@ -4,7 +4,6 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -31,29 +30,38 @@ class IsolatedTestRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("test_first.py", "test_second.py", "test_third.py"):
-                (root / name).write_text("", encoding="utf-8")
+                (root / name).write_text(
+                    "import unittest\n"
+                    "class Sample(unittest.TestCase):\n"
+                    "    def test_ok(self): pass\n",
+                    encoding="utf-8",
+                )
+            progress_path = root / "progress.log"
 
             output = StringIO()
             with (
-                patch("run_isolated_tests.subprocess.run",
-                      return_value=SimpleNamespace(returncode=0)),
-                patch("run_isolated_tests.time.monotonic",
-                      side_effect=[0.0, 4.9, 10.0, 70.8, 72.0, 72.9]),
+                patch.dict("os.environ", {"SACRIFICIAL_TEST_PROGRESS_FILE": str(progress_path)}),
                 redirect_stdout(output),
             ):
                 self.assertEqual(run_suite(root), 0)
+            progress_contents = progress_path.read_text(encoding="utf-8")
 
-        lines = output.getvalue().splitlines()
+        lines = progress_contents.splitlines()
         self.assertEqual(
-            lines[:6],
+            lines[:-1],
             [
-                "Starte Test: 1 / 3 (33%) - test_first.py",
-                "Test 1 / 3 - erfolgreich - Testdauer: 4 Sek",
-                "Starte Test: 2 / 3 (67%) - test_second.py",
-                "Test 2 / 3 - erfolgreich - Testdauer: 1 Min",
-                "Starte Test: 3 / 3 (100%) - test_third.py",
+                "Geplante Einzeltests: 3 aus 3 Testdateimustern.",
+                "Starte Test: 1 / 3 (33%) - test_first.Sample.test_ok",
+                "Test 1 / 3 - erfolgreich - Testdauer: 0 Sek",
+                "Starte Test: 2 / 3 (67%) - test_second.Sample.test_ok",
+                "Test 2 / 3 - erfolgreich - Testdauer: 0 Sek",
+                "Starte Test: 3 / 3 (100%) - test_third.Sample.test_ok",
                 "Test 3 / 3 - erfolgreich - Testdauer: 0 Sek",
             ],
+        )
+        self.assertRegex(
+            lines[-1],
+            r"^Alle 3 Einzeltests aus 3 Testdateimustern erfolgreich\. Gesamtdauer: .+$",
         )
 
     def test_modules_do_not_share_process_environment(self):
@@ -92,3 +100,57 @@ class IsolatedTestRunnerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(run_suite(root, timeout_s=0.5), 1)
+
+    def test_case_count_is_exact_for_multiple_test_methods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test_many.py").write_text(
+                "import unittest\n"
+                "class Sample(unittest.TestCase):\n"
+                "    def test_one(self): pass\n"
+                "    def test_two(self): pass\n"
+                "    def test_three(self): pass\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(run_suite(root), 0)
+
+    def test_nested_runner_does_not_pollute_outer_progress_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outer = root / "outer"
+            nested = root / "nested"
+            outer.mkdir()
+            nested.mkdir()
+            (nested / "test_inner.py").write_text(
+                "import unittest\n"
+                "class InnerTest(unittest.TestCase):\n"
+                "    def test_inner(self): pass\n",
+                encoding="utf-8",
+            )
+            (outer / "test_outer.py").write_text(
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "from run_isolated_tests import run_suite\n"
+                "class OuterTest(unittest.TestCase):\n"
+                "    def test_nested(self):\n"
+                f"        self.assertEqual(run_suite(Path({str(nested)!r})), 0)\n",
+                encoding="utf-8",
+            )
+            progress_path = root / "progress.log"
+            with patch.dict(
+                "os.environ", {"SACRIFICIAL_TEST_PROGRESS_FILE": str(progress_path)}
+            ):
+                self.assertEqual(run_suite(outer), 0)
+
+            progress_lines = progress_path.read_text(encoding="utf-8").splitlines()
+
+        start_lines = [line for line in progress_lines if line.startswith("Starte Test:")]
+        done_lines = [line for line in progress_lines if line.startswith("Test ")]
+        self.assertEqual(
+            start_lines,
+            ["Starte Test: 1 / 1 (100%) - test_outer.OuterTest.test_nested"],
+        )
+        self.assertEqual(
+            done_lines,
+            ["Test 1 / 1 - erfolgreich - Testdauer: 0 Sek"],
+        )

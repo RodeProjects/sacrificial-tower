@@ -139,4 +139,6 @@ jobs:
         run: python setup_native.py build_ext --inplace
 
       - name: Run tests
+        env:
+          SACRIFICIAL_TEST_PROGRESS_FILE: ${{ runner.temp }}\sacrificial-tower-test-progress-${{ github.run_id }}.log
         run: python scripts/run_isolated_tests.py

@@ -81,16 +81,22 @@ Startsignal ohne sichtbare Statusdatei wird ausdrücklich als nicht freigegebene
 
 GitHub Actions führt die vollständige Testauswahl mit
 `python scripts/run_isolated_tests.py` pro Testdateimuster in einem eigenen
-Python-Prozess aus. Die Fortschrittsanzeige zählt diese Testläufe kumulativ
-über die gesamte Suite und rundet den Prozentwert auf volle Prozent. Jeder
-Prozess verwendet die normale `unittest`-Discovery einschließlich
+Python-Prozess aus. Vor dem Start zählt eine isolierte Discovery die einzelnen
+`unittest`-Testfälle je Muster. Die Fortschrittsanzeige zählt diese Testfälle
+kumulativ über die gesamte Suite und rundet den Prozentwert auf volle Prozent;
+ein Testfall entspricht dabei einem `TestCase`-Aufruf, nicht einem einzelnen
+`subTest`. Ändert sich die Fallzahl zwischen Planung und Ausführung, schlägt der
+Lauf mit einer klaren Meldung fehl, statt einen falschen Gesamtstand anzuzeigen.
+Jeder Prozess verwendet die normale `unittest`-Discovery einschließlich
 Unterpaketen; gleiche Dateinamen werden als gemeinsames Muster geprüft. Dadurch
 sammeln sich Qt-Objekte verschiedener GUI-Testmodule nicht bis zum gemeinsamen
-Interpreterende an. Fehler, Abstürze und ein Zeitlimit von zehn Minuten pro
-Muster lassen den Gesamtlauf fehlschlagen. Die Ausgabe zeigt nur Einheiten mit
-Wert größer null: Sekunden, Minuten und Sekunden, Stunden, Minuten und Sekunden
-sowie ab einem Tag zusätzlich Tage. Der CI-Job ist einschließlich Prozessstarts
-auf 30 Minuten begrenzt.
+Interpreterende an. Start, Ergebnis und Dauer jedes Testfalls werden einzeln
+angezeigt. Fehler, Abstürze und ein Zeitlimit von zehn Minuten pro Muster lassen
+den Gesamtlauf fehlschlagen. Die Ausgabe zeigt nur Zeiteinheiten mit Wert größer
+null: Sekunden, Minuten und Sekunden, Stunden, Minuten und Sekunden sowie ab
+einem Tag zusätzlich Tage. Der CI-Job ist einschließlich Prozessstarts auf
+30 Minuten begrenzt. Das Workflow-Skript spiegelt die Fortschrittszeilen in eine
+Datei unter `RUNNER_TEMP`, damit die lokale Runner-Konsole sie live anzeigt.
 
 GUI-Fixtures müssen ihre eigenen Fenster nach dem Test auch nativ freigeben:
 `dispose_test_widget` aus `tests/gui_lifecycle.py` schließt das jeweilige Widget
