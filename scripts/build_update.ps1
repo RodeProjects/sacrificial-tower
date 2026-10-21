@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$Python,
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
-    [Parameter(Mandatory)][ValidateSet('development','free')][string]$ReleaseKind
+    [Parameter(Mandatory)][ValidateSet('development','free')][string]$ReleaseKind,
+    [switch]$LicenseChecksVerified
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
@@ -23,7 +24,10 @@ $iscc = Join-Path $innoRoot 'ISCC.exe'
 $env:INNO_ROOT = $innoRoot
 & $iscc "/DAppVersion=$appVersion" "/DAppPublisherName=$((Get-Content -LiteralPath 'config/legal_profile.json' -Raw | ConvertFrom-Json).provider_name)" installer/SacrificialTower.iss
 & $Python -m unittest discover -s tests -p test_update_handoff_native.py -v
-& ./scripts/test_installer_license.ps1 -IsccPath $iscc
+# The protected private adapter may reuse the separate official hosted GUI
+# check. Release management and artifact transfer both verify that original
+# success for this exact source/base/controller; public builds run it here.
+if (-not $LicenseChecksVerified) { & ./scripts/test_installer_license.ps1 -IsccPath $iscc }
 & ./scripts/test_uninstaller.ps1 -IsccPath $iscc -Version $appVersion
 & ./scripts/test_installer_replacement.ps1 -IsccPath $iscc -Version $appVersion
 $installer = Get-Item -LiteralPath "dist/installer/SacrificialTowerSetup-$appVersion.exe"

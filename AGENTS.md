@@ -57,6 +57,12 @@ Diese Regeln gelten ergänzend zur globalen `AGENTS.md` für das Repository `sac
   `startup_failure`. Beide verwenden die private vertrauenswürdige Steuerung und
   dieselbe Projekt-SHA. Gültige unveränderte Vollprüfungen werden wiederverwendet.
   Abbruch, veränderter Ref oder unklarer Dispatch erlaubt keinen blinden Neustart.
+- Lizenzdialoge benötigen zusätzlich die eigene erfolgreiche gehostete Pflichtprüfung
+  `installer-checks.yml` für dieselbe Projekt-SHA, Basis und CI-Steuerung. Releasehelfer
+  und Artefaktübernahme bestätigen den ursprünglichen Erfolg erneut. Der lokale
+  Buildfallback übernimmt diese Prüfung, behält native Übergabe, Ersetzung und
+  Deinstallation bei. Fehlende gehostete GUI-Prüfung blockiert; keine Ausführung
+  unter dem privilegierten Entwicklerkonto und keine abgeschwächten Assertions.
 - `scripts/publish_update.ps1 -DevelopmentRelease` verwendet den zentralen
   Releasehelfer; Builds ohne Verwaltungszugänge, Signierung und Veröffentlichung
   anschließend im geschützten Entwicklerkonto. Die frühere CI-Zeitlimit-Ausnahme

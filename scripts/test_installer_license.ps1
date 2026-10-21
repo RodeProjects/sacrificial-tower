@@ -52,12 +52,6 @@ var
 
 procedure TestPostQuitMessage(ExitCode: Integer);
   external 'PostQuitMessage@user32.dll stdcall';
-function TestShowWindow(Window: HWND; Command: Integer): Boolean;
-  external 'ShowWindow@user32.dll stdcall';
-function TestSetFocus(Window: HWND): HWND;
-  external 'SetFocus@user32.dll stdcall';
-function TestGetFocus: HWND;
-  external 'GetFocus@user32.dll stdcall';
 
 procedure FinishTest(const Message: String);
 begin
@@ -65,9 +59,8 @@ begin
   TestFinished := True;
   LicenseKillTimer(0, TestTimer);
   SaveStringToFile('__RESULT__', Message, False);
-  { Inno's normal Close path ignores hidden, non-focusable wizard forms.
-    This fixture installs nothing; quit its message loop after recording all
-    assertions, allowing normal Setup deinitialization on unattended runners. }
+  { Inno's Close path ignores hidden, non-focusable wizard forms. This
+    harmless fixture quits its message loop only after recording all assertions. }
   TestPostQuitMessage(0);
 end;
 
@@ -84,10 +77,9 @@ begin
   Info.Size := 28;
   Info.Mask := 7;
   if LicenseGetScrollInfo(WizardForm.LicenseMemo.Handle, 1, Info) then
-    Result := Format('range=%d..%d page=%d pos=%d end=%d height=%d focused=%d', [
+    Result := Format('range=%d..%d page=%d pos=%d end=%d', [
       Info.Minimum, Info.Maximum, Info.PageSize, Info.Position,
-      Integer(LicenseTextEndVisible), WizardForm.LicenseMemo.Height,
-      Integer(TestGetFocus = WizardForm.LicenseMemo.Handle)])
+      Integer(LicenseTextEndVisible)])
   else
     Result := 'scroll info unavailable';
 end;
@@ -100,13 +92,6 @@ begin
     case TestStep of
       0: begin
         if WizardForm.CurPageID <> wpLicense then Exit;
-        { Let the noninteractive desktop finish showing/layout before a later
-          timer tick exercises caret scrolling. }
-        if __CARET__ and __UNATTENDED__ then
-        begin
-          TestShowWindow(WizardForm.Handle, 4); { SW_SHOWNOACTIVATE }
-          TestSetFocus(WizardForm.LicenseMemo.Handle);
-        end;
         if __SHORT__ then
         begin
           Require(LicenseEndReached, 'Fully visible short text remained locked: ' + ScrollState);
@@ -138,11 +123,9 @@ begin
         if __CARET__ then
         begin
           WizardForm.ActiveControl := WizardForm.LicenseMemo;
-          Log('Caret before: ' + ScrollState);
           SendMessage(WizardForm.LicenseMemo.Handle, $00B1,
             $7FFFFFFF, $7FFFFFFF);
           SendMessage(WizardForm.LicenseMemo.Handle, $00B7, 0, 0); { scroll caret into view }
-          Log('Caret after: ' + ScrollState);
         end
         else
           SendMessage(WizardForm.LicenseMemo.Handle, $0115, 7, 0); { bottom }
@@ -218,7 +201,6 @@ foreach ($variant in @('long', 'caret', 'actual', 'short', 'silent')) {
         Replace('__RESULT__', $resultPath.Replace("'", "''")).
         Replace('__SHORT__', $(if ($variant -eq 'short') { 'True' } else { 'False' })).
         Replace('__CARET__', $(if ($variant -eq 'caret') { 'True' } else { 'False' })).
-        Replace('__UNATTENDED__', $(if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { 'True' } else { 'False' })).
         Replace('__VARIANT__', $variant)
     $fixturePath = Join-Path $variantRoot 'test.iss'
     [IO.File]::WriteAllText($fixturePath, $fixture, [Text.UTF8Encoding]::new($true))

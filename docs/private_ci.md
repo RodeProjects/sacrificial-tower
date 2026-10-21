@@ -4,7 +4,7 @@ Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
 Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
 bleiben bis zur vollständigen Abnahme gesperrt.
 
-Private Steuerung 1.0.5 (`f93ffc9`) wurde über PR 5 offiziell geprüft und
+Private Steuerung 1.0.6 (`5587253`) wurde über PR 6 offiziell geprüft und
 installiert. Die kontingentunabhängige lokale Übernahme ist mit dem echten
 Node-Build `39639843854` vollständig abgenommen: erfolgreicher offizieller Export,
 ursprünglicher GitHub-Schrittlog, gebundene Identitäten, tatsächliche Größen-/Hashes
@@ -38,14 +38,24 @@ Nachrichtenschleife. Sie installiert weiterhin keine Anwendung. Siehe
 und [Windows-Nachrichtenschleife](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage).
 Der Build übergibt außerdem den bereits gepinnten Inno-Compiler über `INNO_ROOT`
 an die echten nativen Übergabetests, damit diese nicht wegen eines fehlenden
-Suchpfads übersprungen werden. Die anschließende Diagnose `39667029539` bestätigte
-die reguläre Beendigung; die nun erreichte Caret-Variante scheitert bislang
-ausschließlich im nichtinteraktiven Konto. Die Diagnose erfasst Fokus und
-Scroll-/Layoutmaße. Ausschließlich auf dessen Session-0-Desktop wird die Fixture
-vor einem späteren Caret-Timertakt sichtbar/fokussiert; im Entwicklerdesktop wird
-kein Fenster eingeblendet. Alle Assertions einschließlich Caret-Scrollen bleiben
-erhalten. Im Entwicklerkonto bestanden bereits alle fünf Varianten. Version 0.9.23 benötigt ihre eigenen
-aktuellen Prüfnachweise unter Steuerung 1.0.5. Phase 1 ist noch nicht abgeschlossen.
+Suchpfads übersprungen werden. Die anschließenden Diagnosen bestätigten die reguläre Beendigung. Die
+Caret-Variante bestand im Entwicklerkonto, scheiterte aber reproduzierbar in
+Windows-Session 0, auch mit bestätigtem Fokus und abgewartetem Layout. Die
+erfolglosen Fokus-/Layoutversuche wurden aus der Fixture entfernt; ihre Assertions
+und die produktive Lizenzoberfläche bleiben unverändert.
+
+Die Lizenzdialoge sind deshalb eine eigene offizielle gehostete Releasepflicht
+(`installer-checks.yml`). Der geschützte Releaseadapter bestätigt deren Erfolg
+für exakt dieselbe Projekt-SHA, Basis und CI-Steuerung vor und nach dem Build.
+Der projektspezifische Artefaktvalidator verlangt ihn zusätzlich vor Dateiübernahme.
+Fehlende, fehlgeschlagene, lokale oder abweichende GUI-Nachweise blockieren.
+Der private Build übernimmt diese verifizierte Prüfung; native Übergabe,
+Ersetzung und Deinstallation bleiben im Buildjob. Öffentliche Builds führen die
+Lizenzprüfung selbst aus. Ohne erreichbare GitHub-Hardware für eine noch fehlende
+GUI-Pflichtprüfung bleibt das Release blockiert. Testjobs laufen weiterhin ohne
+Verwaltungszugänge; es gibt keinen GUI-Job unter dem Entwicklerkonto.
+Version 0.9.24 benötigt ihre eigenen aktuellen Prüfnachweise unter Steuerung
+1.0.6. Phase 1 ist noch nicht abgeschlossen.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind
