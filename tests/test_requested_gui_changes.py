@@ -475,7 +475,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
                 version="0.4.2",
                 installer_url=(
                     "https://github.com/RodeProjects/"
-                    "sacrificial-tower-updates/releases/download/v0.4.2/"
+                    "sacrificial-tower/releases/download/v0.4.2/"
                     "SacrificialTowerSetup-0.4.2.exe"
                 ),
                 sha256="0" * 64,

@@ -1,164 +1,116 @@
-# Sacrificial-Tower-Update-Kanal
+# Sacrificial-Tower-Updatekanal
 
-Die eigenständig installierte Windows-Anwendung prüft im Hintergrund das
-öffentliche Manifest unter:
+## Ein Kanal im Hauptrepository
 
-`https://raw.githubusercontent.com/RodeProjects/sacrificial-tower-updates/main/latest.json`
+Installer, signiertes Manifest und aufgelöste Rechtstexte werden als Anhänge
+unveränderlicher Releases in `RodeProjects/sacrificial-tower` veröffentlicht.
+Die maßgebliche Kanaldefinition für Programm und Publisher liegt ausschließlich
+in `src/cooling_tower/update_channel.py`. Die Anwendung liest ohne GitHub-Anmeldung:
 
-Das private Quellcode-Repository und persönliche GitHub-Zugangsdaten sind für
-Endnutzer nicht erforderlich. Der öffentliche Kanal enthält ausschließlich den
-Windows-Installer, das kryptografisch signierte Manifest und die zugehörigen
-Prüfdaten.
+`https://github.com/RodeProjects/sacrificial-tower/releases/latest/download/latest.json`
 
-Ist eine neue Version verfügbar, erscheint unter Menü und Versionsnummer am
-rechten Headerrand die kompakte Schaltfläche „Aktualisieren“. Beim Download
-bleibt sie blau und zeigt „Lädt... x%“; direkt rechts liegt ein quadratischer
-Abbruchbutton mit X im gemeinsamen roten Abbruchdesign. Die Zeile endet ohne
-Außenabstand an der Headertrennlinie. Nur in diesen Updatezuständen werden Menü
-und Versionsnummer horizontal über der gesamten Updatezeile einschließlich
-des Abbruchbuttons zentriert. Beim Einblenden des X bleiben beide an ihrer
-horizontalen Position. Die
-Erstellungsmethode reserviert daneben den benötigten Platz; falls die Höhe
-nicht reicht, wächst der Header nach unten.
+Ein Manifest für Version `x.y.z` muss exakt auf
+`https://github.com/RodeProjects/sacrificial-tower/releases/download/vx.y.z/SacrificialTowerSetup-x.y.z.exe`
+zeigen. Signierte Verweise auf andere Repositorys oder Versionen werden ebenfalls
+abgewiesen. Der Installer liegt nicht im Quellcodebestand. `main` kann neuer als
+der letzte veröffentlichte Installer sein; jeder Release-Tag identifiziert dessen
+tatsächlich geprüften Quellcommit.
 
-## Kostenlose kryptografische Absicherung
+**Bisherige Tester müssen die neue Version einmal manuell installieren.**
+Testinstallationen aus `RodeProjects/sacrificial-tower-updates` wechseln nicht
+automatisch. Der alte Kanal wird nach erfolgreicher öffentlicher Abnahme als
+abgelöst gekennzeichnet und archiviert. Kein paralleler aktiver Kanal, keine
+Übergangsarchitektur und keine dauerhafte Kompatibilität zum alten Kanal.
 
-Der Windows-Installer wird vorerst ohne Authenticode-Zertifikat erzeugt. Deshalb
-kann Windows bei einem manuell heruntergeladenen Installer weiterhin vor einem
-unbekannten Herausgeber warnen. Die Sicherheit des automatischen
-Sacrificial-Tower-Updates hängt davon nicht ab:
+## Signierung und Integrität
 
-- Jede Version erhält ein Ed25519-signiertes Manifest.
-- Der private Ed25519-Schlüssel liegt ausschließlich als verschlüsseltes
-  GitHub-Actions-Secret `UPDATE_MANIFEST_SIGNING_KEY_BASE64` im privaten
-  Quellcode-Repository.
-- Die Anwendung enthält nur den öffentlichen Prüfschlüssel und lehnt fehlende,
-  unbekannte oder ungültige Signaturen ab.
-- Signiert werden Versionsnummer, Installer-URL, SHA-256, Dateigröße und
-  Versionshinweise gemeinsam. Keine dieser Angaben kann unbemerkt verändert
-  werden.
-- Der Installer wird erst nach erfolgreicher Signatur-, Größen- und
-  SHA-256-Prüfung gestartet.
+Jedes Manifest ist mit Ed25519 signiert. Version, Installeradresse, SHA-256,
+Dateigröße und Versionshinweise sind gemeinsam geschützt. Die Anwendung enthält
+nur den öffentlichen Schlüssel `2026-10-private-publisher` und lehnt unbekannte,
+fehlende oder ungültige Signaturen ab. Vor Start des Installers werden Größe und
+Hash erneut geprüft. Versionsvergleich, HTTPS-Zertifikatsprüfung über Windows,
+Abbruch und bestätigte native Installationsübergabe bleiben erhalten.
 
-Version 0.4.2 ignoriert die zusätzlichen Signaturfelder, prüft aber weiterhin
-Größe und SHA-256. Dadurch kann sie auf die erste signierte Manifest-Version
-wechseln. Ab Version 0.4.5 ist die Manifest-Signatur verpflichtend.
+Der private Schlüssel liegt ausschließlich Windows-DPAPI-verschlüsselt unter dem
+Entwicklerkonto. Test-/Buildjobs erhalten weder diesen Schlüssel noch persönliche
+GitHub-/SSH-Zugänge. Das frühere GitHub-Signiergeheimnis wurde entfernt. Der alte
+Provisionierungshelfer ist historisch und wird nicht mehr verwendet. Eine spätere
+Schlüsselrotation bei weiterlaufenden Installationen benötigt eine rechtzeitig
+verteilte Übergangsversion. Sicherung/Wiederherstellung muss das zugehörige
+Windows-Profil und die DPAPI-Wiederherstellung berücksichtigen.
 
-Der optionale Authenticode-Abschnitt in `installer/SacrificialTower.iss` bleibt
-für eine spätere öffentlich vertrauenswürdige Zertifikatsignierung erhalten.
-Eine spätere Signierung ändert weder das Manifestformat noch die bestehende
-Inno-Setup-`AppId`.
+Die Installer sind derzeit **ohne Authenticode-Zertifikat**. Windows kann bei
+manuellen Downloads vor einem unbekannten Herausgeber warnen. Die Manifestprüfung
+ersetzt keine öffentliche Herausgeberreputation oder Virenscannerprüfung.
 
-### Getrennte Signierung und Schlüsselverwaltung
+## Geprüft veröffentlichen
 
-Der neue öffentliche Prüfschlüssel heißt `2026-10-private-publisher`. Der private
-Schlüssel wird ausschließlich unter dem Entwicklerkonto mit Windows-DPAPI
-verschlüsselt gespeichert. Test-/Buildjobs erhalten ihn nicht. Der frühere
-GitHub-Schlüssel kann aus dem Repository-Secret nicht ausgelesen werden; deshalb
-ist für diese Trennung ein neuer Prüfschlüssel erforderlich. Die beauftragte
-Umstellung verlangt keine Migration der wenigen bisherigen Testinstallationen;
-diese erhalten die neue Version später durch manuelle Installation.
-
-Für künftige Rotationen bei weiterlaufenden Installationen bleibt eine kontrollierte
-Übergangsversion erforderlich, die vor Aktivierung eines neuen Signierschlüssels
-dessen öffentlichen Anteil verteilt. Unverschlüsselte Schlüssel niemals in
-Dateien, Logs, Git oder Artefakten ablegen. Der frühere Helfer
-`provision_update_signing_key.py` beschreibt den alten GitHub-Secret-Pfad und wird
-für die neue lokale Signierung nicht verwendet. Sicherung/Wiederherstellung des
-DPAPI-Schlüssels muss das zugehörige Windows-Profil berücksichtigen.
-
-## Veröffentlichung einer neuen Version
-
-Der vollständige aktuelle CI-/Pushablauf steht unter [Private CI](private_ci.md).
-Die technische Abnahme der neuen Einrichtung ist noch in Arbeit; bis zu ihrem
-Erfolg bleibt die Veröffentlichung gesperrt.
-
-1. Patchversion in `src/cooling_tower/version.py` erhöhen, Commitnachricht und
-   Runner nennen, freigegebene Änderung auf `codex/`-Prüfbranch pushen und PR
-   erstellen. Der zentrale `Complete-CheckedPush.ps1` prüft offizielle private
-   Actions und übernimmt dieselbe SHA automatisch nach main. Für einen Release-
-   Push ohne wiederverwendbare Vollprüfung `-HostedFirst` verwenden.
-2. Der Helfer bestätigt anschließend Remote-main und die ursprünglichen privaten
-   Nachweise. Kein zweiter Volltest derselben unverändert geprüften SHA.
-3. Im normalen Entwicklerkonto mit PowerShell 7 ausführen:
-
-   ```powershell
-   ./scripts/publish_update.ps1 -DevelopmentRelease
-   ```
-
-   Erst nach vollständiger tatsächlicher regulärer Freigabe ohne
-   `-DevelopmentRelease` veröffentlichen. Die weiterhin offenen Angaben werden
-   wahrheitsgemäß in [Checkliste](missing_data.md) verfolgt.
-
-Der zentrale Releasehelfer verwendet die private vertrauenswürdige CI-Steuerung.
-Er prüft Projektcommit und Basis getrennt vom CI-Steuerungscommit und verifiziert
-ursprünglichen Lauf, Pflichtjobs und verwendeten Runner gegen GitHub. Gültige
-unveränderte Vollprüfungen werden wiederverwendet. Für erforderliche neue
-Release-/Installerprüfungen zuerst GitHub-Hardware verwenden und bei belegtem
-`failure`, `timed_out` oder `startup_failure` genau einmal denselben Stand lokal
-auf dem privaten offiziellen Runner prüfen. Abbruch, veränderter Ref und
-Dispatch ohne verlässliche Lauf-ID erlauben keine blinden Doppelstarts. Auch ein
-lokaler Fehler blockiert die Veröffentlichung. Beide Ergebnisse bleiben unter
-`state/release-runs/` im geschützten zentralen Toolordner dokumentiert.
-
-Die frühere Entwicklungsrelease-Zeitlimit-Ausnahme mit eigener lokaler Vollsuite
-ist durch den offiziellen privaten Fallback ersetzt. `-AllowTimedOutCI` wird
-nicht mehr akzeptiert. Die Entwicklungsausnahme verschiebt weiterhin nur die
-konkret erlaubten Freigabeangaben; erfolgreiche offizielle Prüfungen sowie
-Lieferumfangs-, Installer-, Signatur- und Integritätsprüfungen bleiben Pflicht.
-Entwicklungsreleases bleiben sichtbar im Titel, Beschreibung und signierten
-Versionshinweisen gekennzeichnet. GitHub erhält kein Prerelease-Flag und
-`--latest`; das ist keine reguläre Vertriebsfreigabe.
-
-Die gemeinsame, unmittelbar releasebezogene Buildfolge steht in
-`scripts/build_update.ps1` und wird sowohl vom privaten Projektadapter als auch
-von der ausschließlich gehosteten öffentlichen Builddatei verwendet. Sie
-bereitet dieselben gepinnten Abhängigkeiten/Qt-Quellen vor, baut und prüft den
-Installer und erzeugt Metadaten. Keine Signierung im Test-/Buildjob. Der
-Verwaltungsprozess lädt den nachgewiesenen Lauf aus dem privaten CI-Repository,
-vergleicht Version, Größe und SHA-256, signiert das Manifest unter dem
-Entwicklerkonto und prüft es vor Veröffentlichung erneut. Das Manifestformat und
-die kryptografischen Prüfungen bleiben erhalten.
-
-Die privaten Stresstests führen bei Pflicht die vollständige Dreiseed-Matrix aus.
-Öffentliche manuelle Stressworkflows laufen ausschließlich auf GitHub-Hardware.
-Der alte `github_hosted`-Eingang kann dort keine lokale Ausführung mehr auswählen.
-Schlägt die Veröffentlichung des Manifests nach dem Erstellen des Releases
-fehl, wird das unvollständige Release entfernt. Im Programm und Installer werden
-keine Verwaltungs- oder GitHub-Zugänge gespeichert.
-
-## Automatische Release-Aufbewahrung
-
-Nach einer vollständig erfolgreichen Veröffentlichung führt
-`scripts/publish_update.ps1` die Bereinigung des öffentlichen Update-Repositories
-aus. Die Regeln liegen nachvollziehbar in
-`config/release_retention.json`:
-
-- Die neuesten 100 veröffentlichten Releases bleiben immer erhalten.
-- Release-Assets dürfen zusammen höchstens 10 GiB belegen.
-- Ungeschützte Releases außerhalb der neuesten 100 werden nach 90 Tagen
-  entfernt.
-- Ist die 10-GiB-Grenze erreicht, werden die ältesten geeigneten Releases ohne
-  Rücksicht auf ihr Alter entfernt, bis die Größe wieder unter der Grenze liegt.
-- Jede Version `x.y.0` und die ausdrücklich eingetragene Version `0.4.9` sind
-  dauerhaft geschützt.
-- Das gerade veröffentlichte Release, Entwürfe, unveränderliche Releases und
-  nicht eindeutig als `x.y.z` erkennbare Tags werden ebenfalls nie automatisch
-  gelöscht.
-
-Die Mindestanzahl und die Schutzregeln haben Vorrang vor der Größenbegrenzung.
-Kann die Größenbegrenzung deshalb nicht eingehalten werden, bricht die
-Bereinigung mit einem eindeutigen Hinweis ab, statt ein geschütztes Release zu
-löschen. Git-Tags bleiben auch beim Löschen eines Release erhalten.
-
-Ein ungefährlicher Probelauf gegen ein beliebiges Repository ist möglich mit:
+Zuerst den [privaten Prüfbranch-/Pushablauf](private_ci.md) abschließen. Anschließend
+im normalen Entwicklerkonto aus dem sauberen Projektordner mit PowerShell 7:
 
 ```powershell
-.\scripts\cleanup_releases.ps1 `
-  -Repository RodeProjects/sacrificial-tower-updates `
-  -LatestVersion 0.4.9 `
-  -DryRun
+./scripts/publish_update.ps1 -DevelopmentRelease
 ```
+
+Dieser eine Aufruf wiederverwendet gültige unveränderte Vollprüfungen und führt
+fehlende offizielle Releaseprüfungen über die private vertrauenswürdige Steuerung
+aus. Neue Releaseprüfungen verwenden zuerst GitHub-Hardware; nur bei belegtem
+`failure`, `timed_out` oder `startup_failure` folgt genau ein lokaler offizieller
+Fallback derselben SHA. Abbruch, geänderter Ref oder unklarer Dispatch erlauben
+keinen blinden Neustart. Die gehostete Lizenzdialogprüfung bleibt eine gesonderte
+Pflicht. Fehlende Nachweise blockieren. Keine zusätzliche lokale Vollsuite und
+keine Zeitlimit-Umgehung mit `-AllowTimedOutCI`.
+
+Buildjobs erzeugen Installer und Metadaten ohne Verwaltungszugänge. Der geschützte
+Übernahmehelfer prüft ursprünglichen Lauf, Pflichtjobs, Projekt-SHA, Basis,
+CI-Steuerung sowie die tatsächlichen Dateien. Erst danach signiert das
+Entwicklerkonto. Der Publisher erstellt den zum geprüften Commit gehörenden Tag
+`vVERSION` und einen Releaseentwurf mit genau diesen Anhängen:
+
+- `SacrificialTowerSetup-VERSION.exe`
+- `latest.json`
+- `legal-texts.zip` mit aufgelösten Anbieter-/Datenschutz-/Lizenztexten
+
+Vor Veröffentlichung werden Tag, Dateigrößen und GitHubs SHA-256-Digests erneut
+abgeglichen. Erst der vollständige Entwurf wird veröffentlicht und als `Latest`
+markiert. GitHub schützt anschließend Tag und Anhänge durch aktivierte
+unveränderliche Releases. Der Publisher lädt die veröffentlichten Dateien
+tatsächlich erneut herunter und bestätigt Signatur, Größe und Hash. Bei Fehlern
+darf nur sein eigener nachweislich unveröffentlichter Entwurf entfernt werden.
+Veröffentlichte Releases und historische Nachweise werden nicht automatisch
+gelöscht; der alte Aufbewahrungshelfer blockiert Löschungen im Hauptrepository.
+
+Solange `release_legal_review` offen ist, ausschließlich den erlaubten
+Entwicklungsreleasepfad verwenden: sichtbare Kennzeichnung im Titel, in der
+Beschreibung und im signierten Manifest, kein Prerelease-Flag und `Latest`.
+Dies verschiebt keine Lizenzpflichten und behauptet keine reguläre Vertriebs-
+oder Storefreigabe. Nach tatsächlich abgeschlossener regulärer Freigabe entfällt
+der Schalter. Details: [Veröffentlichung](distribution.md).
+
+## Abnahme des veröffentlichten Versionsübergangs
+
+Gezielte Tests prüfen Abruf, Versionsvergleich, Signaturen, exakte Kanaladresse,
+Download/Integrität und Fehlerfälle. Zusätzlich ist im privaten CI-Adapter die
+Operation `update-acceptance.yml` fest konfiguriert. Sie darf ausschließlich im
+eingerichteten Windows-Standardkonto und einem neuen eigenen Jobverzeichnis laufen,
+wenn dort noch keine Installation registriert ist. Keine Administratorrechte,
+kein Zugriff auf die reguläre Installation oder Benutzerdaten des Entwicklerkontos.
+
+Die Abnahme lädt zwei tatsächlich veröffentlichte, unveränderliche benachbarte
+Versionen anonym herunter. Sie installiert den alten echten Installer und führt
+den ursprünglichen Qt-Updatercode seines Release-Tags aus. Dieser lädt den neuen
+echten Installer, bestätigt den nativen Übergabeablauf und startet das neue
+installierte Frozen-Programm. Versionsregistrierung, geänderte Programmbytes,
+native Statusreihenfolge, tatsächlicher Programmversionsnachweis und ein eigener
+Benutzerdaten-Canary werden geprüft. Nur die eigene Testinstallation wird danach
+deinstalliert. Die alte gepackte Oberfläche selbst wird dabei nicht automatisiert;
+das ist ausdrücklich eine Grenze dieser Abnahme. Die Lizenzdialoge werden durch
+die separate gehostete GUI-Pflichtprüfung abgedeckt.
+
+Manipulierte echte Signatur und Hashabweichung vor Prozessstart werden zusätzlich
+ungefährlich geprüft. Vollständig anonymer Abruf ist erst nach der beauftragten
+Öffnung möglich und wird unmittelbar danach abgenommen; zuvor prüft der Publisher
+die tatsächlichen veröffentlichten Dateien mit dem Verwaltungszugang.
 
 ## Eigenständiger und vorbereiteter Store-Build
 
@@ -320,10 +272,8 @@ werden im Paket geprüft. Der Workflow archiviert `build-inventory.json` zusamme
 mit dem Installer. Details: [Entwicklung](development.md) und
 [Dependencies](dependencies.md).
 
-`scripts/publish_update.ps1` führt vor seinen GitHub-Aufrufen
-`check_release_readiness.py --release` aus. Solange rechtliche Platzhalter oder
-unregistrierte Vorlagenfelder vorhanden sind, wird keine Veröffentlichung
-begonnen. Alle offenen Daten stehen in [missing_data.md](missing_data.md).
-Ein interner Entwicklungsbuild bleibt mit sichtbaren Platzhaltern möglich.
-Diese maschinelle Vollständigkeitsprüfung ersetzt nicht die inhaltliche
-[Veröffentlichungsprüfung](distribution.md).
+`scripts/publish_update.ps1 -DevelopmentRelease` prüft die ausdrücklich erlaubte
+Entwicklungsfreigabe; ohne diesen Schalter bleibt die reguläre vollständige
+Freigabe erforderlich. Die maschinelle Vollständigkeitsprüfung ersetzt keine
+inhaltliche Vertriebs- oder Storeprüfung. Offene Angaben stehen unter
+[Checkliste](missing_data.md) und [Veröffentlichung](distribution.md).

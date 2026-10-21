@@ -73,7 +73,7 @@ repository is a separate, planned step.
 
 ## Where can I download the Windows application?
 
-Use the [official Windows release channel](https://github.com/RodeProjects/sacrificial-tower-updates/releases/latest).
+Use the [official Windows release channel](https://github.com/RodeProjects/sacrificial-tower/releases/latest).
 Current releases are development versions for testing and evaluation. The
 download channel contains installers and update metadata; development sources
 belong to the separate main repository.

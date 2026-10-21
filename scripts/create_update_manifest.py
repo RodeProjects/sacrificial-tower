@@ -21,6 +21,7 @@ from cooling_tower.update_manifest import (  # noqa: E402
     sign_update_manifest,
     verify_update_manifest_signature,
 )
+from cooling_tower.update_channel import RELEASE_REPOSITORY, installer_url  # noqa: E402
 
 
 _VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){2}$")
@@ -36,6 +37,8 @@ def create_manifest(
     private_key_base64: str,
     key_id: str,
 ) -> dict[str, object]:
+    if update_repository != RELEASE_REPOSITORY:
+        raise ValueError("Nur das konfigurierte Hauptrepository ist als Updatekanal erlaubt.")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
     if not isinstance(metadata, dict):
         raise ValueError("Die Update-Metadaten müssen ein JSON-Objekt sein.")
@@ -58,10 +61,7 @@ def create_manifest(
     unsigned = {
         "schema_version": 1,
         "version": version,
-        "installer_url": (
-            f"https://github.com/{update_repository}/releases/download/"
-            f"v{version}/{installer_name}"
-        ),
+        "installer_url": installer_url(version),
         "sha256": sha256,
         "size_bytes": size_bytes,
         "release_notes": release_notes,
@@ -83,7 +83,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--update-repository",
-        default="RodeProjects/sacrificial-tower-updates",
+        default=RELEASE_REPOSITORY,
     )
     parser.add_argument("--release-notes", required=True)
     parser.add_argument("--key-id", default=CURRENT_UPDATE_SIGNING_KEY_ID)

@@ -13,7 +13,7 @@ Analyze STL models through your installed slicer, inspect layer times and export
 a tower STL or a supported native 3MF project. Existing text G-code can be analyzed
 with the separate command-line interface.
 
-[Windows-Entwicklungsversion herunterladen](https://github.com/RodeProjects/sacrificial-tower-updates/releases/latest)
+**[Windows-Installer herunterladen](https://github.com/RodeProjects/sacrificial-tower/releases/latest)**
 · [Getestete Slicer](#unterstützte-slicer-und-getestete-versionen)
 · [FAQ / English answers](docs/faq.md)
 · [Dokumentation](docs/README.md)
@@ -41,7 +41,7 @@ Nutzungs- und Weitergaberechte.
 
 ## Windows-Download und Voraussetzungen
 
-Die [offiziellen GitHub-Releases](https://github.com/RodeProjects/sacrificial-tower-updates/releases)
+Die [offiziellen GitHub-Releases](https://github.com/RodeProjects/sacrificial-tower/releases)
 enthalten den Windows-Installer. Aktuelle Fassungen sind **Entwicklungsversionen
 für Tests und Evaluation**. Die Apache-2.0-Umstellung betrifft den aktuellen
 Quellstand und daraus kommende Builds. Für bereits veröffentlichte Installer gilt
@@ -50,6 +50,12 @@ Für den STL-Ablauf zuerst einen unterstützten Slicer
 installieren und darin den eigenen Drucker, das Filament und ein Prozessprofil
 einrichten. Danach die Profile im Slicer speichern und im Turmprogramm auswählen.
 Die Verwendung des Windows-Installers erfordert keine eigene Python-Installation.
+
+Der Entwicklungsstand auf `main` kann neuer als der veröffentlichte Installer
+sein. Ein Release gehört zu seinem unveränderlichen Quellcode-Tag `vVERSION`;
+Installer, Versionshinweise und signiertes Manifest tragen dieselbe Version.
+Bisherige Testinstallationen aus dem alten separaten Updatekanal müssen die neue
+Version einmal manuell installieren. Eine automatische Migration ist nicht vorgesehen.
 
 ## Start unter Windows
 

@@ -1,6 +1,6 @@
 # Auffindbarkeit von Sacrificial Tower in Suchmaschinen und KI-Suche
 
-Stand: 20.10.2026. Ziel ist, Zweck, Plattform, Eingaben, Ausgaben, Grenzen und
+Stand: 21.10.2026. Ziel ist, Zweck, Plattform, Eingaben, Ausgaben, Grenzen und
 getestete Slicer für Menschen und Suchsysteme klar zu beschreiben. Verwendete
 Begriffe sind unter anderem „3D printing sacrificial tower tool“, „minimum layer
 time cooling optimizer“, „G-code analyzer“, Kühlturm und minimale Schichtzeit.
@@ -26,7 +26,7 @@ Sie stehen im fachlichen Zusammenhang mit den tatsächlichen Funktionen.
 Die Beschreibungen und Topics werden direkt in GitHubs „About“-Bereich gepflegt.
 Sie sind keine aus einer Markdown-Datei automatisch übernommenen Einstellungen.
 Der Projektlink beider Repositories führt zum öffentlichen Windows-Download:
-`https://github.com/RodeProjects/sacrificial-tower-updates/releases/latest`.
+`https://github.com/RodeProjects/sacrificial-tower/releases/latest`.
 
 Haupt-Repository `RodeProjects/sacrificial-tower`:
 
@@ -36,26 +36,18 @@ Topics: `3d-printing`, `fdm`, `fff`, `sacrificial-tower`, `cooling-tower`,
 `minimum-layer-time`, `gcode`, `gcode-analysis`, `stl`, `3mf`, `orcaslicer`,
 `prusaslicer`, `bambu-studio`, `anycubic-slicer-next`, `windows`.
 
-Öffentlicher Updatekanal `RodeProjects/sacrificial-tower-updates`:
-
-> Official Windows downloads and signed updates for Sacrificial Tower, a free 3D printing cooling tower generator and G-code analyzer for minimum layer time optimization.
-
-Topics: `3d-printing`, `sacrificial-tower`, `cooling-tower`, `minimum-layer-time`,
-`gcode-analysis`, `windows`, `windows-installer`, `software-updates`.
-
-Die [vorbereitete öffentliche Download-README](update_channel_public_readme.md)
-ist eine Fassung für das separate Update-Repository. Sie wird hier lokal gepflegt;
-ihre Übernahme dort erfordert einen eigenen Commit/Push-Auftrag. Diese Aufgabe
-ändert weder vorhandene öffentliche Releases noch `latest.json` oder Installer.
+Der frühere Updatekanal `RodeProjects/sacrificial-tower-updates` wird nach der
+öffentlichen Kanalabnahme als abgelöst markiert und archiviert. Die einzige
+maßgebliche Download-README ist die README des Hauptrepositorys; keine doppelte
+Pflege einer separaten Downloadseite. Historische Releases bleiben erhalten.
 
 ## Sichtbarkeit und Pflege
 
-Das Haupt-Repository bleibt privat, bis der Benutzer ausdrücklich seine
-Veröffentlichung beauftragt. Private Inhalte sind für normale öffentliche
-Suchmaschinen nicht erreichbar. Der bestehende öffentliche Updatekanal bleibt
-der erreichbare Download-Einstieg. Nach einer autorisierten Veröffentlichung
-die sichtbaren Texte, Downloadlinks, getesteten Versionen und Lizenzangaben
-aufeinander abstimmen und Verweise auf erforderlichen Repositoryzugriff entfernen.
+Die Öffnung ist ausdrücklich beauftragt und folgt erst nach den Prüfungen unter
+[Veröffentlichungsprüfung](publication_readiness.md). Anschließend sind Quellcode,
+Releases und GitHub Issues öffentlich erreichbar. Private CI-Steuerung,
+Verwaltungsnachweise und lokale Anmeldungen bleiben getrennt. Die Metadaten und
+Downloadlinks werden bei dieser Umstellung auf das Hauptrepository ausgerichtet.
 
 GitHub rendert die Markdown-Seiten selbst. Eigene HTML-Metatags, Canonical-Tags,
 robots.txt oder eine Sitemap in diesem Quellcode-Repository konfigurieren nicht

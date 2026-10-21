@@ -34,7 +34,7 @@ from cooling_tower.diagnostic_context import diagnostic_scope
 
 
 INSTALLER_URL = (
-    "https://github.com/RodeProjects/sacrificial-tower-updates/"
+    "https://github.com/RodeProjects/sacrificial-tower/"
     "releases/download/v0.4.2/SacrificialTowerSetup-0.4.2.exe"
 )
 TEST_KEY_ID = "test-key"

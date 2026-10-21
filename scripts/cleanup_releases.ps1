@@ -54,6 +54,12 @@ function Assert-NativeSuccess {
     }
 }
 
+$mainChannel = & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from cooling_tower.update_channel import RELEASE_REPOSITORY; print(RELEASE_REPOSITORY)" (Join-Path $projectRoot 'src')
+Assert-NativeSuccess 'Das Lesen des zentralen Releasekanals'
+if ($Repository -ceq $mainChannel -and -not $DryRun) {
+    throw 'Unveränderliche Hauptrepository-Releases und ihre Quellcode-Tags werden nicht automatisch bereinigt.'
+}
+
 & $gh auth status
 Assert-NativeSuccess 'Die GitHub-Anmeldeprüfung'
 

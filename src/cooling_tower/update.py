@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import truststore
@@ -24,20 +23,16 @@ from cooling_tower.update_manifest import (
 )
 from cooling_tower.diagnostic_context import record_diagnostic
 from cooling_tower.version import APP_VERSION
-
-
-DEFAULT_UPDATE_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/"
-    "RodeProjects/sacrificial-tower-updates/main/latest.json"
+from cooling_tower.update_channel import (
+    DEFAULT_UPDATE_MANIFEST_URL,
+    installer_url as official_installer_url,
 )
+
+
 MAXIMUM_MANIFEST_BYTES = 64 * 1024
 MAXIMUM_INSTALLER_BYTES = 512 * 1024 * 1024
 _VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){2}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_ALLOWED_INSTALLER_HOST = "github.com"
-_ALLOWED_INSTALLER_PATH_PREFIX = (
-    "/RodeProjects/sacrificial-tower-updates/releases/download/"
-)
 
 
 class UpdateError(RuntimeError):
@@ -122,13 +117,7 @@ def parse_update_manifest(
         raise UpdateError(str(error)) from error
 
     installer_url = str(raw.get("installer_url", "")).strip()
-    parsed_url = urlparse(installer_url)
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname != _ALLOWED_INSTALLER_HOST
-        or not parsed_url.path.startswith(_ALLOWED_INSTALLER_PATH_PREFIX)
-        or not parsed_url.path.casefold().endswith(".exe")
-    ):
+    if installer_url != official_installer_url(version):
         raise UpdateError("Das Update-Manifest enthält keine erlaubte Installer-URL.")
 
     sha256 = str(raw.get("sha256", "")).strip().casefold()

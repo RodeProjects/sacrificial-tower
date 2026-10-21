@@ -1,6 +1,7 @@
+#Requires -Version 7.4
 param(
-    [string]$SourceRepository = "RodeProjects/sacrificial-tower",
-    [string]$UpdateRepository = "RodeProjects/sacrificial-tower-updates",
+    [string]$SourceRepository = "",
+    [string]$UpdateRepository = "",
     [switch]$DevelopmentRelease,
     [switch]$AllowTimedOutCI,
     [string]$RunnerToolsRoot = (Join-Path $PSScriptRoot '..\..\_Tools\github_actions_runner')
@@ -44,6 +45,17 @@ function Assert-NativeSuccess {
     }
 }
 
+$channelRepository = & $python -c "import sys; sys.path.insert(0, 'src'); from cooling_tower.update_channel import RELEASE_REPOSITORY; print(RELEASE_REPOSITORY)"
+Assert-NativeSuccess 'Das Lesen des zentralen Updatekanals'
+if (-not $SourceRepository) { $SourceRepository = $channelRepository }
+if (-not $UpdateRepository) { $UpdateRepository = $channelRepository }
+if ($SourceRepository -cne $channelRepository -or $UpdateRepository -cne $channelRepository) {
+    throw 'Quellstand und Updatekanal müssen das zentral konfigurierte Hauptrepository verwenden.'
+}
+$immutable = & $gh api "repos/$SourceRepository/immutable-releases" | ConvertFrom-Json
+Assert-NativeSuccess 'Die Prüfung unveränderlicher Releases'
+if (-not $immutable.enabled) { throw 'Vor einer Veröffentlichung müssen unveränderliche Releases aktiviert sein.' }
+
 if ($DevelopmentRelease) {
     & $python `
         (Join-Path $PSScriptRoot "check_release_readiness.py") `
@@ -69,6 +81,11 @@ if (-not $versionMatch.Success) {
 }
 $version = $versionMatch.Groups["version"].Value
 $tag = "v$version"
+$existingReleases = & $gh api "repos/$SourceRepository/releases?per_page=100" | ConvertFrom-Json
+Assert-NativeSuccess 'Die Prüfung vorhandener Releases'
+if (@($existingReleases | Where-Object tag_name -CEQ $tag).Count) {
+    throw 'Diese Releaseversion ist bereits belegt und wird nicht überschrieben.'
+}
 
 $worktreeStatus = git status --porcelain
 Assert-NativeSuccess "Die Prüfung des Git-Arbeitsbaums"
@@ -122,7 +139,7 @@ if (-not $resolvedTemporaryRoot.StartsWith(
 New-Item -ItemType Directory -Path $resolvedTemporaryRoot | Out-Null
 
 $releaseCreated = $false
-$manifestPublished = $false
+$releasePublished = $false
 try {
     $artifactHelper = Join-Path $RunnerToolsRoot 'scripts/Get-PrivateBuildArtifacts.ps1'
     if (-not (Test-Path -LiteralPath $artifactHelper -PathType Leaf)) {
@@ -189,71 +206,99 @@ try {
         $releaseTitle = "Sacrificial Tower $version"
         $releaseNotes = $releaseSummary + "`n`nSacrificial-Tower-Update auf Version $version."
     }
-    $releaseArguments = @(
-        "release", "create", $tag, $installer.FullName,
-        "--repo", $UpdateRepository,
-        "--title", $releaseTitle,
-        "--notes", $releaseNotes,
-        "--latest"
-    )
-    & $gh @releaseArguments
-    Assert-NativeSuccess "Das Erstellen des Sacrificial-Tower-Releases"
-    $releaseCreated = $true
+    $releaseNotes += "`n`nQuellcode: $SourceRepository, Tag $tag, Commit $localCommit.`nInstaller und signiertes latest.json gehören unveränderlich zu diesem Release."
+    $notesPath=Join-Path $resolvedTemporaryRoot 'release-notes.md'
+    [IO.File]::WriteAllText($notesPath,$releaseNotes,[Text.UTF8Encoding]::new($false))
+    $legalRoot=Join-Path $resolvedTemporaryRoot 'legal-texts'
+    & $python (Join-Path $PSScriptRoot 'export_legal_documents.py') --output $legalRoot
+    Assert-NativeSuccess 'Der Export aufgelöster öffentlicher Rechtstexte'
+    $legalArchive=Join-Path $resolvedTemporaryRoot 'legal-texts.zip'
+    [IO.Compression.ZipFile]::CreateFromDirectory($legalRoot,$legalArchive)
 
-    $manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
-    $encodedManifest = [Convert]::ToBase64String($manifestBytes)
-
-    $existingSha = $null
-    try {
-        $existingSha = & $gh api `
-            "repos/$UpdateRepository/contents/latest.json" `
-            --jq .sha
-        Assert-NativeSuccess "Das Lesen des bestehenden Programmupdate-Manifests"
-    } catch {
-        $existingSha = $null
-    }
-    $apiArguments = @(
-        "api",
-        "repos/$UpdateRepository/contents/latest.json",
-        "--method", "PUT",
-        "-f", "message=Programmupdate-Kanal auf Version $version aktualisieren",
-        "-f", "content=$encodedManifest",
-        "-f", "branch=main"
-    )
-    if ($existingSha) {
-        $apiArguments += @("-f", "sha=$existingSha")
-    }
-    & $gh @apiArguments | Out-Null
-    Assert-NativeSuccess "Das Aktualisieren des Programmupdate-Manifests"
-    $manifestPublished = $true
-
-    & (Join-Path $PSScriptRoot 'cleanup_releases.ps1') `
-        -Repository $UpdateRepository `
-        -LatestVersion $version
-    Assert-NativeSuccess 'Die automatische Release-Bereinigung'
-    Write-Host (
-        "Version $version wurde als $releaseKind im öffentlichen " +
-        "Update-Kanal veröffentlicht."
-    )
-} finally {
-    if ($releaseCreated -and -not $manifestPublished) {
-        & $gh release delete $tag `
-            --repo $UpdateRepository `
-            --yes
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning (
-                "Das unvollständig veröffentlichte Release $tag konnte nicht " +
-                "automatisch entfernt werden."
-            )
+    git remote -v
+    git branch --show-current
+    git status -sb
+    if((git remote get-url origin) -cne "git@github.com:$SourceRepository.git") {throw 'Unerwarteter SSH-Remote vor dem Release-Tag.'}
+    $commitMessage=git show -s --format=%s $localCommit
+    Assert-NativeSuccess 'Das Lesen der bereits geprüften Commitnachricht'
+    Write-Host "Commitnachricht des unverändert geprüften Release-Commits: $commitMessage"
+    $remoteTag=git ls-remote origin "refs/tags/$tag"
+    Assert-NativeSuccess 'Die Prüfung des Remote-Tags'
+    if(-not $remoteTag) {
+        $localTags=@(git tag --list $tag)
+        Assert-NativeSuccess 'Die Prüfung lokaler Tags'
+        if($localTags.Count) {
+            if((git rev-parse "$tag^{commit}") -cne $localCommit){throw 'Vorhandener lokaler Tag zeigt auf anderen Quellcode.'}
+        } else {
+            git tag -a $tag $localCommit -m "Sacrificial Tower $version ($releaseKind)"
+            Assert-NativeSuccess 'Das Erstellen des Quellcode-Tags'
         }
+        git push origin "refs/tags/$tag"
+        Assert-NativeSuccess 'Das Pushen des geprüften Quellcode-Tags'
     }
-    if (
-        (Test-Path -LiteralPath $resolvedTemporaryRoot) -and
-        $resolvedTemporaryRoot.StartsWith(
-            $resolvedSystemTemp,
-            [System.StringComparison]::OrdinalIgnoreCase
-        )
-    ) {
+    function Assert-SourceTag {
+        $reference=& $gh api "repos/$SourceRepository/git/ref/tags/$tag" | ConvertFrom-Json
+        Assert-NativeSuccess 'Die serverseitige Tagprüfung'
+        $object=$reference.object
+        if($object.type -ceq 'tag') {
+            $annotation=& $gh api "repos/$SourceRepository/git/tags/$($object.sha)" | ConvertFrom-Json
+            Assert-NativeSuccess 'Die Prüfung des annotierten Tags'
+            $object=$annotation.object
+        }
+        if($object.type -cne 'commit' -or $object.sha -cne $localCommit){throw 'Release-Tag stimmt nicht mit dem geprüften Quellcommit überein.'}
+    }
+    Assert-SourceTag
+    & $gh release create $tag $installer.FullName $manifestPath $legalArchive `
+        --repo $SourceRepository --target $localCommit --verify-tag --draft `
+        --title $releaseTitle --notes-file $notesPath
+    Assert-NativeSuccess 'Das Anlegen des vollständigen Releaseentwurfs'
+    $releaseCreated=$true
+    $draft=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
+    Assert-NativeSuccess 'Die Prüfung des Releaseentwurfs'
+    $expected=@{
+        $installer.Name=@{hash=$actualHash;size=$installer.Length}
+        'latest.json'=@{hash=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant();size=(Get-Item -LiteralPath $manifestPath).Length}
+        'legal-texts.zip'=@{hash=(Get-FileHash -LiteralPath $legalArchive -Algorithm SHA256).Hash.ToLowerInvariant();size=(Get-Item -LiteralPath $legalArchive).Length}
+    }
+    if(-not $draft.draft -or $draft.prerelease -or @($draft.assets).Count -ne $expected.Count){throw 'Releaseentwurf enthält nicht den erwarteten Lieferumfang.'}
+    foreach($asset in $draft.assets) {
+        if(-not $expected.ContainsKey($asset.name) -or $asset.size -ne $expected[$asset.name].size -or $asset.digest -cne ('sha256:'+$expected[$asset.name].hash)) {throw 'GitHub bestätigt keinen passenden Hash und Umfang der Release-Anhänge.'}
+    }
+    $currentRemote=& $gh api "repos/$SourceRepository/commits/main" --jq .sha
+    Assert-NativeSuccess 'Die abschließende Prüfung des Release-Commits'
+    if($currentRemote -cne $localCommit -or (git rev-parse HEAD) -cne $localCommit -or (git status --porcelain)){throw 'Quellstand während der Releasevorbereitung verändert.'}
+    Assert-SourceTag
+    & $gh release edit $tag --repo $SourceRepository --draft=false --latest
+    Assert-NativeSuccess 'Das Veröffentlichen des unveränderlichen Entwicklungs-/Programmreleases'
+    $releasePublished=$true
+    $published=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
+    Assert-NativeSuccess 'Die Bestätigung des veröffentlichten Releases'
+    if($published.draft -or $published.prerelease -or -not $published.immutable -or $published.tag_name -cne $tag){throw 'GitHub bestätigt kein unveränderliches geeignetes Release.'}
+    Assert-SourceTag
+    $roundtrip=Join-Path $resolvedTemporaryRoot 'published-download'
+    New-Item -ItemType Directory -Path $roundtrip | Out-Null
+    & $gh release download $tag --repo $SourceRepository --dir $roundtrip --pattern $installer.Name --pattern latest.json
+    Assert-NativeSuccess 'Der tatsächliche Download der veröffentlichten Dateien'
+    & $python (Join-Path $PSScriptRoot 'verify_update_manifest.py') --manifest (Join-Path $roundtrip 'latest.json') --installer (Join-Path $roundtrip $installer.Name)
+    Assert-NativeSuccess 'Die Signatur-/Integritätsprüfung des veröffentlichten Downloads'
+    if((Get-FileHash -LiteralPath (Join-Path $roundtrip $installer.Name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $actualHash){throw 'Veröffentlichter Installer weicht vom geprüften Build ab.'}
+    Write-Host "Version $version als $releaseKind in $SourceRepository veröffentlicht; Tag, Assets, tatsächlicher Download und Signatur bestätigt."
+} finally {
+    if($releaseCreated -and -not $releasePublished) {
+        # An ambiguous publishing response may already have locked the release.
+        # Delete only this invocation's still-unpublished draft, never a release.
+        try {
+            $remaining=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
+            Assert-NativeSuccess 'Die Prüfung eines unvollständigen Releaseentwurfs'
+            if($remaining.draft) {
+                & $gh release delete $tag --repo $SourceRepository --yes
+                Assert-NativeSuccess 'Das Entfernen des unveröffentlichten Entwurfs'
+            }
+        } catch { Write-Warning 'Releasezustand konnte nicht abschließend geprüft werden; keine unbekannte Veröffentlichung gelöscht.' }
+    }
+    $prefix=$resolvedSystemTemp.TrimEnd('\')+'\'
+    if((Test-Path -LiteralPath $resolvedTemporaryRoot) -and $resolvedTemporaryRoot.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -and
+       -not (Get-Item -LiteralPath $resolvedTemporaryRoot).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
         Remove-Item -LiteralPath $resolvedTemporaryRoot -Recurse -Force
     }
 }

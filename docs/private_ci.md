@@ -1,61 +1,50 @@
 # Private CI und geprüfte Veröffentlichung
 
-Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
-Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
-bleiben bis zur vollständigen Abnahme gesperrt.
+Stand: 21.10.2026. **Phase 1 vollständig abgenommen.** Das Hauptrepository
+bleibt bis zur abschließenden Kanal- und Veröffentlichungsprüfung privat.
+Die direkte Runnerregistrierung am Hauptrepository wurde entfernt.
 
-Private Steuerung 1.0.6 (`5587253`) wurde über PR 6 offiziell geprüft und
-installiert. Die kontingentunabhängige lokale Übernahme ist mit dem echten
-Node-Build `39639843854` vollständig abgenommen: erfolgreicher offizieller Export,
-ursprünglicher GitHub-Schrittlog, gebundene Identitäten, tatsächliche Größen-/Hashes
-und übernommener Inhalt; kein zusätzliches SDK und kein Actions-Artefaktspeicher.
-Lokale Infrastrukturabnahme unter 1.0.2 (`39627221957`): 25
-Sicherheitsfälle, neun ungefährliche Fallbacksimulationen, zwei Node-Tests und
-tatsächliche Zugriffsproben unter dem getrennten Standardkonto erfolgreich.
-Der anschließend behobene gehostete Quelltransport ist unter 1.0.3 tatsächlich
-erfolgreich abgenommen (`39632111266`), einschließlich exaktem Checkout und
-denselben Sicherheits-/Node-Prüfungen. Kurzlebige Vorabreleases bleiben im
-vorher auf Identität und private Sichtbarkeit geprüften CI-Repository und sind
-mit reinen Job-Leserechten zugänglich; nach Erfolg werden sie entfernt.
-Der Anwendungslauf `39632436611` hat alle 1961 Einzeltests bestanden; PR 8 wurde
-mit exakt `fcd4b85` übernommen und der ursprüngliche Nachweis nochmals bestätigt.
-Installerlauf `39635205372` hat Build und Installerprüfungen bestanden, jedoch
-wegen GitHubs Artefaktspeicherkontingent keinen vollständigen Erfolg erreicht.
-Die kontrollierte lokale Fehlerbehandlung und Artefaktübernahme sind deshalb
-gezielt korrigiert und praktisch geprüft. Version 0.9.20 verwendet diesen
-geschützten Übernahmehelfer; ihr Prüflauf `39640392154` hat die Vollsuite
-erfolgreich abgeschlossen und exakt `06831e0` nach `main` übernommen. Der
-anschließende gehostete Installerlauf `39663506526` scheiterte ausschließlich am
-Artefaktkontingent; genau ein lokaler Fallback `39664708263` wurde automatisch
-gestartet und blockierte korrekt wegen eines hängenden Testdialogs.
+Unter privater Steuerung 1.0.6 (`5587253`) hat Version 0.9.24 (`cea9269`)
+alle 1961 Einzeltests im ursprünglichen lokalen Lauf `39670077257` bestanden.
+PR 10 wurde automatisch mit exakt derselben SHA per SSH übernommen; Remote-main,
+Basis und ursprüngliche Nachweise wurden anschließend erneut bestätigt.
+Die gehostete GUI-Pflichtprüfung `39670084139` bestand alle fünf Lizenzdialogfälle.
+Der gehostete Build `39672682633` bestand sämtliche Build-/Installerprüfungen,
+scheiterte ausschließlich am Actions-Artefaktspeicherkontingent. Genau ein
+automatischer lokaler offizieller Fallback `39673818036` bestand einschließlich
+aller fünf nativen Übergabetests, Ersetzung und Deinstallation. Tatsächlicher
+Dateitransport, Hashes und Signaturprüfung des gebauten Installers wurden abgenommen.
 
-Die gezielte offizielle Diagnose `39666465868` grenzte den Fehler ein: Die
-harmlosen Lizenz-Fixtures meldeten `OK long`, ihre versteckte Wizardform konnte
-sich jedoch über den sichtbarkeitsabhängigen Inno-Closepfad nicht beenden. Nur die
-Testfixture beendet jetzt nach ihren unveränderten Assertions regulär ihre
-Nachrichtenschleife. Sie installiert weiterhin keine Anwendung. Siehe
-[Inno-Closepfad](https://github.com/jrsoftware/issrc/blob/is-6_7_3/Projects/Src/Setup.MainForm.pas)
-und [Windows-Nachrichtenschleife](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage).
-Der Build übergibt außerdem den bereits gepinnten Inno-Compiler über `INNO_ROOT`
-an die echten nativen Übergabetests, damit diese nicht wegen eines fehlenden
-Suchpfads übersprungen werden. Die anschließenden Diagnosen bestätigten die reguläre Beendigung. Die
-Caret-Variante bestand im Entwicklerkonto, scheiterte aber reproduzierbar in
-Windows-Session 0, auch mit bestätigtem Fokus und abgewartetem Layout. Die
-erfolglosen Fokus-/Layoutversuche wurden aus der Fixture entfernt; ihre Assertions
-und die produktive Lizenzoberfläche bleiben unverändert.
+Die gemeinsame Infrastruktur wurde mit dem harmlosen Node-Build `39670240350`
+auch für einen anderen Projekttyp geprüft. Ein tatsächlich ohne geschützte
+Freigabedatei ausgelöster Lauf `39671232313` blockierte bereits im Jobstarthook;
+Projektcode wurde nicht ausgeführt. Unbekanntes Projekt, nicht freigegebene SHA,
+abweichende Basis/Prüflogik, fehlende oder fehlgeschlagene Pflichtprüfungen,
+falscher Lauf und veränderte Artefaktbytes wurden ebenfalls zuverlässig blockiert.
+Fehlender GUI-Nachweis verhinderte die Dateiübernahme. Serverseitig besitzt nur
+das private CI-Repository einen Runner; anonymer privater Dispatch ist unzulässig.
+Die vollständigen maschinenbezogenen Belege liegen geschützt außerhalb des
+Quellrepositories in `state/private-ci-migration/phase1-accepted.json` und den
+dort referenzierten Originalnachweisen. Historische Diagnoseberichte im privaten
+CI-Repository sind entsprechend gekennzeichnet.
 
-Die Lizenzdialoge sind deshalb eine eigene offizielle gehostete Releasepflicht
-(`installer-checks.yml`). Der geschützte Releaseadapter bestätigt deren Erfolg
-für exakt dieselbe Projekt-SHA, Basis und CI-Steuerung vor und nach dem Build.
-Der projektspezifische Artefaktvalidator verlangt ihn zusätzlich vor Dateiübernahme.
-Fehlende, fehlgeschlagene, lokale oder abweichende GUI-Nachweise blockieren.
-Der private Build übernimmt diese verifizierte Prüfung; native Übergabe,
-Ersetzung und Deinstallation bleiben im Buildjob. Öffentliche Builds führen die
-Lizenzprüfung selbst aus. Ohne erreichbare GitHub-Hardware für eine noch fehlende
-GUI-Pflichtprüfung bleibt das Release blockiert. Testjobs laufen weiterhin ohne
-Verwaltungszugänge; es gibt keinen GUI-Job unter dem Entwicklerkonto.
-Version 0.9.24 benötigt ihre eigenen aktuellen Prüfnachweise unter Steuerung
-1.0.6. Phase 1 ist noch nicht abgeschlossen.
+Steuerung 1.0.7 (`86d5cc4`) ergänzt ausschließlich den Tower-Adapter um die
+fest konfigurierte Abnahme `update-acceptance.yml`. PR 7 und Controllerlauf
+`39678575537` wurden erfolgreich geprüft; dieselbe SHA ist geschützt installiert.
+Diese Operation installiert nur im fest eingerichteten Standardkonto, verlangt
+die freigegebene Version/Releaseart und verwendet ein frisches Jobverzeichnis.
+Gemeinsame Autorisierungs- und Übernahmelogik bleiben unverändert. Der konkrete
+veröffentlichte Versionsübergang wird nach der Öffnung zusätzlich abgenommen;
+siehe [Updatekanal](update_channel.md).
+
+Lizenzdialoge sind eine eigene **gehostete** Releasepflicht (`installer-checks.yml`).
+Ihre unveränderten Assertions funktionieren nicht vollständig in Windows-Session 0;
+produktive Lizenzoberfläche und Dialogbedingungen wurden nicht verändert. Nur
+die harmlose Testfixture beendet nach den Assertions ihre Nachrichtenschleife.
+Releaseadapter und Artefaktübernahme bestätigen den ursprünglichen GUI-Erfolg für
+dieselbe Projekt-SHA, Basis und CI-Steuerung erneut. Der lokale Buildfallback
+behält native Übergabe, Ersetzung und Deinstallation bei. Fehlende gehostete
+GUI-Prüfung blockiert; keine Testausführung im privilegierten Entwicklerkonto.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind
