@@ -33,6 +33,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Einstellungen, Schema, Migrationen und Downgrade | [Persistenz](settings_migrations.md) |
 | Python-/C++-Analyse, Parität und Fallback | [Native Analyse](native_analysis.md) |
 | Signierte Programmaktualisierungen und Veröffentlichung | [Update-Kanal](update_channel.md) |
+| Private gemeinsame CI, Runnertrennung und geprüfte Push-/Releasebefehle | [Private CI](private_ci.md) |
 | Installation und Datenbereinigung | [Deinstallation](uninstallation.md) |
 
 ## Nachweise und historische Einordnung

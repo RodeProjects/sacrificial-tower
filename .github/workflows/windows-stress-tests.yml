@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       github_hosted:
-        description: Stressmatrix auf GitHub-Hardware statt lokal ausführen
+        description: Compatibility input; public workflows always use GitHub hardware
         required: false
         default: false
         type: boolean
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   process-stress:
-    runs-on: ${{ fromJSON(inputs.github_hosted && '["windows-latest"]' || '["self-hosted","Windows","X64","rodeprojects-local"]') }}
+    runs-on: windows-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false

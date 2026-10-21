@@ -48,6 +48,12 @@ Die beiden STL-Fixtures sind bytegleiche Kopien der jeweiligen Dateien unter
 ASCII-Tetraeder in den Fixtures ist ein synthetischer Testkörper. Für fremde
 Benutzermodelle folgt aus diesem Nachweis keine Nutzungserlaubnis.
 
+Am 21.10.2026 bestätigte der Benutzer zusätzlich ausdrücklich, auch alle drei
+unten ergänzten Modelle (Vase, gemischt und mehrere Objekte) selbst erstellt zu
+haben, die erforderlichen Rechte zu besitzen und sie unter Apache-2.0
+einschließlich Änderung und kommerzieller Weitergabe freizugeben. Ihre aktuellen
+Prüfsummen wurden mit dem bisher offenen Veröffentlichungsnachweis abgeglichen.
+
 | Repository-Pfad | SHA-256 des bestätigten Bestands |
 |---|---|
 | `src/cooling_tower/gui/assets/icon_tower_render.png` | `14db9595df0285ae6fd044b6473bc487a7a8be5d0ce4df0026e6313feb0d0b33` |
@@ -57,3 +63,6 @@ Benutzermodelle folgt aus diesem Nachweis keine Nutzungserlaubnis.
 | `input/Test-STL (non-manifold).stl` | `5c78ffac5d4e86550b52b991fa6fff0acb675556d04ba7a0d525a95041e09b03` |
 | `tests/fixtures/stl/test_model_manifold.stl` | `be144d0019fb184b25983d8b12449dcd6fe37777b8fbfb49da8e5fb2188be290` |
 | `tests/fixtures/stl/test_model_non_manifold.stl` | `5c78ffac5d4e86550b52b991fa6fff0acb675556d04ba7a0d525a95041e09b03` |
+| `input/Test-STL Vase (manifold).stl` | `e0c7e3441bcfe5f12f09b1e24d30dc06ce7e751738c4558f9bfd659618202fba` |
+| `input/Test-STL gemischt (manifold).stl` | `f0bb2062ebedd2a832e323b1fd920f72456f26c13ca3d140e03e9e6f128c2891` |
+| `input/Test-STL mehrere Objekte in einer STL.stl` | `0807455bc904d274d76013346396472d287ea93130962d05f097e34bbef8a362` |

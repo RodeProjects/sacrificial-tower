@@ -1,7 +1,7 @@
 # Veröffentlichungsprüfung: GitHub und Microsoft Store
 
-Stand: 21.10.2026. Ausgangspunkt: `main`, Version 0.9.17,
-Commit `dbe6b4bf424445a553b6a4635fbda4364193c042`. Dies ist eine Bestandsaufnahme,
+Stand: 21.10.2026. Ausgangspunkt: `main`, Version 0.9.18,
+Commit `5abdd0b8051abe2297a963f49d1f8eda022e0a85`. Dies ist eine Bestandsaufnahme,
 keine Vertriebsfreigabe. Das Hauptrepository bleibt auf Wunsch des Benutzers
 bis zum letzten Veröffentlichungsschritt privat.
 
@@ -24,15 +24,16 @@ bis zum letzten Veröffentlichungsschritt privat.
 |---|---|
 | Lokaler Actions-Runner bei künftig öffentlichem Repository | Vor Öffnung eine wirksame technische Trennung von fremden Pull Requests und dem Arbeitsrechner herstellen. Die Fork-Bedingungen in `tests.yml` allein reichen als Sicherheitsgrenze nicht. Sie stehen in einer durch PRs veränderbaren Workflowdatei. Risiko bei ungeschützter öffentlicher Anbindung: **hoch**. |
 | Öffentliche Rechtstexte fehlen im geprüften Downloadkanal | Dort liegen derzeit nur README und `latest.json`; das neueste Release enthält nur den Installer. Aufgelöste Datenschutz-/Anbieterinformationen und Lizenzhinweise vor regulärer Auslieferung öffentlich erreichbar machen und verlinken. Der Publish-Helfer übernimmt diese Veröffentlichung derzeit nicht. |
-| Drei weitere Testmodelle sind nicht eindeutig im Herkunftsnachweis zugeordnet | Herkunft und Berechtigung zur Apache-2.0-Freigabe für die unten genannten Dateien ergänzen. Die bisherige datierte Bestätigung und Hashliste erfassen diese später aufgenommenen Dateien nicht ausdrücklich. Keine Rechtsverletzung festgestellt; offen ist die belastbare Zuordnung. |
-| Aktueller offizieller Testlauf wurde abgebrochen | Für die geprüfte SHA lieferte GitHub nur den abgebrochenen Lauf `39584926424`. Ein erfolgreicher vollständiger Release-/Paketnachweis des später tatsächlich ausgelieferten Commits steht aus. Ein Abbruch ist kein nachgewiesener Programmfehler. |
+| Zusätzliche Testmodelle: Rechtebestätigung erledigt | Der Benutzer bestätigte am 21.10.2026 Urheberschaft, erforderliche Rechte und Apache-2.0-Freigabe für alle drei unten genannten Dateien; aktuelle Hashes im zentralen Asset-Nachweis ergänzt. |
+| Ausgangsstand offiziell erfolgreich geprüft | Für die SHA `5abdd0b8051abe2297a963f49d1f8eda022e0a85` sind die Tests-Läufe `39601457485` und `39605693132` erfolgreich. Der spätere umgestellte Commit benötigt seine eigenen privaten CI-/Installerabnahmen; diese sind noch offen. |
 | Entwicklungsversion ist weiterhin fest eingestellt | Vor einem regulären Release `CURRENT_LICENSE_STATUS` im Über-Dialog, den Entwicklungsabschnitt der Nutzungsbedingungen und die öffentlichen Produkttexte konsistent umstellen. Das Ausfüllen des Anbieterprofils allein schaltet diese Texte nicht um. Aktuell ist die Entwicklungskennzeichnung richtig. |
 
-### Noch zuzuordnende Testmodelle
+### Zusätzlich bestätigte Testmodelle
 
 Diese Dateien gehören zum Quellrepository; der vorhandene PyInstaller-Build
 liefert `input/` nicht als Programmressource aus. Sie sind daher insbesondere
-vor der Quellcodeveröffentlichung zu klären.
+vor der Quellcodeveröffentlichung relevant. Die Zuordnung wurde durch die
+ausdrückliche Benutzerbestätigung vom 21.10.2026 ergänzt.
 
 | Datei unter `input/` | SHA-256 |
 |---|---|
@@ -43,7 +44,7 @@ vor der Quellcodeveröffentlichung zu klären.
 Die Dateien wurden laut Git-Verlauf nach der allgemeinen früheren Bestätigung
 vom 14.09.2026 aufgenommen. Der bestehende
 [Asset-Nachweis](../src/cooling_tower/gui/assets/ASSET_LICENSES.md) ist die maßgebliche
-Stelle für die nachzutragenden Rechte. Die gesonderte WebP-Bestätigung ist erledigt.
+Stelle für die ergänzten Rechte und Prüfsummen. Die gesonderte WebP-Bestätigung ist erledigt.
 
 ## Vor einer regulären Binärveröffentlichung
 

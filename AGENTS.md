@@ -27,18 +27,52 @@ Diese Regeln gelten ergänzend zur globalen `AGENTS.md` für das Repository `sac
 - Während der Push-Vorbereitung rein administrative oder mechanische Begleitänderungen wie die vorgeschriebene Anhebung der statischen Versionsnummer, vom Benutzer im Rahmen der aktuellen Aufgabe angeforderte Anpassungen an `AGENTS.md`, Formatkorrekturen oder vergleichbare nicht ausführungsrelevante Metadatenänderungen erfordern keine erneute Push-Freigabe.
 - Eine erneute ausdrückliche Push-Freigabe einholen, wenn nach der ursprünglichen Freigabe zusätzliche inhaltliche Änderungen hinzukommen, die Programmlogik, Laufzeitverhalten, Build/Packaging, Abhängigkeiten, ausführungsrelevante Konfiguration, Persistenz/Migrationen, Schnittstellen, Kompatibilität, Tests oder CI möglicherweise beeinflussen. Dabei nicht danach unterscheiden, ob die funktionale Änderung subjektiv klein oder wesentlich erscheint. Die Freigabe nicht aus einer lediglich allgemeinen Änderungs- oder Arbeitsanweisung ableiten, die keinen Push nennt.
 
-## Offizielle Actions vor der automatischen Übernahme nach main
+## Offizielle private Actions vor der Übernahme nach main
 
-- Alle normalen Pushes verwenden den globalen Ablauf: freigegebenen Commit auf einen `codex/`-Prüfbranch pushen, Pull Request nach `main` anlegen, offizielle Actions erfolgreich abwarten und denselben Commit unmittelbar automatisch nach `main` übernehmen. Keine zweite Push-Freigabe verlangen. Keine CI-Skip-Anweisungen verwenden.
-- Normale Prüfungen einschließlich Klassifikation laufen ausschließlich auf dem lokalen offiziellen Runner unter `D:\Entwicklung Software\_Tools\github_actions_runner`. Die frühere eigene CI-Nachbildung und eine zusätzliche lokale Vollsuite als Push-Voraussetzung entfallen. Bei offline geschaltetem Runner warten; nicht auf gehostete Hardware ausweichen.
-- `Complete-CheckedPush.ps1` mit Repository, PR-Nummer, exakter SHA und `tests.yml` verwenden. Der Helfer verlangt einen sauberen isolierten Arbeitsbaum, unveränderten Zielbranch, tatsächlich erfolgreiche lokale Jobs und erfolgreiche übrige PR-Prüfungen. Nur Fast-Forward über SSH; kein Force-Push. Unabhängige lokale Turmänderungen ausschließen und erhalten.
-- Vor dem Prüfbranch-Push den letzten abgeschlossenen `Tests`-Lauf auf `main` prüfen und fortbestehende Code-/Testfehler untersuchen. Ein auf ausdrücklichen Benutzerwunsch beendeter redundanter Doppeltest ist kein Codefehler.
-- Nach der automatischen Übernahme bestätigt der schlanke `main`-Lauf über `Confirm-CheckedCommit.ps1` den ursprünglichen offiziellen Prüferfolg derselben SHA, Workflow-Identität und unveränderten Basis. Keine zweite Vollsuite für bereits erfolgreich geprüften identischen Code ausführen. Die Bestätigung bis zum Abschluss beobachten, bevorzugt `gh run watch <run-id> --compact --exit-status --interval 15`.
-- Auf dem Prüfbranch darf nur der konservative Klassifikator sicher administrative Diffs von der Vollsuite ausnehmen. Änderungen an Logik, Build, Tests oder CI und unklare Fälle erfordern dort die Vollsuite. Auf `main` darf zusätzlich ein erneut über die GitHub-API verifizierter ursprünglicher PR-/Release-Prüferfolg für exakt denselben Commit die Wiederholung ersetzen. Fehlende, falsche, nicht mehr erfolgreiche oder nur übersprungene Nachweise erlauben keine Wiederverwendung; dann bleibt eine vollständige Prüfung erforderlich. Bestätigungsläufe dürfen nicht als ursprüngliche Prüfungen verkettet werden.
-- Bei Prozess-/Thread- und entsprechenden GUI-Lebenszyklusänderungen zusätzlich die vollständige Matrix `windows-stress-tests.yml` auf derselben SHA lokal erfolgreich abnehmen. Der frühere wöchentliche gehostete Lauf bleibt deaktiviert.
-- **Projektspezifische Release-Ausnahme:** Für einen Release-Push den PR als Entwurf anlegen, mit `ci:hosted-release` kennzeichnen und anschließend bereit markieren und `Complete-CheckedPush.ps1 -HostedFirst` verwenden. Der normale lokale PR-Lauf wird dann ausgelassen; der Helfer startet `tests.yml` auf dem Prüfbranch mit exakter SHA zuerst auf GitHub-Hardware. Bei `failure`, `timed_out`, `startup_failure` oder eindeutigem Kontingent-/Abrechnungslimit folgt ohne weitere Freigabe genau ein vollständiger lokaler offizieller Actions-Lauf, auch bei unbekannter Fehlerursache. Beide Ergebnisse bleiben dokumentiert. Nur ein erfolgreicher exakter Prüflauf erlaubt die automatische Übernahme. Ein absichtlicher Abbruch, eine veränderte SHA oder ein unklarer Dispatch ohne verlässliche Lauf-ID erlaubt keinen blinden doppelten Start.
-- Für die anschließende Veröffentlichung nutzt `scripts/publish_update.ps1` denselben zentralen Releasehelfer: vollständige Tests und Installer-Workflow auf exakt dem unveränderten `main`-Commit jeweils zuerst gehostet, bei Fehlschlag einmal lokal. Auch ein lokaler Fehler blockiert die Veröffentlichung. Die ausdrücklich dokumentierte Entwicklungsrelease-Ausnahme bei CI-Zeitlimit bleibt gesondert geregelt.
-- Runner-Dateien, Registrierung, Zugangsdaten, Jobprofile und Caches bleiben im zentralen Toolordner und gehören weder in dieses Repository noch in den Installer. Keine `.local-ci.json` oder eigenen Runner-Aufrufe reaktivieren. Fremde Fork-/`pull_request_target`-Jobs auf dem Arbeitsrechner nicht ausführen. Einrichtung, weitere Projekte und Grenzen stehen in der zentralen Runner-Dokumentation.
+- Ausschließlich `RodeProjects/project-ci` darf den lokalen offiziellen Runner
+  `FLO-PC-private` besitzen. Haupt- und Update-Repository erhalten auch über
+  Gruppen keinen Zugriff. Öffentliche Workflows laufen nur auf GitHub-Hardware;
+  keine öffentlichen Ereignisse oder privilegierten Dispatch-Brücken anbinden.
+- Normale freigegebene Pushes: Patchversion erhöhen, Commitnachricht und Runner
+  nennen, `codex/`-Prüfbranch über SSH pushen und PR nach `main` erstellen.
+  `D:\Entwicklung Software\_Tools\github_actions_runner\scripts\Complete-CheckedPush.ps1`
+  mit Repositorypfad, Repository, PR und exakter SHA verwenden. Der Helfer
+  erzeugt die konkrete lokale Freigabe, startet offizielle private Actions und
+  übernimmt nach gültigen Nachweisen automatisch dieselbe SHA per SSH-Fast-Forward.
+- Projektcommit, Basis und CI-Steuerungscommit unterscheiden. Freigaben/Nachweise
+  binden Repository-ID, Quellbaum, Prüflogik, ursprünglichen Lauf, Versuch und
+  vollständige Pflichtjobs. Fehlende, fehlgeschlagene oder nur übersprungene
+  Prüfungen und geänderte Commit-/Basis-/Prüflogik blockieren. Kein Artefakt oder
+  freier SHA-Wert ersetzt den erneuten GitHub-Abgleich.
+- Nach Übernahme Remote-main und ursprüngliche private Nachweise erneut bestätigen.
+  Keine zweite Vollsuite für exakt dieselbe unverändert geprüfte SHA starten.
+  Öffentliche main-Pushes lösen deshalb keine redundante Vollsuite aus.
+- Normale Prüfungen laufen nur auf dem privaten lokalen offiziellen Runner.
+  Bei offline geschaltetem Runner warten. Keine eigene lokale CI-Nachbildung
+  und keine zusätzliche lokale Vollsuite als Push-Voraussetzung verwenden.
+- Prozess-/Thread- und GUI-Lebenszyklusänderungen benötigen zusätzlich die volle
+  private Stressmatrix: `-Workflows tests.yml,windows-stress-tests.yml`.
+- Sacrificial Tower behält die projektspezifische gehostete Releaseprüfung mit
+  genau einem lokalen offiziellen Fallback bei `failure`, `timed_out` oder
+  `startup_failure`. Beide verwenden die private vertrauenswürdige Steuerung und
+  dieselbe Projekt-SHA. Gültige unveränderte Vollprüfungen werden wiederverwendet.
+  Abbruch, veränderter Ref oder unklarer Dispatch erlaubt keinen blinden Neustart.
+- `scripts/publish_update.ps1 -DevelopmentRelease` verwendet den zentralen
+  Releasehelfer; Builds ohne Verwaltungszugänge, Signierung und Veröffentlichung
+  anschließend im geschützten Entwicklerkonto. Die frühere CI-Zeitlimit-Ausnahme
+  mit eigener lokaler Vollsuite wird durch den nachgewiesenen offiziellen Fallback
+  ersetzt; `-AllowTimedOutCI` autorisiert keine Umgehung.
+- Runnerbetrieb als Windows-Standardkonto `RodeCiRunner`, Verwaltung weiter unter
+  dem bisherigen Entwicklerkonto. Code/Konfiguration/Freigaben/Nachweise gegen
+  Runner-Schreibzugriff und persönliche Anmeldungen/Schlüssel gegen Jobzugriff
+  schützen. Profilvariablen und Venvs sind keine Sicherheitsgrenze.
+- Fremde PRs zunächst nur gehostet prüfen. Lokale Ausführung fremden Codes nur
+  nach bewusster Vertrauensentscheidung für den konkreten Commit einschließlich
+  Tests, Buildskripten und Abhängigkeiten; spätere Commits sind nicht umfasst.
+  Ohne VM bleiben gemeinsame Hardware und Runnerkonto kompromittierbar.
+- Bestehende unabhängige Änderungen und Benutzerdaten erhalten. Setup/Details und
+  aktuelle Abnahme: `docs/private_ci.md` sowie das private Infrastrukturrepository.
+  Vor erfolgreicher Phase-1-Abnahme weder Phase 2 noch öffentliche Freigabe beginnen.
 
 ## Entwicklungsreleases und nachzureichende Freigabeangaben
 

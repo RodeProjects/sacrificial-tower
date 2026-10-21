@@ -67,9 +67,7 @@ class UpdatePackagingTests(unittest.TestCase):
         installer = (
             PROJECT_ROOT / "installer" / "SacrificialTower.iss"
         ).read_text(encoding="utf-8")
-        workflow = (
-            PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
-        ).read_text(encoding="utf-8")
+        workflow = (PROJECT_ROOT / "scripts/build_update.ps1").read_text(encoding="utf-8")
         spec = (PROJECT_ROOT / "SacrificialTower.spec").read_text(
             encoding="utf-8"
         )
@@ -79,7 +77,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn(
             "from cooling_tower.version import APP_VERSION", workflow
         )
-        self.assertIn('"/DAppVersion=$env:APP_VERSION"', workflow)
+        self.assertIn('"/DAppVersion=$appVersion"', workflow)
         self.assertIn('version_namespace["APP_VERSION"]', spec)
 
     def test_release_ci_query_is_limited_to_the_exact_main_commit(self) -> None:
@@ -333,26 +331,18 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("RunExistingUninstaller", installer)
         self.assertIn("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", installer)
 
-    def test_release_build_uses_free_signed_update_manifest(self) -> None:
-        installer = (
-            PROJECT_ROOT / "installer" / "SacrificialTower.iss"
-        ).read_text(encoding="utf-8")
-        workflow = (
-            PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
-        ).read_text(encoding="utf-8")
-
+    def test_release_build_keeps_signing_credentials_out_of_jobs(self) -> None:
+        installer = (PROJECT_ROOT / "installer/SacrificialTower.iss").read_text(encoding="utf-8")
+        workflow = (PROJECT_ROOT / ".github/workflows/build-update.yml").read_text(encoding="utf-8")
+        publisher = (PROJECT_ROOT / "scripts/publish_update.ps1").read_text(encoding="utf-8")
         self.assertIn("SignTool=authenticode", installer)
         self.assertIn("SignedUninstaller=yes", installer)
         self.assertIn("Flags: ignoreversion signonce", installer)
-        self.assertIn("UPDATE_MANIFEST_SIGNING_KEY_BASE64", workflow)
-        self.assertIn("create_update_manifest.py", workflow)
-        self.assertIn("release_kind", workflow)
-        self.assertIn("Entwicklungsversion für Tests und Evaluation", workflow)
-        self.assertIn("dist/installer/latest.json", workflow)
-        self.assertNotIn("WINDOWS_SIGNING_CERTIFICATE_BASE64", workflow)
-        self.assertNotIn("WINDOWS_SIGNING_CERTIFICATE_PASSWORD", workflow)
-        self.assertNotIn("/DSignBuild=1", workflow)
-        self.assertNotIn("Get-AuthenticodeSignature", workflow)
+        self.assertNotIn("secrets.", workflow)
+        self.assertNotIn("UPDATE_MANIFEST_SIGNING_KEY_BASE64", workflow)
+        self.assertNotIn("create_update_manifest.py", workflow)
+        self.assertIn("Sign-UpdateManifest.ps1", publisher)
+        self.assertIn("verify_update_manifest.py", publisher)
 
     def test_packaged_resources_and_persistent_files_use_separate_roots(self) -> None:
         main_window = (
@@ -367,28 +357,23 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("migrate_legacy_configuration", main_window)
 
     def test_workflow_builds_and_hashes_the_installer(self) -> None:
-        workflow = (
-            PROJECT_ROOT / ".github" / "workflows" / "build-update.yml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("actions: read", workflow)
-        self.assertIn("scripts/verify_release_ci.py", workflow)
-        self.assertIn("inputs.release_kind != 'development' || !inputs.allow_timed_out_ci", workflow)
-        self.assertIn("inputs.release_kind == 'development' && inputs.allow_timed_out_ci", workflow)
-        self.assertIn('--sha "${{ github.sha }}"', workflow)
-        self.assertIn('--ref "${{ github.ref }}"', workflow)
-        self.assertNotIn("python -m unittest discover -s tests -q", workflow)
-        self.assertIn("pyinstaller --noconfirm --clean", workflow)
-        self.assertIn("Inno Setup", workflow)
-        self.assertIn("Get-FileHash", workflow)
-        self.assertIn("actions/checkout@v5", workflow)
-        self.assertIn("actions/setup-python@v6", workflow)
+        workflow = (PROJECT_ROOT / ".github/workflows/build-update.yml").read_text(encoding="utf-8")
+        builder = (PROJECT_ROOT / "scripts/build_update.ps1").read_text(encoding="utf-8")
+        self.assertIn("scripts/build_update.ps1", workflow)
+        self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("$env:EXPECTED_SHA -cne $env:GITHUB_SHA", workflow)
+        self.assertIn("$env:GITHUB_REF -cne 'refs/heads/main'", workflow)
+        self.assertIn("PyInstaller --noconfirm --clean", builder)
+        self.assertIn("check_release_readiness.py", builder)
+        self.assertIn("distribution_compliance.py", builder)
+        self.assertIn("Get-FileHash", builder)
+        self.assertIn("test_uninstaller.ps1", builder)
+        self.assertIn("test_installer_replacement.ps1", builder)
+        self.assertIn("test_installer_license.ps1", builder)
+        self.assertIn("test_update_handoff_native.py", builder)
+        self.assertIn("9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732", builder)
         self.assertIn("actions/upload-artifact@v5", workflow)
-        self.assertIn("test_uninstaller.ps1", workflow)
-        self.assertIn("test_installer_replacement.ps1", workflow)
-        self.assertIn(
-            "name: Windows-Installer für Sacrificial-Tower-Update bauen",
-            workflow,
-        )
+        self.assertIn("approved-build", workflow)
 
     def test_publish_script_uses_local_gh_auth_and_public_channel(self) -> None:
         script = (
@@ -411,7 +396,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("[switch]$DevelopmentRelease", script)
         self.assertIn("[switch]$AllowTimedOutCI", script)
         self.assertIn("$AllowTimedOutCI -and -not $DevelopmentRelease", script)
-        self.assertIn('allow_timed_out_ci = $AllowTimedOutCI.IsPresent', script)
+        self.assertIn('Die frühere CI-Zeitlimit-Ausnahme', script)
         self.assertIn("--development-release", script)
         self.assertIn('"--latest"', script)
         self.assertNotIn('"--prerelease"', script)

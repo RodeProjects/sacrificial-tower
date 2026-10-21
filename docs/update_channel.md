@@ -49,105 +49,83 @@ für eine spätere öffentlich vertrauenswürdige Zertifikatsignierung erhalten.
 Eine spätere Signierung ändert weder das Manifestformat noch die bestehende
 Inno-Setup-`AppId`.
 
-### Schlüsselrotation
+### Getrennte Signierung und Schlüsselverwaltung
 
-Der derzeitige Schlüssel heißt `2026-07-primary`. Eine reguläre Rotation muss
-zweistufig erfolgen:
+Der neue öffentliche Prüfschlüssel heißt `2026-10-private-publisher`. Der private
+Schlüssel wird ausschließlich unter dem Entwicklerkonto mit Windows-DPAPI
+verschlüsselt gespeichert. Test-/Buildjobs erhalten ihn nicht. Der frühere
+GitHub-Schlüssel kann aus dem Repository-Secret nicht ausgelesen werden; deshalb
+ist für diese Trennung ein neuer Prüfschlüssel erforderlich. Die beauftragte
+Umstellung verlangt keine Migration der wenigen bisherigen Testinstallationen;
+diese erhalten die neue Version später durch manuelle Installation.
 
-1. Eine noch mit dem alten Schlüssel signierte Programmversion veröffentlicht
-   zusätzlich den neuen öffentlichen Schlüssel.
-2. Erst nachdem diese Übergangsversion verteilt wurde, wird das GitHub-Secret
-   durch den neuen privaten Schlüssel ersetzt und die neue Schlüssel-ID für
-   Builds aktiviert.
-
-Der private Schlüssel darf niemals in Dateien, Logs, Commit-Nachrichten oder
-Artefakten gespeichert werden. `scripts/provision_update_signing_key.py` sendet
-ihn bei einer kontrollierten Rotation direkt über die GitHub CLI an das Secret
-und gibt ausschließlich den öffentlichen Anteil aus.
+Für künftige Rotationen bei weiterlaufenden Installationen bleibt eine kontrollierte
+Übergangsversion erforderlich, die vor Aktivierung eines neuen Signierschlüssels
+dessen öffentlichen Anteil verteilt. Unverschlüsselte Schlüssel niemals in
+Dateien, Logs, Git oder Artefakten ablegen. Der frühere Helfer
+`provision_update_signing_key.py` beschreibt den alten GitHub-Secret-Pfad und wird
+für die neue lokale Signierung nicht verwendet. Sicherung/Wiederherstellung des
+DPAPI-Schlüssels muss das zugehörige Windows-Profil berücksichtigen.
 
 ## Veröffentlichung einer neuen Version
 
-1. `APP_VERSION` in `src/cooling_tower/version.py` für die logische Änderung erhöhen.
-2. Den freigegebenen Release-Commit auf einem `codex/`-Prüfbranch bereitstellen
-   und einen PR nach `main` als Entwurf anlegen, mit `ci:hosted-release` markieren
-   und anschließend bereit markieren.
-   Den zentralen `Complete-CheckedPush.ps1` mit `-HostedFirst`, PR-Nummer und
-   exakter SHA ausführen. Er prüft zuerst auf GitHub-Hardware und bei Fehlschlag
-   automatisch einmal auf dem lokalen offiziellen Runner. Erst nach Erfolg
-   übernimmt er denselben Commit unmittelbar nach `main`. Normale Pushes lassen
-   Label und Schalter weg und verwenden ausschließlich lokale offizielle Actions.
-3. Den dadurch gestarteten schlanken `Tests`-Lauf für exakt diesen `main`-Commit
-   den ursprünglichen Prüferfolg bestätigen lassen; keine zweite Vollsuite. Zwischen Prüfung und Veröffentlichung darf `main` nicht wechseln.
-4. Veröffentlichungsart wählen und das Skript im normalen Windows-Benutzerkontext
-   mit PowerShell 7 ausführen:
-   - Regulär kostenlos freigegeben: `scripts/publish_update.ps1`
-   - Kostenlose Entwicklungsversion: `scripts/publish_update.ps1 -DevelopmentRelease`
+Der vollständige aktuelle CI-/Pushablauf steht unter [Private CI](private_ci.md).
+Die technische Abnahme der neuen Einrichtung ist noch in Arbeit; bis zu ihrem
+Erfolg bleibt die Veröffentlichung gesperrt.
 
-Das Veröffentlichungsskript verwendet den zentralen `Invoke-ReleaseWorkflow.ps1`
-unter `D:\Entwicklung Software\_Tools\github_actions_runner` (bei anderem Standort
-`-RunnerToolsRoot` übergeben). Vollständige Tests und anschließend Installer-Build
-laufen jeweils zuerst mit `github_hosted=true`. Eine bereits auf dem Release-Prüfbranch erfolgreich
-abgenommene vollständige Releaseprüfung derselben SHA wird erneut gegen GitHub
-bestätigt und wiederverwendet. Ein normaler ausschließlich lokaler PR-Erfolg
-ersetzt die projektspezifische zusätzliche Releaseprüfung nicht. Bei `failure`, `timed_out`,
-`startup_failure` oder eindeutigem Kontingent-/Abrechnungslimit startet derselbe
-Workflow ohne Rückfrage genau einmal lokal mit `github_hosted=false` auf derselben
-SHA. Auch eine unbekannte Fehlerursache löst diesen Rückfall aus. Der ursprüngliche
-Fehler bleibt sichtbar; der Ersatzlauf ist als alternative Freigabe dokumentiert.
-Ein lokaler Fehler blockiert die Veröffentlichung. Absichtliche Abbrüche, geänderte
-Refs oder unklare Dispatch-Antworten ohne Lauf-ID führen nicht zu blinden Neustarts.
-Die Prüfergebnisse beider Versuche liegen im zentralen `state/release-runs/`.
-Es gibt keine zusätzliche eigene lokale Testsuite vor dem Push.
+1. Patchversion in `src/cooling_tower/version.py` erhöhen, Commitnachricht und
+   Runner nennen, freigegebene Änderung auf `codex/`-Prüfbranch pushen und PR
+   erstellen. Der zentrale `Complete-CheckedPush.ps1` prüft offizielle private
+   Actions und übernimmt dieselbe SHA automatisch nach main. Für einen Release-
+   Push ohne wiederverwendbare Vollprüfung `-HostedFirst` verwenden.
+2. Der Helfer bestätigt anschließend Remote-main und die ursprünglichen privaten
+   Nachweise. Kein zweiter Volltest derselben unverändert geprüften SHA.
+3. Im normalen Entwicklerkonto mit PowerShell 7 ausführen:
 
-Nach einem durch das CI-Zeitlimit abgebrochenen `Tests`-Lauf kann ein
-ausdrücklich freigegebenes Entwicklungsrelease mit
-`scripts/publish_update.ps1 -DevelopmentRelease -AllowTimedOutCI`
-veröffentlicht werden, wenn der lokale vollständige Testlauf für den
-Anwendungscode erfolgreich war. Die Ausnahme wird im Installer-Workflow
-protokolliert und ist für reguläre kostenlose Veröffentlichungen nicht verfügbar. Der
-Installer-Build sowie Lieferumfangs-, Installations-, Signatur- und
-Integritätsprüfungen bleiben verpflichtend.
+   ```powershell
+   ./scripts/publish_update.ps1 -DevelopmentRelease
+   ```
 
-Ein Entwicklungsrelease ist nur zulässig, solange die ausgelieferten
-Nutzungsbedingungen das Programm eindeutig als kostenlose Entwicklungsversion
-für Tests und Evaluation kennzeichnen. Es darf ausschließlich
-die bekannten Anbieter-, Vertriebs- und Abschlussnachweise zurückstellen. Name,
-Marke und Kontakt, die erfolgreiche `main`-CI oder die dokumentierte
-Zeitlimit-Ausnahme, die Lieferumfangsprüfung,
-Installerprüfungen, Signatur und Integritätskontrollen bleiben verpflichtend.
-Der Releasetitel, die Releasebeschreibung und die signierten Versionshinweise
-kennzeichnen die Entwicklungsversion weiterhin ausdrücklich. GitHub-Releases
-erhalten auch für Entwicklungsversionen kein Prerelease-Flag, damit die neueste
-veröffentlichte Version mit `--latest` als „Latest“ angezeigt werden kann.
-GitHub erlaubt diese Markierung nicht für Prereleases. Die Markierung als
-„Latest“ begründet keine abgeschlossene Veröffentlichungsprüfung; offene Angaben
-müssen vor einer regulären kostenlosen Veröffentlichung nachgetragen werden.
+   Erst nach vollständiger tatsächlicher regulärer Freigabe ohne
+   `-DevelopmentRelease` veröffentlichen. Die weiterhin offenen Angaben werden
+   wahrheitsgemäß in [Checkliste](missing_data.md) verfolgt.
 
-Das Skript startet den Workflow
-`Windows-Installer für Sacrificial-Tower-Update bauen`, wartet auf den
-erfolgreichen Build und lädt dessen Artefakt herunter. Anschließend prüft es die
-Ed25519-Signatur sowie Installergröße und SHA-256 erneut. Erst danach erstellt
-es im öffentlichen Update-Repository ein Release und veröffentlicht exakt das
-bereits im privaten Build signierte `latest.json`.
+Der zentrale Releasehelfer verwendet die private vertrauenswürdige CI-Steuerung.
+Er prüft Projektcommit und Basis getrennt vom CI-Steuerungscommit und verifiziert
+ursprünglichen Lauf, Pflichtjobs und verwendeten Runner gegen GitHub. Gültige
+unveränderte Vollprüfungen werden wiederverwendet. Für erforderliche neue
+Release-/Installerprüfungen zuerst GitHub-Hardware verwenden und bei belegtem
+`failure`, `timed_out` oder `startup_failure` genau einmal denselben Stand lokal
+auf dem privaten offiziellen Runner prüfen. Abbruch, veränderter Ref und
+Dispatch ohne verlässliche Lauf-ID erlauben keine blinden Doppelstarts. Auch ein
+lokaler Fehler blockiert die Veröffentlichung. Beide Ergebnisse bleiben unter
+`state/release-runs/` im geschützten zentralen Toolordner dokumentiert.
 
-Der Installer-Workflow prüft im Normalfall über die GitHub-API, dass der
-Workflow `Tests` für exakt denselben Commit auf `main` als erfolgreicher
-Push-Lauf abgeschlossen wurde. Dieser Lauf kann den ursprünglichen erfolgreichen
-Prüfbranch-Lauf derselben SHA bestätigen, ohne die Suite erneut auszuführen.
-Ein Lauf eines anderen Commits, Branches oder
-Ereignisses genügt nicht. Nur bei expliziter Entwicklungsrelease-Ausnahme
-wird diese CI-Prüfung übersprungen und der Grund im Workflow protokolliert.
-Die vollständige Testsuite wird deshalb nicht ein zweites Mal im
-Installer-Workflow ausgeführt. Die nativen Prozess-Stresstests bleiben
-zusätzlich im eigenständigen Workflow `Windows-Prozess-Stresstests` isoliert.
-Dieser Workflow läuft nur manuell; die wöchentliche Automatik entfällt.
-Standardmäßig führt der offizielle selbst gehostete Runner die drei Seeds aus;
-mit dem manuellen Eingang `github_hosted=true` läuft die Matrix auf GitHub-Hardware.
+Die frühere Entwicklungsrelease-Zeitlimit-Ausnahme mit eigener lokaler Vollsuite
+ist durch den offiziellen privaten Fallback ersetzt. `-AllowTimedOutCI` wird
+nicht mehr akzeptiert. Die Entwicklungsausnahme verschiebt weiterhin nur die
+konkret erlaubten Freigabeangaben; erfolgreiche offizielle Prüfungen sowie
+Lieferumfangs-, Installer-, Signatur- und Integritätsprüfungen bleiben Pflicht.
+Entwicklungsreleases bleiben sichtbar im Titel, Beschreibung und signierten
+Versionshinweisen gekennzeichnet. GitHub erhält kein Prerelease-Flag und
+`--latest`; das ist keine reguläre Vertriebsfreigabe.
 
+Die gemeinsame, unmittelbar releasebezogene Buildfolge steht in
+`scripts/build_update.ps1` und wird sowohl vom privaten Projektadapter als auch
+von der ausschließlich gehosteten öffentlichen Builddatei verwendet. Sie
+bereitet dieselben gepinnten Abhängigkeiten/Qt-Quellen vor, baut und prüft den
+Installer und erzeugt Metadaten. Keine Signierung im Test-/Buildjob. Der
+Verwaltungsprozess lädt den nachgewiesenen Lauf aus dem privaten CI-Repository,
+vergleicht Version, Größe und SHA-256, signiert das Manifest unter dem
+Entwicklerkonto und prüft es vor Veröffentlichung erneut. Das Manifestformat und
+die kryptografischen Prüfungen bleiben erhalten.
+
+Die privaten Stresstests führen bei Pflicht die vollständige Dreiseed-Matrix aus.
+Öffentliche manuelle Stressworkflows laufen ausschließlich auf GitHub-Hardware.
+Der alte `github_hosted`-Eingang kann dort keine lokale Ausführung mehr auswählen.
 Schlägt die Veröffentlichung des Manifests nach dem Erstellen des Releases
-fehl, entfernt das Skript das unvollständige Release wieder. Es verwendet nur
-die lokale, interaktive GitHub-CLI-Anmeldung des Entwicklers. Im Programm,
-Installer oder öffentlichen Manifest werden keine GitHub-Tokens gespeichert.
+fehl, wird das unvollständige Release entfernt. Im Programm und Installer werden
+keine Verwaltungs- oder GitHub-Zugänge gespeichert.
 
 ## Automatische Release-Aufbewahrung
 

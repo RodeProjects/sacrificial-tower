@@ -208,44 +208,32 @@ class CiChangeClassifierTests(unittest.TestCase):
 
 
 class WorkflowDefinitionTests(unittest.TestCase):
-    def test_classifier_safely_controls_the_full_windows_job(self) -> None:
-        workflow = (PROJECT_ROOT / ".github/workflows/tests.yml").read_text(
-            encoding="utf-8"
-        )
+    def test_public_workflows_cannot_select_local_runners_or_private_dispatch(self) -> None:
+        for path in (PROJECT_ROOT / ".github/workflows").glob("*.yml"):
+            with self.subTest(path=path.name):
+                workflow = path.read_text(encoding="utf-8")
+                self.assertNotIn("self-hosted", workflow)
+                self.assertNotIn("rodeprojects-local", workflow)
+                self.assertNotIn("workflow_run:", workflow)
+                self.assertNotIn("pull_request_target:", workflow)
+                self.assertNotIn("repository_dispatch", workflow)
+                self.assertNotIn("secrets.", workflow)
+                self.assertNotIn("actions: write", workflow)
+                self.assertNotIn("contents: write", workflow)
+                for line in workflow.splitlines():
+                    if line.strip().startswith("runs-on:"):
+                        self.assertEqual(line.strip(), "runs-on: windows-latest")
 
-        self.assertIn("classify:\n", workflow)
-        self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("github_hosted:", workflow)
-        self.assertIn("expected_sha:", workflow)
-        self.assertIn("Confirm-CheckedCommit.ps1", workflow)
-        self.assertIn("steps.confirm.outputs.confirmed == 'true' && 'false'", workflow)
-        self.assertIn("actions: read", workflow)
-        self.assertIn("pull-requests: read", workflow)
-        self.assertIn("'ci:hosted-release'", workflow)
-        self.assertIn("github.event_name != 'workflow_dispatch'", workflow)
-        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", workflow)
-        self.assertIn("fetch-depth: 0", workflow)
-        self.assertIn("scripts/classify_ci_changes.py", workflow)
-        self.assertIn("gate-files-changed == 'true'", workflow)
-        self.assertIn("steps.gate.outputs.gate-files-changed != 'true'", workflow)
-        self.assertIn(".github/workflows/tests.yml", workflow)
-        self.assertIn("tests/test_ci_change_classifier.py", workflow)
-        self.assertIn("needs: classify", workflow)
-        self.assertIn("always() && !cancelled()", workflow)
-        self.assertIn("!cancelled()", workflow)
-        self.assertIn("needs.classify.result != 'success'", workflow)
-        self.assertIn(
-            "needs.classify.outputs.full-tests-required != 'false'", workflow
-        )
-        self.assertIn("runs-on: [self-hosted, Windows, X64, rodeprojects-local]", workflow)
-        self.assertIn("fromJSON(inputs.github_hosted", workflow)
-        self.assertIn('["windows-latest"]', workflow)
-        self.assertIn("python -m venv .ci-venv", workflow)
+    def test_foreign_pr_tests_use_github_hardware_with_read_only_checkout(self) -> None:
+        workflow = (PROJECT_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("github.event.pull_request.head.repo.full_name != github.repository", workflow)
         self.assertIn("persist-credentials: false", workflow)
-        self.assertIn('python-version: "3.13"', workflow)
         self.assertIn("python -m pip install --require-hashes -r requirements-windows.lock", workflow)
         self.assertIn("python setup_native.py build_ext --inplace", workflow)
         self.assertIn("python scripts/run_isolated_tests.py", workflow)
+        self.assertNotIn("Confirm-CheckedCommit.ps1", workflow)
+        self.assertNotIn("  push:", workflow)
 
 
 if __name__ == "__main__":

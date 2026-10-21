@@ -10,6 +10,9 @@ $ErrorActionPreference = "Stop"
 if ($AllowTimedOutCI -and -not $DevelopmentRelease) {
     throw "Die CI-Zeitlimit-Ausnahme ist nur für Entwicklungsreleases zulässig."
 }
+if ($AllowTimedOutCI) {
+    throw 'Die frühere CI-Zeitlimit-Ausnahme wird durch den nachgewiesenen privaten offiziellen Fallback ersetzt. Ohne diesen Prüferfolg ist keine Veröffentlichung zulässig.'
+}
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     $PSNativeCommandUseErrorActionPreference = $true
 }
@@ -98,7 +101,6 @@ $run = & $releaseWorkflowHelper `
     -Inputs @{
         version = $version
         release_kind = $releaseKind
-        allow_timed_out_ci = $AllowTimedOutCI.IsPresent
     }
 if ($run.conclusion -ne 'success' -or $run.headSha -ne $localCommit) {
     throw 'Der Build-Workflow bestätigt den Release-Commit nicht.'
@@ -122,9 +124,9 @@ New-Item -ItemType Directory -Path $resolvedTemporaryRoot | Out-Null
 $releaseCreated = $false
 $manifestPublished = $false
 try {
-    $artifactName = "SacrificialTower-$version-windows-x64"
+    $artifactName = 'approved-build'
     & $gh run download $run.databaseId `
-        --repo $SourceRepository `
+        --repo $run.repository `
         --name $artifactName `
         --dir $resolvedTemporaryRoot
     Assert-NativeSuccess "Das Herunterladen des Build-Artefakts"
@@ -132,9 +134,11 @@ try {
     $metadataPath = Join-Path $resolvedTemporaryRoot "update-metadata.json"
     $manifestPath = Join-Path $resolvedTemporaryRoot "latest.json"
     $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-    if ($metadata.version -ne $version) {
-        throw "Die Version des Build-Artefakts stimmt nicht überein."
+    if ($metadata.version -cne $version -or
+        $metadata.installer_name -cne "SacrificialTowerSetup-$version.exe" -or
+        $metadata.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $metadata.size_bytes -isnot [ValueType] -or $metadata.size_bytes -le 0) {
+        throw "Version, Dateiname oder Integritätsangaben des Build-Artefakts sind ungültig."
     }
     $installer = Get-Item (
         Join-Path $resolvedTemporaryRoot $metadata.installer_name
@@ -145,6 +149,15 @@ try {
     if ($actualHash -ne $metadata.sha256 -or $installer.Length -ne $metadata.size_bytes) {
         throw "Die Integritätsprüfung des Build-Artefakts ist fehlgeschlagen."
     }
+    $currentRemote = & $gh api "repos/$SourceRepository/commits/main" --jq .sha
+    Assert-NativeSuccess 'Die erneute Prüfung des Release-Commits'
+    if ($currentRemote -cne $localCommit -or (git rev-parse HEAD) -cne $localCommit -or (git status --porcelain)) {
+        throw 'Projektcommit oder main wurde während des Builds verändert. Keine Veröffentlichung.'
+    }
+    $signingHelper = Join-Path $RunnerToolsRoot 'scripts/Sign-UpdateManifest.ps1'
+    $manifestNotes = if ($DevelopmentRelease) { "Sacrificial Tower $version – Entwicklungsversion für Tests und Evaluation" } else { "Sacrificial Tower $version" }
+    & $signingHelper -RepositoryPath (Split-Path $PSScriptRoot -Parent) -MetadataPath $metadataPath -OutputPath $manifestPath -UpdateRepository $UpdateRepository -ReleaseNotes $manifestNotes
+    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     if (
         $manifest.version -ne $version -or
         $manifest.sha256 -ne $actualHash -or
