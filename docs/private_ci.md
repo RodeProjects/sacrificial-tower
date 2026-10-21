@@ -4,6 +4,13 @@ Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
 Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
 bleiben bis zur vollständigen Abnahme gesperrt.
 
+Private Steuerung 1.0.2 (`ae80a9a`) ist über PR 2 offiziell geprüft und
+installiert. Lokale Infrastrukturabnahme `39627221957`: 25 Sicherheitsfälle,
+neun ungefährliche Fallbacksimulationen, zwei Node-Tests und tatsächliche
+Zugriffsproben unter dem getrennten Standardkonto erfolgreich. Der vollständige
+Anwendungslauf, die automatische Übernahme und reale Installerabnahme bleiben
+für die Phase-1-Freigabe erforderlich.
+
 ## Verantwortlichkeiten und Schutzgrenze
 
 `RodeProjects/project-ci` ist die gemeinsame **private** Actions-Steuerung. Nur
@@ -103,8 +110,16 @@ konfigurieren, Pflichtprüfungen und gegebenenfalls Veröffentlichungsziel/
 Signierung festlegen. Anschließend private Steuerung prüfen, übernehmen und
 bewusst installieren; keine zweite Runnerregistrierung am Projekt anlegen.
 
+Den Einrichtungsaufruf in einer separaten sauberen CI-Arbeitskopie auf einem
+`codex/`-Branch verwenden. Pflichtjobnamen, zugeordnete private Workflows und
+relativer Artefaktpfad sind Projektkonfiguration. Projektspezifische
+Parameterprüfung und Veröffentlichungsverfahren liegen in `Validate-Request.ps1`
+bzw. `Release.ps1` des Adapters; gemeinsame Kernlogik bleibt unverändert.
+
 Die vollständige Verwaltungsanleitung und maschinenbezogene Abnahme stehen im
 privaten Repository unter `docs/private-ci.md` und `docs/private-ci-acceptance.md`.
-Ein kleines Node-Projekt ohne Abhängigkeiten dient als abweichender Projekttyp;
-sein tatsächlicher offizieller Abnahmelauf ist noch offen. Fremde SDKs oder
-weitere echte Veröffentlichungsziele gelten dadurch nicht als geprüft.
+Ein kleines Node-Projekt ohne Abhängigkeiten ist als abweichender Projekttyp
+tatsächlich über denselben privaten offiziellen Ablauf geprüft. Konfiguration,
+Projektzuordnung, Quelltransport, Checkout, Pflichtjobs und Nachweisbildung sind
+damit abgenommen. Zusätzliche SDKs, andere reale Buildverfahren und weitere
+Veröffentlichungsziele sind erst am nächsten entsprechenden Projekt zu prüfen.

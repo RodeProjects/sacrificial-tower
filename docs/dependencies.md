@@ -84,6 +84,20 @@ Tätigkeit als alleiniger Einzelunternehmer bestätigt. Das grenzt die mögliche
 Community-Berechtigung ein; es bestätigt noch nicht die Lizenz-/REDIST-Zuordnung
 der tatsächlich ausgewählten 2019-Toolchain oder eines späteren Store-Pakets.
 
+Ergänzung vom 21.10.2026 für die private CI: Der tatsächliche offizielle Buildlog
+belegt Build Tools 2019, MSVC 14.29.30133 und Windows SDK 10.0.19041.0. `vswhere`
+bestätigt zusätzlich Community 2022 17.13.35828.75, jedoch ohne eigenen
+C++-Toolset. Der konkrete [2019-Lizenztext](https://visualstudio.microsoft.com/wp-content/uploads/2019/03/VS_2019_DiagnosticBuildTools_ENU.1033.docx)
+erlaubt Entwicklung/Test nur zusammen mit Visual Studio Community, Professional
+oder Enterprise und beschreibt das Kompilieren/Bauen/Prüfen auf eigenen
+Buildgeräten. Dies ist keine allgemeine Lizenzfreiheit der Build Tools.
+Die bestätigte Einzelunternehmertätigkeit und vorhandene Community-Edition
+sind die dokumentierte Grundlage; eine pauschale abgeschlossene
+Toolchain-/Runtime-Vertriebsprüfung wird daraus nicht behauptet. Keine neue
+Toolchain und kein kostenpflichtiges SDK wurden eingeführt. Die datierte
+Gesamtzuordnung und konkrete Weitergabeprüfung bleiben Teil von
+`release_legal_review`, insbesondere für den späteren Store-Vertrieb.
+
 Für die permissiven Python-Buildwerkzeuge sind keine Lizenzzahlungen oder
 Umsatzschwellen vorgesehen. Die Standardsuite verwendet `unittest` und QtTest aus
 Essentials. Git und GitHub Actions sind Entwicklungswerkzeuge, keine eingebauten

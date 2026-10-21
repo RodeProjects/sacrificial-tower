@@ -137,7 +137,8 @@ try {
     if ($metadata.version -cne $version -or
         $metadata.installer_name -cne "SacrificialTowerSetup-$version.exe" -or
         $metadata.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
-        $metadata.size_bytes -isnot [ValueType] -or $metadata.size_bytes -le 0) {
+        ($metadata.size_bytes -isnot [long] -and $metadata.size_bytes -isnot [int]) -or
+        $metadata.size_bytes -le 0) {
         throw "Version, Dateiname oder Integritätsangaben des Build-Artefakts sind ungültig."
     }
     $installer = Get-Item (
