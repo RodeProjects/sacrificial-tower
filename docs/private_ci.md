@@ -4,12 +4,17 @@ Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
 Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
 bleiben bis zur vollständigen Abnahme gesperrt.
 
-Private Steuerung 1.0.2 (`ae80a9a`) ist über PR 2 offiziell geprüft und
-installiert. Lokale Infrastrukturabnahme `39627221957`: 25 Sicherheitsfälle,
-neun ungefährliche Fallbacksimulationen, zwei Node-Tests und tatsächliche
-Zugriffsproben unter dem getrennten Standardkonto erfolgreich. Der vollständige
-Anwendungslauf, die automatische Übernahme und reale Installerabnahme bleiben
-für die Phase-1-Freigabe erforderlich.
+Private Steuerung 1.0.3 (`200a4d2`) ist über PR 3 offiziell geprüft und
+installiert. Lokale Infrastrukturabnahme unter 1.0.2 (`39627221957`): 25
+Sicherheitsfälle, neun ungefährliche Fallbacksimulationen, zwei Node-Tests und
+tatsächliche Zugriffsproben unter dem getrennten Standardkonto erfolgreich.
+Der anschließend behobene gehostete Quelltransport ist unter 1.0.3 tatsächlich
+erfolgreich abgenommen (`39632111266`), einschließlich exaktem Checkout und
+denselben Sicherheits-/Node-Prüfungen. Kurzlebige Vorabreleases bleiben im
+vorher auf Identität und private Sichtbarkeit geprüften CI-Repository und sind
+mit reinen Job-Leserechten zugänglich; nach Erfolg werden sie entfernt.
+Der vollständige Anwendungslauf, die automatische Übernahme und reale
+Installerabnahme bleiben für die Phase-1-Freigabe erforderlich.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind
@@ -49,6 +54,9 @@ Verwaltungscode, Konfiguration, Freigaben, Nachweise und verschlüsselte
 Signierschlüssel sind für dieses Konto nicht beschreibbar bzw. nicht lesbar.
 Persönliche GitHub-Anmeldung und SSH-Schlüssel werden nicht in Jobs eingebracht.
 Schreibbereiche für Jobs/Caches sind nach Projekt bzw. Freigabe benannt.
+Der gemeinsame offizielle Actions-Arbeitsbereich enthält einen vor jedem Job
+frisch aus dem genehmigten Bundle erstellten Quellcheckout; diese Wiederverwendung
+ist keine zusätzliche Sicherheitsisolierung zwischen Projekten.
 
 Das ist **keine VM und keine vollständige Projektisolierung**. Ausdrücklich
 freigegebener Projektcode führt seine Tests, Buildskripte, Paketinstallationen
@@ -126,5 +134,8 @@ privaten Repository unter `docs/private-ci.md` und `docs/private-ci-acceptance.m
 Ein kleines Node-Projekt ohne Abhängigkeiten ist als abweichender Projekttyp
 tatsächlich über denselben privaten offiziellen Ablauf geprüft. Konfiguration,
 Projektzuordnung, Quelltransport, Checkout, Pflichtjobs und Nachweisbildung sind
-damit abgenommen. Zusätzliche SDKs, andere reale Buildverfahren und weitere
+damit abgenommen. Der dokumentierte Einrichtungsaufruf wurde zusätzlich in einer
+separaten lokalen Kopie praktisch geprüft: bestehende Berechtigung/Repository-ID,
+Konfiguration, Adaptervorlagen und Ablehnung einer doppelten Kennung; kein weiteres
+GitHub-Repository angelegt. Zusätzliche SDKs, andere reale Buildverfahren und weitere
 Veröffentlichungsziele sind erst am nächsten entsprechenden Projekt zu prüfen.
