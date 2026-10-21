@@ -56,6 +56,8 @@ function TestShowWindow(Window: HWND; Command: Integer): Boolean;
   external 'ShowWindow@user32.dll stdcall';
 function TestSetFocus(Window: HWND): HWND;
   external 'SetFocus@user32.dll stdcall';
+function TestGetFocus: HWND;
+  external 'GetFocus@user32.dll stdcall';
 
 procedure FinishTest(const Message: String);
 begin
@@ -82,9 +84,10 @@ begin
   Info.Size := 28;
   Info.Mask := 7;
   if LicenseGetScrollInfo(WizardForm.LicenseMemo.Handle, 1, Info) then
-    Result := Format('range=%d..%d page=%d pos=%d end=%d', [
+    Result := Format('range=%d..%d page=%d pos=%d end=%d height=%d focused=%d', [
       Info.Minimum, Info.Maximum, Info.PageSize, Info.Position,
-      Integer(LicenseTextEndVisible)])
+      Integer(LicenseTextEndVisible), WizardForm.LicenseMemo.Height,
+      Integer(TestGetFocus = WizardForm.LicenseMemo.Handle)])
   else
     Result := 'scroll info unavailable';
 end;
@@ -97,6 +100,13 @@ begin
     case TestStep of
       0: begin
         if WizardForm.CurPageID <> wpLicense then Exit;
+        { Let the noninteractive desktop finish showing/layout before a later
+          timer tick exercises caret scrolling. }
+        if __CARET__ and __UNATTENDED__ then
+        begin
+          TestShowWindow(WizardForm.Handle, 4); { SW_SHOWNOACTIVATE }
+          TestSetFocus(WizardForm.LicenseMemo.Handle);
+        end;
         if __SHORT__ then
         begin
           Require(LicenseEndReached, 'Fully visible short text remained locked: ' + ScrollState);
@@ -127,18 +137,12 @@ begin
         Require(not WizardForm.NextButton.Enabled, 'Partial scrolling enabled Next');
         if __CARET__ then
         begin
-          { Session 0 has no interactive desktop. Make this fixture focusable
-            on its private desktop so EM_SCROLLCARET exercises a real caret;
-            no window is shown in the developer's interactive session. }
-          if __UNATTENDED__ then
-          begin
-            TestShowWindow(WizardForm.Handle, 4); { SW_SHOWNOACTIVATE }
-            TestSetFocus(WizardForm.LicenseMemo.Handle);
-          end;
           WizardForm.ActiveControl := WizardForm.LicenseMemo;
+          Log('Caret before: ' + ScrollState);
           SendMessage(WizardForm.LicenseMemo.Handle, $00B1,
             $7FFFFFFF, $7FFFFFFF);
           SendMessage(WizardForm.LicenseMemo.Handle, $00B7, 0, 0); { scroll caret into view }
+          Log('Caret after: ' + ScrollState);
         end
         else
           SendMessage(WizardForm.LicenseMemo.Handle, $0115, 7, 0); { bottom }
