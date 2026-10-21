@@ -4,7 +4,7 @@ Stand: 21.10.2026, Einrichtung und Abnahme noch in Arbeit. Die bisherige direkte
 Runnerregistrierung am Hauptrepository wurde entfernt. Phase 2 und die Öffnung
 bleiben bis zur vollständigen Abnahme gesperrt.
 
-Private Steuerung 1.0.4 (`d9347f2`) wurde über PR 4 offiziell geprüft und
+Private Steuerung 1.0.5 (`f93ffc9`) wurde über PR 5 offiziell geprüft und
 installiert. Die kontingentunabhängige lokale Übernahme ist mit dem echten
 Node-Build `39639843854` vollständig abgenommen: erfolgreicher offizieller Export,
 ursprünglicher GitHub-Schrittlog, gebundene Identitäten, tatsächliche Größen-/Hashes
@@ -23,8 +23,23 @@ Installerlauf `39635205372` hat Build und Installerprüfungen bestanden, jedoch
 wegen GitHubs Artefaktspeicherkontingent keinen vollständigen Erfolg erreicht.
 Die kontrollierte lokale Fehlerbehandlung und Artefaktübernahme sind deshalb
 gezielt korrigiert und praktisch geprüft. Version 0.9.20 verwendet diesen
-geschützten Übernahmehelfer; ihre vollständige Projekt-/Releaseabnahme unter der
-neuen Steuerung bleibt erforderlich. Phase 1 ist noch nicht abgeschlossen.
+geschützten Übernahmehelfer; ihr Prüflauf `39640392154` hat die Vollsuite
+erfolgreich abgeschlossen und exakt `06831e0` nach `main` übernommen. Der
+anschließende gehostete Installerlauf `39663506526` scheiterte ausschließlich am
+Artefaktkontingent; genau ein lokaler Fallback `39664708263` wurde automatisch
+gestartet und blockierte korrekt wegen eines hängenden Testdialogs.
+
+Die gezielte offizielle Diagnose `39666465868` grenzte den Fehler ein: Die
+harmlosen Lizenz-Fixtures meldeten `OK long`, ihre versteckte Wizardform konnte
+sich jedoch über den sichtbarkeitsabhängigen Inno-Closepfad nicht beenden. Nur die
+Testfixture beendet jetzt nach ihren unveränderten Assertions regulär ihre
+Nachrichtenschleife. Sie installiert weiterhin keine Anwendung. Siehe
+[Inno-Closepfad](https://github.com/jrsoftware/issrc/blob/is-6_7_3/Projects/Src/Setup.MainForm.pas)
+und [Windows-Nachrichtenschleife](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage).
+Der Build übergibt außerdem den bereits gepinnten Inno-Compiler über `INNO_ROOT`
+an die echten nativen Übergabetests, damit diese nicht wegen eines fehlenden
+Suchpfads übersprungen werden. Version 0.9.21 benötigt ihre eigenen aktuellen
+Prüfnachweise unter Steuerung 1.0.5. Phase 1 ist noch nicht abgeschlossen.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind

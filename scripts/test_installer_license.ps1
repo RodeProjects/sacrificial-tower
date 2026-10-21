@@ -50,13 +50,19 @@ var
   TestPageID: Integer;
   TestFinished: Boolean;
 
+procedure TestPostQuitMessage(ExitCode: Integer);
+  external 'PostQuitMessage@user32.dll stdcall';
+
 procedure FinishTest(const Message: String);
 begin
   if TestFinished then Exit;
   TestFinished := True;
   LicenseKillTimer(0, TestTimer);
   SaveStringToFile('__RESULT__', Message, False);
-  WizardForm.Close;
+  { Inno's normal Close path ignores hidden, non-focusable wizard forms.
+    This fixture installs nothing; quit its message loop after recording all
+    assertions, allowing normal Setup deinitialization on unattended runners. }
+  TestPostQuitMessage(0);
 end;
 
 procedure Require(Condition: Boolean; const Message: String);

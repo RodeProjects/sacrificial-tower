@@ -20,6 +20,7 @@ if ((Get-FileHash -LiteralPath $innoInstaller -Algorithm SHA256).Hash.ToLowerInv
 $process = Start-Process -FilePath $innoInstaller -ArgumentList "/PORTABLE=1 /VERYSILENT /CURRENTUSER /DIR=`"$innoRoot`"" -Wait -WindowStyle Hidden -PassThru
 if ($process.ExitCode) { throw 'Inno-Setup-Einrichtung fehlgeschlagen.' }
 $iscc = Join-Path $innoRoot 'ISCC.exe'
+$env:INNO_ROOT = $innoRoot
 & $iscc "/DAppVersion=$appVersion" "/DAppPublisherName=$((Get-Content -LiteralPath 'config/legal_profile.json' -Raw | ConvertFrom-Json).provider_name)" installer/SacrificialTower.iss
 & $Python -m unittest discover -s tests -p test_update_handoff_native.py -v
 & ./scripts/test_installer_license.ps1 -IsccPath $iscc
