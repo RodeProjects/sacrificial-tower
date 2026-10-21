@@ -38,8 +38,14 @@ Nachrichtenschleife. Sie installiert weiterhin keine Anwendung. Siehe
 und [Windows-Nachrichtenschleife](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage).
 Der Build übergibt außerdem den bereits gepinnten Inno-Compiler über `INNO_ROOT`
 an die echten nativen Übergabetests, damit diese nicht wegen eines fehlenden
-Suchpfads übersprungen werden. Version 0.9.21 benötigt ihre eigenen aktuellen
-Prüfnachweise unter Steuerung 1.0.5. Phase 1 ist noch nicht abgeschlossen.
+Suchpfads übersprungen werden. Die anschließende Diagnose `39667029539` bestätigte
+die reguläre Beendigung; die nun erreichte Caret-Variante benötigt im
+nichtinteraktiven Konto zusätzlich einen fokussierbaren Testdialog. Ausschließlich
+auf dessen Session-0-Desktop wird die Fixture deshalb vor dem Caret-Scrollen
+sichtbar/fokussiert; im Entwicklerdesktop wird kein Fenster eingeblendet. Alle
+Assertions einschließlich Caret-Scrollen bleiben erhalten. Im Entwicklerkonto
+bestanden bereits alle fünf Varianten. Version 0.9.22 benötigt ihre eigenen
+aktuellen Prüfnachweise unter Steuerung 1.0.5. Phase 1 ist noch nicht abgeschlossen.
 
 Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
 GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind

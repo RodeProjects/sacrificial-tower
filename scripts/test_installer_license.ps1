@@ -52,6 +52,10 @@ var
 
 procedure TestPostQuitMessage(ExitCode: Integer);
   external 'PostQuitMessage@user32.dll stdcall';
+function TestShowWindow(Window: HWND; Command: Integer): Boolean;
+  external 'ShowWindow@user32.dll stdcall';
+function TestSetFocus(Window: HWND): HWND;
+  external 'SetFocus@user32.dll stdcall';
 
 procedure FinishTest(const Message: String);
 begin
@@ -123,6 +127,14 @@ begin
         Require(not WizardForm.NextButton.Enabled, 'Partial scrolling enabled Next');
         if __CARET__ then
         begin
+          { Session 0 has no interactive desktop. Make this fixture focusable
+            on its private desktop so EM_SCROLLCARET exercises a real caret;
+            no window is shown in the developer's interactive session. }
+          if __UNATTENDED__ then
+          begin
+            TestShowWindow(WizardForm.Handle, 4); { SW_SHOWNOACTIVATE }
+            TestSetFocus(WizardForm.LicenseMemo.Handle);
+          end;
           WizardForm.ActiveControl := WizardForm.LicenseMemo;
           SendMessage(WizardForm.LicenseMemo.Handle, $00B1,
             $7FFFFFFF, $7FFFFFFF);
@@ -202,6 +214,7 @@ foreach ($variant in @('long', 'caret', 'actual', 'short', 'silent')) {
         Replace('__RESULT__', $resultPath.Replace("'", "''")).
         Replace('__SHORT__', $(if ($variant -eq 'short') { 'True' } else { 'False' })).
         Replace('__CARET__', $(if ($variant -eq 'caret') { 'True' } else { 'False' })).
+        Replace('__UNATTENDED__', $(if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { 'True' } else { 'False' })).
         Replace('__VARIANT__', $variant)
     $fixturePath = Join-Path $variantRoot 'test.iss'
     [IO.File]::WriteAllText($fixturePath, $fixture, [Text.UTF8Encoding]::new($true))
