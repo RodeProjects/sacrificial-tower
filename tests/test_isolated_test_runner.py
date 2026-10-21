@@ -154,3 +154,46 @@ class IsolatedTestRunnerTests(unittest.TestCase):
             done_lines,
             ["Test 1 / 1 - erfolgreich - Testdauer: 0 Sek"],
         )
+
+    def test_class_level_skip_is_reported_for_each_planned_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test_class_skip.py").write_text(
+                "import unittest\n"
+                "class SkippedFixtureTests(unittest.TestCase):\n"
+                "    @classmethod\n"
+                "    def setUpClass(cls):\n"
+                "        raise unittest.SkipTest('compiler unavailable')\n"
+                "    def test_first(self): pass\n"
+                "    def test_second(self): pass\n",
+                encoding="utf-8",
+            )
+            progress_path = root / "progress.log"
+            with patch.dict(
+                "os.environ", {"SACRIFICIAL_TEST_PROGRESS_FILE": str(progress_path)}
+            ):
+                self.assertEqual(run_suite(root), 0)
+
+            progress_lines = progress_path.read_text(encoding="utf-8").splitlines()
+
+        start_lines = [line for line in progress_lines if line.startswith("Starte Test:")]
+        result_lines = [line for line in progress_lines if line.startswith("Test ")]
+        self.assertEqual(
+            start_lines,
+            [
+                "Starte Test: 1 / 2 (50%) - test_class_skip.SkippedFixtureTests.test_first",
+                "Starte Test: 2 / 2 (100%) - test_class_skip.SkippedFixtureTests.test_second",
+            ],
+        )
+        self.assertEqual(
+            result_lines,
+            [
+                "Test 1 / 2 - übersprungen - Testdauer: 0 Sek - compiler unavailable",
+                "Test 2 / 2 - übersprungen - Testdauer: 0 Sek - compiler unavailable",
+            ],
+        )
+        self.assertTrue(
+            progress_lines[-1].startswith(
+                "Alle 2 Einzeltests aus 1 Testdateimustern erfolgreich."
+            )
+        )

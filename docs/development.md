@@ -91,7 +91,9 @@ Jeder Prozess verwendet die normale `unittest`-Discovery einschließlich
 Unterpaketen; gleiche Dateinamen werden als gemeinsames Muster geprüft. Dadurch
 sammeln sich Qt-Objekte verschiedener GUI-Testmodule nicht bis zum gemeinsamen
 Interpreterende an. Start, Ergebnis und Dauer jedes Testfalls werden einzeln
-angezeigt. Fehler, Abstürze und ein Zeitlimit von zehn Minuten pro Muster lassen
+angezeigt. Klassen- und Modul-Skips werden für jede betroffene Testmethode
+einzeln gezählt und als übersprungen ausgegeben. Fehler, Abstürze und ein
+Zeitlimit von zehn Minuten pro Muster lassen
 den Gesamtlauf fehlschlagen. Die Ausgabe zeigt nur Zeiteinheiten mit Wert größer
 null: Sekunden, Minuten und Sekunden, Stunden, Minuten und Sekunden sowie ab
 einem Tag zusätzlich Tage. Der CI-Job ist einschließlich Prozessstarts auf

@@ -61,14 +61,24 @@ def _write_progress(
 
 
 class ProgressTestResult(unittest.TextTestResult):
-    def __init__(self, *args, completed_before: int, total: int, progress_path, **kwargs):
+    def __init__(
+        self,
+        *args,
+        completed_before: int,
+        total: int,
+        progress_path,
+        planned_cases: list[unittest.TestCase],
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.completed_before = completed_before
         self.total = total
         self.progress_path = progress_path
+        self.planned_cases = planned_cases
         self.completed = 0
         self.started_at: dict[int, tuple[int, float]] = {}
         self.outcomes: dict[int, tuple[str, str]] = {}
+        self.completed_case_ids: set[int] = set()
 
     def startTest(self, test):
         number = self.completed_before + self.completed + 1
@@ -96,11 +106,23 @@ class ProgressTestResult(unittest.TextTestResult):
         super().addFailure(test, err)
 
     def addError(self, test, err):
-        self.outcomes[id(test)] = ("Fehler", self._exception_summary(err))
+        detail = self._exception_summary(err)
+        if id(test) in self.started_at:
+            self.outcomes[id(test)] = ("Fehler", detail)
+        elif not self._report_fixture_cases(test, "Fehler", detail):
+            _write_progress(
+                f"Testfixture {test} - Fehler - {detail}",
+                is_error=True,
+                progress_path=self.progress_path,
+                use_environment_path=False,
+            )
         super().addError(test, err)
 
     def addSkip(self, test, reason):
-        self.outcomes[id(test)] = ("übersprungen", reason[:240])
+        if id(test) in self.started_at:
+            self.outcomes[id(test)] = ("übersprungen", reason[:240])
+        else:
+            self._report_fixture_cases(test, "übersprungen", reason[:240])
         super().addSkip(test, reason)
 
     def addExpectedFailure(self, test, err):
@@ -114,6 +136,7 @@ class ProgressTestResult(unittest.TextTestResult):
     def stopTest(self, test):
         number, started_at = self.started_at.pop(id(test))
         self.completed += 1
+        self.completed_case_ids.add(id(test))
         status, detail = self.outcomes.pop(id(test), ("Fehler", "Test ohne Ergebnis beendet"))
         duration = format_test_duration(time.monotonic() - started_at)
         message = f"Test {number} / {self.total} - {status} - Testdauer: {duration}"
@@ -127,12 +150,65 @@ class ProgressTestResult(unittest.TextTestResult):
         )
         super().stopTest(test)
 
+    def _report_fixture_cases(self, fixture, status: str, detail: str) -> bool:
+        description = str(fixture)
+        class_prefix = "setUpClass ("
+        module_prefix = "setUpModule ("
+        cases = []
+        if description.startswith(class_prefix) and description.endswith(")"):
+            class_name = description[len(class_prefix):-1]
+            cases = [
+                case
+                for case in self.planned_cases
+                if f"{case.__class__.__module__}.{case.__class__.__qualname__}" == class_name
+            ]
+        elif description.startswith(module_prefix) and description.endswith(")"):
+            module_name = description[len(module_prefix):-1]
+            cases = [
+                case for case in self.planned_cases if case.__class__.__module__ == module_name
+            ]
+        else:
+            return False
+
+        for case in cases:
+            case_id = id(case)
+            if case_id in self.completed_case_ids:
+                continue
+            number = self.completed_before + self.completed + 1
+            percent = int(100 * number / self.total + 0.5)
+            _write_progress(
+                f"Starte Test: {number} / {self.total} ({percent}%) - {case.id()}",
+                progress_path=self.progress_path,
+                use_environment_path=False,
+            )
+            self.completed += 1
+            self.completed_case_ids.add(case_id)
+            message = f"Test {number} / {self.total} - {status} - Testdauer: 0 Sek"
+            if detail:
+                message += f" - {detail}"
+            _write_progress(
+                message,
+                is_error=status == "Fehler",
+                progress_path=self.progress_path,
+                use_environment_path=False,
+            )
+        return bool(cases)
+
 
 class ProgressTestRunner(unittest.TextTestRunner):
-    def __init__(self, *args, completed_before: int, total: int, progress_path, **kwargs):
+    def __init__(
+        self,
+        *args,
+        completed_before: int,
+        total: int,
+        progress_path,
+        planned_cases: list[unittest.TestCase],
+        **kwargs,
+    ):
         self.completed_before = completed_before
         self.total = total
         self.progress_path = progress_path
+        self.planned_cases = planned_cases
         super().__init__(*args, **kwargs)
 
     def _makeResult(self):
@@ -143,11 +219,22 @@ class ProgressTestRunner(unittest.TextTestRunner):
             completed_before=self.completed_before,
             total=self.total,
             progress_path=self.progress_path,
+            planned_cases=self.planned_cases,
         )
 
 
 def count_pattern(root: Path, pattern: str) -> int:
     return _discover(root, pattern).countTestCases()
+
+
+def _collect_test_cases(suite: unittest.TestSuite) -> list[unittest.TestCase]:
+    cases = []
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            cases.extend(_collect_test_cases(test))
+        elif isinstance(test, unittest.TestCase):
+            cases.append(test)
+    return cases
 
 
 def plan_suite(root: Path, patterns: list[str], *, timeout_s: float = 600):
@@ -222,13 +309,25 @@ def run_pattern(
             use_environment_path=False,
         )
         return 1
+    planned_cases = _collect_test_cases(suite)
+    if len(planned_cases) != expected_count:
+        _write_progress(
+            f"Testdateimuster {pattern} - Fehler - Geplante TestCase-Fälle "
+            f"({len(planned_cases)}) stimmen nicht mit der Discovery-Zahl "
+            f"({expected_count}) überein.",
+            is_error=True,
+            progress_path=progress_path,
+            use_environment_path=False,
+        )
+        return 1
     result = ProgressTestRunner(
         verbosity=0,
         completed_before=completed_before,
         total=total,
         progress_path=progress_path,
+        planned_cases=planned_cases,
     ).run(suite)
-    return 0 if result.wasSuccessful() and result.testsRun == expected_count else 1
+    return 0 if result.wasSuccessful() and result.completed == expected_count else 1
 
 
 def run_suite(root: Path, *, timeout_s: float = 600) -> int:
