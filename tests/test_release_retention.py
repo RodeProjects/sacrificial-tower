@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -165,16 +169,33 @@ class ReleaseRetentionTests(unittest.TestCase):
 
 
 class ReleaseRetentionIntegrationTests(unittest.TestCase):
-    def test_publication_runs_cleanup_only_after_manifest_publish(self) -> None:
+    def test_immutable_main_publication_does_not_run_legacy_cleanup(self) -> None:
         script = (PROJECT_ROOT / "scripts" / "publish_update.ps1").read_text(
             encoding="utf-8"
         )
 
-        manifest_position = script.index("$manifestPublished = $true")
-        cleanup_position = script.index("cleanup_releases.ps1")
-        self.assertGreater(cleanup_position, manifest_position)
-        self.assertIn("-Repository $UpdateRepository", script)
-        self.assertIn("-LatestVersion $version", script)
+        self.assertNotIn("cleanup_releases.ps1", script)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows release management")
+    def test_main_cleanup_is_blocked_before_any_github_access(self) -> None:
+        powershell = shutil.which("pwsh")
+        self.assertIsNotNone(powershell, "PowerShell 7 is required for release management")
+        with tempfile.TemporaryDirectory() as directory:
+            # No authentication/network call is allowed in this negative test.
+            fake_gh = Path(directory) / "gh.cmd"
+            fake_gh.write_text("@echo FORBIDDEN_GITHUB_ACCESS\n@exit /b 95\n")
+            environment = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"])
+            result = subprocess.run(
+                [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                 str(SCRIPTS_ROOT / "cleanup_releases.ps1"),
+                 "-Repository", "RodeProjects/sacrificial-tower", "-LatestVersion", "0.9.26"],
+                cwd=PROJECT_ROOT, env=environment, capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("nicht automatisch bereinigt", output)
+        self.assertNotIn("FORBIDDEN_GITHUB_ACCESS", output)
 
     def test_cleanup_deletes_release_without_deleting_git_tag(self) -> None:
         script = (PROJECT_ROOT / "scripts" / "cleanup_releases.ps1").read_text(
