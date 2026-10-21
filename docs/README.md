@@ -21,6 +21,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Apache-2.0, kostenlose offizielle Downloads, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
 | Nachprüfung der Lizenzumstellung, Paketnachweise und offene Freigabepunkte | [Apache-2.0-Prüfnachweis](license_review.md) |
+| Aktueller Gesamtabgleich: offene GitHub-/Store-Schritte, Runner-Sicherheit und öffentliche Rechtstexte | [Veröffentlichungsprüfung](publication_readiness.md) |
 | Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |
 | GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |

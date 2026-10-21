@@ -71,6 +71,9 @@ geeignete kurze Dateihinweise; tatsächliche fremde Urheberschaft dabei erhalten
 
 Die erneute Prüfung, behobene Paketprüfungslücke, Testnachweise und noch offenen
 Veröffentlichungspunkte sind im [Apache-2.0-Prüfnachweis](license_review.md) festgehalten.
+Der anschließende [Gesamtabgleich für GitHub und Microsoft Store](publication_readiness.md)
+erfasst zusätzlich den tatsächlichen CI-/Downloadstand, die vor einer Öffnung
+abzusichernden Runner und noch fehlende Herkunftszuordnungen.
 
 ## Anbieter, Datenschutz und Support
 
