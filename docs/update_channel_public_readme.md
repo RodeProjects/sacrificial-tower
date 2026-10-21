@@ -31,9 +31,15 @@ and SHA-256 before accepting an automatic update.
 
 ## Project and license
 
-RodeProjects develops Sacrificial Tower. The application is free to use and
-Source Available under the project license; commercial redistribution of the
-application is prohibited. Permitted generated results may be used commercially.
-The application includes its project license, terms, privacy information and
-third-party notices. See the [main project](https://github.com/RodeProjects/sacrificial-tower)
+RodeProjects develops Sacrificial Tower and offers official downloads free of charge.
+The current development tree has adopted Apache License 2.0 for original code,
+documentation and project-owned assets, unless otherwise noted. Future releases
+built from this tree permit commercial use, modification and redistribution under
+Apache-2.0, without a Commons Clause. License and attribution obligations apply;
+third-party components retain their own licenses. Previously published downloads
+retain the license shipped with each version; this text does not replace their
+license or installer. Permitted generated results may be used commercially.
+New packages built from the Apache-2.0 source tree include LICENSE.md, NOTICE,
+terms, privacy information and third-party notices.
+See the [main project](https://github.com/RodeProjects/sacrificial-tower)
 for development sources when access is available.

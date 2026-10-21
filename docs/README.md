@@ -19,7 +19,8 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Konfiguration und Start optionaler Abnahmen mit installierten Slicern | [Slicer-Abnahmetests](slicer_acceptance_tests.md) |
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
-| Kostenlose Nutzung, Source-Available-Lizenz, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
+| Apache-2.0, kostenlose offizielle Downloads, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
+| Nachprüfung der Lizenzumstellung, Paketnachweise und offene Freigabepunkte | [Apache-2.0-Prüfnachweis](license_review.md) |
 | Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |
 | GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |

@@ -575,10 +575,14 @@ in Pre-Slice, gemeinsame Slices und den exportierten 3MF-Projektstand ein.
 Nach Bestätigung wird ein Turm über die gesamte Modellhöhe erzwungen; dabei
 darf allein die durch die aktuelle Messung erhöhte Zielzeit-Untergrenze für
 diesen Lauf unterschritten werden. Andere Eingabefehler bleiben gesperrt.
-Eingabegrenzen sind standardmäßig verborgen und lassen sich
-in „Allgemeine Einstellungen“ wieder einblenden. Dort befinden sich außerdem
-das Slice-Budget und der Exportordner; ein eigener Exportordner-Menüpunkt entfällt.
-Die drei Zahlenfelder des Dialogs sind gleich breit. Ein durchgehender
+Eingabegrenzen sind standardmäßig verborgen; die frühere Anzeigeoption ist aus
+„Allgemeine Einstellungen“ entfernt. Dort befinden sich außerdem Slice-Budget,
+Layerzeit-Toleranz, lokales Zeitfenster und Exportordner; ein eigener
+Exportordner-Menüpunkt entfällt. Bis Datei-, Slicer- und Profilvorbereitung
+erfolgreich bestätigt sind, bleiben die Einstellungen außer dem Exportordner
+ausgegraut. Ein Hinweis direkt unter der Überschrift erklärt die Verfügbarkeit.
+Die Info-Symbole bieten ihre Hover-Hinweise auch vor Abschluss der Vorbereitung an.
+Die Zahlenfelder des Dialogs sind gleich breit. Ein durchgehender
 Trennstrich setzt die Aktionen „Abbrechen“ und „Übernehmen“ mit gleichem
 Innenabstand vom Inhalt ab.
 Das Ausblenden verkleinert die gesamte Einstellungskarte. Einige Zahlenfelder

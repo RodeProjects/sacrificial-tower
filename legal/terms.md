@@ -1,6 +1,6 @@
 # Nutzungsbedingungen für Sacrificial Tower
 
-Stand: 18. Oktober 2026.
+Stand: 21. Oktober 2026.
 
 ## Anbieter
 
@@ -12,17 +12,19 @@ Direkter Kontakt, insbesondere für Rechts-, Datenschutz- und Sicherheitsanliege
 
 ## Kostenlose Anwendung
 
-Sacrificial Tower wird kostenlos angeboten. Es gibt keinen Kaufpreis, kein
-Abonnement und keine kostenpflichtig freizuschaltenden Funktionen. Die Software
-darf auch im beruflichen und gewerblichen Umfeld verwendet werden.
+Der Anbieter stellt Sacrificial Tower kostenlos zur Verfügung, ohne Kaufpreis,
+Abonnement oder kostenpflichtig freizuschaltende Funktionen. Die Software darf
+auch im beruflichen und gewerblichen Umfeld verwendet werden. Diese Beschreibung
+des eigenen Angebots beschränkt nicht die nach Apache-2.0 zulässige kommerzielle
+Weitergabe durch Dritte.
 
 ## Freiwillige Unterstützung über PayPal
 
 Über „Buy me a coffee …“ im Menü können Sie dem Entwickler freiwillig einen
 einmaligen Geldbetrag als Dankeschön zuwenden. Empfänger ist {{provider_name}},
 PayPal-Empfängeradresse: {{support_paypal_email}}. Die vorgeschlagenen Beträge
-sind 2,50 €, 5 €, 10 €, 15 € und 20 €; alternativ können Sie einen eigenen Betrag
-von 1,50 € bis 50,00 € pro Zahlung eingeben. PayPal kann eigene Transaktionsgrenzen vorgeben.
+sind 3,50 €, 5 €, 10 €, 15 € und 20 €; alternativ können Sie einen eigenen Betrag
+von 2,50 € bis 50,00 € pro Zahlung eingeben. PayPal kann eigene Transaktionsgrenzen vorgeben.
 5 € sind beim erstmaligen Öffnen als unverbindlicher, frei änderbarer Vorschlag
 vorausgewählt. Dadurch entsteht keine Zahlungsverpflichtung.
 
@@ -66,22 +68,29 @@ oder bereits erfolgte Veröffentlichung im Microsoft Store wird damit nicht beha
 ## Lizenz und Weiterentwicklung
 
 Copyright © 2026 {{provider_name}} (Entwicklerkennung {{provider_brand}}).
-Die vollständige Projektlizenz in „LICENSE.md“ ist Bestandteil dieser Bedingungen
-und wird mit der Anwendung ausgeliefert. Sie erlaubt Nutzen, Klonen, Forken,
-Ändern und kostenlose Weitergabe der eigenen Projektbestandteile unter Erhalt
-der Lizenz und Urheberhinweise. Forks müssen Änderungen kennzeichnen und dürfen
-nicht als offizielle Fassung ausgegeben werden.
+Eigener Anwendungscode, eigene Dokumentation und eigene Assets stehen unter der
+Apache License, Version 2.0 (Apache-2.0), soweit einzelne Bestandteile keine
+abweichende Herkunft oder Lizenz ausweisen. Der vollständige englische Lizenztext
+in „LICENSE.md“ und die Urheber-/Herkunftshinweise in „NOTICE“ werden mitgeliefert
+und nach diesen ergänzenden Informationen angezeigt. Maßgeblich ist der englische
+Apache-2.0-Lizenztext.
 
-Kommerzielle Weiterverbreitung der Software selbst einschließlich darauf basierender
-Weiterentwicklungen ist ohne gesonderte Erlaubnis untersagt. Das umfasst insbesondere
-Verkauf, Vermietung, kostenpflichtige Downloads, Abonnements, kostenpflichtige Bundles
-und entgeltliche Bereitstellung als Softwaredienst. Die genaue Abgrenzung und die
-Erlaubnis der vom Rechteinhaber veranlassten kostenlosen Store-Verteilung regelt
-die Projektlizenz. Das Urheberrecht an übernommenen Bestandteilen bleibt beim
-Rechteinhaber; Bearbeiter dürfen eigene Urheberhinweise ergänzen.
-Für Umfang und Bedingungen der urheberrechtlichen Nutzungsrechte ist die mit
-dieser Fassung ausgelieferte Projektlizenz maßgeblich. Spätere Änderungen gelten
-nicht rückwirkend für bereits nach einer früheren Lizenz eingeräumte Rechte.
+Apache-2.0 erlaubt Nutzung, Klonen, Forken, Änderungen und Weitergabe sowohl im
+Quellcode als auch in ausführbarer Form, einschließlich kommerzieller Weitergabe
+und Verkauf. Die Lizenz verlangt keine Veröffentlichung eigener Änderungen.
+Bei Weitergabe müssen eine Lizenzkopie und die nach Abschnitt 4 vorgeschriebenen
+Hinweise erhalten bleiben; geänderte Dateien sind als geändert zu kennzeichnen.
+Die einschlägigen Hinweise aus „NOTICE“ sind nach den dort genannten Möglichkeiten
+mitzugeben. Eigene Urheberhinweise und zusätzliche oder andere Bedingungen für
+eigene Änderungen sind im Rahmen von Abschnitt 4 zulässig.
+
+Das Urheberrecht an übernommenen Bestandteilen bleibt bei deren Rechteinhabern.
+Abschnitt 6 erteilt keine allgemeinen Marken- oder Namensrechte; die nach der
+Lizenz zulässige Herkunftsangabe bleibt möglich. Für diese Fassung gilt keine
+Commons Clause und keine zusätzliche Beschränkung kommerzieller Weitergabe.
+Diese Informationen zu Anbieter, Nutzung und Support schränken die Apache-2.0-Rechte
+nicht ein. Bereits nach früheren Fassungen eingeräumte Rechte bleiben erhalten;
+maßgeblich für ältere Auslieferungen ist deren jeweils mitgelieferte Lizenz.
 
 ## Drittkomponenten und gesetzliche Rechte
 
@@ -136,10 +145,10 @@ Anwendung ist keine pauschale datenschutzrechtliche Einwilligung.
 
 ## Haftung und Aktualisierungen
 
-Die Haftung richtet sich nach den gesetzlichen Vorschriften. Ein pauschaler
-Haftungsausschluss wird nicht vereinbart, insbesondere nicht für Vorsatz, grobe
-Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit sowie zwingende
-Produkthaftungs- und Datenschutzansprüche.
+Für Gewährleistung und Haftung gelten die Abschnitte 7 bis 9 der Apache-2.0-Lizenz
+im gesetzlich zulässigen Umfang. Zwingende gesetzliche Ansprüche bleiben unberührt,
+insbesondere bei Vorsatz, grober Fahrlässigkeit, Schäden an Leben, Körper oder
+Gesundheit sowie nach zwingendem Produkthaftungs- und Datenschutzrecht.
 
 Die eigenständige Windows-Fassung kann Programmaktualisierungen über den
 GitHub-Kanal beziehen. Der vorbereitete Microsoft-Store-Kanal deaktiviert diesen

@@ -61,11 +61,15 @@ Model processing takes place locally. See [file safety and source analysis](sour
 
 ## Is Sacrificial Tower free or open source?
 
-The application is free to use and Source Available under its
-[project license](../LICENSE.md). It is not released under an OSI open-source
-license. Commercial use of permitted generated results is allowed; commercial
-redistribution of the application or derivative versions is prohibited by the
-project license. Third-party components retain their own licenses.
+The current source tree uses the OSI-approved [Apache License 2.0](../LICENSE.md)
+for original code, documentation and project-owned assets, unless otherwise noted.
+It allows commercial use, modification and redistribution, including selling
+copies and derivative versions, subject to its license and notice obligations.
+There is no Commons Clause and no requirement to publish your changes.
+Third-party components retain their own licenses. Permitted generated results
+may also be used commercially. The provider offers official downloads free of charge;
+previous releases retain their shipped license. Public release of the source
+repository is a separate, planned step.
 
 ## Where can I download the Windows application?
 

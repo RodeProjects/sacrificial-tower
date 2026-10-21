@@ -1,0 +1,15 @@
+Sacrificial Tower
+Copyright 2026 Wolfgang Florian Rode
+Developer identifier: RodeProjects
+
+Unless a file or component states otherwise, the original application code,
+documentation, configuration, build scripts, tests and project-owned assets
+in this repository are licensed under the Apache License, Version 2.0.
+The complete license is provided in LICENSE.md.
+
+Third-party components retain their own licenses and copyright notices.
+See legal/third_party.md, docs/dependencies.md and the bundled legal/licenses
+directory for the corresponding notices and license texts.
+
+This notice is for attribution and information only; it does not add to or
+modify the Apache License, Version 2.0.

@@ -11487,10 +11487,12 @@ class MainWindow(QMainWindow):
             maximum_local_reference_window=self.local_window_spin.property("validationMaximum") or 999,
             layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
             default_layer_time_tolerance_s=self.default_settings.layer_time_tolerance_s,
+            preparation_ready=(
+                self.workflow.stage is WorkflowStage.READY
+                and self.workflow.preparation_acknowledged
+            ),
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
-        dialog.show_limits_checkbox.setChecked(self.show_setting_limits)
-        dialog.limits_applied.connect(self._apply_show_setting_limits)
         dialog.separate_value_applied.connect(
             self._apply_maximum_separate_slices
         )
@@ -11512,6 +11514,7 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_show_setting_limits(self, visible: bool) -> None:
+        """Apply a previously saved numeric-range visibility preference."""
         self.show_setting_limits = bool(visible)
         for setting in self._setting_widgets.values():
             setting.set_limits_visible(self.show_setting_limits)

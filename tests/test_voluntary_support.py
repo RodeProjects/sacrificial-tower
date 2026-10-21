@@ -33,7 +33,7 @@ class SupportAmountTests(unittest.TestCase):
     def test_unambiguous_amounts_and_boundaries(self):
         for text, expected in (
             ("2,50", "2.50"), (" 5 ", "5"), ("10.1", "10.10"),
-            ("1,50", "1.50"), ("50", "50.00"), ("50.00", "50.00"),
+            ("50", "50.00"), ("50.00", "50.00"),
         ):
             with self.subTest(text=text):
                 self.assertEqual(parse_support_amount(text), Decimal(expected))
@@ -43,14 +43,14 @@ class SupportAmountTests(unittest.TestCase):
             "", " ", "0", "0,00", "-2", "+5", "10000", "1.234", "2,501",
             "1.000,00", "1,000.00", "1 000", "1e2", "NaN", "Infinity",
             "2,5 EUR", ".50", "5.", "５", "5&business=other@example.test",
-            "0,01", "0,50", "1,49", "50,01", "9999.99",
+            "0,01", "0,50", "1,49", "2,49", "50,01", "9999.99",
         ):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 parse_support_amount(text)
 
     def test_presets_and_custom_amount_build_only_allowlisted_fields(self):
         recipient = "support+test@example.test"
-        for amount in (*SUPPORT_PRESETS, "12,34", "1.50", "50,00"):
+        for amount in (*SUPPORT_PRESETS, "12,34", "2.50", "50,00"):
             with self.subTest(amount=amount):
                 url = urlsplit(paypal_support_url(amount, recipient))
                 self.assertEqual((url.scheme, url.netloc, url.path),
@@ -110,10 +110,12 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         self.assertTrue(self.dialog.continue_button.isEnabled())
         self.assertEqual([b.isChecked() for b in self.dialog.preset_buttons],
                          [False, True, False, False, False])
+        self.assertEqual([b.property("preferredAmount") for b in self.dialog.preset_buttons],
+                         [False, True, False, False, False])
         self.assertIn("Vorschlag", self.dialog.status_label.text())
         self.assertIn("frei änderbar", self.dialog.status_label.text())
         self.assertEqual([b.text() for b in self.dialog.preset_buttons],
-                         ["2,50 €", "5 €", "10 €", "15 €", "20 €"])
+                         ["3,50 €", "5 €", "10 €", "15 €", "20 €"])
         for amount, button in zip(SUPPORT_PRESETS, self.dialog.preset_buttons):
             button.click()
             self.assertEqual(self.dialog.amount_edit.text(), "")
@@ -166,21 +168,21 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         self.assertFalse(any(b.isChecked() for b in self.dialog.preset_buttons))
         edit.step_down_button.click()
         self.assertEqual(edit.text(), "5,00")
-        self.dialog.preset_buttons[2].click()
+        self.dialog.preset_buttons[0].click()
         self.assertEqual(edit.text(), "")
         edit.step_down_button.click()
-        self.assertEqual(edit.text(), "9,50")
+        self.assertEqual(edit.text(), "3,00")
         self.open_url.assert_not_called()
         self.dialog.continue_button.click()
         self.assertEqual(parse_qs(urlsplit(self.open_url.call_args.args[0].toString()).query)["amount"],
-                         ["9.50"])
+                         ["3.00"])
 
     def test_step_buttons_use_exact_half_euro_steps_and_respect_both_bounds(self):
         edit = self.dialog.amount_edit
         for text, direction, expected in (
             ("7,25", 1, "7,75"), ("7.75", -1, "7,25"),
             ("49,50", 1, "50,00"), ("50,00", -1, "49,50"),
-            ("49,99", 1, "50,00"), ("1,51", -1, "1,50"),
+            ("49,99", 1, "50,00"), ("2,51", -1, "2,50"),
         ):
             with self.subTest(text=text, direction=direction):
                 edit.setText(text)
@@ -189,7 +191,7 @@ class VoluntarySupportDialogTests(unittest.TestCase):
                 self.assertEqual(edit.text(), expected)
                 self.assertTrue(edit.hasAcceptableInput())
         for text, blocked, allowed in (
-            ("1,50", edit.step_down_button, edit.step_up_button),
+            ("2,50", edit.step_down_button, edit.step_up_button),
             ("50,00", edit.step_up_button, edit.step_down_button),
         ):
             edit.setText(text)
@@ -205,9 +207,9 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         edit.clear()
         self.assertFalse(edit.step_down_button.isEnabled())
         edit.step_up_button.click()
-        self.assertEqual(edit.text(), "1,50")
-        for text, expected in (("1,00", "1,50"), ("12,", "12,50"),
-                               ("0,", "1,50"), ("NaN", "1,50"), ("1e2", "1,50")):
+        self.assertEqual(edit.text(), "2,50")
+        for text, expected in (("1,00", "2,50"), ("12,", "12,50"),
+                               ("0,", "2,50"), ("NaN", "2,50"), ("1e2", "2,50")):
             with self.subTest(text=text):
                 edit.setText(text)
                 edit.step_up_button.click()
@@ -246,7 +248,7 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         edit = self.dialog.amount_edit
         for text, button, expected in (
             ("49,50", edit.step_up_button, "50,00"),
-            ("2,00", edit.step_down_button, "1,50"),
+            ("3,00", edit.step_down_button, "2,50"),
         ):
             with self.subTest(text=text):
                 edit.setText(text)
@@ -275,7 +277,7 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         self.assertIn("erst dort bestätigt", self.dialog.status_label.text())
 
     def test_invalid_amount_cannot_be_submitted_even_by_direct_call(self):
-        for amount in ("0", "-1", "1,999", "10000", "1,49", "50,01"):
+        for amount in ("0", "-1", "1,999", "10000", "2,49", "50,01"):
             self.dialog.amount_edit.setText(amount)
             self.assertFalse(self.dialog.continue_button.isEnabled())
             self.dialog.open_paypal()
@@ -309,12 +311,12 @@ class VoluntarySupportDialogTests(unittest.TestCase):
                 edit.selectAll()
                 edit.insert(value)
                 self.assertEqual(edit.text(), "5,00")
-        for value in ("2,50", "5", "7.25", "1,50", "50.00"):
+        for value in ("2,50", "5", "7.25", "2,49", "50.00"):
             with self.subTest(value=value):
                 edit.selectAll()
                 edit.insert(value)
                 self.assertEqual(edit.text(), value)
-                self.assertTrue(edit.hasAcceptableInput())
+                self.assertEqual(edit.hasAcceptableInput(), value != "2,49")
         self.open_url.assert_not_called()
 
     def test_unfinished_amounts_allow_editing_but_cannot_continue(self):
@@ -322,10 +324,10 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         validator = edit.validator()
         self.dialog.show()
         self.assertTrue(self.dialog.amount_hint_label.isVisible())
-        self.assertIn("Mindestens 1,50 €", self.dialog.amount_hint_label.text())
+        self.assertIn("Mindestens 2,50 €", self.dialog.amount_hint_label.text())
         self.assertIn("höchstens 50,00 €", self.dialog.amount_hint_label.text())
         edit.setText("7,50")
-        for value in ("", "0", "0,", "0.0", "0,00", "1", "1,00", "1,49", "12,", "12."):
+        for value in ("", "0", "0,", "0.0", "0,00", "1", "1,00", "2,49", "12,", "12."):
             with self.subTest(value=value):
                 self.assertEqual(validator.validate(value, len(value))[0], QValidator.State.Intermediate)
                 edit.setText(value)
@@ -333,14 +335,14 @@ class VoluntarySupportDialogTests(unittest.TestCase):
                 self.assertFalse(self.dialog.continue_button.isEnabled())
                 if value and Decimal(value.replace(",", ".")) < SUPPORT_AMOUNT_MIN:
                     self.assertTrue(self.dialog.amount_hint_label.isVisible())
-                    self.assertEqual(self.dialog.amount_hint_label.text(), "Bitte mindestens 1,50 € eingeben.")
+                    self.assertEqual(self.dialog.amount_hint_label.text(), "Bitte mindestens 2,50 € eingeben.")
                     self.assertTrue(self.dialog.amount_hint_label.property("belowMinimum"))
-        edit.setText("1,5")
+        edit.setText("2,5")
         edit.insert("0")
-        self.assertEqual(edit.text(), "1,50")
+        self.assertEqual(edit.text(), "2,50")
         self.assertTrue(self.dialog.continue_button.isEnabled())
         self.assertFalse(self.dialog.amount_hint_label.property("belowMinimum"))
-        self.assertIn("Mindestens 1,50 €", self.dialog.amount_hint_label.text())
+        self.assertIn("Mindestens 2,50 €", self.dialog.amount_hint_label.text())
 
     def test_browser_failure_is_visible_and_does_not_claim_payment(self):
         for result in (False, OSError("browser unavailable")):

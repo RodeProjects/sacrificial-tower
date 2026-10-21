@@ -35,14 +35,18 @@ Außendurchmesser, Übergangswinkel und Standfuß begrenzen die Turmgeometrie.
 Der geschlossene Turmkörper hat keinen modellierten inneren Hohlraum; das
 tatsächliche Infill bestimmt der Slicer. Wenn die Analyse keinen Turm benötigt,
 ist das ein erfolgreicher Ausgang ohne zusätzliche STL. Die Anwendung ist
-kostenlos und **Source Available**; die [Projektlizenz](LICENSE.md) beschreibt
+vom Anbieter kostenlos erhältlich und unter der **Apache-2.0-Lizenz** lizenziert;
+die [Projektlizenz](LICENSE.md) beschreibt
 Nutzungs- und Weitergaberechte.
 
 ## Windows-Download und Voraussetzungen
 
 Die [offiziellen GitHub-Releases](https://github.com/RodeProjects/sacrificial-tower-updates/releases)
 enthalten den Windows-Installer. Aktuelle Fassungen sind **Entwicklungsversionen
-für Tests und Evaluation**. Für den STL-Ablauf zuerst einen unterstützten Slicer
+für Tests und Evaluation**. Die Apache-2.0-Umstellung betrifft den aktuellen
+Quellstand und daraus kommende Builds. Für bereits veröffentlichte Installer gilt
+die jeweils mitgelieferte Lizenz; sie werden durch diese README nicht umlizenziert.
+Für den STL-Ablauf zuerst einen unterstützten Slicer
 installieren und darin den eigenen Drucker, das Filament und ein Prozessprofil
 einrichten. Danach die Profile im Slicer speichern und im Turmprogramm auswählen.
 Die Verwendung des Windows-Installers erfordert keine eigene Python-Installation.
@@ -128,11 +132,16 @@ Der [Dokumentationsindex](docs/README.md) führt zu Architektur, Tests, Migratio
 Slicern, nativer Analyse und Programmaktualisierungen. Den aktuellen Bestand aus
 älteren Phasen dokumentiert ein ausdrücklich [historisches Archiv](docs/history/development_phases.md).
 
-Die [Projektlizenz](LICENSE.md) erlaubt kostenlose Nutzung, auch im Gewerbe,
-Klonen, Forken und Weiterentwicklung mit erhaltenen Urheberhinweisen.
-Kommerzielle Weiterverbreitung der Software einschließlich abgeleiteter Fassungen
-ist untersagt; erzeugte Kühltürme dürfen kommerziell verwendet werden.
-Das öffentlich einsehbare Lizenzmodell heißt „Source Available“.
+Eigener Code, eigene Dokumentation und eigene Assets stehen unter der
+[Apache License 2.0](LICENSE.md), einer OSI-anerkannten Open-Source-Lizenz,
+soweit keine abweichende Lizenz angegeben ist. Nutzung, Klonen, Forken, Änderungen
+und Weitergabe sind auch kommerziell einschließlich Verkauf zulässig.
+Lizenzkopie, Änderungskennzeichnung und die vorgeschriebenen Urheber-/Herkunftshinweise
+aus [NOTICE](NOTICE) sind nach Abschnitt 4 zu erhalten. Es gibt keine Commons Clause
+und keine Pflicht, eigene Änderungen zu veröffentlichen. Drittkomponenten behalten
+ihre eigenen Lizenzen. Erzeugte Kühltürme dürfen kommerziell verwendet werden.
+Lizenzumfang, Beiträge und der Übergang von früheren Fassungen sind unter
+[Rechte und Nutzungsmodell](docs/distribution.md#rechte-und-nutzungsmodell) erläutert.
 
 Die Oberfläche enthält vollständige Projektlizenz, Nutzungsbedingungen,
 Datenschutzinformationen und Drittanbieterhinweise. Maßgeblich sind

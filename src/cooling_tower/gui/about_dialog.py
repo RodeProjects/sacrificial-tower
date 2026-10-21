@@ -17,8 +17,9 @@ LICENSE_STATUS_DEFINITIONS = {
     "development": {
         "label": "Entwicklungsversion",
         "description": (
-            "Diese kostenlose Version befindet sich noch in Entwicklung und ist nicht "
-            "für den regulären Vertrieb bestimmt."
+            "Diese kostenlose Version befindet sich noch in Entwicklung. "
+            "Die Veröffentlichungsprüfung des Anbieters ist noch offen; "
+            "die Nutzungsrechte nach Apache-2.0 gelten auch für diese Fassung."
         ),
         "foreground": "#6b4b00",
         "background": "#fff3ce",
@@ -26,7 +27,7 @@ LICENSE_STATUS_DEFINITIONS = {
     },
     "free": {
         "label": "Kostenlose Version",
-        "description": "Kostenlose Nutzung einschließlich gewerblicher Verwendung zulässiger Ergebnisse.",
+        "description": "Vom Anbieter kostenlos veröffentlichte Fassung unter Apache-2.0.",
         "foreground": "#17633a",
         "background": "#e7f6ed",
         "border": "#8fc9a5",
@@ -217,17 +218,18 @@ class AboutDialog(QDialog):
         developer_layout.addLayout(self.about_developer_row)
         self.about_copyright_row = self._about_symbol_text_row(
             "©",
-            f"2026 {provider['provider_name']} · Alle Rechte vorbehalten.",
+            f"2026 {provider['provider_name']} · Apache-2.0",
         )
         developer_layout.addLayout(self.about_copyright_row)
-        proprietary_notice = QLabel(
-            "Kostenlose Software. Klonen, Forken und Weiterentwicklung sind "
-            "nach der Projektlizenz erlaubt; kommerzielle Weiterverbreitung "
-            "ist untersagt. Erzeugte Kühltürme dürfen kommerziell genutzt werden."
+        license_notice = QLabel(
+            "Apache-2.0 erlaubt Nutzung, Änderung und Weitergabe, auch kommerziell, "
+            "unter Erhalt der vorgeschriebenen Lizenz- und Urheberhinweise. "
+            "Drittkomponenten behalten ihre eigenen Lizenzen. "
+            "Erzeugte Kühltürme dürfen kommerziell genutzt werden."
         )
-        proprietary_notice.setWordWrap(True)
-        proprietary_notice.setObjectName("aboutBodyText")
-        developer_layout.addWidget(proprietary_notice)
+        license_notice.setWordWrap(True)
+        license_notice.setObjectName("aboutBodyText")
+        developer_layout.addWidget(license_notice)
         content_layout.addWidget(developer_section)
 
         license_section = QFrame()
@@ -244,7 +246,7 @@ class AboutDialog(QDialog):
         self.about_license_status_label = development_status
         self.about_license_status_row = self._about_icon_text_row(
             "shield.svg",
-            "Lizenzstatus:",
+            "Veröffentlichungsstatus:",
             heading=True,
             value_widget=development_status,
         )

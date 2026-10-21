@@ -1,13 +1,13 @@
 # Freiwillige Unterstützung über PayPal
 
-Stand: 18.10.2026. Der Menüpunkt „Buy me a coffee …“ bietet ein freiwilliges,
+Stand: 21.10.2026. Der Menüpunkt „Buy me a coffee …“ bietet ein freiwilliges,
 einmaliges Dankeschön ohne Gegenleistung. Keine Verbindung zur Plattform
 Buy Me a Coffee, kein SDK, kein Zahlungsbackend und kein Abonnement.
 
 ## Bedienung und Datenfluss
 
-Der lokale Dialog bietet 2,50 €, 5 €, 10 €, 15 € und 20 € sowie eine freie Eingabe
-von 1,50 bis 50,00 EUR pro Zahlung. Beim erstmaligen Öffnen sind 5 EUR als
+Der lokale Dialog bietet 3,50 €, 5 €, 10 €, 15 € und 20 € sowie eine freie Eingabe
+von 2,50 bis 50,00 EUR pro Zahlung. Beim erstmaligen Öffnen sind 5 EUR als
 unverbindlicher, frei änderbarer Vorschlag vorausgewählt und sichtbar markiert.
 Komma und Punkt sind
 als Dezimaltrenner erlaubt, maximal zwei Nachkommastellen; Gruppierungszeichen,
@@ -15,10 +15,9 @@ Exponenten, negative Werte und Rundung sind ausgeschlossen. Die Obergrenze ist
 eine lokale Eingabegrenze, keine Zusage einer PayPal-Zahlungsgrenze. Die Grenzen
 gelten für den durch die Anwendung vorbereiteten Zahlungslink; nachträglich
 außerhalb der Anwendung geänderte Beträge kontrolliert sie nicht.
-Die Untergrenze von 1,50 EUR lässt beim am 17.10.2026 geprüften Inlandsspendentarif
-von 2,49 % + 0,35 EUR rechnerisch etwa 1,11 EUR nach Gebühren übrig. Damit wird
-für diesen Tarif das Ziel von mindestens 1 EUR erreicht. Abweichende Kontotarife,
-Auslands- und Währungsgebühren können den Nettobetrag ändern; die Anwendung
+Die Untergrenze von 2,50 EUR lässt beim am 17.10.2026 geprüften Inlandsspendentarif
+von 2,49 % + 0,35 EUR rechnerisch etwa 2,09 EUR nach Gebühren übrig. Abweichende
+Kontotarife, Auslands- und Währungsgebühren können den Nettobetrag ändern; die Anwendung
 ermittelt keine kontospezifischen Gebühren und garantiert keinen universellen
 Nettoerlös. Quelle und Gebührenstand: [Dependencies](dependencies.md#paypal-als-freiwilliger-externer-zahlungsweg-geprüft-17102026).
 Das Eingabefeld weist Buchstaben, Sonderzeichen, mehr als einen Dezimaltrenner,
@@ -40,11 +39,11 @@ aktuelle Auswahl beziehungsweise eigene Eingabe erhalten und wird nicht erneut
 durch den 5-EUR-Vorschlag ersetzt.
 
 Die integrierten Hoch-/Runter-Pfeile ändern den Betrag mit `Decimal` um jeweils
-0,50 EUR und begrenzen das Ergebnis auf 1,50 bis 50,00 EUR. Die Feldbreite bleibt
+0,50 EUR und begrenzen das Ergebnis auf 2,50 bis 50,00 EUR. Die Feldbreite bleibt
 unverändert. Ausgangspunkt ist die aktuelle eigene Eingabe oder der ausgewählte
 Festbetrag; der Klick erzeugt eine eigene Eingabe und hebt die Festbetragsauswahl
 auf. Ist keine Auswahl und kein eigener Betrag vorhanden, beginnt der erste
-Aufwärtsklick bei 1,50 EUR. Gedrückthalten wiederholt den Schritt alle 250 ms
+Aufwärtsklick bei 2,50 EUR. Gedrückthalten wiederholt den Schritt alle 250 ms
 (vier Schritte pro Sekunde); Loslassen oder Erreichen der Grenze beendet die
 Wiederholung. Nicht ausführbare Schritte an den Grenzen sind deaktiviert und
 grau dargestellt. Die Pfeile öffnen keinen Browser und lösen keine Zahlung aus.
@@ -93,14 +92,16 @@ dominanten Dokumentbuttons. Grundlage für den leicht zugänglichen Datenschutz:
 
 ## Rechtliche Einordnung und verbleibende Betreiberaufgaben
 
-Die [Projektlizenz, Abschnitt 4](../LICENSE.md) gestattet bereits freiwillige
-Zuwendungen ohne Softwaregegenleistung und musste deshalb nicht geändert werden.
+Die [Apache-2.0-Projektlizenz](../LICENSE.md) erlaubt auch kommerzielle Nutzung und
+Weitergabe. Die hier angebotene freiwillige Unterstützung ist unabhängig von
+diesen Lizenzrechten und bleibt ohne Gegenleistung; eine Zahlung ist keine
+Voraussetzung für deren Ausübung.
 [Nutzungsbedingungen](../legal/terms.md), [Datenschutzinformationen](../legal/privacy.md)
 und das zentrale Vertriebsprofil beschreiben die konkrete Funktion. Die gemeinsame
 Exportpipeline übernimmt den neuen Abschnitt automatisch in den Installertext;
 keine zweite Lizenzkopie oder Zahlung während der Installation hinzufügen.
 
-### Prüfung der Betragsvorauswahl (18.10.2026)
+### Prüfung der Betragsvorauswahl (aktualisiert am 21.10.2026)
 
 Ergebnis der konkreten Gestaltungseinschätzung: Die sichtbare 5-EUR-Vorauswahl
 ist unter den nachfolgenden Bedingungen vertretbar; das zusätzliche Risiko wird

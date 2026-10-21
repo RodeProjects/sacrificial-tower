@@ -17,7 +17,7 @@ EXPECTED = {
     "provider_additional_details": "Rechtsform, Vertretung, Register und USt-ID, soweit einschlägig; andernfalls ausdrücklich nicht einschlägig",
     "support_retention_policy": "Speicher-/Löschkriterien und eingesetzte GitHub-/Maildienste",
     "distribution_terms": "Vertriebs-/Nutzungsmodell sowie konkrete Support- und Updatezusagen",
-    "release_legal_review": "Datierte Prüfung mit Nachweisen: individuelle Lizenz/Rechtstexte, GitHub-/Mail-Datenschutzbedingungen, LGPL-Quell-/Binärzuordnung und Store-Austausch, Toolchain-/Runtime-Berechtigung sowie CRA-Einordnung",
+    "release_legal_review": "Datierte Prüfung mit Nachweisen: Apache-2.0-Lizenzumfang/NOTICE und ergänzende Rechtstexte, GitHub-/Mail-Datenschutzbedingungen, LGPL-Quell-/Binärzuordnung und Store-Austausch, Toolchain-/Runtime-Berechtigung sowie CRA-Einordnung einschließlich Open-Source-Vertrieb",
 }
 
 DEVELOPMENT_DEFERRED_FIELDS = {

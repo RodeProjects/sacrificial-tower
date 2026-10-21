@@ -97,6 +97,8 @@ VC_INCLUDE_DIRS, VC_LIBRARY_DIRS = _prepare_standalone_msvc_environment()
 setup(
     name="sacrificial-tower-native",
     version="1.0.0",
+    license_expression="Apache-2.0",
+    license_files=["LICENSE.md", "NOTICE"],
     ext_modules=[
         Extension(
             "cooling_tower._native_timing",

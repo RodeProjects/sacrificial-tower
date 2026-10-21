@@ -455,10 +455,13 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "Kühlturm-Generator",
             "Wolfgang Florian Rode",
             "Entwicklungsversion",
+            "Apache-2.0",
+            "auch kommerziell",
             "GitHub Issues",
         ):
             self.assertIn(expected, labels)
         self.assertNotIn("© 2026 Florian Rode", labels)
+        self.assertNotIn("Weiterverbreitung ist untersagt", labels)
         self.assertEqual(
             window.about_developer_row.itemAt(1).widget().text(),
             "Entwickelt von:",
@@ -469,7 +472,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         self.assertEqual(
             window.about_license_status_row.itemAt(1).widget().text(),
-            "Lizenzstatus:",
+            "Veröffentlichungsstatus:",
         )
         self.assertIs(
             window.about_license_status_row.itemAt(2).widget(),
@@ -482,7 +485,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         )
         self.assertEqual(
             window.about_copyright_text.text(),
-            "2026 Wolfgang Florian Rode · Alle Rechte vorbehalten.",
+            "2026 Wolfgang Florian Rode · Apache-2.0",
         )
         self.assertTrue(window.about_copyright_symbol.pixmap().isNull())
         stylesheet = window.styleSheet()

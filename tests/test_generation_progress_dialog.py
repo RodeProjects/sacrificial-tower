@@ -170,7 +170,9 @@ class GenerationProgressDialogTests(unittest.TestCase):
         dialog.close()
 
     def test_joint_slice_setting_is_bounded_between_five_and_twenty(self) -> None:
-        dialog = JointSliceSettingsDialog(17, maximum_separate_slices=9)
+        dialog = JointSliceSettingsDialog(
+            17, maximum_separate_slices=9, preparation_ready=True
+        )
         self.assertEqual(dialog.spin_box.minimum(), 5)
         self.assertEqual(dialog.spin_box.maximum(), 20)
         self.assertGreaterEqual(dialog.minimumWidth(), 707)
@@ -198,21 +200,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         dialog.show()
         self.app.processEvents()
-        limits_layout = dialog.layout().itemAt(0).widget().layout().itemAt(1).layout()
-        self.assertLess(
-            limits_layout.indexOf(dialog.limits_info_button),
-            limits_layout.indexOf(dialog.show_limits_checkbox),
-        )
-        self.assertEqual(dialog.limits_info_button.size().width(), 19)
-        self.assertIn("wichtigen Grenzüberschreitungen", dialog.limits_info_button.toolTip())
-        shown_hints: list[str] = []
-        dialog.limits_info_button.hint_shown.connect(shown_hints.append)
-        QApplication.sendEvent(
-            dialog.limits_info_button, QEvent(QEvent.Type.Enter)
-        )
-        self.assertEqual(shown_hints, [dialog.limits_info_button.toolTip()])
         reset_buttons = (
-            dialog.limits_reset_button,
             dialog.tolerance_reset_button,
             dialog.separate_reset_button,
             dialog.reset_button,
@@ -230,14 +218,6 @@ class GenerationProgressDialogTests(unittest.TestCase):
         dialog.local_window_reset_button.click()
         self.assertEqual(dialog.local_window_spin_box.value(), 51)
         self.assertFalse(dialog.local_window_reset_button.property("modified"))
-        self.assertLess(
-            dialog.show_limits_checkbox.mapTo(
-                dialog, dialog.show_limits_checkbox.rect().topLeft()
-            ).y(),
-            dialog.tolerance_label.mapTo(
-                dialog, dialog.tolerance_label.rect().topLeft()
-            ).y(),
-        )
         self.assertLess(
             dialog.tolerance_label.mapTo(
                 dialog, dialog.tolerance_label.rect().topLeft()
@@ -301,13 +281,6 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(dialog.output_reset_button.objectName(), "settingResetButton")
         self.assertEqual(dialog.output_reset_button.size().width(), 36)
         self.assertFalse(dialog.output_reset_button.isEnabled())
-        self.assertFalse(dialog.limits_reset_button.isEnabled())
-        dialog.show_limits_checkbox.setChecked(True)
-        self.assertTrue(dialog.limits_reset_button.isEnabled())
-        dialog.limits_reset_button.click()
-        self.assertFalse(dialog.show_limits_checkbox.isChecked())
-        self.assertFalse(dialog.limits_reset_button.isEnabled())
-
         applied: list[int] = []
         dialog.value_applied.connect(applied.append)
         dialog.spin_box.setValue(14)
@@ -318,6 +291,32 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
         dialog.close()
 
+    def test_unavailable_general_settings_keep_hover_information_accessible(self) -> None:
+        dialog = JointSliceSettingsDialog(17, output_root="custom")
+        self.addCleanup(dispose_test_widget, dialog)
+        dialog.show()
+        self.app.processEvents()
+        for label, editor, info in (
+            (dialog.tolerance_label, dialog.tolerance_spin_box, dialog.tolerance_info_button),
+            (dialog.maximum_separate_slices_label, dialog.separate_spin_box, dialog.separate_info_button),
+            (dialog.maximum_joint_slices_label, dialog.spin_box, dialog.info_button),
+            (dialog.local_window_label, dialog.local_window_spin_box, dialog.local_window_info_button),
+        ):
+            with self.subTest(setting=label.text()):
+                self.assertFalse(label.isEnabled())
+                self.assertFalse(editor.isEnabled())
+                self.assertTrue(info.isEnabled())
+                QApplication.sendEvent(info, QEvent(QEvent.Type.Enter))
+                self.assertTrue(dialog._bounded_hint_popover.isVisible())
+                self.assertEqual(dialog._bounded_hint_popover.label.text(), info.toolTip())
+                QApplication.sendEvent(info, QEvent(QEvent.Type.Leave))
+        self.assertTrue(dialog.output_root_edit.isEnabled())
+        self.assertIsNot(dialog.focusWidget(), dialog.output_root_edit)
+        self.assertFalse(dialog.output_root_edit.hasSelectedText())
+        self.assertFalse(dialog.general_reset_button.isEnabled())
+        dialog.spin_box.setValue(18)
+        self.assertFalse(dialog.reset_button.isEnabled())
+
     def test_general_settings_reset_only_changes_dialog_values_until_applied(self) -> None:
         dialog = JointSliceSettingsDialog(
             17,
@@ -326,8 +325,8 @@ class GenerationProgressDialogTests(unittest.TestCase):
             maximum_separate_slices=9,
             local_reference_window=31,
             layer_time_tolerance_s=0.6,
+            preparation_ready=True,
         )
-        dialog.show_limits_checkbox.setChecked(True)
         self.assertTrue(dialog.general_reset_button.isEnabled())
         footer_layout = dialog.general_reset_button.parentWidget().layout()
         self.assertEqual(footer_layout.itemAt(0).widget(), dialog.general_reset_button)
@@ -336,7 +335,6 @@ class GenerationProgressDialogTests(unittest.TestCase):
         dialog.general_reset_button.click()
         self.assertEqual(dialog.separate_spin_box.value(), 6)
         self.assertEqual(dialog.spin_box.value(), 12)
-        self.assertFalse(dialog.show_limits_checkbox.isChecked())
         self.assertEqual(dialog.local_window_spin_box.value(), 51)
         self.assertEqual(dialog.tolerance_spin_box.value(), 0.25)
         self.assertEqual(dialog.output_root_edit.text(), "default")
@@ -356,6 +354,12 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_startup_slicer_discovery=False,
         )
         self.addCleanup(dispose_test_widget, window)
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "STL", analysis_complete=True
+        )
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.layer_time_tolerance_spin.setValue(0.6)
         self.assertFalse(window._has_non_default_settings())
         window.target_time_spin.setValue(12.0)
@@ -480,6 +484,12 @@ class GenerationProgressDialogTests(unittest.TestCase):
             enable_startup_slicer_discovery=False,
         )
         self.addCleanup(dispose_test_widget, window)
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded(
+            "STL", analysis_complete=True
+        )
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
         window.local_window_spin.setValue(31)
         window.target_time_spin.setValue(12)
         window.reset_defaults()

@@ -25,7 +25,7 @@ Eingabefeld-Hinweise der GUI oder Beispielvariablen in Anleitungen.
 | eingetragen | `provider_additional_details` | Rechtsform, Vertretung, Register und USt-ID, soweit einschlägig; andernfalls ausdrücklich nicht einschlägig | `legal/terms.md` |
 | eingetragen | `support_retention_policy` | Speicher-/Löschkriterien und eingesetzte GitHub-/Maildienste | `legal/privacy.md` |
 | eingetragen | `distribution_terms` | Vertriebs-/Nutzungsmodell sowie konkrete Support- und Updatezusagen | Freigabeprozess |
-| OFFEN | `release_legal_review` | Datierte Prüfung mit Nachweisen: individuelle Lizenz/Rechtstexte, GitHub-/Mail-Datenschutzbedingungen, LGPL-Quell-/Binärzuordnung und Store-Austausch, Toolchain-/Runtime-Berechtigung sowie CRA-Einordnung | Freigabeprozess |
+| OFFEN | `release_legal_review` | Datierte Prüfung mit Nachweisen: Apache-2.0-Lizenzumfang/NOTICE und ergänzende Rechtstexte, GitHub-/Mail-Datenschutzbedingungen, LGPL-Quell-/Binärzuordnung und Store-Austausch, Toolchain-/Runtime-Berechtigung sowie CRA-Einordnung einschließlich Open-Source-Vertrieb | Freigabeprozess |
 
 Wenn alle Einträge erledigt sind und die Prüfung erfolgreich ist, sind sämtliche
 hier registrierten Daten eingepflegt. Das bestätigt die Vollständigkeit der

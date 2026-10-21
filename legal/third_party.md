@@ -2,11 +2,11 @@
 
 Sacrificial Tower verwendet Qt/PySide6 und Shiboken unter der LGPLv3 sowie
 Python, NumPy, trimesh, truststore, cryptography und weitere separat dokumentierte
-Komponenten unter ihren jeweiligen Lizenzen. Die kostenlose Bereitstellung und
-die Projektlizenz mit Beschränkung kommerzieller Weiterverbreitung ändern diese
-Drittlizenzen nicht. Das Vertriebsverbot gilt ausschließlich für eigene
-Projektbestandteile; eigenständige kommerzielle Nutzungs- und Weitergaberechte
-der Drittkomponenten bleiben im Umfang ihrer jeweiligen Lizenzen erhalten.
+Komponenten unter ihren jeweiligen Lizenzen. Eigener Anwendungscode, eigene
+Dokumentation und eigene Assets stehen grundsätzlich unter Apache-2.0 gemäß
+„LICENSE.md“ und „NOTICE“. Diese Lizenzierung und die kostenlose Bereitstellung
+durch den Anbieter ändern die Drittlizenzen nicht. Bei Weitergabe des Gesamtpakets
+sind neben Apache-2.0 auch die jeweiligen Bedingungen der Drittkomponenten zu erfüllen.
 
 Copyright an der eigenen Anwendung: © 2026 {{provider_name}}.
 Die Rechte an Drittkomponenten verbleiben bei deren jeweiligen Rechteinhabern.

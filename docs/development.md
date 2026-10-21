@@ -227,8 +227,16 @@ die vorhandene Lizenzdokumentation für Inno Setup gilt weiter.
 
 `python scripts/export_legal_documents.py` exportiert dieselben aufgelösten
 Rechtstexte wie die Oberfläche nach `build/legal-public/`. Darin enthält
-`terms.md` bereits die vollständige Projektlizenz; `terms.txt` enthält denselben
-Text mit UTF-8-BOM für Inno Setup. Die Vorlagen unter `legal/` unverändert als
+`terms.md` bereits den vollständigen Apache-2.0-Lizenztext und die Herkunftshinweise
+aus NOTICE; `terms.txt` enthält denselben Text mit UTF-8-BOM für Inno Setup.
+LICENSE.md und NOTICE werden zusätzlich unverändert als einzelne Dateien exportiert.
+Der Paketbuild kopiert beide aus dem Repository in das Rechtsverzeichnis;
+die Lieferumfangsprüfung vergleicht beide, die Rechtstextvorlagen, die Quellbuild-
+und Austauschhinweise sowie das Anbieterprofil mit dem aktuellen Quellstand.
+Sie verlangt auch die zugehörigen aktuellen Exportdateien; übereinstimmende
+Exporte veralteter Vorlagen reichen nicht aus.
+Die native Erweiterung kennzeichnet ihre Paketmetadaten mit Apache-2.0 und führt
+LICENSE.md und NOTICE als Lizenzdateien mit. Die Vorlagen unter `legal/` unverändert als
 Vorlagen behalten und öffentliche Kopien nach jeder Text-/Profiländerung neu
 erzeugen. Der PyInstaller-Build übernimmt die aufgelösten Kopien unter
 `_internal/legal/published/`; die Lieferumfangsprüfung erkennt fehlende oder

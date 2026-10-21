@@ -2,7 +2,7 @@
 
 ## Rechteinhaber
 
-© 2026 Wolfgang Florian Rode. Nicht eingeräumte Rechte bleiben vorbehalten.
+© 2026 Wolfgang Florian Rode. Eigene Assets sind unter Apache-2.0 lizenziert.
 
 ## Projektinterne Symbole
 
@@ -10,10 +10,15 @@ Die SVG-Symbole in diesem Ordner wurden eigens für den
 Kühlturm-Generator als einfache geometrische Liniengrafiken erstellt. Sie
 stammen aus keinem externen Iconpaket.
 
-Für Verwendung, Vervielfältigung, Veränderung und kostenlose Verbreitung eigener
-Symbole gilt die [Projektlizenz](../../../../LICENSE.md). Urheber-/Herkunftshinweise
-bleiben erhalten; kommerzielle Weiterverbreitung ist nach deren Bedingungen
-untersagt. Rechte an fremden eigenständigen Inhalten werden nicht beansprucht.
+Für Verwendung, Vervielfältigung, Veränderung und Weitergabe eigener Assets,
+einschließlich kommerzieller Weitergabe, gilt die
+[Apache-2.0-Projektlizenz](../../../../LICENSE.md). Dies umfasst die eigenen
+SVG-Symbole, die bestätigte Logografik, das Windows-Icon, das WebP-Bild und die
+eigenen Testmodelle.
+Vorgeschriebene Lizenz-, Änderungs- und Herkunftshinweise
+einschließlich [NOTICE](../../../../NOTICE) sind gemäß Apache-2.0 zu erhalten.
+Rechte an fremden eigenständigen Inhalten werden nicht beansprucht; Markenrechte
+werden nur im in Abschnitt 6 der Lizenz beschriebenen Umfang eingeräumt.
 
 ## Programmsymbol
 
@@ -22,9 +27,13 @@ Anwendung bereitgestellt. Es wurde nicht aus einem Drittanbieter-Assetpaket
 bezogen.
 
 `tower_gen_finished.webp` wurde vom Benutzer als projektinternes Bild für den
-Generierungsdialog bereitgestellt. Es wird unverändert und ausschließlich als
-Bestandteil dieser Anwendung verwendet; es stammt aus keinem neu eingeführten
-Drittanbieter-Assetpaket.
+Generierungsdialog bereitgestellt. Der erfasste Bestand ist unverändert; das Bild
+stammt aus keinem neu eingeführten Drittanbieter-Assetpaket. Am 21.10.2026 bestätigte
+der Benutzer ausdrücklich, das Bild selbst erstellt zu haben und unter Apache-2.0
+freizugeben, einschließlich Änderung und kommerzieller Weitergabe. Dies ist die
+gesonderte Rechtebestätigung für das später hinzugefügte Bild; die Bestätigung vom
+14.09.2026 für Logo und Test-STL wird dafür nicht herangezogen. Siehe
+[Prüfnachweis](../../../../docs/license_review.md).
 
 ## Bestätigte Urheberschaft und Testmodelle
 

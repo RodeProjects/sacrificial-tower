@@ -6,8 +6,8 @@ import re
 from urllib.parse import urlencode
 
 
-SUPPORT_PRESETS = ("2.50", "5.00", "10.00", "15.00", "20.00")
-SUPPORT_AMOUNT_MIN = Decimal("1.50")
+SUPPORT_PRESETS = ("3.50", "5.00", "10.00", "15.00", "20.00")
+SUPPORT_AMOUNT_MIN = Decimal("2.50")
 SUPPORT_AMOUNT_MAX = Decimal("50.00")
 SUPPORT_AMOUNT_RANGE_TEXT = f"{SUPPORT_AMOUNT_MIN:.2f} bis {SUPPORT_AMOUNT_MAX:.2f} €".replace(".", ",")
 SUPPORT_AMOUNT_PATTERN = r"[0-9]{1,4}(?:[.,][0-9]{1,2})?"

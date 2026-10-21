@@ -310,9 +310,6 @@ class VoluntarySupportDialog(QDialog):
             button.setAutoDefault(False)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setAccessibleName(f'{text} als Unterstützungsbetrag auswählen')
-            if amount == '5.00':
-                button.setToolTip('5 € · bevorzugter Unterstützungsbetrag')
-                button.setAccessibleDescription('Bevorzugter Unterstützungsbetrag')
             button.clicked.connect(lambda _checked=False, value=amount: self.select_amount(value))
             self.preset_buttons.append(button)
         self.amount_choices = _AmountChoices(self.preset_buttons)

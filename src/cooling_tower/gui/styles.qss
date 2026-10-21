@@ -2101,6 +2101,15 @@ QLabel#dialogTitle {
     font-weight: 700;
 }
 
+QLabel#generalSettingsPreparationHint {
+    color: #405b73;
+    background: #edf6fd;
+    border: 1px solid #c4d8e8;
+    border-left: 4px solid #79a7c8;
+    border-radius: 6px;
+    padding: 7px 10px;
+}
+
 /* ---------- STL-Datei ---------- */
 QFrame#sourceDropZone {
     background: #f6fafd;
@@ -2801,9 +2810,6 @@ QCheckBox#simulateFullTowerInfill:pressed,
 QCheckBox#simulateTowerWithoutSupports,
 QCheckBox#simulateTowerWithoutSupports:hover,
 QCheckBox#simulateTowerWithoutSupports:pressed,
-QCheckBox#showSettingLimits,
-QCheckBox#showSettingLimits:hover,
-QCheckBox#showSettingLimits:pressed,
 QCheckBox#showAllProfilesCheckBox,
 QCheckBox#showAllProfilesCheckBox:hover,
 QCheckBox#showAllProfilesCheckBox:pressed {
@@ -2812,8 +2818,7 @@ QCheckBox#showAllProfilesCheckBox:pressed {
     padding: 4px 7px 4px 0;
 }
 QCheckBox#simulateFullTowerInfill:hover,
-QCheckBox#simulateTowerWithoutSupports:hover,
-QCheckBox#showSettingLimits:hover {
+QCheckBox#simulateTowerWithoutSupports:hover {
     color: #0f5d91;
     background: #f1f7fb;
 }
@@ -2825,7 +2830,6 @@ QCheckBox#showAllProfilesCheckBox:pressed {
 }
 QCheckBox#simulateFullTowerInfill::indicator,
 QCheckBox#simulateTowerWithoutSupports::indicator,
-QCheckBox#showSettingLimits::indicator,
 QCheckBox#showAllProfilesCheckBox::indicator {
     width: 16px;
     height: 16px;
@@ -3559,7 +3563,38 @@ QWidget#generalSettingsFooter QPushButton {
 QPushButton#generalSettingsBrowseButton {
     min-height: 34px;
     max-height: 34px;
-    padding: 4px 13px;
+    padding: 0 13px;
+}
+
+QLineEdit#generalSettingsOutputRoot {
+    min-height: 34px;
+    padding: 0 8px;
+}
+
+QLineEdit#generalSettingsOutputRoot:focus,
+QPushButton#generalSettingsBrowseButton:focus {
+    border-width: 1px;
+}
+
+QWidget#generalSettingsPanel QLabel:disabled,
+QWidget#generalSettingsPanel QLineEdit:disabled {
+    color: #8995a0;
+    background: transparent;
+}
+
+QWidget#generalSettingsPanel QSpinBox:disabled,
+QWidget#generalSettingsPanel QDoubleSpinBox:disabled {
+    color: #8995a0;
+    background: #edf0f2;
+    border-color: #d8dee3;
+}
+
+QWidget#generalSettingsPanel QSpinBox::up-button:disabled,
+QWidget#generalSettingsPanel QSpinBox::down-button:disabled,
+QWidget#generalSettingsPanel QDoubleSpinBox::up-button:disabled,
+QWidget#generalSettingsPanel QDoubleSpinBox::down-button:disabled {
+    background: #e5eaee;
+    border-color: #d8dee3;
 }
 
 QLabel#towerGenerationTitle {

@@ -11,6 +11,7 @@ DOCUMENTS = {
     "Datenschutzerklärung": "privacy.md",
     "Drittanbieter-Lizenzen": "third_party.md",
 }
+PROJECT_LEGAL_FILES = ("LICENSE.md", "NOTICE")
 
 DEVELOPMENT_PLACEHOLDER_TEXT = {
     "provider_postal_address": (
@@ -37,10 +38,10 @@ def legal_profile(*, root: Path = RESOURCE_ROOT) -> dict[str, str]:
     return profile
 
 
-def _project_license(root: Path) -> str:
-    path = root / "LICENSE.md"
+def _project_legal_text(root: Path, filename: str) -> str:
+    path = root / filename
     if not path.is_file():
-        path = root / "legal" / "LICENSE.md"
+        path = root / "legal" / filename
     return path.read_text(encoding="utf-8")
 
 
@@ -49,7 +50,9 @@ def render_legal_document(title: str, *, root: Path = RESOURCE_ROOT) -> str:
     profile = legal_profile(root=root)
     template = (root / "legal" / filename).read_text(encoding="utf-8")
     if title == "Lizenzbedingungen":
-        template += "\n\n---\n\n" + _project_license(root)
+        template += "\n\n---\n\n" + _project_legal_text(root, "LICENSE.md")
+        template += "\n\n---\n\n## Urheber- und Herkunftshinweise (NOTICE)\n\n"
+        template += _project_legal_text(root, "NOTICE")
     def substitute(match: re.Match[str]) -> str:
         key = match.group(1)
         if key not in profile or not isinstance(profile[key], str):
@@ -73,7 +76,10 @@ def export_legal_documents(destination: Path, *, root: Path = RESOURCE_ROOT) -> 
         filename: render_legal_document(title, root=root)
         for title, filename in DOCUMENTS.items()
     }
-    documents["LICENSE.md"] = _project_license(root)
+    documents.update({
+        filename: _project_legal_text(root, filename)
+        for filename in PROJECT_LEGAL_FILES
+    })
     # Resolve everything before writing, so unknown or missing provider keys
     # cannot leave a partly updated set of public documents.
     destination.mkdir(parents=True, exist_ok=True)

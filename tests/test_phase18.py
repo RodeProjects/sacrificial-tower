@@ -634,20 +634,6 @@ class Phase18UiTests(unittest.TestCase):
         dialog = window._joint_slice_settings_dialog
         self.assertGreaterEqual(dialog.width(), 707)
         self.assertEqual(
-            dialog.show_limits_checkbox.layoutDirection(),
-            window.full_infill_checkbox.layoutDirection(),
-        )
-        self.assertEqual(
-            dialog.show_limits_checkbox.sizeHint().height(),
-            window.full_infill_checkbox.sizeHint().height(),
-        )
-        limits_layout = dialog.layout().itemAt(0).widget().layout().itemAt(1).layout()
-        self.assertEqual(
-            (limits_layout.contentsMargins().top(),
-             limits_layout.contentsMargins().bottom()),
-            (2, 2),
-        )
-        self.assertEqual(
             (dialog.separate_spin_box.width(), dialog.spin_box.width(),
              dialog.local_window_spin_box.width()),
             (165, 165, 165),
@@ -661,6 +647,14 @@ class Phase18UiTests(unittest.TestCase):
             if button.text() == "Auswählen …"
         )
         self.assertEqual(browse.height(), dialog.output_root_edit.height())
+        export_controls = (dialog.output_root_edit, browse, dialog.output_reset_button)
+        self.assertEqual(len({control.height() for control in export_controls}), 1)
+        self.assertEqual(
+            len({control.mapTo(dialog, QPoint(0, 0)).y() for control in export_controls}),
+            1,
+        )
+        self.assertIsNot(dialog.focusWidget(), dialog.output_root_edit)
+        self.assertFalse(dialog.output_root_edit.hasSelectedText())
         footer_buttons = (
             dialog.general_reset_button,
             dialog.apply_button,

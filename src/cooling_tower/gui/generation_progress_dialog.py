@@ -15,7 +15,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
-    QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QLineEdit,
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -610,7 +608,6 @@ class TowerGenerationDialog(QDialog):
 class JointSliceSettingsDialog(QDialog):
     value_applied = Signal(int)
     separate_value_applied = Signal(int)
-    limits_applied = Signal(bool)
     output_root_applied = Signal(str)
     local_window_applied = Signal(int)
     layer_time_tolerance_applied = Signal(float)
@@ -630,6 +627,7 @@ class JointSliceSettingsDialog(QDialog):
         maximum_local_reference_window: int = 999,
         layer_time_tolerance_s: float = 0.25,
         default_layer_time_tolerance_s: float = 0.25,
+        preparation_ready: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("jointSliceSettingsDialog")
@@ -642,6 +640,7 @@ class JointSliceSettingsDialog(QDialog):
         self.default_maximum_separate_slices = max(
             1, min(15, int(default_maximum_separate_slices))
         )
+        self._preparation_ready = bool(preparation_ready)
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
@@ -654,6 +653,20 @@ class JointSliceSettingsDialog(QDialog):
         title.setObjectName("dialogTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        self.preparation_hint = QLabel(
+            "Diese Einstellungen sind nach erfolgreichem Abschluss der "
+            "Vorbereitungen verfügbar."
+        )
+        self.preparation_hint.setObjectName("generalSettingsPreparationHint")
+        self.preparation_hint.setWordWrap(True)
+        self.preparation_hint.setVisible(not preparation_ready)
+        layout.addWidget(self.preparation_hint)
+        self.settings_panel = QWidget(content)
+        self.settings_panel.setObjectName("generalSettingsPanel")
+        settings_panel_layout = QVBoxLayout(self.settings_panel)
+        settings_panel_layout.setContentsMargins(0, 0, 0, 0)
+        settings_panel_layout.setSpacing(8)
+        layout.addWidget(self.settings_panel)
         separate_row = QHBoxLayout()
         separate_row.setSpacing(METRICS.setting_info_text_gap_px)
         self.separate_info_button = InfoToolButton(
@@ -711,7 +724,7 @@ class JointSliceSettingsDialog(QDialog):
         )
         separate_row.addWidget(self.separate_reset_button)
         self.separate_settings_row_layout = separate_row
-        layout.addLayout(separate_row)
+        settings_panel_layout.addLayout(separate_row)
         row = QHBoxLayout()
         row.setSpacing(METRICS.setting_info_text_gap_px)
         self.info_button = InfoToolButton(
@@ -760,52 +773,7 @@ class JointSliceSettingsDialog(QDialog):
         self.spin_box.valueChanged.connect(self._refresh_reset_button)
         row.addWidget(self.reset_button)
         self.settings_row_layout = row
-        layout.addLayout(row)
-        self.show_limits_checkbox = QCheckBox("Eingabegrenzen für Zahlenfelder anzeigen")
-        self.show_limits_checkbox.setObjectName("showSettingLimits")
-        self.show_limits_checkbox.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.show_limits_checkbox.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-        limits_row = QHBoxLayout()
-        limits_row.setContentsMargins(0, 2, 0, 2)
-        limits_row.setSpacing(METRICS.setting_info_text_gap_px)
-        self.limits_info_button = InfoToolButton(
-            "Blendet die zulässigen Wertebereiche unter den Zahlenfeldern ein "
-            "oder aus. Bei wichtigen Grenzüberschreitungen erscheint "
-            "unabhängig davon ein Hinweis an der betroffenen Einstellung.",
-            self,
-            accessible_name="Informationen zur Anzeige der Eingabegrenzen",
-            object_name="settingInfoButton",
-            diameter_px=METRICS.setting_info_diameter_px,
-        )
-        limits_row.addWidget(
-            self.limits_info_button, 0, Qt.AlignmentFlag.AlignVCenter
-        )
-        limits_row.addWidget(
-            self.show_limits_checkbox, 0, Qt.AlignmentFlag.AlignVCenter
-        )
-        limits_row.addStretch(1)
-        self.limits_reset_button = QPushButton("↺")
-        self.limits_reset_button.setObjectName("settingResetButton")
-        self.limits_reset_button.setFixedSize(
-            METRICS.reset_button_size_px,
-            METRICS.reset_button_size_px,
-        )
-        self.limits_reset_button.setToolTip(
-            "Anzeige der Eingabegrenzen auf Standardwert zurücksetzen"
-        )
-        self.limits_reset_button.setAccessibleName(
-            "Anzeige der Eingabegrenzen auf Standardwert zurücksetzen"
-        )
-        self.limits_reset_button.clicked.connect(
-            lambda: self.show_limits_checkbox.setChecked(False)
-        )
-        self.show_limits_checkbox.toggled.connect(
-            self._refresh_limits_reset_button
-        )
-        limits_row.addWidget(self.limits_reset_button)
-        layout.insertLayout(1, limits_row)
+        settings_panel_layout.addLayout(row)
         tolerance_row = QHBoxLayout()
         tolerance_row.setSpacing(METRICS.setting_info_text_gap_px)
         self.tolerance_info_button = InfoToolButton(
@@ -867,7 +835,7 @@ class JointSliceSettingsDialog(QDialog):
         )
         tolerance_row.addWidget(self.tolerance_reset_button)
         self.tolerance_settings_row_layout = tolerance_row
-        layout.insertLayout(2, tolerance_row)
+        settings_panel_layout.insertLayout(0, tolerance_row)
         local_row = QHBoxLayout()
         local_row.setSpacing(METRICS.setting_info_text_gap_px)
         self.local_window_info_button = InfoToolButton(
@@ -878,7 +846,8 @@ class JointSliceSettingsDialog(QDialog):
             diameter_px=METRICS.setting_info_diameter_px,
         )
         local_row.addWidget(self.local_window_info_button)
-        local_row.addWidget(QLabel("Layer im lokalen Zeitfenster:"))
+        self.local_window_label = QLabel("Layer im lokalen Zeitfenster:")
+        local_row.addWidget(self.local_window_label)
         local_row.addStretch(1)
         self.local_window_spin_box = QSpinBox()
         self.local_window_spin_box.setObjectName("localReferenceWindow")
@@ -914,21 +883,23 @@ class JointSliceSettingsDialog(QDialog):
             self._refresh_local_window_reset_button
         )
         local_row.addWidget(self.local_window_reset_button)
-        layout.addLayout(local_row)
+        settings_panel_layout.addLayout(local_row)
         layout.addWidget(QLabel("Exportordner"))
         export_row = QHBoxLayout()
         self.output_root_edit = QLineEdit(output_root)
+        self.output_root_edit.setObjectName("generalSettingsOutputRoot")
         self.output_root_edit.setAccessibleName("Exportordner")
         self.output_root_edit.setFixedHeight(METRICS.form_control_height_px)
-        export_row.addWidget(self.output_root_edit, 1)
+        export_row.addWidget(self.output_root_edit, 1, Qt.AlignmentFlag.AlignVCenter)
         browse = QPushButton("Auswählen …")
         browse.setObjectName("generalSettingsBrowseButton")
+        browse.setFixedHeight(METRICS.form_control_height_px)
         def select_output():
             selected = QFileDialog.getExistingDirectory(self, "Exportordner auswählen", self.output_root_edit.text())
             if selected:
                 self.output_root_edit.setText(selected)
         browse.clicked.connect(select_output)
-        export_row.addWidget(browse)
+        export_row.addWidget(browse, 0, Qt.AlignmentFlag.AlignVCenter)
         self.output_reset_button = QPushButton("↺")
         self.output_reset_button.setObjectName("settingResetButton")
         self.output_reset_button.setFixedSize(
@@ -947,7 +918,7 @@ class JointSliceSettingsDialog(QDialog):
         self.output_root_edit.textChanged.connect(
             self._refresh_output_reset_button
         )
-        export_row.addWidget(self.output_reset_button)
+        export_row.addWidget(self.output_reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(export_row)
         self.footer_divider = QFrame(self)
         self.footer_divider.setObjectName("generalSettingsFooterDivider")
@@ -966,6 +937,7 @@ class JointSliceSettingsDialog(QDialog):
         self.general_reset_button.setToolTip(
             "Alle allgemeinen Einstellungen auf Standardwerte zurücksetzen"
         )
+        self.general_reset_button.setEnabled(preparation_ready)
         self.general_reset_button.clicked.connect(self._reset_general_settings)
         self.general_reset_button.setFixedHeight(METRICS.info_button_diameter_px)
         actions.addWidget(self.general_reset_button)
@@ -987,7 +959,6 @@ class JointSliceSettingsDialog(QDialog):
         for signal in (
             self.separate_spin_box.valueChanged,
             self.spin_box.valueChanged,
-            self.show_limits_checkbox.toggled,
             self.tolerance_spin_box.valueChanged,
             self.local_window_spin_box.valueChanged,
             self.output_root_edit.textChanged,
@@ -995,29 +966,44 @@ class JointSliceSettingsDialog(QDialog):
             signal.connect(self._refresh_general_reset_button)
         self._refresh_separate_reset_button()
         self._refresh_reset_button()
-        self._refresh_limits_reset_button()
         self._refresh_tolerance_reset_button()
         self._refresh_local_window_reset_button()
         self._refresh_output_reset_button()
         self._refresh_general_reset_button()
+        # Keep the information controls active while their settings are unavailable.
+        for widget in (
+            self.tolerance_label,
+            self.tolerance_spin_box,
+            self.maximum_separate_slices_label,
+            self.separate_spin_box,
+            self.maximum_joint_slices_label,
+            self.spin_box,
+            self.local_window_label,
+            self.local_window_spin_box,
+        ):
+            widget.setEnabled(self._preparation_ready)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _reset_general_settings(self) -> None:
         self.separate_spin_box.setValue(self.default_maximum_separate_slices)
         self.spin_box.setValue(self.default_maximum_joint_slices)
-        self.show_limits_checkbox.setChecked(False)
         self.tolerance_spin_box.setValue(self.default_layer_time_tolerance_s)
         self.local_window_spin_box.setValue(self.default_local_reference_window)
         self.output_root_edit.setText(self._default_output_root)
 
     def _refresh_general_reset_button(self) -> None:
         self.general_reset_button.setEnabled(
-            self.separate_spin_box.value() != self.default_maximum_separate_slices
-            or self.spin_box.value() != self.default_maximum_joint_slices
-            or self.show_limits_checkbox.isChecked()
-            or self.tolerance_spin_box.value() != self.default_layer_time_tolerance_s
-            or self.local_window_spin_box.value()
-            != self.default_local_reference_window
-            or self.output_root_edit.text() != self._default_output_root
+            self._preparation_ready
+            and (
+                self.separate_spin_box.value() != self.default_maximum_separate_slices
+                or self.spin_box.value() != self.default_maximum_joint_slices
+                or self.tolerance_spin_box.value()
+                != self.default_layer_time_tolerance_s
+                or self.local_window_spin_box.value()
+                != self.default_local_reference_window
+                or self.output_root_edit.text() != self._default_output_root
+            )
         )
 
     def accept(self) -> None:
@@ -1025,7 +1011,6 @@ class JointSliceSettingsDialog(QDialog):
             self.output_root_edit.setFocus()
             return
         self.output_root_applied.emit(self.output_root_edit.text().strip())
-        self.limits_applied.emit(self.show_limits_checkbox.isChecked())
         self.layer_time_tolerance_applied.emit(self.tolerance_spin_box.value())
         self.separate_value_applied.emit(self.separate_spin_box.value())
         self.local_window_applied.emit(self.local_window_spin_box.value())
@@ -1034,7 +1019,7 @@ class JointSliceSettingsDialog(QDialog):
 
     def _refresh_reset_button(self) -> None:
         modified = self.spin_box.value() != self.default_maximum_joint_slices
-        self.reset_button.setEnabled(modified)
+        self.reset_button.setEnabled(self._preparation_ready and modified)
         self.reset_button.setProperty("modified", modified)
         style = self.reset_button.style()
         style.unpolish(self.reset_button)
@@ -1045,7 +1030,7 @@ class JointSliceSettingsDialog(QDialog):
             self.separate_spin_box.value()
             != self.default_maximum_separate_slices
         )
-        self.separate_reset_button.setEnabled(modified)
+        self.separate_reset_button.setEnabled(self._preparation_ready and modified)
         self.separate_reset_button.setProperty("modified", modified)
         style = self.separate_reset_button.style()
         style.unpolish(self.separate_reset_button)
@@ -1064,7 +1049,7 @@ class JointSliceSettingsDialog(QDialog):
             self.local_window_spin_box.value()
             != self.default_local_reference_window
         )
-        self.local_window_reset_button.setEnabled(modified)
+        self.local_window_reset_button.setEnabled(self._preparation_ready and modified)
         self.local_window_reset_button.setProperty("modified", modified)
         style = self.local_window_reset_button.style()
         style.unpolish(self.local_window_reset_button)
@@ -1072,16 +1057,8 @@ class JointSliceSettingsDialog(QDialog):
 
     def _refresh_tolerance_reset_button(self) -> None:
         modified = self.tolerance_spin_box.value() != self.default_layer_time_tolerance_s
-        self.tolerance_reset_button.setEnabled(modified)
+        self.tolerance_reset_button.setEnabled(self._preparation_ready and modified)
         self.tolerance_reset_button.setProperty("modified", modified)
         style = self.tolerance_reset_button.style()
         style.unpolish(self.tolerance_reset_button)
         style.polish(self.tolerance_reset_button)
-
-    def _refresh_limits_reset_button(self) -> None:
-        modified = self.show_limits_checkbox.isChecked()
-        self.limits_reset_button.setEnabled(modified)
-        self.limits_reset_button.setProperty("modified", modified)
-        style = self.limits_reset_button.style()
-        style.unpolish(self.limits_reset_button)
-        style.polish(self.limits_reset_button)

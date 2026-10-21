@@ -9,7 +9,10 @@ werden beim Build automatisch gesammelt. Unveränderte Einträge nicht bei jedem
 Arbeitsauftrag erneut recherchieren; bei Versions-/Lizenz-/Distributionsänderung
 erneut prüfen und diesen Nachweis aktualisieren.
 
-Die Anwendung wird kostenlos unter einer eigenen Source-Available-Lizenz angeboten.
+Der eigene Quellstand ist seit 21.10.2026 unter Apache-2.0 lizenziert; die offiziellen
+Downloads des Anbieters bleiben kostenlos. Umfang, NOTICE und Lizenzquelle stehen
+unter [Rechte und Nutzungsmodell](distribution.md#rechte-und-nutzungsmodell).
+Der Lizenzwechsel verändert keine der nachfolgend dokumentierten Drittlizenzen.
 Die folgenden Aussagen über kommerzielle Nutzungsrechte beschreiben die Rechte an
 Drittkomponenten; sie sind kein Verkaufsmodell der Anwendung. Kostenlosigkeit hebt
 Drittanbieterpflichten nicht auf. Der Store-Vertriebsweg benötigt eine zusätzliche
@@ -41,14 +44,21 @@ LGPL-/Paketierungsprüfung, siehe [Veröffentlichung](distribution.md).
 | pywin32-ctypes 0.2.3 | BSD-3-Clause; [Quelle](https://github.com/enthought/pywin32-ctypes), Wheel `LICENSE.txt` | Frei kommerziell; Lizenz/Copyright erhalten. |
 | setuptools 83.0.0 | MIT und permissive vendorte Werkzeuge; [Lizenz](https://github.com/pypa/setuptools/blob/main/LICENSE), Wheel-Lizenzbaum | Frei kommerziell; vendorte Lizenzen nicht weglassen. Buildwerkzeug; keine zusätzliche Testbibliothek eingeführt. |
 | Inno Setup 6.7.3 | Eigene permissive Lizenz; [versionierter Text](https://github.com/jrsoftware/issrc/blob/is-6_7_3/license.txt), Kopie unter `legal/licenses/InnoSetup.txt` | Kommerzielle Nutzung laut Lizenz erlaubt. Kauf wird für kommerzielle Nutzer erbeten, ist in diesem Lizenztext keine verpflichtende Zahlung. Keine Umsatzschwelle; Hinweise erhalten. Bei Versionswechsel erneut prüfen. |
-| MSVC Build Tools / Windows SDK; lokal MSVC 14.29.30133, SDK 10.0.19041.0 | Proprietäre Microsoft-Entwicklerwerkzeuge; [Build-Tools-2019-Lizenz](https://visualstudio.microsoft.com/license-terms/mlt031519/), Lizenz-/REDIST-Dateien der konkret installierten Version | Keine pauschal unbeschränkte kostenlose Nutzung zusagen. Berechtigung für eigenen proprietären Code und Runtime-Redistribution vor Freigabe nachweisen; siehe nachfolgenden Abschnitt. Keine Toolchain selbst mitliefern. |
+| MSVC Build Tools / Windows SDK; lokal MSVC 14.29.30133, SDK 10.0.19041.0 | Proprietäre Microsoft-Entwicklerwerkzeuge; [Build-Tools-2019-Lizenz](https://visualstudio.microsoft.com/license-terms/mlt031519/), Lizenz-/REDIST-Dateien der konkret installierten Version | Keine pauschal unbeschränkte kostenlose Nutzung zusagen. Berechtigung für eigenen Anwendungscode und Runtime-Redistribution vor Freigabe nachweisen; siehe nachfolgenden Abschnitt. Keine Toolchain selbst mitliefern. |
 
 ### Microsoft-Toolchain: noch offener Berechtigungsnachweis
 
-Microsoft verlangt für die aktuellen Build Tools eine gültige Visual-Studio-Lizenz;
-die Ausnahme für das Bauen von Open-Source-Abhängigkeiten deckt den eigenen
-proprietären C++-Code nicht automatisch ab. Die vorhandene Installation ist kein
-Nachweis dieser Berechtigung. [Microsoft-Downloadbedingungen](https://visualstudio.microsoft.com/downloads/).
+Microsoft verlangt für die aktuellen Build Tools grundsätzlich eine gültige
+Visual-Studio-Lizenz; eine Ausnahme betrifft das Bauen von Open-Source-Abhängigkeiten.
+Diese Ausnahme ist keine pauschale Erlaubnis zur eigenen Entwicklung und zum Testen
+dieser Komponenten. Die Umstellung des eigenen C++-Codes auf Apache-2.0 ersetzt
+daher weder den Nachweis für die konkret verwendete Toolchain noch die Prüfung
+der Runtime-Weitergabe; das Repository ist derzeit zudem noch privat.
+Die vorhandene Installation ist kein Nachweis dieser Berechtigung.
+[Microsoft-Downloadbedingungen](https://visualstudio.microsoft.com/downloads/),
+[Lizenzierungs-Whitepaper, Open Source Dependencies (April 2025)](https://visualstudio.microsoft.com/wp-content/uploads/2025/04/Visual-Studio-Licensing-Whitepaper-April2025.pdf).
+Auswirkungen des eigenen Lizenzwechsels am 21.10.2026 anhand dieser Quellen geprüft;
+die konkrete Lizenz-/REDIST-Zuordnung bleibt offen.
 
 Für individuelle Entwickler eigener kostenloser oder kostenpflichtiger Apps bietet
 Community eine kostenfreie Möglichkeit. Für Organisationen gelten zusätzliche
