@@ -11,6 +11,11 @@ Zugriffsproben unter dem getrennten Standardkonto erfolgreich. Der vollständige
 Anwendungslauf, die automatische Übernahme und reale Installerabnahme bleiben
 für die Phase-1-Freigabe erforderlich.
 
+Serverseitig sind für Haupt- und CI-Repository ausschließlich offizielle
+GitHub-Actions mit vollständigen Commit-SHAs erlaubt. Standardtoken sind
+schreibgeschützt; Actions dürfen keine PRs genehmigen. Das frühere
+Manifest-Signiergeheimnis wurde aus dem Hauptrepository entfernt.
+
 ## Verantwortlichkeiten und Schutzgrenze
 
 `RodeProjects/project-ci` ist die gemeinsame **private** Actions-Steuerung. Nur

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -223,6 +224,10 @@ class WorkflowDefinitionTests(unittest.TestCase):
                 for line in workflow.splitlines():
                     if line.strip().startswith("runs-on:"):
                         self.assertEqual(line.strip(), "runs-on: windows-latest")
+                actions = re.findall(r"uses:\s+([^\s#]+)", workflow)
+                self.assertTrue(actions)
+                for action in actions:
+                    self.assertRegex(action, r"^actions/[a-z-]+@[0-9a-f]{40}$")
 
     def test_foreign_pr_tests_use_github_hardware_with_read_only_checkout(self) -> None:
         workflow = (PROJECT_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")

@@ -372,7 +372,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("test_installer_license.ps1", builder)
         self.assertIn("test_update_handoff_native.py", builder)
         self.assertIn("9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732", builder)
-        self.assertIn("actions/upload-artifact@v5", workflow)
+        self.assertIn("actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4", workflow)
         self.assertIn("approved-build", workflow)
 
     def test_publish_script_uses_local_gh_auth_and_public_channel(self) -> None:
