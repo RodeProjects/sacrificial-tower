@@ -135,16 +135,22 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
+        window.profile_angle_limit.checkbox.setChecked(False)
         setting = window.maximum_expansion_angle_setting
-        window.maximum_expansion_angle_spin.setValue(90.0)
+        window.maximum_expansion_angle_spin.lineEdit().setText(
+            window.maximum_expansion_angle_spin.textFromValue(90.0)
+        )
         self.app.processEvents()
 
-        self.assertEqual(window.maximum_expansion_angle_spin.value(), 90.0)
+        self.assertEqual(
+            window.maximum_expansion_angle_spin.lineEdit().text(),
+            window.maximum_expansion_angle_spin.textFromValue(90.0),
+        )
         self.assertTrue(setting.editor.property("invalid"))
         self.assertFalse(setting.editor.property("warning"))
-        self.assertIn("Maximalwert 89,0 °", setting.message_label.text())
+        self.assertIn("unvollständig oder ungültig", setting.message_label.text())
         self.assertTrue(setting.secondary_message_label.isHidden())
-        self.assertIn("Maximalwert 89,0 °", window.validation_label.text())
+        self.assertIn("90,0", window.validation_label.text())
 
         window.maximum_expansion_angle_spin.setValue(28.0)
         self.app.processEvents()
@@ -1443,8 +1449,11 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
+        window.profile_angle_limit.checkbox.setChecked(False)
         window.target_time_spin.setValue(121.0)
-        window.maximum_expansion_angle_spin.setValue(90.0)
+        window.maximum_expansion_angle_spin.lineEdit().setText(
+            window.maximum_expansion_angle_spin.textFromValue(90.0)
+        )
         self.app.processEvents()
         self.assertEqual(window.timing_group.badge_label.text(), "1 Fehler")
         self.assertEqual(
@@ -1460,7 +1469,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             "1 Fehler",
         )
         self.assertIn(
-            "Maximalwert 89,0 °",
+            "unvollständig oder ungültig",
             window.maximum_expansion_angle_setting.message_label.text(),
         )
         window.close()

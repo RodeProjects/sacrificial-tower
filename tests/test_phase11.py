@@ -468,10 +468,10 @@ class NumericSettingWidgetTests(GuiCase):
             self.window.geometry_settings_group,
         ):
             group.setChecked(True)
-        self.assertEqual(len(self.window._setting_widgets), 7)
+        self.assertEqual(len(self.window._setting_widgets), 8)
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
-            self.assertIn("Standardwert", setting.reset_button.toolTip())
+            self.assertIn("Standard", setting.reset_button.toolTip())
         self.window.target_time_spin.setValue(77)
         self.app.processEvents()
         self.assertTrue(

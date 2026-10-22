@@ -61,24 +61,26 @@ class ManualNumericInputTests(unittest.TestCase):
         self.assertEqual(self.panel.settings.circle_segments,30)
 
     def test_dots_and_commas_produce_the_same_number_and_comma_display(self):
+        self.panel.profile_angle_limit.checkbox.setChecked(False)
         spin=self.panel.editors["expansion_angle_deg"]
-        for text in ("12.5","12,5"):
+        for text in ("22.5","22,5"):
             self.enter(spin,text)
-            self.assertEqual(self.panel.settings.expansion_angle_deg,77.5)
-            self.assertIn("12,50",spin.text())
+            self.assertEqual(self.panel.settings.expansion_angle_deg,67.5)
+            self.assertIn("22,50",spin.text())
             self.assertNotIn(".",spin.text())
 
     def test_pasted_invalid_text_reports_error_and_valid_paste_clears_it(self):
+        self.panel.profile_angle_limit.checkbox.setChecked(False)
         spin=self.panel.editors["expansion_angle_deg"]
         row=self.panel.rows["expansion_angle_deg"]
         spin.setFocus();spin.selectAll()
         QApplication.clipboard().setText("abc")
         QTest.keyClick(spin,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);self.app.processEvents()
         self.assertTrue(row.message_label.isVisible())
-        QApplication.clipboard().setText("15.25")
+        QApplication.clipboard().setText("25.25")
         QTest.keyClick(spin,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(spin,Qt.Key.Key_Return);self.app.processEvents()
-        self.assertEqual(spin.value(),15.25)
+        self.assertEqual(spin.value(),25.25)
         self.assertFalse(row.message_label.isVisible())
 
     def test_reset_to_valid_value_clears_the_corresponding_notice(self):

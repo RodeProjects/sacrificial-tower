@@ -911,14 +911,14 @@ class Phase18UiTests(unittest.TestCase):
                 5,
                 window.prediction_frame.header.height() + 5,
             ).name(),
-            "#fbfaff",
+            "#ffffff",
         )
         self.assertEqual(
             prediction_image.pixelColor(
                 1,
                 prediction_image.height() // 2,
             ).name(),
-            "#fbfaff",
+            "#ffffff",
         )
         icon_colours = {
             group.status_icon.palette().color(
@@ -1893,16 +1893,20 @@ class Phase18UiTests(unittest.TestCase):
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
         setting = window._setting_widgets["maximum_expansion_angle_deg"]
+        window.profile_angle_limit.checkbox.setChecked(False)
         line_edit = window.maximum_expansion_angle_spin.lineEdit()
         line_edit.setText(
             window.maximum_expansion_angle_spin.textFromValue(90.0)
         )
         self.app.processEvents()
         self.assertTrue(bool(window.maximum_expansion_angle_spin.property("invalid")))
-        self.assertEqual(window.maximum_expansion_angle_spin.value(), 90.0)
-        self.assertIn("Maximalwert 89,0 °", setting.message_label.text())
+        self.assertEqual(
+            line_edit.text(),
+            window.maximum_expansion_angle_spin.textFromValue(90.0),
+        )
+        self.assertIn("unvollständig oder ungültig", setting.message_label.text())
         self.assertTrue(setting.secondary_message_label.isHidden())
-        self.assertIn("Maximalwert 89,0 °", window.validation_label.text())
+        self.assertIn("90,0", window.validation_label.text())
 
         integer_setting = window._setting_widgets["local_reference_window"]
         window.local_window_spin.lineEdit().setText("0")
@@ -1947,6 +1951,7 @@ class Phase18UiTests(unittest.TestCase):
 
         invalid = replace(
             GenerationSettings(),
+            limit_expansion_to_profile=False,
             maximum_expansion_angle_deg=70.1,
         )
         with self.assertRaisesRegex(ValueError, "Horizontalen.*außerhalb"):

@@ -14302,7 +14302,7 @@ class MainWindow(QMainWindow):
         else:
             self.preview_button.setText("Kühlturm generieren")
         footer_inner_width = max(0, self.width() - 44)
-        wide_action_width = max(0, (footer_inner_width - 13) // 2 - 12)
+        wide_action_width = max(0, (footer_inner_width - 13) // 2)
         folder_buttons = (
             self.open_output_button,
             self.open_stl_button,
@@ -14311,6 +14311,11 @@ class MainWindow(QMainWindow):
         report_visible = not self.open_run_button.isHidden()
         action_buttons = (self.preview_action_control, self.export_button)
         spacing = self.main_actions_layout.horizontalSpacing()
+
+        def action_width(button: QWidget) -> int:
+            # Explicitly sized footer controls can be wider than their
+            # content-based sizeHint because their padding is fixed.
+            return max(button.sizeHint().width(), button.minimumWidth())
 
         def set_labels(
             shorten_folders: bool, report_label_level: int,
@@ -14349,7 +14354,7 @@ class MainWindow(QMainWindow):
                 if not button.isHidden()
             ]
             return (
-                sum(button.sizeHint().width() for button in visible)
+                sum(action_width(button) for button in visible)
                 + spacing * max(0, len(visible) - 1)
                 # Columns 2 and 3 may still reserve grid gaps between the
                 # folder buttons and the right-aligned action group.
@@ -14380,13 +14385,13 @@ class MainWindow(QMainWindow):
 
         required_width = required_action_width()
         primary_width = sum(
-            button.sizeHint().width()
+            action_width(button)
             for button in action_buttons if not button.isHidden()
         ) + spacing * max(0, sum(
             not button.isHidden() for button in action_buttons
         ) - 1)
         folder_pair_width = sum(
-            button.sizeHint().width()
+            action_width(button)
             for button in (self.open_output_button, self.open_stl_button)
             if not button.isHidden()
         )

@@ -13,6 +13,11 @@ from cooling_tower.persistence.versioned_json import (ConcurrentDocumentChangeEr
                                                     VersionedJsonStore, FutureSchemaVersionError)
 
 
+def migrated_default_settings():
+    """Defaults for legacy files whose profile binding was disabled."""
+    return replace(ManualSettings(), limit_expansion_to_profile=False)
+
+
 class ManualPersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -99,7 +104,7 @@ class ManualPersistenceTests(unittest.TestCase):
         for red in (True,"16",{"unit":"ms","value":16000},10,9,61,float("nan")):
             self.path.write_text(json.dumps({"manual_settings_schema_version":11,"manual":{
                 "color_reference_time_s":10,"color_red_time_s":red}}))
-            self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
+            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings())
         for deficit in (6,0,-1,61,True,"6",{"unit":"ms","value":6000}):
             original=json.dumps({"manual_settings_schema_version":12,"manual":{
                 "color_reference_time_s":10,"color_deficit_time_s":deficit}}).encode()
@@ -207,7 +212,7 @@ class ManualPersistenceTests(unittest.TestCase):
         for reference in (3,4.9,True,"3",{"unit":"ms","value":3000},31,float("nan")):
             self.path.write_text(json.dumps({"manual_settings_schema_version":14,"manual":{
                 "color_reference_time_s":reference,"color_deficit_time_s":4,"color_scale_max_time_s":14}}))
-            self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
+            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings())
 
     def test_v15_low_color_times_roundtrip_and_invalid_deficits_use_valid_defaults(self):
         from cooling_tower.manual.geometry import validate_settings
@@ -247,7 +252,7 @@ class ManualPersistenceTests(unittest.TestCase):
         for maximum in (3600.1,7200,True,"120",{"unit":"ms","value":120000},float("inf"),float("nan")):
             self.path.write_text(json.dumps({"manual_settings_schema_version":15,"manual":{
                 "color_scale_max_time_s":maximum}}))
-            self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
+            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings())
 
     def test_v16_allows_finite_long_object_scales_without_serializing_object_data(self):
         from cooling_tower.manual.geometry import validate_settings
@@ -284,7 +289,7 @@ class ManualPersistenceTests(unittest.TestCase):
         for reference in (31,60,120,True,"60",{"unit":"ms","value":60000},float("inf"),float("nan")):
             self.path.write_text(json.dumps({"manual_settings_schema_version":16,"manual":{
                 "color_reference_time_s":reference}}))
-            self.assertEqual(ManualSettingsStore(self.path).load(),ManualSettings())
+            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings())
 
     def test_v17_roundtrips_long_green_times_and_blocks_downgrade_types_units_bounds(self):
         for reference in (60,123.4,7200.5):
@@ -656,7 +661,7 @@ class ManualPersistenceTests(unittest.TestCase):
             "minimum_diameter_mm":50,"maximum_diameter_mm":10,"maximum_foot_diameter_mm":12,
             "circle_segments":True,"overhang_enabled":"true","expansion_angle_deg":float("nan")}}))
         s=ManualSettingsStore(self.path).load()
-        self.assertEqual(s,replace(ManualSettings(),object_resolution_percent=50,color_deficit_time_s=1))
+        self.assertEqual(s,replace(migrated_default_settings(),object_resolution_percent=50,color_deficit_time_s=1))
 
     def test_one_millimetre_migration_direct_multistep_backup_and_atomic_write(self):
         for version in (1,8,9):

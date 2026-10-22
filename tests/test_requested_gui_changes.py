@@ -953,7 +953,10 @@ class RequestedGuiChangesTests(unittest.TestCase):
         warning = window.maximum_expansion_angle_setting.message_label
         self.assertFalse(warning.isHidden())
         self.assertIn("Vorsicht", warning.text())
-        self.assertIn("Haftungs- und Formprobleme", warning.text())
+        self.assertEqual(
+            warning.text(),
+            "Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang.",
+        )
         window.maximum_expansion_angle_spin.setValue(20.0)
         self.assertTrue(window.validate_form())
         window.close()
@@ -1085,6 +1088,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
             "manual_base_width_mm": "mm",
+            "circle_segments": "",
             "maximum_expansion_angle_deg": "°",
             "maximum_contraction_angle_deg": "°",
             "local_reference_window": "Layer",
