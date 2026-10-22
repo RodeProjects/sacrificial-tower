@@ -140,6 +140,7 @@ New-Item -ItemType Directory -Path $resolvedTemporaryRoot | Out-Null
 
 $releaseCreated = $false
 $releasePublished = $false
+$releaseId = 0L
 try {
     $artifactHelper = Join-Path $RunnerToolsRoot 'scripts/Get-PrivateBuildArtifacts.ps1'
     if (-not (Test-Path -LiteralPath $artifactHelper -PathType Leaf)) {
@@ -248,13 +249,24 @@ try {
         if($object.type -cne 'commit' -or $object.sha -cne $localCommit){throw 'Release-Tag stimmt nicht mit dem geprüften Quellcommit überein.'}
     }
     Assert-SourceTag
-    & $gh release create $tag $installer.FullName $manifestPath $legalArchive `
-        --repo $SourceRepository --target $localCommit --verify-tag --draft `
-        --title $releaseTitle --notes-file $notesPath
-    Assert-NativeSuccess 'Das Anlegen des vollständigen Releaseentwurfs'
+    # The tag endpoint only resolves published releases. Keep the concrete ID
+    # returned when creating this invocation's unpublished draft.
+    $requestPath=Join-Path $resolvedTemporaryRoot 'release-request.json'
+    $request=@{tag_name=$tag;target_commitish=$localCommit;draft=$true;prerelease=$false;name=$releaseTitle;body=$releaseNotes}
+    [IO.File]::WriteAllText($requestPath,($request|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
+    $created=& $gh api --method POST "repos/$SourceRepository/releases" --input $requestPath | ConvertFrom-Json
+    Assert-NativeSuccess 'Das Anlegen des Releaseentwurfs'
+    if($created.id -le 0 -or -not $created.draft -or $created.tag_name -cne $tag -or $created.target_commitish -cne $localCommit){throw 'GitHub bestätigt keinen eindeutig zugeordneten Releaseentwurf.'}
+    $releaseId=[long]$created.id
     $releaseCreated=$true
-    $draft=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
-    Assert-NativeSuccess 'Die Prüfung des Releaseentwurfs'
+    foreach($assetFile in @($installer.FullName,$manifestPath,$legalArchive)) {
+        $assetName=[Uri]::EscapeDataString([IO.Path]::GetFileName($assetFile))
+        $null=& $gh api --method POST -H 'Content-Type: application/octet-stream' `
+            "https://uploads.github.com/repos/$SourceRepository/releases/$releaseId/assets?name=$assetName" --input $assetFile
+        Assert-NativeSuccess 'Das Hochladen eines nachgewiesenen Releaseanhangs'
+    }
+    $draft=& $gh api "repos/$SourceRepository/releases/$releaseId" | ConvertFrom-Json
+    Assert-NativeSuccess 'Die Prüfung des Releaseentwurfs anhand seiner ID'
     $expected=@{
         $installer.Name=@{hash=$actualHash;size=$installer.Length}
         'latest.json'=@{hash=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant();size=(Get-Item -LiteralPath $manifestPath).Length}
@@ -268,11 +280,9 @@ try {
     Assert-NativeSuccess 'Die abschließende Prüfung des Release-Commits'
     if($currentRemote -cne $localCommit -or (git rev-parse HEAD) -cne $localCommit -or (git status --porcelain)){throw 'Quellstand während der Releasevorbereitung verändert.'}
     Assert-SourceTag
-    & $gh release edit $tag --repo $SourceRepository --draft=false --latest
+    $published=& $gh api --method PATCH "repos/$SourceRepository/releases/$releaseId" -F draft=false -f make_latest=true | ConvertFrom-Json
     Assert-NativeSuccess 'Das Veröffentlichen des unveränderlichen Entwicklungs-/Programmreleases'
     $releasePublished=$true
-    $published=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
-    Assert-NativeSuccess 'Die Bestätigung des veröffentlichten Releases'
     if($published.draft -or $published.prerelease -or -not $published.immutable -or $published.tag_name -cne $tag){throw 'GitHub bestätigt kein unveränderliches geeignetes Release.'}
     Assert-SourceTag
     $roundtrip=Join-Path $resolvedTemporaryRoot 'published-download'
@@ -284,14 +294,14 @@ try {
     if((Get-FileHash -LiteralPath (Join-Path $roundtrip $installer.Name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $actualHash){throw 'Veröffentlichter Installer weicht vom geprüften Build ab.'}
     Write-Host "Version $version als $releaseKind in $SourceRepository veröffentlicht; Tag, Assets, tatsächlicher Download und Signatur bestätigt."
 } finally {
-    if($releaseCreated -and -not $releasePublished) {
+    if($releaseCreated -and $releaseId -gt 0 -and -not $releasePublished) {
         # An ambiguous publishing response may already have locked the release.
         # Delete only this invocation's still-unpublished draft, never a release.
         try {
-            $remaining=& $gh api "repos/$SourceRepository/releases/tags/$tag" | ConvertFrom-Json
+            $remaining=& $gh api "repos/$SourceRepository/releases/$releaseId" | ConvertFrom-Json
             Assert-NativeSuccess 'Die Prüfung eines unvollständigen Releaseentwurfs'
-            if($remaining.draft) {
-                & $gh release delete $tag --repo $SourceRepository --yes
+            if($remaining.draft -and $remaining.id -eq $releaseId -and $remaining.tag_name -ceq $tag) {
+                & $gh api --method DELETE "repos/$SourceRepository/releases/$releaseId"
                 Assert-NativeSuccess 'Das Entfernen des unveröffentlichten Entwurfs'
             }
         } catch { Write-Warning 'Releasezustand konnte nicht abschließend geprüft werden; keine unbekannte Veröffentlichung gelöscht.' }

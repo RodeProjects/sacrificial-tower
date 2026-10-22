@@ -1,50 +1,78 @@
-# Veröffentlichungsprüfung: GitHub und Microsoft Store
+# Veröffentlichungsprüfung: Quellcode, Entwicklungsreleases und Microsoft Store
 
-Stand: 21.10.2026. Ausgangspunkt: `main`, Version 0.9.18,
-Commit `5abdd0b8051abe2297a963f49d1f8eda022e0a85`. Dies ist eine Bestandsaufnahme,
-keine Vertriebsfreigabe. Das Hauptrepository bleibt auf Wunsch des Benutzers
-bis zum letzten Veröffentlichungsschritt privat.
+Stand: 22.10.2026. Die Quellcodeveröffentlichung und die technische Umstellung sind
+ausdrücklich beauftragt. Eine reguläre Binär-/Storefreigabe ist davon getrennt.
+Der aktuelle Nachweis zum öffentlichen Installerübergang steht in der Beschreibung
+des [neuesten Releases](https://github.com/RodeProjects/sacrificial-tower/releases/latest).
+Die maschinenbezogenen Originalnachweise bleiben im privaten Verwaltungsbereich.
 
-## Bereits vorhanden
+## Erreichte Voraussetzungen
 
-- Apache-2.0, NOTICE, Lizenzanzeige, Export und Paketprüfungen sind eingerichtet.
-  GitHub erkennt die Projektlizenz bereits als Apache License 2.0.
-  Einzelheiten und die früheren 107 Tests: [Lizenzprüfung](license_review.md).
-- Anbietername, Anschrift, Kontakt, USt-ID, Support-/Löschregeln und Vertriebsmodell
-  sind eingetragen. Im Anbieterprofil ist allein `release_legal_review` offen.
-- Drittkomponenten, Wheel-Hashes, Qt-Quellarchive und Herkunftshinweise sind
-  dokumentiert; das ersetzt noch nicht die unten genannten Auslieferungsnachweise.
-- Sicherheitskontakt, Issue-Vorlagen und datensparsame Diagnoseexporte sind vorhanden.
-- Der vorbereitete Kanal `microsoft-store` schaltet den eigenen Updater aus.
-  Die aktuelle Buildkonfiguration ist weiterhin `standalone`.
+- Nur `RodeProjects/project-ci` besitzt `FLO-PC-private`; Haupt- und altes
+  Update-Repository besitzen serverseitig keinen Runner. Persönliches Benutzerkonto,
+  geschützte Verwaltungsdateien und getrenntes Runner-Standardkonto sind praktisch
+  geprüft. Öffentliche Workflows verwenden nur GitHub-Hardware und besitzen keine
+  privilegierte Brücke zur privaten CI. Details: [Private CI](private_ci.md).
+- Phase 1 wurde mit echter Prüfbranch-Übernahme, ursprünglicher Vollprüfung,
+  gehosteter GUI-Pflichtprüfung, tatsächlichem lokalem Buildfallback, Dateiübernahme,
+  Signaturprüfung und negativen Sicherheitsfällen vollständig abgenommen.
+- Der neue Updatekanal ist die einzige Kanaldefinition. Version 0.9.26 wurde mit
+  Installer, signiertem `latest.json` und aufgelösten Rechtstexten im Hauptrepository
+  unveränderlich veröffentlicht. Der Publisher bestätigt die wirklich veröffentlichten
+  Dateien vor der Öffnung mit Verwaltungszugang. Kein Geheimnis gelangt in Buildjobs.
+- Eigener Code, Dokumentation und eigene Assets stehen unter Apache-2.0; NOTICE und
+  Dritttexte bleiben erhalten. Benutzerbestätigte Herkunft einschließlich der drei
+  zusätzlichen STL-Modelle steht maßgeblich im
+  [Asset-Nachweis](../src/cooling_tower/gui/assets/ASSET_LICENSES.md).
+- Anbieter-/Kontakt-/Supportangaben sind zentral eingetragen. Das allein noch offene
+  `release_legal_review` bleibt wahrheitsgemäß offen. Entwicklungsversionen werden
+  sichtbar gekennzeichnet; die bestehende technische Entwicklungsfreigabe gilt
+  weiterhin. Daraus folgt keine reguläre Vertriebs- oder Storefreigabe.
 
-## Wichtige zusätzliche Befunde
+## Prüfung der zu veröffentlichenden Inhalte
 
-| Befund | Erforderlicher Abschluss |
-|---|---|
-| Lokaler Actions-Runner bei künftig öffentlichem Repository | Vor Öffnung eine wirksame technische Trennung von fremden Pull Requests und dem Arbeitsrechner herstellen. Die Fork-Bedingungen in `tests.yml` allein reichen als Sicherheitsgrenze nicht. Sie stehen in einer durch PRs veränderbaren Workflowdatei. Risiko bei ungeschützter öffentlicher Anbindung: **hoch**. |
-| Öffentliche Rechtstexte fehlen im geprüften Downloadkanal | Dort liegen derzeit nur README und `latest.json`; das neueste Release enthält nur den Installer. Aufgelöste Datenschutz-/Anbieterinformationen und Lizenzhinweise vor regulärer Auslieferung öffentlich erreichbar machen und verlinken. Der Publish-Helfer übernimmt diese Veröffentlichung derzeit nicht. |
-| Zusätzliche Testmodelle: Rechtebestätigung erledigt | Der Benutzer bestätigte am 21.10.2026 Urheberschaft, erforderliche Rechte und Apache-2.0-Freigabe für alle drei unten genannten Dateien; aktuelle Hashes im zentralen Asset-Nachweis ergänzt. |
-| Ausgangsstand offiziell erfolgreich geprüft | Für die SHA `5abdd0b8051abe2297a963f49d1f8eda022e0a85` sind die Tests-Läufe `39601457485` und `39605693132` erfolgreich. Der spätere umgestellte Commit benötigt seine eigenen privaten CI-/Installerabnahmen; diese sind noch offen. |
-| Entwicklungsversion ist weiterhin fest eingestellt | Vor einem regulären Release `CURRENT_LICENSE_STATUS` im Über-Dialog, den Entwicklungsabschnitt der Nutzungsbedingungen und die öffentlichen Produkttexte konsistent umstellen. Das Ausfüllen des Anbieterprofils allein schaltet diese Texte nicht um. Aktuell ist die Entwicklungskennzeichnung richtig. |
+Die Prüfung am 21.10.2026 umfasste den erreichbaren Bestand bis zum Kanalcommit
+`03439c63ce731aae755032b9672c799be4da7c15` einschließlich aller damaligen Refs:
+2.387 Dateiobjekte (2.377 Textobjekte, zehn Binärobjekte), 129 Commits und alle
+178 verfügbaren Actions-Logarchive. Alle sechs noch vorhandenen Buildartefakte
+wurden tatsächlich heruntergeladen und ihr Dateibestand geprüft. Die Installer
+sind anhand Größe und SHA-256 bytegleich mit den bereits öffentlichen historischen
+Releases. Die zusätzlichen Dateien sind Manifeste, Metadaten und Buildinventare;
+keine Schlüssel-, Profil- oder Credentialdateien. Alle elf PR-Beschreibungen sowie
+Kommentar-/Reviewinventare wurden einbezogen. Es gab keine zusätzlichen Issues,
+Kommentare, Deployments, Umgebungen, Variablen oder Webhooks als Veröffentlichungsfläche.
 
-### Zusätzlich bestätigte Testmodelle
+Mehrere Prüfwege wurden kombiniert:
 
-Diese Dateien gehören zum Quellrepository; der vorhandene PyInstaller-Build
-liefert `input/` nicht als Programmressource aus. Sie sind daher insbesondere
-vor der Quellcodeveröffentlichung relevant. Die Zuordnung wurde durch die
-ausdrückliche Benutzerbestätigung vom 21.10.2026 ergänzt.
+- Suchmuster für private Schlüssel, verbreitete Zugangsdaten und Credential-URLs
+  ergaben keine ungeklärten Treffer. Eine zweite Prüfung erfasste auch literale
+  Geheimniszuweisungen ohne bekannte Tokenpräfixe. Ihre drei Kandidaten waren der
+  reine Variablenname `UPDATE_MANIFEST_SIGNING_KEY_BASE64`, kein Schlüsselwert.
+- Historische Signier-/Provisionierungs-/Publishpfade und ihre Workflowvarianten
+  wurden inhaltlich geprüft: private Werte aus Jobumgebung wurden weder als
+  Programmressource noch in den konfigurierten Artefaktpfaden gespeichert.
+  294 relevante Ausgabevorkommen waren leer oder maskiert; maskierte Basic-Header
+  wurden gesondert eingeordnet. Das alte Signiergeheimnis ist entfernt; der neue
+  Schlüssel liegt ausschließlich DPAPI-verschlüsselt außerhalb des Repositorys.
+- Historische Konfigurationen, entfernte Hilfsskripte und aktuelle Verpackung wurden
+  geprüft. Der ehemals versehentlich eingecheckte SSH-Einrichtungshelfer erzeugte
+  Schlüssel lokal und enthielt keinen Schlüssel. Persönliche Laufzeitprofile,
+  Anmeldedateien und Nutzermodelle werden nicht versioniert.
+- Die zehn Binärobjekte sind eigene STL-/PNG-/ICO-/WebP-Assets mit Herkunftsnachweis.
+  Die vorhandenen PNG-XMP-Daten enthalten nur Bildtechnik, Bearbeitungssoftware und
+  Datumsangaben, keine Kontakt-/Autor-/GPS-/Pfadfelder. Keine unnötige Assetänderung.
+- LICENSE, NOTICE, Assetrechte, Rechtstexte, Qt-Quellmaterial und der vorhandene
+  Verpackungsnachweis wurden abgeglichen. Öffentlich beabsichtigte Anbieter- und
+  Git-Autorenangaben sind von Geheimnissen unterschieden; frühere Lizenzfassungen
+  und bereits veröffentlichte Binärdateien werden nicht rückwirkend umgeschrieben.
 
-| Datei unter `input/` | SHA-256 |
-|---|---|
-| `Test-STL Vase (manifold).stl` | `e0c7e3441bcfe5f12f09b1e24d30dc06ce7e751738c4558f9bfd659618202fba` |
-| `Test-STL gemischt (manifold).stl` | `f0bb2062ebedd2a832e323b1fd920f72456f26c13ca3d140e03e9e6f128c2891` |
-| `Test-STL mehrere Objekte in einer STL.stl` | `0807455bc904d274d76013346396472d287ea93130962d05f097e34bbef8a362` |
-
-Die Dateien wurden laut Git-Verlauf nach der allgemeinen früheren Bestätigung
-vom 14.09.2026 aufgenommen. Der bestehende
-[Asset-Nachweis](../src/cooling_tower/gui/assets/ASSET_LICENSES.md) ist die maßgebliche
-Stelle für die ergänzten Rechte und Prüfsummen. Die gesonderte WebP-Bestätigung ist erledigt.
+Die Grenzen bleiben ausdrücklich bestehen: Mustersuche beweist keine Abwesenheit
+unbekannter oder verschleierter Geheimnisse. Die Inhalts-/Datenflussprüfung und
+Herkunftsnachweise ergänzen sie; dies ist keine vollständige Malwareanalyse
+historischer Binärdateien und keine juristische Zertifizierung. Zum Öffnungszeitpunkt
+werden der spätere kleine Dokumentations-/Versionsdiff und neu hinzugekommene
+Metadaten/Logs nochmals gesondert abgeglichen. Private CI-Logs werden nicht durch die
+Öffnung des Hauptrepositorys öffentlich.
 
 ## Vor einer regulären Binärveröffentlichung
 
@@ -66,8 +94,9 @@ Stelle für die ergänzten Rechte und Prüfsummen. Die gesonderte WebP-Bestätig
    konkrete Werkzeug-/Runtime-Versionen und Inventar archivieren, offizielle
    Actions sowie die Prüfungen des tatsächlich erzeugten Pakets abschließen.
    Die lokale `.venv` verwendet weiterhin Python 3.13.2; das ist keine Vorgabe für
-   künftige Releases. Der aktuell öffentliche Installer 0.9.8 entstand vor der
-   Apache-2.0-Umstellung und erhält dadurch keine neuen beigepackten Lizenztexte.
+   künftige Releases. Historische Installer bis 0.9.8 entstanden vor der
+   Apache-2.0-Umstellung und erhalten dadurch keine neuen beigepackten Lizenztexte.
+   Neue Entwicklungsreleases enthalten die aktuellen aufgelösten Texte und Quellen.
 
 `check_release_readiness.py --release` endet gegenwärtig korrekt mit Exitcode 1
 wegen `release_legal_review`. `--development-release` endet mit Exitcode 0;
@@ -89,41 +118,30 @@ Für MSIX/AppX übernimmt Microsoft nach erfolgreicher Zertifizierung die
 Store-Signierung; dafür ist kein gekauftes CA-Code-Signing-Zertifikat erforderlich.
 Die Manifest-Signatur des bestehenden Updaters ist keine Authenticode-Signatur.
 
-## Hauptrepository zuletzt öffnen
+## Öffnung und unmittelbar anschließende Abnahme
 
-Unmittelbar vor diesem ausdrücklich beauftragten Schritt:
+Vor der Sichtbarkeitsänderung müssen die ursprünglichen privaten Pflichtprüfungen
+und unveränderlichen Releases vorliegen. Serverseitig Runnerzuordnung, Rechte,
+Actions-Token, offizielle gepinnte Actions und Ausschluss öffentlicher Dispatch-
+Brücken nochmals prüfen. Die CI-Steuerung bleibt privat. Eine Rückkehr auf privat
+kann bereits öffentlich gewordene Kopien/Forks nicht zurückholen.
 
-1. Die Runner-Sicherheitsgrenze wirksam einrichten und die dann geltenden
-   GitHub-Actions-/Schutzregeln prüfen. Bis dahin keinen fremden Fork-Code auf dem
-   Arbeitsrechner ausführen. Eine mögliche Lösung ist eine getrennte öffentliche
-   Prüfung auf GitHub-Hardware und ein davon technisch abgeschotteter privater
-   lokaler Prüfpfad; dies erfordert eine gezielte Anpassung der bisherigen CI-Regeln.
-2. Den endgültigen Quellstand samt vollständiger zu veröffentlichender Historie,
-   alten Issues/PRs, Anhängen, Actions-Logs und Artefakten auf sensible Inhalte und
-   fremde Rechte prüfen. Die Sichtbarkeitsänderung macht auch alte Actions-Logs
-   öffentlich. Bei veröffentlichten echten Zugangsdaten genügt Löschen allein
-   nicht; sie wären zusätzlich zu widerrufen/erneuern.
-3. Herkunft der zusätzlichen Testmodelle klären; LICENSE.md und NOTICE erhalten.
-4. Öffentliche Download-/Supporttexte auf den tatsächlichen Release und die
-   geplante Öffnung abstimmen. Fertige Rechtstexte können vorher im separaten
-   öffentlichen Downloadrepository oder auf einer Website bereitstehen; das
-   Hauptrepository muss dafür nicht vorzeitig geöffnet werden. Bis zur Öffnung
-   einen tatsächlich erreichbaren Supportkontakt, etwa E-Mail, angeben.
-5. Erst dann die Sichtbarkeit ändern und die öffentlichen Links kontrollieren.
+Anonyme Release-URLs eines privaten Repositorys sind absichtlich nicht erreichbar.
+Alle vorher möglichen Prüfungen werden daher privat abgeschlossen; die ausdrücklich
+beauftragte Öffnung wird nicht dafür vorgezogen. Unmittelbar danach werden ohne
+Anmeldung README-Downloadlink, Manifest, Rechtstexte, Release-Anhänge, Signaturen,
+Hashes und Quelltag geprüft. Die feste private Operation `update-acceptance.yml`
+nimmt den echten veröffentlichten Versionsübergang 0.9.26 → 0.9.27 im getrennten
+Standardkonto ab. Details und die präzise Testgrenze stehen unter
+[Updatekanal](update_channel.md#abnahme-des-veröffentlichten-versionsübergangs).
+Die Entwicklerinstallation und deren Daten werden nicht verwendet.
 
-## Umfang dieser Nachprüfung
-
-Geprüft wurden Rechtstexte/Profil, Herkunftsdokumentation, Git-Dateibestand und
-erreichbare Historie, Packaging-/Publishskripte, alle drei Actions-Workflows sowie
-GitHub-Sichtbarkeit, aktueller CI-Nachweis und Inhalt des öffentlichen Downloadkanals.
-Eine Mustersuche über 2.312 Textobjekte von 2.323 erreichbaren Git-Dateiobjekten
-aus 118 Commits ergab keine Treffer für die geprüften Privatschlüssel-,
-GitHub-/GitLab-/AWS-/Google-/Slack-/Stripe-Zugangsdaten- und Zugangsdaten-URL-Muster.
-Binärdateien und Muster-unbekannte Geheimnisse sind dadurch nicht freigeprüft;
-eine vollständige Inhaltsprüfung aller GitHub-Logs/Anhänge wurde nicht durchgeführt.
-Die offiziellen Tests wurden nur ausgelesen, nicht erneut gestartet. Kein neues
-Installationspaket wurde gebaut oder zertifiziert. Änderungen dieser Prüfung
-betreffen ausschließlich die Dokumentation.
+Nach erfolgreichem öffentlichen Kanaltest wird das alte Update-Repository in
+Beschreibung und Projektlink eindeutig als abgelöst gekennzeichnet und archiviert.
+Historische Releases bleiben erhalten. Abschließend die Runnertrennung erneut
+serverseitig bestätigen. Erst bei Erfolg aller Kriterien gilt die Gesamtaufgabe
+als abgeschlossen. Der datierte Abschlussbericht in der neuesten Releasebeschreibung
+und die geschützten Originalnachweise dokumentieren das tatsächliche Ergebnis.
 
 ## Maßgebliche externe Quellen
 

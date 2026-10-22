@@ -1,8 +1,9 @@
 # Kostenlose Veröffentlichung und rechtliche Voraussetzungen
 
 Stand: 21.10.2026. Sacrificial Tower wird vom Anbieter kostenlos angeboten. Vorgesehen sind
-der Microsoft Store und öffentlich einsehbarer Quellcode auf GitHub. Das
-Quellcode-Repository bleibt bis zu einer ausdrücklichen Veröffentlichung privat.
+öffentlich einsehbarer Quellcode auf GitHub und später der Microsoft Store.
+Die ausdrücklich beauftragte Quellcodeöffnung folgt der technischen und
+sicherheitsbezogenen Abnahme unter [Veröffentlichungsprüfung](publication_readiness.md).
 Eine Versionsnummer oder ausgefüllte Checkliste ist keine Freigabe oder
 Store-Zertifizierung.
 
@@ -32,8 +33,8 @@ Die Umstellung am 21.10.2026 gilt für den aktuellen Quellstand und daraus neu
 erzeugte Fassungen. Bereits veröffentlichte Installer, frühere Quellstände und
 Release-Anhänge werden nicht nachträglich umgeschrieben; die dort mitgelieferten
 Lizenztexte bleiben dokumentiert und bereits eingeräumte Rechte erhalten.
-Die jetzige Lizenzentscheidung ist weder eine Veröffentlichung des privaten
-Repositorys noch eine abgeschlossene Store-/Vertriebsfreigabe.
+Die Lizenzentscheidung ist von der technischen Quellcodeveröffentlichung und
+der gesonderten Store-/Vertriebsfreigabe zu unterscheiden.
 
 Der Anbieter bietet seine offiziellen Fassungen weiterhin kostenlos an; dies
 beschränkt nicht die Weitergaberechte Dritter. Eigene Ergebnisse wie Kühltürme
@@ -53,8 +54,8 @@ Beitragenden bleibt erhalten. Das Copyright des ursprünglichen Entwicklers
 begründet kein Alleineigentum an späteren fremden Beiträgen.
 
 Apache-2.0 ist eine [OSI-anerkannte Open-Source-Lizenz](https://opensource.org/license/apache-2-0).
-Bis zur gesonderten Veröffentlichung bleibt das Quellcode-Repository privat;
-die Lizenzwahl allein macht es nicht öffentlich erreichbar. Unabhängige Drittkomponenten
+Die technische Quellcodeveröffentlichung erfolgt gesondert nach der
+autorisierten Sicherheitsabnahme; die Lizenzwahl allein ändert keine Sichtbarkeit. Unabhängige Drittkomponenten
 behalten ihre eigenen Rechte und Lizenzbedingungen; siehe [Dependencies](dependencies.md).
 Die Rechte an eigenen Grafiken und Testmodellen sind im
 [Asset-Nachweis](../src/cooling_tower/gui/assets/ASSET_LICENSES.md) dokumentiert.
@@ -73,7 +74,7 @@ Die erneute Prüfung, behobene Paketprüfungslücke, Testnachweise und noch offe
 Veröffentlichungspunkte sind im [Apache-2.0-Prüfnachweis](license_review.md) festgehalten.
 Der anschließende [Gesamtabgleich für GitHub und Microsoft Store](publication_readiness.md)
 erfasst zusätzlich den tatsächlichen CI-/Downloadstand, die vor einer Öffnung
-abzusichernden Runner und noch fehlende Herkunftszuordnungen.
+abgesicherten Runner, bestätigte Herkunft und getrennte reguläre Freigabeanforderungen.
 
 ## Anbieter, Datenschutz und Support
 

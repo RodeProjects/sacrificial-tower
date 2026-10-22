@@ -154,14 +154,13 @@ Datenschutzinformationen und Drittanbieterhinweise. Maßgeblich sind
 [Abhängigkeiten und Lizenzpflichten](docs/dependencies.md),
 [kostenlose Veröffentlichung](docs/distribution.md) und die
 [Checkliste offener Nachweise](docs/missing_data.md).
-Die aktuelle Fassung ist eine kostenlose Entwicklungsversion; die Veröffentlichung
-im Microsoft Store und die Öffnung des Quellcode-Repositorys sind vorbereitet,
-aber noch nicht erfolgt. Anbieterwerte werden nur in `config/legal_profile.json`
+Die aktuelle Fassung ist eine kostenlose Entwicklungsversion. Quellcode und
+veröffentlichte Installer gehören zum Hauptrepository; eine Microsoft-Store-
+Veröffentlichung und reguläre Vertriebsfreigabe benötigen gesonderte Nachweise. Anbieterwerte werden nur in `config/legal_profile.json`
 gepflegt.
 
 Fehler, Funktionswünsche und Fragen laufen über
 [GitHub Issues](https://github.com/RodeProjects/sacrificial-tower/issues/new/choose).
-Solange das Repository privat ist, benötigen Nutzer Zugriffsrechte.
 [Support und Diagnose](docs/support.md) erklärt die freiwilligen Anhänge,
 ihre mögliche öffentliche Sichtbarkeit und den vertraulichen Kontaktweg.
 

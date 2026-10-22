@@ -60,6 +60,7 @@ def owned_processes(executable, *, terminate=False):
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
     kernel.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
     if snapshot == ctypes.c_void_p(-1).value:
@@ -71,7 +72,7 @@ def owned_processes(executable, *, terminate=False):
         present = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
         while present:
             if entry.name.casefold() == executable.name.casefold():
-                handle = kernel.OpenProcess(0x1000 | (1 if terminate else 0), False, entry.pid)
+                handle = kernel.OpenProcess(0x1000 | (0x100001 if terminate else 0), False, entry.pid)
                 if handle:
                     try:
                         buffer = ctypes.create_unicode_buffer(32768)
@@ -81,6 +82,8 @@ def owned_processes(executable, *, terminate=False):
                             matches.append(entry.pid)
                             if terminate and not kernel.TerminateProcess(handle, 0):
                                 raise ctypes.WinError(ctypes.get_last_error())
+                            if terminate and kernel.WaitForSingleObject(handle, 10000) != 0:
+                                raise RuntimeError("Owned test application did not exit")
                     finally:
                         kernel.CloseHandle(handle)
             present = kernel.Process32NextW(snapshot, ctypes.byref(entry))
@@ -207,8 +210,14 @@ def main():
         time.sleep(3)
         assert set(pids) & set(owned_processes(install / "SacrificialTower.exe")), "Updated application exited immediately"
         journal = work / "userdata/logs/background_jobs.jsonl"
-        records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
-        assert any(record.get("program_version") == APP_VERSION for record in records), "Frozen application reports a different program version"
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()] if journal.exists() else []
+            if any(record.get("program_version") == APP_VERSION for record in records):
+                break
+            time.sleep(0.5)
+        else:
+            raise AssertionError("Frozen application did not report the expected program version")
         report = json.loads((work / "gui-result.json").read_text())
         report.update(source_sha=source_sha, previous_source_sha=old_source,
                       installed_versions=[previous, APP_VERSION], native_handoff_completed=True,

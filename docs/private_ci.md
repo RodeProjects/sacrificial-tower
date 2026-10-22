@@ -1,7 +1,7 @@
 # Private CI und geprüfte Veröffentlichung
 
-Stand: 21.10.2026. **Phase 1 vollständig abgenommen.** Das Hauptrepository
-bleibt bis zur abschließenden Kanal- und Veröffentlichungsprüfung privat.
+Stand: 22.10.2026. **Phase 1 vollständig abgenommen.** Die Öffnung des Hauptrepositorys folgt der
+[abschließenden Kanal- und Veröffentlichungsprüfung](publication_readiness.md).
 Die direkte Runnerregistrierung am Hauptrepository wurde entfernt.
 
 Unter privater Steuerung 1.0.6 (`5587253`) hat Version 0.9.24 (`cea9269`)
@@ -30,12 +30,21 @@ CI-Repository sind entsprechend gekennzeichnet.
 
 Steuerung 1.0.7 (`86d5cc4`) ergänzt ausschließlich den Tower-Adapter um die
 fest konfigurierte Abnahme `update-acceptance.yml`. PR 7 und Controllerlauf
-`39678575537` wurden erfolgreich geprüft; dieselbe SHA ist geschützt installiert.
+`39678575537` wurden erfolgreich geprüft; dieselbe SHA wurde geschützt installiert.
 Diese Operation installiert nur im fest eingerichteten Standardkonto, verlangt
 die freigegebene Version/Releaseart und verwendet ein frisches Jobverzeichnis.
 Gemeinsame Autorisierungs- und Übernahmelogik bleiben unverändert. Der konkrete
-veröffentlichte Versionsübergang wird nach der Öffnung zusätzlich abgenommen;
+veröffentlichte Versionsübergang gehört zur zusätzlichen Abnahme nach der Öffnung;
 siehe [Updatekanal](update_channel.md).
+
+Die aktuelle Steuerung 1.0.8 (`40ed31f`) wurde über PR 8 und den offiziellen
+Controllerlauf `39701921669` geprüft und installiert. Sie erhält den bereits
+verifizierten Originalbeleg auch nach GitHubs Logkonsolidierung: Verwaltungs-
+eigentümer und Schreibrechte werden geprüft, der ursprüngliche Lauf samt
+Pflichtjobs erneut über GitHub bestätigt und sein aktueller Joblog abgeglichen.
+Ein zusammengefasster Log ohne zuvor verifizierten geschützten Originalbeleg
+genügt nicht. Veränderte Identitäten, Dateien oder unsichere Rechte blockieren.
+Die 27 Artefaktsicherheitsfälle gehören zur offiziellen Controllerprüfung.
 
 Lizenzdialoge sind eine eigene **gehostete** Releasepflicht (`installer-checks.yml`).
 Ihre unveränderten Assertions funktionieren nicht vollständig in Windows-Session 0;

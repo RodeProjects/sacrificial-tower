@@ -77,6 +77,9 @@ markiert. GitHub schützt anschließend Tag und Anhänge durch aktivierte
 unveränderliche Releases. Der Publisher lädt die veröffentlichten Dateien
 tatsächlich erneut herunter und bestätigt Signatur, Größe und Hash. Bei Fehlern
 darf nur sein eigener nachweislich unveröffentlichter Entwurf entfernt werden.
+Entwurf, Upload, Veröffentlichung und eventuelle Entwurfsbereinigung verwenden
+die konkrete von GitHub zurückgegebene Release-ID. Der Tag-Endpunkt ist erst für
+veröffentlichte Releases geeignet.
 Veröffentlichte Releases und historische Nachweise werden nicht automatisch
 gelöscht; der alte Aufbewahrungshelfer blockiert Löschungen im Hauptrepository.
 
