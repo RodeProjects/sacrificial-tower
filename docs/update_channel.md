@@ -99,8 +99,10 @@ eingerichteten Windows-Standardkonto und einem neuen eigenen Jobverzeichnis lauf
 wenn dort noch keine Installation registriert ist. Keine Administratorrechte,
 kein Zugriff auf die reguläre Installation oder Benutzerdaten des Entwicklerkontos.
 
-Die Abnahme lädt zwei tatsächlich veröffentlichte, unveränderliche benachbarte
-Versionen anonym herunter. Sie installiert den alten echten Installer und führt
+Die Abnahme lädt zwei tatsächlich veröffentlichte, unveränderliche Versionen
+anonym herunter. Als Vorgänger dient die numerisch neueste geeignete ältere
+Veröffentlichung; unveröffentlichte Patchnummern werden nicht vorausgesetzt.
+Sie installiert den alten echten Installer und führt
 den ursprünglichen Qt-Updatercode seines Release-Tags aus. Dieser lädt den neuen
 echten Installer, bestätigt den nativen Übergabeablauf und startet das neue
 installierte Frozen-Programm. Versionsregistrierung, geänderte Programmbytes,

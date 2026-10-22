@@ -47,6 +47,7 @@ var
   TestTimer: UINT_PTR;
   TestStep: Integer;
   TestTicks: Integer;
+  TestScrollWaitTicks: Integer;
   TestPageID: Integer;
   TestFinished: Boolean;
 
@@ -132,6 +133,15 @@ begin
         TestStep := 2;
       end;
       2: begin
+        { The two Windows timer callbacks are asynchronous. A visible bottom
+          does not prove the separate 100ms production callback ran first. }
+        if not LicenseEndReached then
+        begin
+          Inc(TestScrollWaitTicks);
+          Require(TestScrollWaitTicks <= 20,
+            'Scrollbar bottom did not unlock acceptance within five seconds: ' + ScrollState);
+          Exit;
+        end;
         Require(LicenseEndReached, 'Scrollbar bottom did not unlock acceptance: ' + ScrollState);
         Require(WizardForm.NextButton.Enabled, 'Consent button disabled at bottom');
         Require(WizardForm.CurPageID = wpLicense, 'Scrolling alone navigated without consent click');

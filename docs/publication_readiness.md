@@ -131,7 +131,7 @@ Alle vorher möglichen Prüfungen werden daher privat abgeschlossen; die ausdrü
 beauftragte Öffnung wird nicht dafür vorgezogen. Unmittelbar danach werden ohne
 Anmeldung README-Downloadlink, Manifest, Rechtstexte, Release-Anhänge, Signaturen,
 Hashes und Quelltag geprüft. Die feste private Operation `update-acceptance.yml`
-nimmt den echten veröffentlichten Versionsübergang 0.9.26 → 0.9.27 im getrennten
+nimmt den echten veröffentlichten Versionsübergang 0.9.26 → 0.9.28 im getrennten
 Standardkonto ab. Details und die präzise Testgrenze stehen unter
 [Updatekanal](update_channel.md#abnahme-des-veröffentlichten-versionsübergangs).
 Die Entwicklerinstallation und deren Daten werden nicht verwendet.

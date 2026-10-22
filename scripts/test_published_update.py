@@ -102,6 +102,23 @@ def json_api(path, context):
                  context=context, timeout=60) as response:
         return json.load(response)
 
+def choose_previous_release(releases, current_version):
+    current = tuple(map(int, current_version.split(".")))
+    candidates = []
+    for release in releases:
+        match = re.fullmatch(r"v([0-9]+\.[0-9]+\.[0-9]+)", release.get("tag_name", ""))
+        if (not match or release.get("draft") or release.get("prerelease")
+                or release.get("immutable") is not True):
+            continue
+        version = match[1]
+        numeric = tuple(map(int, version.split(".")))
+        if numeric < current:
+            candidates.append((numeric, version))
+    if not candidates:
+        raise RuntimeError("No previous immutable published installer version")
+    return max(candidates)[1]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -118,10 +135,6 @@ def main():
         raise RuntimeError("Only the dedicated nonadministrative official runner may install these test versions")
     if args.version != APP_VERSION:
         raise RuntimeError("Acceptance version differs from approved source")
-    current = tuple(map(int, APP_VERSION.split(".")))
-    if current[2] < 1:
-        raise RuntimeError("No previous patch version")
-    previous = f"{current[0]}.{current[1]}.{current[2]-1}"
     work = args.work_root.resolve()
     temporary = Path(os.environ["RUNNER_TEMP"]).resolve()
     if (work.parent != temporary or not work.name.startswith("tower-published-update-")
@@ -130,6 +143,15 @@ def main():
     work.mkdir()
     install = work / "installed"
     service = UpdateService(temporary_root=work, timeout_s=60)
+    releases = []
+    page = 1
+    while True:
+        batch = json_api(f"repos/{RELEASE_REPOSITORY}/releases?per_page=100&page={page}", service._ssl_context)
+        releases.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    previous = choose_previous_release(releases, APP_VERSION)
     source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     old_source = None
     for version in (previous, APP_VERSION):

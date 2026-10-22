@@ -50,6 +50,10 @@ Lizenzdialoge sind eine eigene **gehostete** Releasepflicht (`installer-checks.y
 Ihre unveränderten Assertions funktionieren nicht vollständig in Windows-Session 0;
 produktive Lizenzoberfläche und Dialogbedingungen wurden nicht verändert. Nur
 die harmlose Testfixture beendet nach den Assertions ihre Nachrichtenschleife.
+Sie wartet außerdem begrenzt auf den separaten asynchronen Prüftimer, bevor sie
+die unveränderten Freigabeassertionen auswertet. Sichtbares Textende und bereits
+verarbeiteter Timer sind unterschiedliche Zustände; fehlende Freigabe bleibt ein
+Testfehler. Kein produktiver Scrollschutz wird umgangen.
 Releaseadapter und Artefaktübernahme bestätigen den ursprünglichen GUI-Erfolg für
 dieselbe Projekt-SHA, Basis und CI-Steuerung erneut. Der lokale Buildfallback
 behält native Übergabe, Ersetzung und Deinstallation bei. Fehlende gehostete
