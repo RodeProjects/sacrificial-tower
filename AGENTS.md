@@ -68,6 +68,11 @@ Diese Regeln gelten ergänzend zur globalen `AGENTS.md` für das Repository `sac
   anschließend im geschützten Entwicklerkonto. Die frühere CI-Zeitlimit-Ausnahme
   mit eigener lokaler Vollsuite wird durch den nachgewiesenen offiziellen Fallback
   ersetzt; `-AllowTimedOutCI` autorisiert keine Umgehung.
+- Die zusätzliche tatsächliche Updateabnahme `update-acceptance.yml` darf unter
+  privater Steuerung auf GitHub-Hardware in einem eigens angelegten Standardkonto
+  laufen. Konto, Profil und Testinstallation anschließend entfernen. Der normale
+  lokale Runnerbetrieb bleibt unverändert. Lokale Virenscannersperren nicht durch
+  Abschaltung, breite Ausnahmen oder Umgehung beseitigen; Grenzen dokumentieren.
 - Runnerbetrieb als Windows-Standardkonto `RodeCiRunner`, Verwaltung weiter unter
   dem bisherigen Entwicklerkonto. Code/Konfiguration/Freigaben/Nachweise gegen
   Runner-Schreibzugriff und persönliche Anmeldungen/Schlüssel gegen Jobzugriff

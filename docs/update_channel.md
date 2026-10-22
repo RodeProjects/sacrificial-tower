@@ -18,7 +18,7 @@ tatsächlich geprüften Quellcommit.
 
 **Bisherige Tester müssen die neue Version einmal manuell installieren.**
 Testinstallationen aus `RodeProjects/sacrificial-tower-updates` wechseln nicht
-automatisch. Der alte Kanal wird nach erfolgreicher öffentlicher Abnahme als
+automatisch. Der alte Kanal ist nach erfolgreicher öffentlicher Abnahme als
 abgelöst gekennzeichnet und archiviert. Kein paralleler aktiver Kanal, keine
 Übergangsarchitektur und keine dauerhafte Kompatibilität zum alten Kanal.
 
@@ -94,10 +94,15 @@ der Schalter. Details: [Veröffentlichung](distribution.md).
 
 Gezielte Tests prüfen Abruf, Versionsvergleich, Signaturen, exakte Kanaladresse,
 Download/Integrität und Fehlerfälle. Zusätzlich ist im privaten CI-Adapter die
-Operation `update-acceptance.yml` fest konfiguriert. Sie darf ausschließlich im
-eingerichteten Windows-Standardkonto und einem neuen eigenen Jobverzeichnis laufen,
+Operation `update-acceptance.yml` fest konfiguriert. Sie darf ausschließlich unter
+einem kontrollierten Windows-Standardkonto und in einem neuen eigenen Jobverzeichnis laufen,
 wenn dort noch keine Installation registriert ist. Keine Administratorrechte,
 kein Zugriff auf die reguläre Installation oder Benutzerdaten des Entwicklerkontos.
+Die erfolgreiche Abnahme `39711833966` verwendete ein eigens angelegtes Standardkonto
+auf GitHub-Hardware. Der lokale Teststart war durch Avast blockiert; es wurden
+weder Scanner abgeschaltet noch Ausnahmen ergänzt. Nur der zusätzliche echte
+Versionsübergang weicht deshalb auf GitHub-Hardware aus. Konto, Profil und eigene
+Testinstallation werden danach entfernt. Normale lokale CI bleibt unverändert.
 
 Die Abnahme lädt zwei tatsächlich veröffentlichte, unveränderliche Versionen
 anonym herunter. Als Vorgänger dient die numerisch neueste geeignete ältere
@@ -113,9 +118,9 @@ das ist ausdrücklich eine Grenze dieser Abnahme. Die Lizenzdialoge werden durch
 die separate gehostete GUI-Pflichtprüfung abgedeckt.
 
 Manipulierte echte Signatur und Hashabweichung vor Prozessstart werden zusätzlich
-ungefährlich geprüft. Vollständig anonymer Abruf ist erst nach der beauftragten
-Öffnung möglich und wird unmittelbar danach abgenommen; zuvor prüft der Publisher
-die tatsächlichen veröffentlichten Dateien mit dem Verwaltungszugang.
+ungefährlich geprüft. Vollständig anonymer Abruf wurde unmittelbar nach der
+beauftragten Öffnung erfolgreich abgenommen; zuvor prüfte der Publisher die
+tatsächlich veröffentlichten Dateien mit dem Verwaltungszugang.
 
 ## Eigenständiger und vorbereiteter Store-Build
 

@@ -56,6 +56,7 @@ sein. Ein Release gehört zu seinem unveränderlichen Quellcode-Tag `vVERSION`;
 Installer, Versionshinweise und signiertes Manifest tragen dieselbe Version.
 Bisherige Testinstallationen aus dem alten separaten Updatekanal müssen die neue
 Version einmal manuell installieren. Eine automatische Migration ist nicht vorgesehen.
+Das frühere Update-Repository ist als abgelöst gekennzeichnet und archiviert.
 
 ## Start unter Windows
 

@@ -6,6 +6,15 @@ Der aktuelle Nachweis zum öffentlichen Installerübergang steht in der Beschrei
 des [neuesten Releases](https://github.com/RodeProjects/sacrificial-tower/releases/latest).
 Die maschinenbezogenen Originalnachweise bleiben im privaten Verwaltungsbereich.
 
+Das Hauptrepository ist seit der geprüften Öffnung öffentlich. Beide tatsächlichen
+Entwicklungsreleases 0.9.26 und 0.9.28 besitzen unveränderliche Quellcode-Tags und
+Anhänge. Der öffentliche Versionsübergang bestand in privatem Actions-Lauf
+`39711833966` unter einem eigenen GitHub-Standardkonto; die Entwicklerinstallation
+wurde nicht verwendet. Anonyme Downloads, Signaturen und Hashes sind bestätigt.
+Der alte Kanal ist archiviert und seine Actions sind deaktiviert. Haupt- und
+Alt-Repository besitzen weiterhin keinen lokalen Runner; die gemeinsame CI bleibt
+privat. Der nachfolgende reine Dokumentationsstand 0.9.29 ist kein neuer Installer.
+
 ## Erreichte Voraussetzungen
 
 - Nur `RodeProjects/project-ci` besitzt `FLO-PC-private`; Haupt- und altes

@@ -1,7 +1,8 @@
 # Private CI und geprüfte Veröffentlichung
 
-Stand: 22.10.2026. **Phase 1 vollständig abgenommen.** Die Öffnung des Hauptrepositorys folgt der
-[abschließenden Kanal- und Veröffentlichungsprüfung](publication_readiness.md).
+Stand: 22.10.2026. **Phase 1 vollständig abgenommen.** Das Hauptrepository ist
+öffentlich; der alte Updatekanal ist abgelöst und archiviert. Die
+[Kanal- und Veröffentlichungsprüfung](publication_readiness.md) beschreibt die Nachweise.
 Die direkte Runnerregistrierung am Hauptrepository wurde entfernt.
 
 Unter privater Steuerung 1.0.6 (`5587253`) hat Version 0.9.24 (`cea9269`)
@@ -37,7 +38,7 @@ Gemeinsame Autorisierungs- und Übernahmelogik bleiben unverändert. Der konkret
 veröffentlichte Versionsübergang gehört zur zusätzlichen Abnahme nach der Öffnung;
 siehe [Updatekanal](update_channel.md).
 
-Die aktuelle Steuerung 1.0.8 (`40ed31f`) wurde über PR 8 und den offiziellen
+Steuerung 1.0.8 (`40ed31f`) wurde über PR 8 und den offiziellen
 Controllerlauf `39701921669` geprüft und installiert. Sie erhält den bereits
 verifizierten Originalbeleg auch nach GitHubs Logkonsolidierung: Verwaltungs-
 eigentümer und Schreibrechte werden geprüft, der ursprüngliche Lauf samt
@@ -45,6 +46,35 @@ Pflichtjobs erneut über GitHub bestätigt und sein aktueller Joblog abgeglichen
 Ein zusammengefasster Log ohne zuvor verifizierten geschützten Originalbeleg
 genügt nicht. Veränderte Identitäten, Dateien oder unsichere Rechte blockieren.
 Die 27 Artefaktsicherheitsfälle gehören zur offiziellen Controllerprüfung.
+
+Steuerung 1.0.13 (`eaa3f39`) ist über PR 13 und den offiziellen
+Controllerlauf `39711562712` geprüft und installiert. Der tatsächliche öffentliche
+Installerübergang 0.9.26 → 0.9.28 bestand in Lauf `39711833966` unter einem eigenen
+Windows-Standardkonto auf GitHub-Hardware: Signatur-/Hashfehler wurden blockiert,
+native Übergabe, Dateiersetzung, Neustart des installierten Frozen-Programms und
+Erhalt der Testdaten bestätigt. Testinstallation, Konto und Profil wurden entfernt.
+Die präzise Grenze der alten Qt-Oberfläche steht im [Updatekanal](update_channel.md).
+
+Der lokale Versuch wurde vor der Installation von Avast Autosandbox beendet.
+Schutzsoftware und Ausnahmen wurden nicht verändert. Nur diese zusätzliche
+Abnahme verwendet deshalb GitHub-Hardware; Entwicklung, normale Vollprüfungen und
+der lokale offizielle Buildfallback bleiben auf dem eigenen Rechner. Ein neuer
+Standardbenutzer auf GitHub erhält nur den eigenen Testbereich und lesenden
+Quellzugriff. Ein kurzer Testpfad vermeidet die nachgewiesene Windows-Pfadgrenze
+bei langen Qt-Lizenznamen; die normalen benutzereigenen Shellordner werden erzeugt.
+Dies ist keine allgemeine Langpfadfreigabe des Installers und keine Zusage über
+das Verhalten lokaler Virenscanner.
+
+Nach der Öffnung wurden anonyme README-/Release-/Manifest-/Anhangdownloads samt
+Signatur und Integrität geprüft. Nur die private CI besitzt weiterhin einen
+Runner. Externe öffentliche PRs benötigen eine bewusste gehostete Actions-Freigabe;
+`main` ist gegen Force-Push und Löschung geschützt. Historische Releaseprüfungen
+bleiben als Originalnachweise erhalten; eine neue Steuerung macht sie nicht zu
+wiederverwendbaren aktuellen Freigaben.
+Die aktuelle Steuerung 1.0.14 (`0ff4740`) ergänzt dazu nur die abschließende
+Betriebsdokumentation und statische CI-Version. Die Prüflogik ist gegenüber 1.0.13
+unverändert. Die anschließenden aktuellen Nachweise binden trotzdem die neue
+konkrete Steuerungs-SHA; alte Erfolge werden nicht als neue Läufe ausgegeben.
 
 Lizenzdialoge sind eine eigene **gehostete** Releasepflicht (`installer-checks.yml`).
 Ihre unveränderten Assertions funktionieren nicht vollständig in Windows-Session 0;
