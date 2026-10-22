@@ -428,6 +428,7 @@ class SupportSimulationTests(unittest.TestCase):
     def test_angle_warning_appears_at_threshold_and_respects_override(self):
         window = self.make_window()
         self.addCleanup(window.close)
+        window.profile_angle_limit.checkbox.setChecked(False)
         selected = window.profile_match_result.selected
         profile = replace(selected.effective_profile, effective_values={
             **selected.effective_profile.effective_values,
@@ -461,6 +462,7 @@ class SupportSimulationTests(unittest.TestCase):
     def test_support_warning_reflows_after_repeated_checkbox_changes(self):
         window = self.make_window()
         self.addCleanup(window.close)
+        window.profile_angle_limit.checkbox.setChecked(False)
         window.resize(900, 900)
         window.show()
         window.workflow.set_slicer_step_visible(True)

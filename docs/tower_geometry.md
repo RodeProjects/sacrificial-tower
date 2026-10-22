@@ -91,6 +91,11 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
    stattdessen eine feste maximale Radiusabnahme von 1 mm pro mm Höhe; der
    Standfußübergang behält seine eigene Höhenregel.
 
+   In der Oberfläche ist der Verjüngungswinkel bei aktivierter 100-%-Turmfüllung
+   gesperrt und ausgegraut; das Feld zeigt „auto“ ohne Gradzeichen. Der Reset
+   ist ebenfalls gesperrt. Der manuelle Winkel bleibt numerisch gespeichert
+   und erscheint wieder, sobald die Füllungssimulation ausgeschaltet wird.
+
 ### Automatischer Standfuß
 
 Die automatische Außenbreite folgt `0,21 mm je 1 mm Original-Objekthöhe` und ist auf
@@ -167,11 +172,14 @@ Das exportierte gemeinsame Projekt übernimmt die 100-%-Füllung objektspezifisc
 ### Bereichseditor für ausgeschlossene Turmaufweitungen
 
 Nach dem abgeschlossenen Pre-Slice öffnet **Erweiterte Turmeinstellungen →
-Editor: Turmaufweitungen bereichsweise ausschließen** ein separates, am
+Editor für Ausschlussbereiche öffnen** ein separates, am
 Hauptfenster zentriertes Fenster.
 Der Button steht als letztes Element dieses Einstellungsbereichs, mit einem
 Info-Button links daneben. Seine Breite folgt dem Text einschließlich der
-Innenabstände; seine Höhe entspricht „Standardwerte wiederherstellen“ im Footer.
+Innenabstände; seine Höhe beträgt 30 Pixel, zwei Pixel weniger als
+„Standardwerte wiederherstellen“ im Footer. „Editor“ ist dezent halbfett und
+dunkelgrün hervorgehoben.
+Die optisch zentrierte Textzeile ist um einen Pixel nach unten versetzt.
 Rechts daneben steht ausschließlich die Anzahl als „1 Ausschlussbereich“ oder
 „x Ausschlussbereiche“. Ohne Bereiche bleibt diese Anzeige verborgen.
 Die Stichpunkte des Info-Buttons erklären das Ignorieren von
@@ -484,8 +492,9 @@ Mindestabstände diese Seite, wird die nächste freie Seite geprüft. Zu Objekt 
 Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
 maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
 
-Die Kreissegmentzahl wird pro Kandidat aus dessen größtem aktuellen Durchmesser
-berechnet: `max(30, ceil(1,0 × Durchmesser in mm))`. Damit haben
+Die standardmäßig aktivierte Option „Turm-Kreissegmente → Automatisch berechnen“
+berechnet die Kreissegmentzahl pro Kandidat aus dessen größtem aktuellen
+Durchmesser: `max(30, ceil(1,0 × Durchmesser in mm))`. Damit haben
 kleine Türme mindestens 30 Segmente; bei größeren Durchmessern gilt
 ein Segment pro Millimeter ohne obere Begrenzung.
 Alle Ringe eines STL verwenden dieselbe Segmentzahl,
@@ -494,6 +503,22 @@ dieselbe Regel; eine veränderte Kandidatenbreite kann die Auflösung im nächst
 Kalibrierungsdurchlauf ändern.
 Die 3D-Vorschau zeigt die für den dargestellten Kandidaten verwendete Zahl als
 „Turm-Kreissegmente“ oberhalb der Höhenangabe an.
+
+In den erweiterten Turmeinstellungen steht die Segmentwahl zwischen der
+Standfußbreite und dem maximalen Aufweitungswinkel. Das bei aktiver Automatik gesperrte Zahlenfeld zeigt vor der
+Übernahme eines fertigen Turms „auto“, danach dessen tatsächlich verwendete
+Segmentzahl. Ohne Automatik lässt sich eine feste Ganzzahl von 4 bis 256 wählen.
+Die manuelle Zahl bleibt beim Umschalten erhalten und gilt einheitlich für
+Kalibrierung, Zwischenvorschau, endgültige Vorschau und STL-Export. Änderungen
+machen das bisherige Ergebnis wie andere Geometrieeinstellungen veraltet.
+Tastatur- und Einfügeeingaben außerhalb von 4 bis 256 werden abgefangen.
+Anfangsziffern 1 bis 3 werden beim Tippen kurz intern vorgemerkt, damit gültige
+mehrstellige Zahlen weiterhin direkt eingegeben werden können, ohne einen
+ungültigen Zwischenwert im Feld anzuzeigen. Fehlerhafte anderweitige Eingaben
+blockieren weiterhin die Generierung und nennen die Grenzen; ein leeres Feld
+oder 0 zeigt „Das Feld darf nicht leer sein!“.
+Der Einzel-Reset stellt die Automatik und den manuellen Standardwert 32 wieder
+her. Die Segmentwahl des manuellen Editors bleibt davon unabhängig.
 
 Das Originalobjekt erscheint nach dem Pre-Slice zunächst in der 3/4-Ansicht.
 Der erste abgeschlossene gemeinsame Slice stellt auf die Seitenansicht um;
@@ -615,20 +640,39 @@ entfällt bei deaktivierten Stützen oder aktivierter Simulation ohne Stützen.
 
 Die kleine Zusatzzeile „Auf Threshold-angle des Slicer-Profils begrenzen“
 übernimmt bei Aktivierung den expliziten Schwellenwinkel des bestätigten
-Prozessprofils. Das Eingabefeld zeigt ihn gesperrt an; beim Ausschalten kehrt
+Prozessprofils. Für neue Einstellungen und beim Wiederherstellen der Standardwerte
+ist sie aktiviert; ausdrücklich gespeicherte Auswahlen und historische Migrationen
+bleiben erhalten. Das Eingabefeld zeigt ihn gesperrt an; beim Ausschalten kehrt
 der vorherige freie Wert zurück. Die Zeile liegt unter der Feldbeschriftung
 ohne Teilnahme am Formularraster; Hauptzeile und Folgefelder behalten ihre
 Position. Nur bei schmalen Spalten wird der nachgestellte Erklärungsteil
 gekürzt; die vollständige Beschriftung bleibt über den Hinweis verfügbar.
-Fehlende/ungültige Werte und automatische Schwellen (0°) werden nicht geraten:
-die gespeicherte Bindung wartet auf ein geeignetes bestätigtes Profil und der
-freie Winkel bleibt verwendbar. Im automatischen Modus gilt auch bei einer
-Profilbindung mindestens 20° zur Horizontalen. Flachere Profilwerte werden auf
-20° begrenzt; der Hoverhinweis nennt Profilwert und angewendeten Winkel.
-Im manuellen Modus sind weiterhin kleinere Winkel möglich.
+Ohne Profilbindung kann der Aufweitungswinkel in beiden Modi zwischen 20° und
+89° gewählt werden. Nur eine aktive Bindung darf einen tatsächlich gelesenen
+positiven Profilwinkel unter 20° übernehmen. Ausgelesene Werte von 0° oder
+darunter werden für diese Bindung durch 30° ersetzt; der Hover-Hinweis lautet
+„Profilwinkel ≤ 0°: Automatisch auf 30° gesetzt.“ Fehlende, mehrdeutige,
+nicht endliche und sonstige ungültige Profilwerte aktivieren keine Bindung;
+die gespeicherte Auswahl wartet dann auf ein geeignetes bestätigtes Profil.
+Die Slicer-Quelldateien bleiben unverändert. Die tatsächliche Stützenerkennung
+interpretiert 0° weiterhin als automatische bzw. überlappungsbasierte Erkennung;
+der Ersatzwinkel betrifft ausschließlich die Turm-Winkelbindung.
+Bei aktiver Übernahme eines Profilwinkels bleiben rote Fehler sichtbar, während
+gelbe Hinweise an der Einstellung ausgeblendet sind. Bei manueller Eingabe
+erscheinen wieder alle zutreffenden Hinweise. Ist kein Profilwinkel verfügbar,
+bleibt das Feld manuell einstellbar und behält die vollständigen Hinweise.
+
+Der gemeinsame Hoverhinweis gliedert die Erklärung in „Was ist das?“ und
+„Sollte ich das aktivieren?“, mit Aufzählung und eingerückten Empfehlungen.
+Ein kleinerer Winkel zur Horizontalen beschreibt eine flachere Fläche.
+Beim Ausschalten der Bindung wird der gemerkte freie Winkel innerhalb von
+20° bis 89° wiederhergestellt. Gespeichert wird weiterhin dieser freie,
+vertikal referenzierte Wert mit der Bindungsoption; der gelesene Profilwinkel
+und dessen Ersatzwert werden erst im bestätigten Laufzeitkontext angewendet.
 Der allgemeine Kalibrierungshinweis für 35° und flachere Winkel steht ausschließlich
-im Hovertext. Erst bei 28° und flacher erscheint eine gelbe Warnung vor möglichen
-Druckproblemen. Die separate Warnung vor Stützen durch das aktive Profil bleibt erhalten.
+im Hovertext. Bei 29° und flacher erscheint die gelbe Warnung
+„Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang.“
+Die separate Warnung vor Stützen durch das aktive Profil bleibt erhalten.
 
 Die Simulation steht direkt unter „100% Turmfüllung simulieren“ und schreibt
 ausschließlich temporäre Profilkopien und objektspezifische Einstellungen
@@ -692,37 +736,69 @@ als aktuell angezeigt; Export bleibt bis zur Ergebnisübernahme gesperrt.
 Außerhalb einer Generierung erscheint das Turm-Fortschrittsbild vollständig,
 während sein letzter interner Fortschrittswert für die Fortsetzung erhalten bleibt.
 
-Die abschließende Aktionszeile eines automatischen Ergebnisses bietet zwischen
-**Angleichung fortsetzen** und **Kühlturm exportieren** eine Alternative:
-„Noch nicht das gewünschte Ergebnis?“ und „Gestalte deinen Turm im manuellen
-Modus nach deinen Vorstellungen.“ Darunter steht **Manuell gestalten →** auf
-derselben Grundlinie wie die anderen Buttons. Entfällt die Fortsetzung, steht
-der Hinweis neben dem Export. Der Bereich ist transparent und ohne Rahmen.
-Bei weniger Platz entfällt zuerst „nach deinen Vorstellungen.“ im Subtext.
-Danach wird der Subtext ausgeblendet und die Überschrift zweizeilig angezeigt.
-Reicht auch das nicht, bleiben nur die Buttons nebeneinander; erst dann werden
-ihre horizontalen Innenabstände von regulär 13 beziehungsweise 25 Pixeln auf
-mindestens 4 Pixel verkleinert.
-Die Stufen richten sich nach den tatsächlichen Schrift- und Buttonbreiten;
-beim Verbreitern erscheinen die Texte wieder. Die umgebende Ansicht behält ihren
-bisherigen Wechsel zu einer Spalte.
+Das automatische Ergebnis erscheint auf einer durchgehend weißen Fläche ohne
+zusätzlichen äußeren Kartenrahmen. Die eckigen Farbflächen reichen bis zum
+Abschnittsrand und schließen horizontal und vertikal ohne Lücken aneinander an.
+Feine Trennlinien grenzen die Flächen ab und folgen auch der gestapelten Anordnung.
+Eine leicht pastelllila Kopffläche bündelt Fortschrittsbild, Status und Slicezähler. Ein gemeinsamer
+Messwertbereich zeigt Layerzeit und Abweichung in direkt benachbarten Spalten:
+Beide Spalten verwenden dasselbe zarte Blau. Zielzeit
+und Toleranz stehen unmittelbar unter der Layerzeit. Rechts daneben fasst eine eigene
+Bewertungsfläche Ergebnis und Simulationen zusammen. Alle drei Flächen behalten
+denselben hellblauen Hintergrund unabhängig vom Ergebnis; die Messwerttexte
+kennzeichnen die Bewertung weiterhin farbig.
+Schmale Ergebnisbereiche stapeln Messwertbereich und Bewertung; bei besonders
+wenig Platz werden auch die beiden Messwertspalten untereinander angeordnet.
 
-**Manuell gestalten →** öffnet denselben manuellen Modus wie die Methodenwahl im
-Header. Der Hinweis erscheint sowohl nach vorzeitiger Übernahme als auch nach dem
+Während der Generierung blendet sich der Titel von links nach rechts in einer
+Sekunde ein. Danach folgen die drei Punkte nacheinander mit jeweils einer
+Drittelsekunde. Nach einer halben Sekunde vollständig sichtbarem Titel blendet
+alles in einer Drittelsekunde aus; nach 200 Millisekunden beginnt der Zyklus neu.
+Der vollständige Text bleibt für Layout und Barrierefreiheit unverändert.
+Die Animation läuft nur bei sichtbarem Generierungstitel und endet bei einem
+Ergebnis, Fehler oder Abbruch; einzelne Slices starten sie nicht erneut.
+
+Die abschließende Aktionszeile verbindet die Buttons auf einem dezenten,
+durchgehenden Hintergrund. Links steht der
+Hinweis **Ergebnis nicht zufriedenstellend?** / „Probiere den manuellen
+Modus aus.“ Ein zusätzlicher manueller Button entfällt. **Angleichen fortsetzen**
+steht, wenn verfügbar, unmittelbar links neben dem rechtsbündigen
+**Kühlturm exportieren**. Die Buttons behalten seitliche Innenabstände und
+Abstand zur horizontalen Trennlinie. Reicht die Breite nicht aus, wandert die
+primäre Aktionsgruppe unter den umbrechenden Hinweis; bei noch weniger Platz stehen
+ihre Buttons untereinander. Die Tastaturreihenfolge folgt der sichtbaren
+Anordnung. Beim Verbreitern wird die einzeilige Anordnung wiederhergestellt.
+Ohne Hinweis und ohne verfügbare Aktionen bleibt die gesamte Aktionszeile verborgen.
+Bei sichtbaren Ergebnisflächen ohne Buttons entfällt auch die zusätzliche
+horizontale Vorschau-Trennlinie. Mit Aktionen liegt sie unmittelbar unter der
+Aktionsfläche; deren interne Buttonabstände bleiben erhalten.
+Die vorbereitende Fortschrittsanzeige behält unabhängig von den randfüllenden
+Ergebnisflächen ihre Innenabstände für Texte und Balken.
+
+Der manuelle Hinweis erscheint ab dem ersten gemeinsamen Slice und bleibt
+während der gemeinsamen Berechnung sichtbar, ebenso nach vorzeitiger Übernahme oder dem
 automatischen Ende und nach einer fehlgeschlagenen Fortsetzung mit erhaltenem,
-exportierbarem Turm. Während der Berechnung, beim Fortsetzen und ohne verwertbares
-Ergebnis bleibt er verborgen. Der Wechsel erhält die getrennten Sitzungen und
-das automatische Ergebnis; laufende Generierungen oder Exporte sperren den Button
-genauso wie die Methodenwahl im Header.
+exportierbarem Turm. Während vorbereitender Slices und der Vorbereitung einer
+Fortsetzung bleibt er verborgen. Der Wechsel über die Methodenwahl im Header erhält
+die getrennten Sitzungen und das automatische Ergebnis; laufende Generierungen
+oder Exporte sperren die Methodenwahl.
+
+Links vor „3D-Vorschau“ erläutert ein Info-Icon beim Darüberfahren, dass die
+Ansicht nur eine grobe Veranschaulichung ist. Auch die Ausrichtung des Originals
+kann von der exportierten 3MF-Datei abweichen.
 
 ## Prüfungen
 
-`test_generation_result_actions.py` prüft die Textstufen, die Rückkehr zur vollen
-Beschriftung, die Buttonabstände und die Anordnung ohne Fortsetzung.
+`test_generation_result_actions.py` prüft Links-/Rechtsausrichtung, benachbarte
+primäre Aktionen, schmale Ansichten, Tastaturreihenfolge und die Anordnung ohne
+Fortsetzung. `test_automatic_circle_segments.py` prüft Segmentwahl, Vorschaugeometrie,
+Reset, Schemaübergänge, Sicherungen, Schreibfehler und Downgrade-Kompatibilität.
 `test_generation_method_selection.py` deckt den Wechsel in den manuellen Modus,
 den Sitzungserhalt und die Aktionszeile auf beiden Seiten des Spaltenumbruchs ab.
 Die Ergebniszustände einschließlich fehlgeschlagener Fortsetzungen mit erhaltenem
 Turm werden in `test_embedded_generation.py` geprüft.
+`test_animated_generation_title.py` prüft die Animationsphasen, das Timing und den
+Start-/Stopp-Lebenszyklus bei Sichtbarkeits- und Statuswechseln.
 
 `test_october_editor_changes.py` deckt die unabhängige Wiederherstellung der
 Profilrollen, Historienschritte und Wiederholungszweige, schmale Vorschauleisten,

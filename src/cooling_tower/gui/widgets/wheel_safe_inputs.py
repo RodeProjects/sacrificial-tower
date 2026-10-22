@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QLocale, Qt, QTimer, Signal
-from PySide6.QtGui import QFontMetrics, QWheelEvent
+from PySide6.QtCore import QEvent, QLocale, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtGui import QFontMetrics, QValidator, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -114,3 +114,34 @@ class WheelSafeDoubleSpinBox(QDoubleSpinBox):
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         event.ignore()
+
+
+class AutomaticDoubleSpinBox(WheelSafeDoubleSpinBox):
+    """Show a disabled 'auto' label without replacing the retained numeric value."""
+
+    _automatic_display = False
+
+    def textFromValue(self, value):  # noqa: N802
+        return "auto" if self._automatic_display else super().textFromValue(value)
+
+    def validate(self, text, position):
+        if self._automatic_display and text.strip() == "auto":
+            return QValidator.State.Acceptable, text, position
+        return super().validate(text, position)
+
+    def valueFromText(self, text):  # noqa: N802
+        if self._automatic_display and text.strip() == "auto":
+            return self.value()
+        return super().valueFromText(text)
+
+    def set_automatic_display(self, automatic):
+        value = self.value()
+        self._automatic_display = bool(automatic)
+        self.setProperty("automaticPreview", self._automatic_display)
+        with QSignalBlocker(self), QSignalBlocker(self.lineEdit()):
+            self.setEnabled(not automatic)
+            self.setValue(value)
+            self.lineEdit().setText(self.textFromValue(value))
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()

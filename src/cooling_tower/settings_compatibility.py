@@ -141,6 +141,14 @@ SETTING_COMPATIBILITY_RULES = (
     _generation_rule(
         "local_reference_window", "layer-window-count-v1", "int", minimum=1, maximum=999
     ),
+    _generation_rule(
+        "automatic_circle_segments", "automatic-circle-segments-v1", "bool",
+        group="generation.circle-segments-v1",
+    ),
+    _generation_rule(
+        "circle_segments", "circle-segments-count-v1", "int",
+        group="generation.circle-segments-v1", minimum=4, maximum=256,
+    ),
     SettingCompatibilityRule(
         "output_root", "output-directory-path-v1", ("output_root",), "string", "output_root"
     ),
@@ -239,6 +247,14 @@ def _set_value(payload: dict[str, Any], path: tuple[str, ...], value: object) ->
 
 
 def _group_is_valid(group: str, payload: Mapping[str, Any]) -> bool:
+    if group == "generation.circle-segments-v1":
+        generation = payload.get("generation")
+        if not isinstance(generation, Mapping):
+            return False
+        count = generation.get("circle_segments")
+        return (isinstance(generation.get("automatic_circle_segments"), bool)
+                and isinstance(count, int) and not isinstance(count, bool)
+                and 4 <= count <= 256)
     if group == "generation.solid-geometry-v1":
         generation = payload.get("generation")
         if not isinstance(generation, Mapping):

@@ -1598,8 +1598,7 @@ QFrame#predictionPreviewDivider {
     border: none;
     min-height: 1px;
     max-height: 1px;
-    margin-top: 8px;
-    margin-bottom: 6px;
+    margin: 0;
 }
 
 QDialog#embeddedPreviewPanel {
@@ -2551,6 +2550,8 @@ QWidget#layerTimeColorControls QPushButton[rangeCompactReset="true"] {
 }
 
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"],
+QDoubleSpinBox#maximumContractionAngle[automaticPreview="true"],
+QDoubleSpinBox#maximumExpansionAngle:disabled,
 QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]:disabled {
     color: #667684;
     background: #f1f4f6;
@@ -2559,6 +2560,10 @@ QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]:disabled {
 
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::up-button,
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::down-button,
+QDoubleSpinBox#maximumContractionAngle[automaticPreview="true"]::up-button,
+QDoubleSpinBox#maximumContractionAngle[automaticPreview="true"]::down-button,
+QDoubleSpinBox#maximumExpansionAngle::up-button:disabled,
+QDoubleSpinBox#maximumExpansionAngle::down-button:disabled,
 QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]::up-button:disabled,
 QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]::down-button:disabled {
     background: #edf1f4;
@@ -2938,10 +2943,14 @@ QPushButton#profileConfirmButton:disabled {
 }
 
 QPushButton#headerResetButton,
-QPushButton#towerResetButton,
-QPushButton#layerRangeToolButton {
+QPushButton#towerResetButton {
     min-height: 30px;
     max-height: 30px;
+    padding: 0 12px;
+}
+QPushButton#layerRangeToolButton {
+    min-height: 28px;
+    max-height: 28px;
     padding: 0 12px;
 }
 QPushButton#headerResetButton:disabled,
@@ -2987,6 +2996,19 @@ QCheckBox::indicator:checked {
 QCheckBox::indicator:checked:hover {
     background: #105b93;
     border-color: #0d4c7e;
+}
+
+QCheckBox#manualPreviewExpansionLimit:disabled {
+    color: #8393a3;
+    background: transparent;
+}
+QCheckBox#manualPreviewExpansionLimit::indicator:disabled {
+    background: #edf1f4;
+    border-color: #c5cfd8;
+}
+QCheckBox#manualPreviewExpansionLimit::indicator:checked:disabled {
+    background: #9aa9b6;
+    border-color: #8b9ba9;
 }
 
 QCheckBox#simulateFullTowerInfill,
@@ -3927,10 +3949,54 @@ QToolButton#previewNavigationStatus:hover {
         stop: 0 rgba(56, 63, 75, 215), stop: 1 rgba(27, 32, 40, 215));
     border: 1px solid rgba(198, 207, 218, 120);
 }
-QWidget#generationPanel QLabel#towerGenerationTitle { font-size: 13pt; }
+QWidget#generationPanel QLabel#towerGenerationTitle { font-size: 14pt; color: #263e57; }
+QFrame#generationResultCard {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+QFrame#sectionCard[outerDropdown="true"][role="prediction"] { background: #ffffff; }
+QFrame#generationResultHero {
+    background: #f4f1fc;
+    border: none;
+    border-bottom: 1px solid #dce2eb;
+    border-radius: 0;
+}
+QLabel#generationResultEyebrow {
+    color: #766a91; font-size: 8pt; font-weight: 650;
+}
+QLabel#generationSliceCounter { color: #586b80; font-size: 9pt; }
+QFrame#generationMetricsGroup {
+    background: transparent; border: none;
+}
+QFrame#generationMetricCard {
+    background: #eef6fc; border: none; border-radius: 0;
+    border-bottom: 1px solid #dce2eb;
+    border-right: 1px solid #eef6fc;
+}
+QFrame#generationMetricCard[dividerRight="true"] {
+    border-right: 1px solid #dce2eb;
+}
+QLabel#generationMetricCaption { color: #536a7c; font-size: 9pt; font-weight: 600; }
+QLabel#generationLayerTimeValue, QLabel#generationDeviationValue { font-size: 21pt; font-weight: 650; }
+QLabel#generationLayerTimeValue[resultState="pending"] { font-size: 10pt; }
+QLabel#generationMetricHint { color: #617184; font-size: 9pt; }
+QFrame#generationResultSummary {
+    background: #eef6fc; border: none; border-radius: 0;
+    border-bottom: 1px solid #dce2eb;
+}
+QFrame#generationManualHintCell {
+    background: #eef6fc; border: none; border-radius: 0;
+    border-right: 1px solid #dce2eb;
+    border-bottom: 1px solid #dce2eb;
+}
+QLabel#generationSimulationContext { color: #617184; font-size: 9pt; }
+QWidget#generationResultActions {
+    background: #f6f8fb; border: none; border-radius: 0;
+}
 QLabel#generationIntroLabel {
     color: #526274;
-    padding: 5px 2px 7px 2px;
+    padding: 15px 12px 13px 12px;
 }
 QPushButton#generationContinueButton {
     color: #174a70;
@@ -3985,53 +4051,48 @@ QPushButton#exportButton:disabled {
     border-color: #d8dee3;
 }
 QLabel#generationResultDescription {
-    padding-top: 3px;
-    padding-bottom: 3px;
-}
-QWidget#manualCreationOffer {
-    background: transparent;
-    border: none;
-}
-QLabel#manualCreationOfferTitle {
-    color: #21384f;
-    font-size: 11pt;
-    font-weight: 650;
-    background: transparent;
-    border: none;
+    color: #344d5e; font-weight: 650;
     padding: 0;
 }
-QLabel#manualCreationOfferText {
-    color: #526274;
-    background: transparent;
-    border: none;
-    padding: 0;
-}
-QPushButton#generationManualButton {
-    color: #214d75;
-    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #ffffff, stop: 1 #e3eefb);
-    border: 1px solid #a2bdd9;
-    border-radius: 7px;
-    min-height: 34px;
-    padding: 7px 13px;
-    font-weight: 650;
-}
-QPushButton#generationManualButton:hover {
-    background: #dbeafb;
-    border-color: #6f9dc8;
-}
-QPushButton#generationManualButton:pressed {
-    background: #cfdfef;
-}
-QPushButton#generationManualButton:disabled {
-    color: #8995a0;
-    background: #edf1f5;
-    border-color: #d0dae4;
+QLabel#generationManualHint {
+    color: #617184;
+    font-size: 9pt;
 }
 /* Keep measured action widths stable when keyboard focus moves along the row. */
 QWidget#generationResultActions QPushButton:focus {
     border: 1px solid #3b82f6;
 }
+QWidget#generationResultActions QPushButton {
+    min-height: 34px; max-height: 34px; padding: 0 12px;
+}
+/* Left controls stay compact; all right-side actions retain their original size. */
+QWidget#mainFooter QPushButton {
+    min-height: 30px; max-height: 30px; padding: 0 12px;
+}
+QWidget#mainFooter QWidget#footerActionArea QPushButton {
+    min-height: 34px; max-height: 34px; padding: 7px 13px;
+}
+QWidget#mainFooter QFrame#previewActionControl { border: none; }
+QWidget#mainFooter QFrame#previewActionControl QPushButton#previewButton {
+    border: 1px solid #145b91; border-radius: 7px;
+}
+QWidget#mainFooter QFrame#previewActionControl[cancelAction="true"] QPushButton#previewButton {
+    border-color: #dfbcbc;
+}
+QWidget#mainFooter QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton {
+    border-color: #a4d5b6;
+}
+QSpinBox#circleSegments:disabled {
+    color: #748396; background: #f1f4f6; border-color: #d6dee4;
+}
+QSpinBox#circleSegments::up-button:disabled, QSpinBox#circleSegments::down-button:disabled {
+    background: #edf1f4; border-color: #d6dee4;
+}
+QWidget#circleSegmentsAutomaticLine,
+QWidget#circleSegmentsAutomaticLine QLabel,
+QWidget#profileAngleLimit[automaticMode="true"],
+QWidget#profileAngleLimit[automaticMode="true"] QLabel { font-size: 9pt; }
+QWidget#circleSegmentsAutomaticLine QCheckBox::indicator { width: 12px; height: 12px; }
 QWidget#embeddedPreviewPanel QLabel#previewStateLabel {
     padding: 3px 8px;
     border-radius: 7px;

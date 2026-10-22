@@ -13,7 +13,7 @@ from pathlib import Path
 from weakref import ref
 
 from cooling_tower.angles import GENERATION_ANGLE_FIELDS, complementary_angle
-from cooling_tower.slicers.support_angles import profile_support_threshold
+from cooling_tower.slicers.support_angles import profile_binding_threshold
 from cooling_tower.gui.update_transaction import suspended_widget_updates
 
 from PySide6.QtCore import (
@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayoutItem,
+    QWidgetItem,
     QLineEdit,
     QMainWindow,
     QMenu,
@@ -90,7 +91,12 @@ from cooling_tower.gui.background_jobs import (
     JobKind,
 )
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.circle_segments_setting import (
+    CIRCLE_SEGMENTS_HINT, CircleSegmentsSetting, CircleSegmentsSpinBox,
+)
 from cooling_tower.gui.widgets.profile_preparation_hint import ProfilePreparationHint
+from cooling_tower.gui.widgets.prefix_button import PrefixButton
+from cooling_tower.gui.widgets.wheel_safe_inputs import AutomaticDoubleSpinBox
 from cooling_tower.gui.widgets.preparation_requirements_layout import PreparationRequirementsLayout
 from cooling_tower.gui.widgets.indicator_only_checkbox import IndicatorOnlyCheckBox
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
@@ -480,6 +486,18 @@ def _format_grouped_footer_notice(
             for message in compact
         )
     return "\n".join(lines)
+
+
+class _FooterColumnItem(QWidgetItem):
+    """Use explicitly measured footer heights instead of nested Qt HFW caches."""
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return False
+
+    def sizeHint(self):  # noqa: N802
+        hint = super().sizeHint()
+        hint.setHeight(self.widget().minimumHeight())
+        return hint
 
 
 class _FooterIssueLabel(QLabel):
@@ -2608,16 +2626,16 @@ class MainWindow(QMainWindow):
             "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
-        self.layer_range_button = QPushButton("Editor: Turmaufweitungen bereichsweise ausschließen")
+        self.layer_range_button = PrefixButton("Editor", " für Ausschlussbereiche öffnen")
         self.layer_range_button.setObjectName("layerRangeToolButton")
-        self.layer_range_button.setFixedHeight(METRICS.info_button_diameter_px)
+        self.layer_range_button.setFixedHeight(METRICS.info_button_diameter_px - 2)
         self.layer_range_button.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
         self.layer_range_button.clicked.connect(self.show_layer_range_tool)
         self.layer_range_button_row = QWidget()
         range_button_layout = QHBoxLayout(self.layer_range_button_row)
-        range_button_layout.setContentsMargins(0, 0, 0, 0)
+        range_button_layout.setContentsMargins(0, 1, 0, 0)
         range_button_layout.setSpacing(METRICS.setting_info_text_gap_px)
         self.layer_range_info_button = InfoToolButton(
             "<b>Was macht dieses Werkzeug?</b><p>"
@@ -2717,7 +2735,8 @@ class MainWindow(QMainWindow):
             "maximumExpansionAngle",
         )
         self.maximum_contraction_angle_spin = self._double_spin(
-            5.0, 89.0, 1, 1.0, "maximumContractionAngle"
+            5.0, 89.0, 1, 1.0, "maximumContractionAngle",
+            editor_class=AutomaticDoubleSpinBox,
         )
         for angle_editor in (self.maximum_expansion_angle_spin, self.maximum_contraction_angle_spin):
             angle_editor.setDecimals(12)
@@ -2781,6 +2800,17 @@ class MainWindow(QMainWindow):
         self.overhang_group = overhang_group
         overhang_layout = overhang_group.content_layout
         self.overhang_fields_layout = overhang_layout
+        self.circle_segments_spin = CircleSegmentsSpinBox()
+        self.circle_segments_spin.setObjectName("circleSegments")
+        self.circle_segments_spin.setRange(4, 256)
+        self.circle_segments_spin.setProperty("validationMinimum", 4)
+        self.circle_segments_spin.setProperty("validationMaximum", 256)
+        self.circle_segments_setting = self._add_numeric_setting(
+            overhang_layout, "circle_segments", "Turm-Kreissegmente",
+            self.circle_segments_spin, info_text=CIRCLE_SEGMENTS_HINT,
+        )
+        self.automatic_circle_segments_checkbox = self.circle_segments_setting.automatic_checkbox
+        self.automatic_circle_segments_checkbox.toggled.connect(self._on_circle_segments_automatic_toggled)
         self.maximum_expansion_angle_setting = self._add_numeric_setting(
             overhang_layout,
             "maximum_expansion_angle_deg",
@@ -2789,6 +2819,7 @@ class MainWindow(QMainWindow):
         )
         from cooling_tower.gui.widgets.profile_angle_limit import ProfileAngleLimitControl
         self.profile_angle_limit = ProfileAngleLimitControl(self.maximum_expansion_angle_setting)
+        self.profile_angle_limit.setProperty("automaticMode", True)
         self.profile_angle_limit.checkbox.toggled.connect(self._on_profile_angle_limit_toggled)
         self._add_numeric_setting(
             overhang_layout,
@@ -2949,6 +2980,8 @@ class MainWindow(QMainWindow):
         self.prediction_frame.setProperty("edgeAttached", True)
         self.prediction_frame.setProperty("bodyHover", False)
         prediction_layout = self.prediction_frame.content_layout
+        prediction_layout.setContentsMargins(0, 0, 0, 0)
+        prediction_layout.setSpacing(0)
         self.prediction_method_label = QLabel("Noch nicht verfügbar")
         self.prediction_method_label.setObjectName("predictionMethodBadge")
         self.prediction_method_label.setProperty("mode", "pending")
@@ -3036,6 +3069,7 @@ class MainWindow(QMainWindow):
             self.prediction_frame.content_widget,
             embedded=True,
         )
+        self._preview_dialog.layout().setContentsMargins(10, 6, 10, 10)
         self._preview_dialog.layout_changed.connect(
             self._refresh_ready_grid_layout
         )
@@ -3277,7 +3311,7 @@ class MainWindow(QMainWindow):
         )
         footer_layout = QVBoxLayout(footer)
         self.footer_layout = footer_layout
-        footer_layout.setContentsMargins(22, 8, 22, 18)
+        footer_layout.setContentsMargins(22, 8, 22, 8)
         footer_layout.setSpacing(8)
 
         self.validation_label = _FooterIssueLabel()
@@ -3308,7 +3342,7 @@ class MainWindow(QMainWindow):
         isolated_progress_layout = QVBoxLayout(
             self.isolated_progress_widget
         )
-        isolated_progress_layout.setContentsMargins(0, 0, 0, 0)
+        isolated_progress_layout.setContentsMargins(10, 10, 10, 10)
         isolated_progress_layout.setSpacing(6)
         self.isolated_progress_title_label = QLabel(
             "Turmgenerierung wird vorbereitet..."
@@ -3456,7 +3490,7 @@ class MainWindow(QMainWindow):
 
         main_actions = QGridLayout()
         self.main_actions_layout = main_actions
-        main_actions.setContentsMargins(0, 4, 0, 0)
+        main_actions.setContentsMargins(0, 0, 0, 0)
         main_actions.setHorizontalSpacing(8)
         main_actions.setVerticalSpacing(0)
         main_actions.addWidget(
@@ -3620,6 +3654,8 @@ class MainWindow(QMainWindow):
 
         self.footer_content_widget = QWidget()
         self.footer_content_widget.setObjectName("footerContent")
+        self.footer_message_area.setParent(self.footer_content_widget)
+        self.footer_action_area.setParent(self.footer_content_widget)
         self.footer_content_grid = QGridLayout(self.footer_content_widget)
         self.footer_content_grid.setContentsMargins(0, 0, 0, 0)
         self.footer_content_grid.setHorizontalSpacing(12)
@@ -3772,8 +3808,6 @@ class MainWindow(QMainWindow):
         self.preparation_view_button.setEnabled(available)
         for button in (self.automatic_method_button, self.manual_method_button):
             button.setEnabled(available and ready)
-        if self._joint_generation_dialog is not None:
-            self._joint_generation_dialog.manual_creation_button.setEnabled(available and ready)
 
     def _show_preparation_workspace(self, view: str) -> None:
         if not self._generation_method_change_available():
@@ -4223,8 +4257,10 @@ class MainWindow(QMainWindow):
         decimals: int,
         step: float,
         object_name: str,
+        *,
+        editor_class: type[WheelSafeDoubleSpinBox] = WheelSafeDoubleSpinBox,
     ) -> QDoubleSpinBox:
-        widget = WheelSafeDoubleSpinBox()
+        widget = editor_class()
         widget.setObjectName(object_name)
         widget.setProperty("validationMinimum", minimum)
         widget.setProperty("validationMaximum", maximum)
@@ -4256,7 +4292,8 @@ class MainWindow(QMainWindow):
         if setting_name in GENERATION_ANGLE_FIELDS:
             original_provider = default_provider
             default_provider = lambda: complementary_angle(original_provider())
-        setting_widget = NumericSettingWidget(
+        setting_class = CircleSegmentsSetting if setting_name == "circle_segments" else NumericSettingWidget
+        setting_widget = setting_class(
             setting_name=setting_name,
             label=label,
             editor=editor,
@@ -8040,6 +8077,7 @@ class MainWindow(QMainWindow):
                 dispose()
             self.current_preview = None
         self.preview_state = PreviewState.EMPTY
+        self.circle_segments_setting.set_accepted_count(None)
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
         self.manual_controller.invalidate_context()
@@ -8640,6 +8678,15 @@ class MainWindow(QMainWindow):
     def _refresh_ready_grid_layout(self) -> None:
         """Refresh the shared grid without changing any sibling card state."""
 
+        panel = getattr(self, "_joint_generation_dialog", None)
+        if panel is not None and hasattr(self, "prediction_preview_divider"):
+            overview_visible = not panel.isHidden() and not panel.result_widget.isHidden()
+            actions_visible = any(not button.isHidden() for button in (
+                panel.continue_button, panel.export_button, panel.accept_button,
+            ))
+            self.prediction_preview_divider.setVisible(
+                not overview_visible or actions_visible
+            )
         self.ready_grid.setMinimumHeight(0)
         self.ready_grid.setMaximumHeight(16777215)
         self.ready_grid.refresh_layout()
@@ -8885,8 +8932,9 @@ class MainWindow(QMainWindow):
         if hasattr(self,"manual_footer_status_widget"):
             manual = self.generation_mode is GenerationMode.MANUAL
             self.footer_message_layout.setSpacing(5 if manual else 8)
-            self.footer_content_grid.setAlignment(self.footer_message_area,
-                                                  Qt.AlignmentFlag.AlignBottom if manual else Qt.AlignmentFlag.AlignTop)
+            # Fill the column: its fixed message area stays at the top while
+            # only the stretch above the compact resets absorbs extra height.
+            self.footer_content_grid.setAlignment(self.footer_message_area, Qt.AlignmentFlag(0))
             self.tower_reset_button.setVisible(manual)
             self.manual_controller.update_scrollbar_policy(manual)
             self.manual_controller.sync_footer_content_visibility()
@@ -8951,38 +8999,36 @@ class MainWindow(QMainWindow):
         if narrow:
             self.footer_vertical_divider.hide()
             self.footer_horizontal_divider.show()
-            self.footer_content_grid.addWidget(
-                self.footer_message_area,
+            self.footer_content_grid.addItem(
+                _FooterColumnItem(self.footer_message_area),
                 0,
                 0,
                 1,
                 3,
-                Qt.AlignmentFlag.AlignTop,
             )
             self.footer_content_grid.addWidget(
                 self.footer_horizontal_divider, 1, 0, 1, 3
             )
-            self.footer_content_grid.addWidget(
-                self.footer_action_area, 2, 0, 1, 3
+            self.footer_content_grid.addItem(
+                _FooterColumnItem(self.footer_action_area), 2, 0, 1, 3
             )
             self.footer_content_grid.setColumnStretch(0, 1)
             self.footer.setMaximumHeight(MAIN_FOOTER_NARROW_MAX_HEIGHT_PX)
         else:
             self.footer_horizontal_divider.hide()
             self.footer_vertical_divider.show()
-            self.footer_content_grid.addWidget(
-                self.footer_message_area,
+            self.footer_content_grid.addItem(
+                _FooterColumnItem(self.footer_message_area),
                 0,
                 0,
                 1,
                 1,
-                Qt.AlignmentFlag.AlignTop,
             )
             self.footer_content_grid.addWidget(
                 self.footer_vertical_divider, 0, 1
             )
-            self.footer_content_grid.addWidget(
-                self.footer_action_area, 0, 2
+            self.footer_content_grid.addItem(
+                _FooterColumnItem(self.footer_action_area), 0, 2
             )
             self.footer_content_grid.setColumnStretch(0, 1)
             self.footer_content_grid.setColumnStretch(2, 1)
@@ -9026,13 +9072,12 @@ class MainWindow(QMainWindow):
             (self.result_label, left_width),
         ):
             label.setMinimumHeight(0)
+            label.setVisible(bool(label.text().strip()))
             if label.text():
                 label.setMinimumHeight(
-                    max(
-                        label.minimumSizeHint().height(),
-                        label.heightForWidth(available_width),
-                    )
+                    max(0, label.heightForWidth(available_width))
                 )
+        self.footer_status_layout.invalidate()
         self.footer_status_widget.setMinimumHeight(0)
         status_natural_height = max(
             0,
@@ -9058,7 +9103,7 @@ class MainWindow(QMainWindow):
         )
         self.footer_messages_scroll.setVisible(messages_natural_height > 0)
         message_spacing = self.footer_message_layout.spacing() if messages_natural_height else 0
-        reset_height = self.reset_button.sizeHint().height() if not self.reset_button.isHidden() else 0
+        reset_height = self.footer_reset_host.sizeHint().height() if not self.footer_reset_host.isHidden() else 0
         left_natural_height = messages_natural_height+message_spacing+reset_height
         action_height = self.main_actions_layout.sizeHint().height()
         notice_height = (
@@ -9109,13 +9154,15 @@ class MainWindow(QMainWindow):
         self.footer_messages_scroll.setFixedHeight(
             max(0, visible_left_height-message_spacing-reset_height)
         )
+        self.footer_message_area.setMinimumHeight(visible_left_height)
         self.footer_action_area.setMinimumHeight(right_natural_height)
         target_height = margins.top() + margins.bottom() + content_height
         bounded_height = min(maximum_height, target_height)
         self.footer.setFixedHeight(bounded_height)
         self.footer_layout.invalidate()
         self.footer_layout.activate()
-        self.footer_content_grid.activate()
+        self.footer_content_grid.invalidate()
+        self.footer_content_grid.setGeometry(self.footer_content_widget.rect())
         if self._footer_narrow_layout and not self.footer_action_area.isHidden():
             action_bottom = self.footer_action_area.mapTo(
                 self.footer, QPoint(0, self.footer_action_area.height())
@@ -10274,7 +10321,7 @@ class MainWindow(QMainWindow):
     def _on_full_infill_changed(self, _checked: bool) -> None:
         if self._closing:
             return
-        self.maximum_contraction_angle_spin.setEnabled(not _checked)
+        self._refresh_contraction_angle_display()
         self._last_changed_setting_name = "simulate_full_tower_infill"
         self._pending_reset_setting_name = None
         self._feasibility_request_id += 1
@@ -12344,6 +12391,8 @@ class MainWindow(QMainWindow):
                 complementary_angle(self.maximum_contraction_angle_spin.value())
             ),
             limit_expansion_to_profile=self.profile_angle_limit.checkbox.isChecked(),
+            automatic_circle_segments=self.automatic_circle_segments_checkbox.isChecked(),
+            circle_segments=self.circle_segments_spin.value(),
             local_reference_window=self.local_window_spin.value(),
         )
 
@@ -12390,6 +12439,7 @@ class MainWindow(QMainWindow):
                 complementary_angle(settings.maximum_contraction_angle_deg),
             ),
             (self.local_window_spin, settings.local_reference_window),
+            (self.circle_segments_spin, settings.circle_segments),
         )
         for widget, value in values:
             widget.blockSignals(True)
@@ -12412,11 +12462,14 @@ class MainWindow(QMainWindow):
             settings.simulate_tower_without_supports
         )
         self.simulate_tower_without_supports_checkbox.blockSignals(False)
-        self.maximum_contraction_angle_spin.setEnabled(not settings.simulate_full_tower_infill)
+        self._refresh_contraction_angle_display()
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
         )
         self._automatic_base_width_active = settings.automatic_base_width
+        with QSignalBlocker(self.automatic_circle_segments_checkbox):
+            self.automatic_circle_segments_checkbox.setChecked(settings.automatic_circle_segments)
+        self.circle_segments_setting.refresh()
         from cooling_tower.angles import ProfileAngleBinding
         self.profile_angle_limit.state = ProfileAngleBinding(settings.maximum_expansion_angle_deg)
         with QSignalBlocker(self.profile_angle_limit.checkbox):
@@ -12425,6 +12478,20 @@ class MainWindow(QMainWindow):
         self.automatic_base_reset_button.setVisible(True)
         self._update_expansion_angle_warning()
         self._update_automatic_base_width_preview()
+
+    def _refresh_contraction_angle_display(self) -> None:
+        automatic = self.full_infill_checkbox.isChecked()
+        self.maximum_contraction_angle_spin.set_automatic_display(automatic)
+        setting = self._setting_widgets["maximum_contraction_angle_deg"]
+        setting.unit_label.setVisible(not automatic)
+        setting.refresh_reset_state()
+        if automatic:
+            setting.reset_button.setEnabled(False)
+        setting.refresh_input_state()
+
+    def _on_circle_segments_automatic_toggled(self, _checked: bool) -> None:
+        self._last_changed_setting_name = "circle_segments"
+        self._on_value_changed(None)
 
     def _on_profile_angle_limit_toggled(self, _checked: bool) -> None:
         self._last_changed_setting_name = "maximum_expansion_angle_deg"
@@ -12436,21 +12503,28 @@ class MainWindow(QMainWindow):
             return
         result = self.profile_match_result
         profile = getattr(getattr(result, "selected", None), "effective_profile", None)
-        threshold = profile_support_threshold(profile) if getattr(result, "user_confirmed", False) else None
+        threshold = profile_binding_threshold(profile) if getattr(result, "user_confirmed", False) else None
         control = self.profile_angle_limit
         was_active = control.state.active
         angle = control.refresh(complementary_angle(self.maximum_expansion_angle_spin.value()),
-                                control.checkbox.isChecked(), threshold, minimum=20.0)
+                                control.checkbox.isChecked(), threshold)
         spin = self.maximum_expansion_angle_spin
         value_changed = abs(spin.value()-complementary_angle(angle)) > 1e-8
-        with QSignalBlocker(self.maximum_expansion_angle_spin):
+        with QSignalBlocker(self.maximum_expansion_angle_spin), QSignalBlocker(spin.lineEdit()):
             from cooling_tower.gui.widgets.profile_angle_limit import set_angle_editor_precision
+            decimals = 15 if control.state.active else 12
+            if spin.decimals() != decimals:
+                spin.setDecimals(decimals)
+            spin.setRange(min(20.0, control.applied_threshold) if control.state.active else 20.0,
+                          89.9 if control.state.active else 89.0)
             set_angle_editor_precision(spin, control.applied_threshold if control.state.active else None)
             if value_changed or (control.state.active and not spin.hasAcceptableInput()):
                 spin.setValue(complementary_angle(angle))
         active = control.state.active
         spin.setEnabled(not active)
-        bounds = (20.0, 89.9) if active else (20.0, 89.0)
+        if active:
+            spin.lineEdit().deselect()
+        bounds = (min(20.0, control.applied_threshold), 89.9) if active else (20.0, 89.0)
         if (spin.property("validationMinimum"), spin.property("validationMaximum")) != bounds:
             spin.setProperty("validationMinimum", bounds[0])
             spin.setProperty("validationMaximum", bounds[1])
@@ -12459,18 +12533,20 @@ class MainWindow(QMainWindow):
             self.maximum_expansion_angle_setting.refresh_reset_state()
         if active:
             self.maximum_expansion_angle_setting.reset_button.setEnabled(False)
+        self.maximum_expansion_angle_setting.refresh_input_state()
 
     def _update_expansion_angle_warning(self) -> None:
         self._refresh_profile_angle_binding()
         from cooling_tower.gui.texts import EXPANSION_ANGLE_CAUTION
         warning = (
             EXPANSION_ANGLE_CAUTION
-            if self.maximum_expansion_angle_spin.value() <= 28.0
+            if not self.profile_angle_limit.state.active and self.maximum_expansion_angle_spin.value() <= 29.0
             else ""
         )
         profile_match = self.profile_match_result
         if (
-            self.source_preslice_result is not None
+            not self.profile_angle_limit.state.active
+            and self.source_preslice_result is not None
             and profile_match is not None
             and profile_match.selected is not None
             and not self.simulate_tower_without_supports_checkbox.isChecked()
@@ -12762,7 +12838,7 @@ class MainWindow(QMainWindow):
                 if setting is not None
                 else "Bitte einen gültigen vollständigen Zahlenwert eingeben."
             )
-            if setting is not None:
+            if setting is not None and name != "circle_segments":
                 entered = setting.editor.lineEdit().text().strip()
                 unit = SETTING_UNITS.get(name, "")
                 label = " ".join(setting.label.text().split())
@@ -12820,7 +12896,9 @@ class MainWindow(QMainWindow):
             and not (
             0.0
             < settings.maximum_expansion_angle_deg
-            <= MAXIMUM_EXPANSION_ANGLE_DEG
+            < 90.0
+            and (settings.limit_expansion_to_profile
+                 or settings.maximum_expansion_angle_deg <= MAXIMUM_EXPANSION_ANGLE_DEG)
             )
         ):
             add_error(
@@ -13183,9 +13261,6 @@ class MainWindow(QMainWindow):
             dialog.export_requested.connect(self._on_main_export_clicked)
             dialog.layout_changed.connect(self._refresh_ready_grid_layout)
             dialog.continue_requested.connect(self._continue_joint_generation)
-            dialog.manual_creation_requested.connect(
-                lambda: self.select_generation_mode(GenerationMode.MANUAL)
-            )
             self._joint_generation_dialog = dialog
         return self._joint_generation_dialog
 
@@ -13561,6 +13636,7 @@ class MainWindow(QMainWindow):
             result.completed_joint_slice_count = self._joint_slices_completed
             result.configured_joint_slice_count = self.maximum_joint_slices
         self.current_preview = result
+        self.circle_segments_setting.set_accepted_count(getattr(result.scene, "tower_circle_segments", None))
         self.preview_state = PreviewState.CURRENT
         self._preview_cancel_requested = False
         self.last_export_result = None
@@ -13858,6 +13934,7 @@ class MainWindow(QMainWindow):
         previous = self.current_preview
         self.current_preview = None
         self.preview_state = PreviewState.EMPTY
+        self.circle_segments_setting.set_accepted_count(None)
         self.preview_dialog.set_cancelled()
         self._show_original_object_preview()
         if previous is not None:

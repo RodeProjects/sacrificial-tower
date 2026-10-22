@@ -32,6 +32,7 @@ einfacheres Format behalten.
 - [Schema 20: Simulation ohne Turmstützen](#schema-20-simulation-ohne-turmstützen)
 - [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
 - [Schema 22: Profilbindung des Aufweitungswinkels](#schema-22-profilbindung-des-aufweitungswinkels)
+- [Schema 23: Segmentwahl für automatisch erzeugte Türme](#schema-23-segmentwahl-für-automatisch-erzeugte-türme)
 - [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
 
@@ -387,11 +388,29 @@ neue Option besitzt eine eigene stabile Kompatibilitätskennung. Unbekannte
 neuere Dateien, externe Änderungen und beschädigte Dateien behalten die
 bisherigen Schutzregeln einschließlich Sicherung und atomarem Schreiben.
 
+## Schema 23: Segmentwahl für automatisch erzeugte Türme
+
+22→23 ergänzt `generation.automatic_circle_segments` als boolesche, anfangs
+aktivierte Option und `generation.circle_segments` als manuelle Ganzzahl mit
+Standardwert 32. Zulässig sind 4 bis 256 Segmente. Die Migration erhält das
+bisherige automatische Verhalten; die manuelle Zahl bleibt beim Umschalten
+unverändert. Die Anzeige „auto“ beziehungsweise die Segmentzahl des zuletzt
+übernommenen Turms ist reine Sitzungsinformation und wird nicht gespeichert.
+
+Der Originalstand wird vor dem atomaren Umschreiben gesichert. Ungültige Typen
+oder Zahlen außerhalb beider Grenzen fallen beim Laden auf die Produktstandards
+zurück. Die Kompatibilitätstoken `automatic-circle-segments-v1` und
+`circle-segments-count-v1` binden beide Werte an eine validierte Gruppe.
+Downgrades übernehmen ausschließlich boolesche Aktivierung und Ganzzahlen im
+Zielbereich bei gleicher Bedeutung; Gradangaben oder andere Einheiten sind
+inkompatibel. Neuere, beschädigte und extern geänderte Originaldateien bleiben
+nach den allgemeinen Schutzregeln erhalten.
+
 ## Getrennte manuelle Einstellungen (eigenes Schema 19)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
-automatische Format verwendet Schema 22. `ManualSettingsStore` normalisiert
+automatische Format verwendet Schema 23. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
 gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
 18→19 ergänzt die zunächst deaktivierte Option `limit_expansion_to_profile`.

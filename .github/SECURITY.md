@@ -2,7 +2,7 @@
 
 Bitte keine Sicherheitslücken, Zugangsdaten oder persönlichen Daten in öffentliche
 Issues einstellen. Bitte vertraulich per E-Mail an
-[florian.rode@outlook.com](mailto:florian.rode@outlook.com) melden.
+[rodeprojects@outlook.com](mailto:rodeprojects@outlook.com) melden.
 Die [Datenschutzinformationen](https://github.com/RodeProjects/sacrificial-tower/blob/main/legal/privacy.md)
 erläutern den Umgang mit solchen Anfragen.
 

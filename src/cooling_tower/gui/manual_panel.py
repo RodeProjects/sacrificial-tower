@@ -6,7 +6,7 @@ from functools import partial
 import math
 import copy
 
-from cooling_tower.angles import MANUAL_ANGLE_FIELDS, ProfileAngleBinding, complementary_angle
+from cooling_tower.angles import MANUAL_ANGLE_FIELDS, ProfileAngleBinding, complementary_angle, profile_binding_angle
 from cooling_tower.gui.texts import EXPANSION_ANGLE_CAUTION, SETTING_INFO_TEXTS
 
 from PySide6.QtCore import QEvent,QSignalBlocker, QTimer, Qt, Signal, QSize, QPointF,QVariantAnimation,QEasingCurve
@@ -124,6 +124,8 @@ class ManualGenerationPanel(QWidget):
                     text = {"expansion_enabled":"Max. Aufweitungswinkel in Vorschau begrenzen",
                             "overhang_enabled":"Überhangstellen visuell markieren"}[option]
                     box = QCheckBox(text)
+                    if option == "expansion_enabled":
+                        box.setObjectName("manualPreviewExpansionLimit")
                     box.pressed.connect(self._begin_interaction)
                     box.released.connect(self._end_interaction)
                     box.toggled.connect(partial(self.change_setting,option))
@@ -437,11 +439,7 @@ class ManualGenerationPanel(QWidget):
         self._original_minimum_layer_time = minimum_original_layer_time(reference.context.layers)
         self.selected = self.canvas.selected = ""
         s = settings or self.settings_for_persistence()
-        self.profile_angle_limit.state = ProfileAngleBinding(s.expansion_angle_deg)
-        threshold = getattr(reference.context, "support_threshold_angle_deg", None)
-        angle = self.profile_angle_limit.state.resolve(s.expansion_angle_deg, s.limit_expansion_to_profile, threshold)
-        s = replace(s, expansion_angle_deg=angle,
-                    expansion_enabled=s.expansion_enabled or self.profile_angle_limit.state.active)
+        s, self.profile_angle_limit.state = self._resolve_profile_settings(s)
         limit = reference.context.maximum_foot_diameter_mm
         if limit < s.minimum_diameter_mm+2-1e-9:
             raise GeometryError("maximum_foot_diameter_mm", "Für den Standfuß ist neben dem Originalobjekt nicht genügend freie Druckbettfläche vorhanden.")
@@ -450,11 +448,12 @@ class ManualGenerationPanel(QWidget):
         if draft.foot_diameter_mm > limit:
             draft = initial_draft(s,reference.context.layers,reference.context.maximum_height_mm,reference.context.key,foot_diameter_mm=limit)
         default_foot_limit = limit
-        self.initial = initial_draft(replace(ManualSettings(),overhang_angle_deg=s.overhang_angle_deg,
+        initial_settings, _ = self._resolve_profile_settings(replace(ManualSettings(),overhang_angle_deg=s.overhang_angle_deg,
                                            minimum_diameter_mm=min(ManualSettings().minimum_diameter_mm,limit-2),
                                            maximum_foot_diameter_mm=default_foot_limit,
                                            foot_diameter_mm=draft.foot_diameter_mm,
-                                           object_resolution_percent=self.default_value("object_resolution_percent")),
+                                           object_resolution_percent=self.default_value("object_resolution_percent")))
+        self.initial = initial_draft(initial_settings,
                                      reference.context.layers,reference.context.maximum_height_mm,reference.context.key,
                                      foot_diameter_mm=draft.foot_diameter_mm)
         reference.context.validate(draft)
@@ -538,9 +537,14 @@ class ManualGenerationPanel(QWidget):
             with QSignalBlocker(spin):
                 if name == "expansion_angle_deg":
                     threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
-                    spin.setMinimum(0.1 if s.limit_expansion_to_profile and threshold is not None else 1.0)
+                    applied = profile_binding_angle(threshold) if s.limit_expansion_to_profile else None
+                    decimals = 15 if applied is not None else 12
+                    if spin.decimals() != decimals:
+                        spin.setDecimals(decimals)
+                    spin.setRange(min(20.0, applied) if applied is not None else 20.0,
+                                  89.9 if applied is not None else 89.0)
                     from cooling_tower.gui.widgets.profile_angle_limit import set_angle_editor_precision
-                    set_angle_editor_precision(spin, threshold if s.limit_expansion_to_profile else None, minimum=2)
+                    set_angle_editor_precision(spin, applied, minimum=2)
                 value = values.get(name,self.default_value(name))
                 if name in MANUAL_ANGLE_FIELDS and value is not None:
                     value = complementary_angle(value)
@@ -558,7 +562,11 @@ class ManualGenerationPanel(QWidget):
         self.preview_information.set_state(self.canvas.view,s.critical_layers_enabled)
         self._syncing = False
         self._refresh_profile_angle_binding()
-        self.expansion_warning.setVisible(complementary_angle(s.expansion_angle_deg) <= 28.0)
+        warnings = ([EXPANSION_ANGLE_CAUTION]
+                    if not self.profile_angle_limit.state.active
+                    and complementary_angle(s.expansion_angle_deg) <= 29.0 else [])
+        self.expansion_warning.setText('\n'.join(warnings))
+        self.expansion_warning.setVisible(bool(warnings))
         self.rows["expansion_angle_deg"].refresh_content_height()
         self._apply_view_editability()
         self.point_editor.sync_fields(self.canvas.information_identity(),self._point_fields(),self.canvas.selected_handle_text(),not self._busy)
@@ -631,6 +639,13 @@ class ManualGenerationPanel(QWidget):
     def settings_for_persistence(self):
         return replace(self.settings, expansion_angle_deg=(self.profile_angle_limit.state.free_angle_deg
                        if self.profile_angle_limit.state.active else self.settings.expansion_angle_deg))
+
+    def _resolve_profile_settings(self, settings):
+        binding = ProfileAngleBinding(settings.expansion_angle_deg)
+        threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
+        angle = binding.resolve(settings.expansion_angle_deg, settings.limit_expansion_to_profile, threshold)
+        return (replace(settings, expansion_angle_deg=angle,
+                        expansion_enabled=settings.expansion_enabled or binding.active), binding)
 
     def _refresh_profile_angle_binding(self):
         threshold = getattr(getattr(self.reference, "context", None), "support_threshold_angle_deg", None)
@@ -984,6 +999,7 @@ class ManualGenerationPanel(QWidget):
             if self.initial is not None:
                 s = replace(s,overhang_angle_deg=self.initial.settings.overhang_angle_deg,
                             minimum_diameter_mm=self.initial.settings.minimum_diameter_mm)
+            s, binding = self._resolve_profile_settings(s)
             draft = initial_draft(s,self.reference.context.layers,self.reference.context.maximum_height_mm,self.reference.context.key,
                                   foot_diameter_mm=self.default_value("foot_diameter_mm"))
             self._checked(draft)
@@ -991,6 +1007,7 @@ class ManualGenerationPanel(QWidget):
             self.feedback(e,"points")
             return
         self.initial = draft
+        self.profile_angle_limit.state = binding
         for checkbox in (self.full_infill_checkbox, self.source_supports_checkbox):
             with QSignalBlocker(checkbox):
                 checkbox.setChecked(False)

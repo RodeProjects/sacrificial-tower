@@ -329,13 +329,34 @@ Fehler der Generierung erscheinen mit ihrer vollständigen Ursache nur im
 Statusbereich unten links. Der Ergebnisbereich zeigt bei erhaltenem Kandidaten
 weiterhin dessen Werte und mögliche Aktionen, aber keinen zweiten Fehlertext.
 
-Die zweispaltige Anzeige enthält kürzeste gemeinsame Layerzeit/Ziel/Toleranz,
+Die Ergebnisanzeige enthält kürzeste gemeinsame Layerzeit/Ziel/Toleranz,
 vorzeichenbehaftete Abweichung, zuerst das Ergebnis und danach tatsächlich
 aktivierte Simulationen (Stützen und/oder 100-%-Turmfüllung). Nach manueller
 Übernahme und nach regulärem Abschluss steht dort „Kühlturm exportieren“.
 Nur erreichte Zeit und
 Abweichung werden abhängig von der Toleranz eingefärbt; Zielzeit und Toleranz
 bleiben neutral. Die Ansichtsbuttons über der 3D-Vorschau stehen in einer Zeile.
+Vor dem ersten gemeinsamen Messwert bleibt die Dreispaltenansicht erhalten,
+solange die drei Inhalte einschließlich Innenabständen nebeneinander passen.
+Die Felder teilen freie Breite untereinander: Der längere Platzhalter zur
+Layerzeit erhält seinen benötigten Raum, die übrigen Felder rücken zusammen.
+Erst wenn dabei eine Zeile umbrechen müsste, wechselt die Anzeige ins 2×2-Layout.
+Sobald ein gemeinsamer Messwert vorliegt, erhalten alle drei blauen Ergebnisfelder die gleiche
+Breite; unteilbare Pixel werden mit höchstens einem Pixel Unterschied verteilt.
+Ihre erforderlichen Textbreiten einschließlich Innenabständen bestimmen die
+Umbruchgrenze. Die Bewertung reserviert unabhängig vom aktuellen Zustand
+die Breite ihrer längstmöglichen Statusmeldung. Dadurch ändert ein Wechsel etwa
+zwischen erreichter, unter- oder überschrittener Zielzeit weder ihre Breite noch
+die Umbruchgrenze. Bevor die Bewertung oder der Hinweis neben den Ergebnisbuttons
+zusätzlich umbrechen müsste, wechseln die Felder in
+zwei Zeilen: Zeit und Abweichung oben, der Hinweis auf den manuellen Modus unten
+links und die Bewertung unten rechts. Im 2×2-Layout erhalten alle vier Zellen
+jeweils die halbe verfügbare Breite; die senkrechten Trennlinien beider Zeilen
+liegen übereinander. Bei ungerader Pixelbreite ist die linke Spalte einen Pixel
+breiter. In breiter Ansicht bleibt der Hinweis neben den rechts angeordneten
+Ergebnisaktionen.
+Bei sehr kleinen Breiten dürfen Texte innerhalb der Zellen umbrechen. Beide
+Zeilen werden anhand ihrer tatsächlichen Breite in der Höhe bemessen.
 Außerhalb der Toleranz wird
 nach zusätzlicher Abweichung unterschieden: bis einschließlich 0,5 s „leicht“,
 über 0,5 bis einschließlich 1 s ohne Verstärkung, über 1 s „stärker“.
@@ -600,7 +621,15 @@ und die Geometrieprüfung mit den neuen Werten erneut gestartet. Rechts
 bleiben Exportordner, letzter Export, Exportbericht und die aktuelle Hauptaktion
 als Gruppen erhalten. Ihre Anordnung richtet sich nach der verfügbaren Breite;
 der Footer nimmt nur die für Meldungen und Aktionen erforderliche Höhe ein und
-verkleinert sich auch nach einer Rückvergrößerung des Fensters.
+verkleinert sich auch nach einer Rückvergrößerung des Fensters. Rechts behalten
+alle Aktionsbuttons einschließlich später eingeblendeter Aktionen ihre
+ursprüngliche Höhe von 50 Pixeln; die Resets links bleiben 32 Pixel hoch.
+Die Meldungen links stehen unabhängig von der Höhe rechts am oberen Rand.
+Zusätzliche Höhe fließt nur in den Abstand vor den linken Resets. Die beiden
+Bereiche werden getrennt bemessen; in der zweispaltigen Ansicht bestimmt der
+größere tatsächliche Inhaltsbedarf die Footerhöhe. Leere Ergebniszeilen
+reservieren keine Höhe; umbrochene Meldungen werden anhand ihrer tatsächlich
+verfügbaren Breite bemessen.
 
 Bei gemeinsamen Slices ist die absolute Abweichung der kürzesten Layerzeit des
 vollständigen Projekts von der Zielzeit das Vergleichskriterium. Ausschlüsse

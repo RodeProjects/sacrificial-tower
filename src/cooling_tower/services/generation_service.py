@@ -24,7 +24,7 @@ from cooling_tower.tower.solid_profile import (
 )
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
-    automatic_mesh_segments,
+    configured_mesh_segments,
     generate_solid_tower_mesh,
     validate_mesh_config,
     write_binary_stl,
@@ -179,7 +179,7 @@ class GenerationService:
         notify(60, "Verkürztes Turmprofil wird berechnet")
 
         mesh = generate_solid_tower_mesh(
-            solid_profile, TowerMeshConfig(automatic_mesh_segments(solid_profile))
+            solid_profile, TowerMeshConfig(configured_mesh_segments(solid_profile, settings))
         )
         export = write_binary_stl(mesh, paths.stl_path)
         notify(80, "STL und Berichte werden gespeichert")

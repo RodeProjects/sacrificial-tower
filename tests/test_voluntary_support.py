@@ -272,7 +272,9 @@ class VoluntarySupportDialogTests(unittest.TestCase):
         self.open_url.assert_called_once()
         query = parse_qs(urlsplit(self.open_url.call_args.args[0].toString()).query)
         self.assertEqual(query["amount"], ["12.34"])
+        self.assertEqual(query["business"], ["florian.rode@outlook.com"])
         self.assertEqual(query["business"], [legal_profile()["support_paypal_email"]])
+        self.assertNotEqual(self.dialog.recipient, legal_profile()["provider_email"])
         self.assertEqual(self.dialog.recipient_label.text(), legal_profile()["support_paypal_email"])
         self.assertIn("erst dort bestätigt", self.dialog.status_label.text())
 

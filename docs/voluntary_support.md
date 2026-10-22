@@ -61,7 +61,10 @@ Das ist eine von PayPal noch unterstützte Legacy-Schnittstelle. Die
 [offizielle Parameterreferenz](https://developer.paypal.com/api/nvp-soap/paypal-payments-standard/integration-guide/Appx-websitestandard-htmlvariables/?mark=handling_cart)
 belegt Betrag, bestätigte Empfänger-E-Mail, Währung und `no_shipping=1`.
 Die Empfängeradresse kommt ausschließlich aus `support_paypal_email` im
-`config/legal_profile.json`; sie ist nicht vom Zahlenden editierbar. Beim
+`config/legal_profile.json`; sie ist nicht vom Zahlenden editierbar. Dieser
+Eintrag wird unabhängig von der allgemeinen Kontaktadresse `provider_email`
+gepflegt. Eine Kontaktänderung darf die bestätigte PayPal-Empfängeradresse
+nicht automatisch ersetzen. Beim
 Öffnen wird dieselbe Adresse angezeigt und verwendet. Die Empfängerzeile zeigt
 nur die E-Mail-Adresse. `provider_name` bleibt für die rechtlichen
 Anbieterangaben maßgeblich; persönliche Angaben werden nicht zusätzlich in der

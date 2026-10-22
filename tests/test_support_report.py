@@ -622,9 +622,9 @@ class SupportReportDialogTests(unittest.TestCase):
             guidance = dialog.route_contents["contact"].findChild(QLabel, "supportContactGuidanceText").text()
             for text in ("Fehler melden", "Frage stellen", "Funktion vorschlagen", "GitHub-Formular"):
                 self.assertIn(text, guidance)
-            self.assertEqual(dialog.contact_button.accessibleName(), "florian.rode@outlook.com")
+            self.assertEqual(dialog.contact_button.accessibleName(), "rodeprojects@outlook.com")
             self.assertEqual(dialog.contact_button.findChild(QLabel, "supportContactLinkText").text(),
-                             "florian.rode@outlook.com")
+                             "rodeprojects@outlook.com")
             self.assertFalse(dialog.contact_button.findChild(QLabel, "supportContactLinkIcon").pixmap().isNull())
             icon = dialog.contact_button.findChild(QLabel, "supportContactLinkIcon")
             address = dialog.contact_button.findChild(QLabel, "supportContactLinkText")
@@ -640,7 +640,7 @@ class SupportReportDialogTests(unittest.TestCase):
             dialog.contact_button.click()
             external.assert_called_once()
             url = external.call_args.args[0]
-            self.assertEqual(url.toString(), "mailto:florian.rode@outlook.com")
+            self.assertEqual(url.toString(), "mailto:rodeprojects@outlook.com")
             self.assertFalse(url.hasQuery())
             create.assert_not_called()
 

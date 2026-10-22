@@ -35,7 +35,8 @@ class HintPopover(QFrame):
 
         self.hide()
 
-    def show_for(self, target: QWidget, text: str, *, duration_ms: int = 15_000) -> None:
+    def show_for(self, target: QWidget, text: str, *, duration_ms: int = 15_000,
+                 unwrapped_line: str | None = None) -> None:
         hint = text.strip()
         owner = self.parentWidget()
         if not hint or owner is None:
@@ -53,11 +54,15 @@ class HintPopover(QFrame):
         )
         metrics = QFontMetrics(self.label.font())
         natural_width = metrics.horizontalAdvance(hint.replace("\n", " ")) + 30
-        attractive_limit = min(520, available.width())
+        line_width = metrics.horizontalAdvance(unwrapped_line) + 30 if unwrapped_line else 0
+        attractive_limit = min(max(520, line_width), available.width())
         if anchor.center().x() >= available.center().x():
             edge_capacity = max(180, anchor.right() - available.left() + 1)
         else:
             edge_capacity = max(180, available.right() - anchor.left() + 1)
+        # A requested complete line may extend past the anchor; final placement
+        # still keeps the entire bubble inside the owning window.
+        edge_capacity = max(edge_capacity, line_width)
         width = max(180, min(natural_width, attractive_limit, edge_capacity))
         self.label.setFixedWidth(max(120, width - 24))
         if hint.startswith("<"):
@@ -97,6 +102,7 @@ def show_window_hint(
     text: str,
     *,
     duration_ms: int = 15_000,
+    unwrapped_line: str | None = None,
 ) -> HintPopover | None:
     """Show a reusable popover inside ``target``'s top-level window."""
 
@@ -107,7 +113,7 @@ def show_window_hint(
     if not isinstance(popover, HintPopover):
         popover = HintPopover(owner)
         setattr(owner, "_bounded_hint_popover", popover)
-    popover.show_for(target, text, duration_ms=duration_ms)
+    popover.show_for(target, text, duration_ms=duration_ms, unwrapped_line=unwrapped_line)
     return popover
 
 

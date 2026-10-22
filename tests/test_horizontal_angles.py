@@ -15,17 +15,20 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('COOLING_TOWER_DISABLE_SLICER_DISCOVERY', '1')
 
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QEnterEvent
+from PySide6.QtGui import QEnterEvent, QPalette
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QStyle, QStyleOptionSpinBox
+from PySide6.QtWidgets import QStyle, QStyleOptionButton, QStyleOptionSpinBox
 from cooling_tower.angles import complementary_angle
 from cooling_tower.config import load_generation_settings, save_generation_settings
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
+from cooling_tower.gui.design_tokens import COLORS
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.manual.settings_store import ManualSettingsStore, MANUAL_SCHEMA_VERSION
+from cooling_tower.manual.geometry import ManualSettings
 from cooling_tower.persistence.versioned_json import VersionedDocumentError
 from cooling_tower.models import GenerationSettings
-from cooling_tower.slicers.support_angles import profile_support_threshold
+from cooling_tower.slicers.support_angles import profile_binding_threshold, profile_support_threshold
+from cooling_tower.gui.widgets.profile_angle_limit import PROFILE_ANGLE_HINT, PROFILE_ANGLE_FALLBACK_NOTICE
 from cooling_tower.tower.solid_profile import validate_solid_settings
 import test_support_simulation as support
 from test_manual_generation import create_fixture
@@ -55,7 +58,7 @@ class HorizontalAngleTests(unittest.TestCase):
             **selected.effective_profile.effective_values, key: threshold})
         w.profile_match_result = replace(w.profile_match_result,
                                         selected=replace(selected, effective_profile=profile))
-        w.apply_settings(GenerationSettings())
+        w.apply_settings(GenerationSettings(limit_expansion_to_profile=False))
         return w
 
     def test_auto_angles_roundtrip_without_changing_saved_geometry(self):
@@ -75,7 +78,168 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertEqual(w.maximum_contraction_angle_spin.value(), 35)
         w.full_infill_checkbox.setChecked(True)
         self.assertFalse(w.maximum_contraction_angle_spin.isEnabled())
+        self.assertEqual(w.maximum_contraction_angle_spin.text(), 'auto')
         self.assertEqual(w.collect_settings().maximum_contraction_angle_deg, 55)
+
+    def test_contraction_auto_display_retains_manual_angle_after_loading_and_toggling(self):
+        w = self.ready_angle_window()
+        spin = w.maximum_contraction_angle_spin
+        row = w._setting_widgets['maximum_contraction_angle_deg']
+        for full_infill in (True, False, True):
+            with self.subTest(full_infill=full_infill):
+                w.apply_settings(replace(w.collect_settings(), simulate_full_tower_infill=full_infill,
+                                         maximum_contraction_angle_deg=63))
+                self.assertEqual(spin.isEnabled(), not full_infill)
+                self.assertEqual(spin.text(), 'auto' if full_infill else '27,0')
+                self.assertEqual(row.unit_label.isHidden(), full_infill)
+                self.assertEqual(row.reset_button.isEnabled(), not full_infill)
+                self.assertEqual(spin.value(), 27)
+                self.assertEqual(w.collect_settings().maximum_contraction_angle_deg, 63)
+                spin.interpretText()
+                self.assertEqual(spin.value(), 27)
+                w.full_infill_checkbox.setChecked(False)
+                self.assertTrue(spin.isEnabled())
+                self.assertEqual(spin.value(), 27)
+                spin.setFocus()
+                spin.lineEdit().selectAll()
+                QTest.keyClicks(spin.lineEdit(), '29')
+                QTest.keyClick(spin, Qt.Key.Key_Enter)
+                self.assertEqual(spin.value(), 29)
+                w.full_infill_checkbox.setChecked(True)
+                self.assertEqual(spin.text(), 'auto')
+                self.assertEqual(spin.value(), 29)
+                self.assertFalse(row.reset_button.isEnabled())
+                w.full_infill_checkbox.setChecked(False)
+                self.assertEqual(spin.text(), '29,0')
+                self.assertTrue(row.reset_button.isEnabled())
+                row.reset_button.click()
+                self.assertEqual(spin.value(), 35)
+                self.assertTrue(spin.isEnabled())
+
+    def test_contraction_auto_display_is_gray_and_preserves_saved_numeric_precision(self):
+        w = self.ready_angle_window()
+        spin = w.maximum_contraction_angle_spin
+        row = w._setting_widgets['maximum_contraction_angle_deg']
+        w.apply_settings(replace(w.collect_settings(), simulate_full_tower_infill=True,
+                                 maximum_contraction_angle_deg=62.875))
+        self.assertEqual(spin.text(), 'auto')
+        self.assertTrue(spin.hasAcceptableInput())
+        self.assertNotIn('maximum_contraction_angle_deg', w._incomplete_setting_names)
+        self.assertEqual(spin.grab().toImage().pixelColor(10, 10).name(), '#f1f4f6')
+        w._save_user_settings(strict=True)
+        saved, _ = w.settings_store.load()
+        self.assertEqual(saved.maximum_contraction_angle_deg, 62.875)
+        self.assertTrue(saved.simulate_full_tower_infill)
+        w.apply_settings(saved)
+        self.assertEqual(spin.text(), 'auto')
+        spin.interpretText()
+        self.assertEqual(spin.value(), 27.125)
+        w.full_infill_checkbox.setChecked(False)
+        self.assertEqual(spin.value(), 27.125)
+        self.assertEqual(spin.text(), '27,1')
+        self.assertFalse(row.unit_label.isHidden())
+        self.assertTrue(row.reset_button.isEnabled())
+        self.assertNotEqual(spin.grab().toImage().pixelColor(10, 10).name(), '#f1f4f6')
+
+    def test_contraction_help_explains_auto_and_keeps_steps_without_threshold_paragraph(self):
+        from cooling_tower.gui.texts import SETTING_INFO_TEXTS
+        hint = SETTING_INFO_TEXTS['maximum_contraction_angle_deg']
+        self.assertIn('nach eigenen Regeln', hint)
+        self.assertIn('„auto“', hint)
+        self.assertIn('bleibt aber erhalten', hint)
+        self.assertIn('Direkte Absätze nach innen', hint)
+        self.assertNotIn('Threshold angle', hint)
+        self.assertNotIn('Stütz-Erkennung', hint)
+
+    def test_new_defaults_enable_profile_binding_in_both_modes(self):
+        self.assertTrue(GenerationSettings().limit_expansion_to_profile)
+        self.assertTrue(load_generation_settings(ROOT / 'config/default_settings.json').limit_expansion_to_profile)
+        self.assertTrue(ManualSettings().limit_expansion_to_profile)
+        w = self.window(15)
+        w.apply_settings(GenerationSettings())
+        self.assertTrue(w.profile_angle_limit.checkbox.isChecked())
+        self.assertTrue(w.profile_angle_limit.state.active)
+        self.assertEqual(w.maximum_expansion_angle_spin.value(), 15)
+        self.assertFalse(w.maximum_expansion_angle_spin.isEnabled())
+        _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
+        reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=15))
+        panel = ManualGenerationPanel()
+        self.addCleanup(panel.close)
+        panel.initialize(reference)
+        self.assertTrue(panel.profile_angle_limit.checkbox.isChecked())
+        self.assertTrue(panel.profile_angle_limit.state.active)
+        self.assertEqual(panel.editors['expansion_angle_deg'].value(), 15)
+        panel.profile_angle_limit.checkbox.click()
+        panel.editors['expansion_angle_deg'].setValue(35)
+        panel.reset_all()
+        self.assertTrue(panel.settings.limit_expansion_to_profile)
+        self.assertEqual(panel.editors['expansion_angle_deg'].value(), 15)
+        self.assertEqual(panel.settings_for_persistence().expansion_angle_deg, 50)
+
+    def test_active_profile_binding_hides_yellow_warnings_and_keeps_red_errors(self):
+        from cooling_tower.gui.texts import EXPANSION_ANGLE_CAUTION
+        w = self.ready_angle_window(15)
+        w.maximum_expansion_angle_spin.setValue(25)
+        self.assertIn(EXPANSION_ANGLE_CAUTION, w.maximum_expansion_angle_setting._helper_text)
+        w.profile_angle_limit.checkbox.click()
+        row = w.maximum_expansion_angle_setting
+        row.set_error('Testfehler')
+        w._update_expansion_angle_warning()
+        self.assertEqual(row._helper_text, '')
+        self.assertIn('Testfehler', row.message_label.text())
+        self.assertTrue(row.message_label.property('error'))
+        w.profile_angle_limit.checkbox.click()
+        self.assertIn(EXPANSION_ANGLE_CAUTION, row._helper_text)
+        _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
+        reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=15))
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
+        self.addCleanup(panel.close)
+        panel.initialize(reference)
+        panel.editors['expansion_angle_deg'].setValue(25)
+        self.assertIn(EXPANSION_ANGLE_CAUTION, panel.expansion_warning.text())
+        panel.profile_angle_limit.checkbox.click()
+        row = panel.rows['expansion_angle_deg']
+        row.set_error('Testfehler')
+        panel._sync()
+        self.assertTrue(panel.expansion_warning.isHidden())
+        self.assertIn('Testfehler', row.message_label.text())
+        self.assertFalse(row.message_label.isHidden())
+        self.assertIn(f"color: {COLORS['error']}", row.message_label.styleSheet())
+        panel.profile_angle_limit.checkbox.click()
+        self.assertIn(EXPANSION_ANGLE_CAUTION, panel.expansion_warning.text())
+
+    def test_manual_bound_preview_limit_is_checked_disabled_and_gray(self):
+        w = self.window(15)
+        _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
+        reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=15))
+        panel = ManualGenerationPanel()
+        self.addCleanup(panel.close)
+        panel.setStyleSheet(w.styleSheet())
+        panel.initialize(reference)
+        panel.resize(1400, 900)
+        panel.show()
+        self.app.processEvents()
+        box = panel.checks['expansion_enabled']
+        self.assertTrue(box.isChecked())
+        self.assertFalse(box.isEnabled())
+        self.assertTrue(panel.profile_angle_limit.checkbox.isEnabled())
+        self.assertEqual(box.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText).name(), '#8393a3')
+        option = QStyleOptionButton()
+        option.initFrom(box)
+        indicator = box.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, box)
+        rendered = box.grab().toImage()
+        self.assertTrue(any(rendered.pixelColor(x, y).name() == '#9aa9b6'
+                            for x in range(indicator.left(), indicator.right() + 1)
+                            for y in range(indicator.top(), indicator.bottom() + 1)))
+        box.click()
+        self.assertTrue(box.isChecked())
+        panel.profile_angle_limit.checkbox.click()
+        self.app.processEvents()
+        self.assertTrue(box.isEnabled())
+        self.assertTrue(box.isChecked())
+        self.assertEqual(box.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText).name(), '#152536')
+        box.click()
+        self.assertFalse(box.isChecked())
 
     def test_binding_exact_profile_angle_and_restores_free_angle(self):
         for adapter in ('orca_slicer', 'prusa_slicer'):
@@ -92,12 +256,34 @@ class HorizontalAngleTests(unittest.TestCase):
                 self.assertTrue(w.maximum_expansion_angle_spin.isEnabled())
                 self.assertEqual(w.maximum_expansion_angle_spin.value(), 40)
 
+    def test_auto_bound_angle_is_visibly_grey_and_restores_background(self):
+        w = self.window()
+        w._apply_style()
+        spin = w.maximum_expansion_angle_spin
+        spin.ensurePolished()
+        def background():
+            return spin.grab().toImage().pixelColor(10, 10).name()
+        free_background = background()
+        spin.setValue(23.5)
+        spin.selectAll()
+        self.assertTrue(spin.lineEdit().hasSelectedText())
+        w.profile_angle_limit.checkbox.click()
+        self.app.processEvents()
+        self.assertFalse(spin.isEnabled())
+        self.assertFalse(spin.lineEdit().hasSelectedText())
+        self.assertEqual(background(), '#f1f4f6')
+        self.assertNotEqual(background(), free_background)
+        w.profile_angle_limit.checkbox.click()
+        self.app.processEvents()
+        self.assertTrue(spin.isEnabled())
+        self.assertEqual(background(), free_background)
+
     def test_small_profile_angle_validates_and_persists_free_value(self):
         w = self.window(15)
         w.profile_angle_limit.checkbox.click()
-        self.assertEqual(w.maximum_expansion_angle_spin.value(), 20)
-        self.assertIn('Profilwert: 15°', w.profile_angle_limit.threshold_hint.hint)
-        self.assertIn('Angewendeter Winkel: 20°', w.profile_angle_limit.threshold_hint.hint)
+        self.assertEqual(w.maximum_expansion_angle_spin.value(), 15)
+        self.assertEqual(w.maximum_expansion_angle_spin.minimum(), 15)
+        self.assertEqual(w.profile_angle_limit.applied_threshold, 15)
 
         validate_solid_settings(w.collect_settings())
         w._save_user_settings(strict=True)
@@ -111,6 +297,11 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertTrue(w.maximum_expansion_angle_spin.isEnabled())
         w.profile_match_result = replace(w.profile_match_result, user_confirmed=True)
         w._refresh_profile_angle_binding()
+        self.assertEqual(w.maximum_expansion_angle_spin.value(), 15)
+        w.profile_angle_limit.checkbox.click()
+        self.assertEqual(w.maximum_expansion_angle_spin.value(), 40)
+        self.assertEqual(w.maximum_expansion_angle_spin.minimum(), 20)
+        w.maximum_expansion_angle_spin.setValue(15)
         self.assertEqual(w.maximum_expansion_angle_spin.value(), 20)
 
     def test_unbinding_immediately_restores_reset_for_a_modified_free_angle(self):
@@ -145,11 +336,14 @@ class HorizontalAngleTests(unittest.TestCase):
         w.simulate_tower_without_supports_checkbox.setChecked(True)
         row = w.maximum_expansion_angle_setting
         spin = w.maximum_expansion_angle_spin
-        for angle in (40, 35, 30, 28.1):
+        for angle in (40, 35, 30, 29.1):
             spin.setValue(angle)
             self.assertEqual(row.message_label.text(), '')
-        spin.setValue(28)
-        self.assertIn('Vorsicht', row.message_label.text())
+        for angle in (29, 28.9, 28, 20):
+            spin.setValue(angle)
+            self.assertIn('Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang.',
+                          row.message_label.text())
+            self.assertNotIn('Haftungs-', row.message_label.text())
         spin.setValue(15)
         self.assertEqual(spin.value(), 20)
         self.assertEqual(w.collect_settings().maximum_expansion_angle_deg, 70)
@@ -202,7 +396,7 @@ class HorizontalAngleTests(unittest.TestCase):
                 w = self.ready_angle_window(threshold)
                 self.enter_invalid_expansion(w)
                 w.profile_angle_limit.checkbox.click()
-                self.assertEqual(w.maximum_expansion_angle_spin.value(), max(20, threshold))
+                self.assertEqual(w.maximum_expansion_angle_spin.value(), threshold)
                 self.assert_expansion_recovered(w)
                 w.profile_angle_limit.checkbox.click()
                 self.assertEqual(w.maximum_expansion_angle_spin.value(), 40)
@@ -283,7 +477,7 @@ class HorizontalAngleTests(unittest.TestCase):
     def test_manual_numeric_entry_uses_horizontal_angle_and_binding_is_reversible(self):
         _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
         reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=30))
-        panel = ManualGenerationPanel()
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
         self.addCleanup(panel.close)
         panel.initialize(reference)
         panel.resize(1400, 900)
@@ -319,20 +513,21 @@ class HorizontalAngleTests(unittest.TestCase):
         panel.set_busy(False)
         self.assertTrue(panel.profile_angle_limit.checkbox.isEnabled())
 
-    def test_manual_allows_shallow_angles_with_persistent_warning(self):
+    def test_manual_allows_shallow_angles_only_from_profile_with_persistent_warning(self):
         _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
         reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=15))
-        panel = ManualGenerationPanel()
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
         self.addCleanup(panel.close)
         panel.initialize(reference)
         spin = panel.editors['expansion_angle_deg']
-        for angle in (35, 28.1):
+        for angle in (35, 29.1):
             spin.setValue(angle)
             self.assertTrue(panel.expansion_warning.isHidden())
-        spin.setValue(28)
+        spin.setValue(29)
         self.assertFalse(panel.expansion_warning.isHidden())
         spin.setValue(15)
-        self.assertEqual(panel.settings.expansion_angle_deg, 75)
+        self.assertEqual(spin.value(), 20)
+        self.assertEqual(panel.settings.expansion_angle_deg, 70)
         self.assertFalse(panel.expansion_warning.isHidden())
         row = panel.rows['expansion_angle_deg']
         row.set_error('Testfehler')
@@ -342,10 +537,95 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertEqual(spin.value(), 15)
         self.assertFalse(spin.isEnabled())
 
+    def test_nonpositive_profile_angles_use_thirty_degrees_in_both_modes(self):
+        _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
+        for raw in (0, -1, -25):
+            with self.subTest(raw=raw):
+                w = self.window(raw)
+                self.assertTrue(w.profile_angle_limit.checkbox.isEnabled())
+                w.profile_angle_limit.checkbox.click()
+                self.assertTrue(w.profile_angle_limit.state.active)
+                self.assertEqual(w.maximum_expansion_angle_spin.value(), 30)
+                self.assertEqual(w.profile_angle_limit.profile_warning, PROFILE_ANGLE_FALLBACK_NOTICE)
+                self.assertEqual(w.maximum_expansion_angle_setting._helper_text, '')
+                self.assertIn(PROFILE_ANGLE_FALLBACK_NOTICE, w.profile_angle_limit.threshold_hint.hint)
+                validate_solid_settings(w.collect_settings())
+                w.profile_angle_limit.checkbox.click()
+                self.assertEqual(w.maximum_expansion_angle_spin.value(), 40)
+                self.assertEqual(w.profile_angle_limit.profile_warning, '')
+
+                panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
+                self.addCleanup(panel.close)
+                panel.initialize(replace(reference, context=replace(reference.context,
+                                                                   support_threshold_angle_deg=raw)))
+                panel.profile_angle_limit.checkbox.click()
+                self.assertTrue(panel.settings.limit_expansion_to_profile)
+                self.assertEqual(panel.editors['expansion_angle_deg'].value(), 30)
+                self.assertFalse(panel.editors['expansion_angle_deg'].isEnabled())
+                self.assertEqual(panel.expansion_warning.text(), '')
+                self.assertTrue(panel.expansion_warning.isHidden())
+                self.assertIn(PROFILE_ANGLE_FALLBACK_NOTICE, panel.profile_angle_limit.threshold_hint.hint)
+                self.assertEqual(panel.settings_for_persistence().expansion_angle_deg, 50)
+                panel.profile_angle_limit.checkbox.click()
+                self.assertEqual(panel.editors['expansion_angle_deg'].value(), 40)
+                self.assertEqual(panel.profile_angle_limit.profile_warning, '')
+
+    def test_positive_fractional_profile_angles_below_twenty_remain_exact(self):
+        _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
+        for threshold in (19.75, 15, 0.05, 1e-13):
+            with self.subTest(threshold=threshold):
+                w = self.window(threshold)
+                w.profile_angle_limit.checkbox.click()
+                self.assertAlmostEqual(w.maximum_expansion_angle_spin.value(), threshold)
+                self.assertGreater(w.maximum_expansion_angle_spin.value(), 0)
+                self.assertEqual(w.profile_angle_limit.profile_warning, '')
+                validate_solid_settings(w.collect_settings())
+                panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
+                self.addCleanup(panel.close)
+                panel.initialize(replace(reference, context=replace(reference.context,
+                                                                   support_threshold_angle_deg=threshold)))
+                panel.profile_angle_limit.checkbox.click()
+                self.assertAlmostEqual(panel.editors['expansion_angle_deg'].value(), threshold)
+                self.assertGreater(panel.editors['expansion_angle_deg'].value(), 0)
+                self.assertFalse(panel.editors['expansion_angle_deg'].isEnabled())
+
+    def test_binding_parser_preserves_nonpositive_values_without_affecting_support_detection(self):
+        for adapter, key in (('orca_slicer', 'support_threshold_angle'),
+                             ('bambu_studio', 'support_threshold_angle'),
+                             ('anycubic_slicer_next', 'support_threshold_angle'),
+                             ('prusa_slicer', 'support_material_threshold')):
+            for raw, expected in ((0, 0), (['-12'], -12), ('0.05', .05), ('15', 15),
+                                  (True, None), ('nan', None), ('inf', None),
+                                  (90, None), (None, None), (['1', '2'], None)):
+                with self.subTest(adapter=adapter, raw=raw):
+                    profile = SimpleNamespace(installation=SimpleNamespace(adapter_id=adapter),
+                                              effective_values={key: raw})
+                    self.assertEqual(profile_binding_threshold(profile), expected)
+                    if expected is not None and expected <= 0:
+                        self.assertIsNone(profile_support_threshold(profile))
+
+    def test_profile_help_is_shared_and_has_headings_bullets_and_indented_choices(self):
+        w = self.window()
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
+        self.addCleanup(panel.close)
+        for control in (w.profile_angle_limit, panel.profile_angle_limit):
+            self.assertEqual(control.threshold_hint.hint, PROFILE_ANGLE_HINT)
+            self.assertIn('<b>Was ist das?</b>', control.threshold_hint.hint)
+            self.assertIn('<b>Sollte ich das aktivieren?</b>', control.threshold_hint.hint)
+            self.assertEqual(control.threshold_hint.hint.count('&#8226;'), 2)
+            self.assertEqual(control.threshold_hint.hint.count('&nbsp;&nbsp;...du'), 3)
+            self.assertIn('Ja, wenn...<br>', control.threshold_hint.hint)
+            self.assertIn('Nein, wenn...<br>', control.threshold_hint.hint)
+            self.assertNotIn('margin-top:16px', control.threshold_hint.hint)
+            self.assertIn('den horizontalen Grenzwinkel', control.threshold_hint.hint)
+            self.assertIn('für die betreffenden Stellen', control.threshold_hint.hint)
+            self.assertIn('Hier gilt: Je niedriger der Wert, desto flacher die Überhänge '
+                          'und schwerer zu drucken.', control.threshold_hint.hint)
+
     def test_manual_bound_angle_uses_disabled_background_and_restores_it_on_unbinding(self):
         _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
         reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=30))
-        panel = ManualGenerationPanel()
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
         self.addCleanup(panel.close)
         panel.setStyleSheet((ROOT / 'src/cooling_tower/gui/styles.qss').read_text(encoding='utf-8'))
         panel.initialize(reference)
@@ -375,7 +655,7 @@ class HorizontalAngleTests(unittest.TestCase):
         link.enterEvent(QEnterEvent(QPointF(1,1), QPointF(1,1), QPointF(1,1)))
         self.assertNotEqual(link.styleSheet(), normal)
         self.assertFalse(w._bounded_hint_popover.isHidden())
-        self.assertIn('Horizontalen', w._bounded_hint_popover.label.text())
+        self.assertIn('horizontalen Grenzwinkel', w._bounded_hint_popover.label.text())
         link.leaveEvent(QEvent(QEvent.Type.Leave))
         self.assertEqual(link.styleSheet(), normal)
         self.assertTrue(w._bounded_hint_popover.isHidden())
@@ -383,7 +663,7 @@ class HorizontalAngleTests(unittest.TestCase):
     def test_manual_binding_rejects_incompatible_existing_shape_atomically(self):
         _, _, reference, _, _ = create_fixture(self, joint=True, count=200)
         reference = replace(reference, context=replace(reference.context, support_threshold_angle_deg=89))
-        panel = ManualGenerationPanel()
+        panel = ManualGenerationPanel(ManualSettings(limit_expansion_to_profile=False))
         self.addCleanup(panel.close)
         panel.initialize(reference)
         panel.move('top_width', 35, panel.draft.height_mm)
@@ -442,7 +722,7 @@ class HorizontalAngleMigrationTests(unittest.TestCase):
             path.write_text(json.dumps({'manual_settings_schema_version':19,
                                        'manual':{'limit_expansion_to_profile':'true'}}))
             store = ManualSettingsStore(path)
-            self.assertFalse(store.load().limit_expansion_to_profile)
+            self.assertTrue(store.load().limit_expansion_to_profile)
             original = b'{"manual_settings_schema_version":99,"manual":{"limit_expansion_to_profile":true}}'
             path.write_bytes(original)
             store = ManualSettingsStore(path)
@@ -452,7 +732,7 @@ class HorizontalAngleMigrationTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original)
             store.recover()
             settings = store.load()
-            self.assertFalse(settings.limit_expansion_to_profile)
+            self.assertTrue(settings.limit_expansion_to_profile)
             external = path.read_bytes()+b' '
             path.write_bytes(external)
             with self.assertRaises((OSError, VersionedDocumentError)):

@@ -42,6 +42,17 @@ def automatic_mesh_segments(profile: object) -> int:
     return max(MINIMUM_AUTOMATIC_CIRCLE_SEGMENTS, math.ceil(2.0 * max(radii)))
 
 
+def configured_mesh_segments(profile: object, settings: object) -> int:
+    """Resolve the same tessellation for calibration, preview and export."""
+    automatic = settings.automatic_circle_segments
+    count = settings.circle_segments
+    if not isinstance(automatic, bool):
+        raise MeshGenerationError("Automatic circle segments must be a boolean.")
+    if isinstance(count, bool) or not isinstance(count, int) or not 4 <= count <= 256:
+        raise MeshGenerationError("Circle segments must be an integer from 4 to 256.")
+    return automatic_mesh_segments(profile) if automatic else count
+
+
 @dataclass(frozen=True, slots=True)
 class TriangleMesh:
     vertices: tuple[Vector3, ...]

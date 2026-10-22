@@ -60,7 +60,7 @@ from cooling_tower.slicers import (
 from cooling_tower.tower.solid_profile import build_solid_tower_profile
 from cooling_tower.tower.mesh_generator import (
     TowerMeshConfig,
-    automatic_mesh_segments,
+    configured_mesh_segments,
     generate_solid_tower_mesh,
     write_binary_stl,
 )
@@ -572,7 +572,7 @@ class CalibrationService:
                     geometry_is_valid = candidate_stl.stat().st_size > 84
                 else:
                     mesh = generate_solid_tower_mesh(
-                        solid, TowerMeshConfig(automatic_mesh_segments(solid))
+                        solid, TowerMeshConfig(configured_mesh_segments(solid, settings))
                     )
                     export = write_binary_stl(mesh, candidate_stl)
                     geometry_is_valid = export.validation.is_valid

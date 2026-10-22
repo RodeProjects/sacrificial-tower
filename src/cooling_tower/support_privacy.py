@@ -49,6 +49,7 @@ SETTING_KEYS = frozenset({
     "manual_base_width_mm", "minimum_radius_height_factor", "maximum_radius_change_per_mm_z",
     "maximum_expansion_angle_deg", "maximum_contraction_angle_deg", "local_reference_window",
     "limit_expansion_to_profile",
+    "automatic_circle_segments", "circle_segments",
 })
 _TEXT_KEYS = frozenset({
     "message", "error_message", "visible_error", "status_text", "diagnostics",

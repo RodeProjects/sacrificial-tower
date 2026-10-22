@@ -563,6 +563,40 @@ class Phase17Tests(unittest.TestCase):
         self.assertGreater(source_count, 6_000)
         self.assertLessEqual(len(segments), 350)
 
+    def test_manual_circle_segments_reach_intermediate_and_final_preview(self) -> None:
+        class ReportingCalibrator(SyntheticSuccessfulCalibrator):
+            def calibrate(self, snapshot, settings, **kwargs):
+                result = super().calibrate(snapshot, settings, **kwargs)
+                kwargs["joint_progress_callback"](SimpleNamespace(
+                    current_profile=result.profile, placement=result.placement,
+                ))
+                return result
+
+        scenes = []
+        result = PreviewService(ReportingCalibrator()).prepare(
+            self.request(settings=GenerationSettings(automatic_circle_segments=False, circle_segments=64)),
+            joint_scene_callback=scenes.append,
+        )
+        self.addCleanup(result.dispose)
+        self.assertEqual(result.scene.tower_circle_segments, 64)
+        self.assertEqual(scenes[0].tower_circle_segments, 64)
+        # Two rings and one connecting line per fourth segment.
+        self.assertEqual(len(result.scene.tower_segments), 144)
+        self.assertEqual(scenes[0].tower_segments, result.scene.tower_segments)
+
+    def test_fixed_segments_are_used_in_generated_stl(self) -> None:
+        from cooling_tower.services.generation_service import GenerationService
+        from cooling_tower.tower.mesh_generator import write_binary_stl
+
+        with patch("cooling_tower.services.generation_service.write_binary_stl",
+                   wraps=write_binary_stl) as write_stl:
+            result = GenerationService(self.root / "fixed_segments").generate_from_analysis(
+                self.snapshot, GenerationSettings(automatic_circle_segments=False, circle_segments=64),
+            )
+        self.assertTrue(result.stl_path.is_file())
+        self.assertEqual(write_stl.call_args.args[0].segment_count, 64)
+        self.assertTrue(result.mesh_validation.is_valid)
+
     def test_14_camera_rotate_pan_zoom_and_reset(self) -> None:
         canvas = PreviewCanvas()
         canvas.set_scene(preview_scene())

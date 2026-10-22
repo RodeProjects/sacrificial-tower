@@ -64,9 +64,9 @@ class ManualContext:
             adhesion = values.get("adhesion_type","")
             if isinstance(adhesion,(list,tuple)): adhesion = adhesion[0] if adhesion else ""
             brim = max(0,scalar(values.get("brim_width")) or 0) if str(adhesion).casefold() == "brim" else 0
-        from cooling_tower.slicers.support_angles import profile_support_threshold
+        from cooling_tower.slicers.support_angles import profile_binding_threshold
         return cls(key, tuple(request.snapshot.layers), height, note, bed, source_data.occupied_bounds, brim,
-                   profile_support_threshold(request.effective_profile))
+                   profile_binding_threshold(request.effective_profile))
 
     def validate(self, draft):
         validate(draft)

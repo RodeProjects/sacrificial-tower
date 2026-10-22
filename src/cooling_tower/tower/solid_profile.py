@@ -86,6 +86,12 @@ class ProfileFeasibilityError(ValueError):
 
 
 def validate_solid_settings(settings: GenerationSettings) -> None:
+    if not isinstance(settings.automatic_circle_segments, bool):
+        raise ValueError("Automatic circle segments must be a boolean.")
+    if (isinstance(settings.circle_segments, bool)
+            or not isinstance(settings.circle_segments, int)
+            or not 4 <= settings.circle_segments <= 256):
+        raise ValueError("Circle segments must be an integer from 4 to 256.")
     if not isinstance(settings.limit_expansion_to_profile, bool):
         raise ValueError("Die Profilbegrenzung benötigt einen gültigen Ein-/Aus-Wert.")
     if not isinstance(settings.automatic_base_width, bool):
@@ -96,7 +102,7 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError("Tower support simulation must be a boolean value.")
 
     for name, value in settings.to_dict().items():
-        if name in {"automatic_base_width", "simulate_full_tower_infill", "simulate_tower_without_supports", "limit_expansion_to_profile"}:
+        if name in {"automatic_base_width", "automatic_circle_segments", "simulate_full_tower_infill", "simulate_tower_without_supports", "limit_expansion_to_profile"}:
             continue
         if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
             continue
@@ -129,7 +135,9 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
     if not (
         0.0
         < settings.maximum_expansion_angle_deg
-        <= MAXIMUM_EXPANSION_ANGLE_DEG
+        < 90.0
+        and (settings.limit_expansion_to_profile
+             or settings.maximum_expansion_angle_deg <= MAXIMUM_EXPANSION_ANGLE_DEG)
     ):
         raise ValueError(
             "Der Aufweitungswinkel zur Horizontalen liegt außerhalb des zulässigen Bereichs."

@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 from PySide6.QtTest import QSignalSpy, QTest
 from cooling_tower.gui.generation_panel import GenerationPanel, result_description
 from cooling_tower.gui.widgets.chevron_button import ChevronButton
@@ -46,7 +46,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
 
     def test_result_thresholds_both_directions(self):
         for sign in (-1, 1):
-            self.assertIn("erreicht", result_description(sign * .2, .2))
+            self.assertEqual("Zielzeit erreicht", result_description(sign * .2, .2))
             self.assertIn("leicht", result_description(sign * .7, .2))
             self.assertNotIn("leicht", result_description(sign * .71, .2))
             self.assertNotIn("stärker", result_description(sign * 1.2, .2))
@@ -58,7 +58,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertFalse(p.isWindow())
         self.assertTrue(p.isHidden())
         p.set_context(("Turmfüllung: 100 %",))
-        self.assertIn("<u>Simulierte Werte:</u>", p.simulation_label.text())
+        self.assertIn("<b>Simulationen</b>", p.simulation_label.text())
         p.begin(10, .2, 0, 10)
         self.assertTrue(p.result_widget.isHidden())
         self.assertTrue(p.export_button.isHidden())
@@ -66,11 +66,17 @@ class EmbeddedGenerationTests(unittest.TestCase):
         p.start_slice(0, 10)
         self.assertFalse(p.result_widget.isHidden())
         self.assertTrue(p.image_progress.isVisibleTo(p))
+        self.assertFalse(p.result_actions.isHidden())
+        self.assertTrue(w.prediction_preview_divider.isHidden())
         candidate = SimpleNamespace(evaluation=SimpleNamespace(layer_timings=(SimpleNamespace(combined_layer_time_s=8.5),)))
         p.complete_slice(2, 10, candidate, 10)
         self.assertIn("2 von 10", p.counter_label.text())
         self.assertTrue(p.accept_button.isHidden())
+        self.assertFalse(p.result_actions.isHidden())
+        self.assertTrue(w.prediction_preview_divider.isHidden())
         p.complete_slice(3, 10, candidate, 10)
+        self.assertFalse(p.result_actions.isHidden())
+        self.assertFalse(w.prediction_preview_divider.isHidden())
         self.assertFalse(p.accept_button.isHidden())
         self.assertFalse(p.continue_button.isHidden())
         self.assertFalse(p.continue_button.isEnabled())
@@ -103,6 +109,8 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertEqual(p.title_label.text(), "Kühlturm fertig generiert")
         self.assertTrue(p.accept_button.isHidden())
         self.assertFalse(p.export_button.isHidden())
+        self.assertFalse(p.result_actions.isHidden())
+        self.assertFalse(w.prediction_preview_divider.isHidden())
         with patch.object(w, "start_export") as export:
             w._on_main_export_clicked()
             export.assert_called_once_with()
@@ -116,20 +124,20 @@ class EmbeddedGenerationTests(unittest.TestCase):
         p.start_slice(0, 10)
         self.app.processEvents()
         caption = next(
-            label for label in p.result_widget.findChildren(type(p.title_label))
-            if "Beste bisherige Layerzeit" in label.text()
+            label for label in p.result_widget.findChildren(QLabel)
+            if "Beste gemeinsame Layerzeit" in label.text()
         )
-        self.assertFalse(caption.wordWrap())
+        self.assertTrue(caption.wordWrap())
         self.assertFalse(any(
             label.text() == "Slicer-gestützte Schätzung"
-            for label in p.result_widget.findChildren(type(p.title_label))
+            for label in p.result_widget.findChildren(QLabel)
         ))
         image_y = p.image_progress.mapTo(p.result_widget, p.image_progress.rect().topLeft()).y()
         p.set_achieved(9.39)
         p.mark_finished(paused=False, can_continue=False)
         achieved_html = p.best_minimum_value.text()
         self.assertIn('color:#b87900">9.39 s</span>', achieved_html)
-        self.assertIn('color:#000000"> / 11.00 s (± 0.25 s Toleranz)</span>', achieved_html)
+        self.assertEqual(p.target_label.text(), "Ziel 11.00 s · Toleranz ± 0.25 s")
         self.assertIn("#b87900", p.best_deviation_value.styleSheet())
         self.app.processEvents()
         self.assertEqual(
@@ -138,44 +146,46 @@ class EmbeddedGenerationTests(unittest.TestCase):
         )
         p.set_achieved(11.05)
         self.assertIn('color:#22854b">11.05 s</span>', p.best_minimum_value.text())
-        self.assertIn('color:#000000"> / 11.00 s', p.best_minimum_value.text())
+        self.assertIn("Ziel 11.00 s", p.target_label.text())
         self.assertIn("#22854b", p.best_deviation_value.styleSheet())
 
-    def test_manual_creation_offer_follows_retained_result_lifecycle(self):
+    def test_manual_mode_hint_follows_retained_result_lifecycle(self):
         panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
         self.addCleanup(dispose_test_widget, panel)
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.begin(10, .2, 0, 10)
+        self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.start_slice(0, 10)
+        self.assertFalse(panel.manual_mode_hint.isHidden())
         candidate = SimpleNamespace(evaluation=SimpleNamespace(
             layer_timings=(SimpleNamespace(combined_layer_time_s=9.0),)
         ))
         panel.complete_slice(3, 10, candidate, 10)
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertFalse(panel.manual_mode_hint.isHidden())
         for paused in (True, False):
             with self.subTest(paused=paused):
                 panel.mark_finished(paused=paused, can_continue=paused)
-                self.assertFalse(panel.manual_creation_offer.isHidden())
+                self.assertFalse(panel.manual_mode_hint.isHidden())
                 layout = panel.result_widget.layout()
                 self.assertIs(layout.itemAt(layout.count() - 1).widget(), panel.result_actions)
                 panel.resume_waiting()
-                self.assertTrue(panel.manual_creation_offer.isHidden())
+                self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.show_error("Fortsetzung fehlgeschlagen", retain_result=True)
-        self.assertFalse(panel.manual_creation_offer.isHidden())
+        self.assertFalse(panel.manual_mode_hint.isHidden())
         panel.start_slice(3, 10)
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertFalse(panel.manual_mode_hint.isHidden())
         panel.show_error("Kein verwertbarer Turm")
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.mark_finished(paused=True, can_continue=False, has_result=False)
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.mark_finished(paused=False, can_continue=False)
         panel.mark_interrupted("Generierung abgebrochen")
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.mark_finished(paused=False, can_continue=False)
         panel.begin(10, .2, 0, 10)
-        self.assertTrue(panel.manual_creation_offer.isHidden())
+        self.assertTrue(panel.manual_mode_hint.isHidden())
 
-    def test_best_layer_time_caption_uses_available_horizontal_space(self):
+    def test_best_layer_time_caption_wraps_without_clipping_in_shared_metrics(self):
         panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
         self.addCleanup(panel.close)
         panel.resize(900, 300)
@@ -183,12 +193,12 @@ class EmbeddedGenerationTests(unittest.TestCase):
         panel.start_slice(0, 10)
         self.app.processEvents()
         caption = next(
-            label for label in panel.result_widget.findChildren(type(panel.title_label))
-            if "Beste bisherige Layerzeit" in label.text()
+            label for label in panel.result_widget.findChildren(QLabel)
+            if "Beste gemeinsame Layerzeit" in label.text()
         )
-        self.assertFalse(caption.wordWrap())
+        self.assertTrue(caption.wordWrap())
         self.assertGreaterEqual(
-            caption.width(), caption.fontMetrics().horizontalAdvance(caption.text())
+            caption.height(), caption.heightForWidth(caption.width())
         )
 
     def test_preview_camera_buttons_share_one_row_and_hint_points_left(self):
@@ -278,6 +288,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(w.isolated_progress_widget.isVisibleTo(p))
         self.assertEqual(w.isolated_progress_title_label.text(), "Turmgenerierung wird vorbereitet...")
+        self.assertFalse(w.prediction_preview_divider.isHidden())
         self.assertFalse(p.result_widget.isVisibleTo(p))
         w._on_preview_progress(w._preview_request_id, 20, "Getrennter Slice 2/6 wird vorbereitet …")
         self.assertEqual(w.isolated_progress_bar.value(), 17)

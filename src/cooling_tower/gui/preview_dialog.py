@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 
 from cooling_tower.gui.widgets import PreviewCanvas
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
+from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.preview import PreviewResult, PreviewScene, PreviewState
 
@@ -64,6 +66,19 @@ class PreviewDialog(QDialog):
             )
             title_row = QHBoxLayout(self.preview_title_widget)
             title_row.setContentsMargins(0, 0, 0, 0)
+            self.preview_info_button = InfoToolButton(
+                "<b>Grobe 3D-Vorschau</b><p>Die Darstellung dient nur der groben "
+                "Veranschaulichung und bildet das Druckergebnis nicht exakt ab. "
+                "Auch die Ausrichtung des Originalobjekts kann von der exportierten "
+                "3MF-Datei abweichen.</p>",
+                accessible_name="Hinweis zur Genauigkeit der 3D-Vorschau",
+                accessible_hint="Die Vorschau dient nur der groben Veranschaulichung. "
+                "Sie ist nicht exakt; auch die Ausrichtung des Originalobjekts kann "
+                "von der exportierten 3MF-Datei abweichen.",
+                object_name="settingInfoButton",
+                diameter_px=METRICS.setting_info_diameter_px,
+            )
+            title_row.addWidget(self.preview_info_button)
             title_row.addWidget(section_title)
             layout.addWidget(self.preview_title_widget)
         self.state_label = QLabel("Vorschau wurde noch nicht erstellt.")

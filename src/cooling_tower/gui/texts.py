@@ -30,8 +30,7 @@ def slicer_support_hint_html() -> str:
 
 
 EXPANSION_ANGLE_CAUTION = (
-    "Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang. "
-    "Beim Drucken können Haftungs- und Formprobleme entstehen."
+    "Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang."
 )
 
 
@@ -74,7 +73,7 @@ SETTING_INFO_TEXTS = {
         "• Ein kleinerer Wert erlaubt flachere Außenflächen und mehr Aufweitung "
         "je Schicht; ein größerer Wert erzwingt steilere Außenflächen.<br>"
         "• Bei 35° und flacheren Winkeln zur Horizontalen sind ein gut kalibrierter "
-        "Drucker und geeignete Druckeinstellungen besonders wichtig. Ab 28° und "
+        "Drucker und geeignete Druckeinstellungen besonders wichtig. Ab 29° und "
         "flacher erscheint zusätzlich ein Vorsichtshinweis im Programm.<br>"
         "• Der Bezug entspricht dem „Threshold angle“ bzw. „Schwellenwinkel“ im Slicer. "
         "Bei nach unten gerichteten Flächen unterhalb dieser Schwelle erkennt der "
@@ -86,13 +85,11 @@ SETTING_INFO_TEXTS = {
         "<p>• Der Winkel wird zur Horizontalen (Druckbett) gemessen.<br>"
         "• Ein kleinerer Wert erlaubt eine flachere, stärkere Verjüngung je Schicht; "
         "ein größerer Wert erzwingt steilere Übergänge.<br>"
-        "• Der Winkelbezug entspricht dem „Threshold angle“ bzw. „Schwellenwinkel“ "
-        "des Slicers. Dessen Stütz-Erkennung betrifft nach unten gerichtete "
-        "Flächen unterhalb der Schwelle; bei aktivierten Stützen versucht der "
-        "Slicer dort Stützmaterial zu erzeugen. Die Verjüngungsgrenze selbst "
-        "bleibt eine Einstellung der Turmform.<br>"
-        "• Bei 100 % Turmfüllung wird diese Winkelgrenze vollständig ignoriert. "
-        "Direkte Absätze nach innen sind dann nur vor einem Objektlayer "
+        "• Bei 100 % Turmfüllung bestimmt das Programm die Verjüngung nach eigenen Regeln. "
+        "Das Feld ist dann gesperrt und zeigt „auto“. Der manuell eingestellte Winkel "
+        "wird dabei nicht verwendet, bleibt aber erhalten und ist nach dem Ausschalten "
+        "der Füllungssimulation wieder einstellbar.<br>"
+        "• Direkte Absätze nach innen sind bei 100 % Turmfüllung nur vor einem Objektlayer "
         "mit ausreichender eigener Layerzeit möglich.</p>"
     ),
     "local_reference_window": (

@@ -297,7 +297,7 @@ class VoluntarySupportDialog(QDialog):
         amount_layout.setContentsMargins(16, 12, 16, 12)
         amount_layout.setSpacing(8)
         amount_title = self._label(
-            amount_layout, 'Jede Unterstützung ist willkommen', 'supportSectionTitle',
+            amount_layout, 'Jede Unterstützung ist willkommen :)', 'supportSectionTitle',
         )
         amount_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preset_buttons: list[QPushButton] = []

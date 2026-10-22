@@ -1049,6 +1049,24 @@ class Phase16Tests(unittest.TestCase):
         self.assertIn("zeitprognose", warnings.casefold())
         self.assertNotIn("The calibrated STL", warnings)
 
+    def test_fixed_segments_are_used_by_every_calibration_candidate(self) -> None:
+        from cooling_tower.tower.mesh_generator import generate_solid_tower_mesh
+
+        with patch("cooling_tower.calibration.calibration_service.generate_solid_tower_mesh",
+                   wraps=generate_solid_tower_mesh) as generate_mesh:
+            result = CalibrationService().calibrate(
+                self.snapshot,
+                GenerationSettings(target_layer_time_s=2.0, automatic_circle_segments=False, circle_segments=64),
+                adapter=FakeAdapter(tower_gcode(path_size=1.0, feed=60)),
+                profile=self.profile,
+                output_directory=self.root / "fixed_segments",
+                config=CalibrationConfig(mode=CalibrationMode.STL, maximum_iterations=3),
+            )
+        self.assertTrue(result.success, result.failures)
+        self.assertTrue(result.stl_path.is_file())
+        self.assertEqual(generate_mesh.call_count, 3)
+        self.assertTrue(all(call.args[1].segment_count == 64 for call in generate_mesh.call_args_list))
+
     def test_selected_pass_count_is_honoured_after_result_stabilises(self) -> None:
         adapter = SequencedAdapter(
             [

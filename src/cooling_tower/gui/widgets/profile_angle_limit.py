@@ -4,27 +4,37 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QSignalBlocker, Qt
 from PySide6.QtGui import QFont, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QWidget
 
-from cooling_tower.angles import ProfileAngleBinding
+from cooling_tower.angles import ProfileAngleBinding, profile_binding_angle
 from cooling_tower.gui.widgets.hint_popover import hide_window_hint, show_window_hint
 
 
-PROFILE_ANGLE_HINT = (
-    '<p><b>Grenzwinkel aus dem Slicer-Profil</b></p>'
-    '<p>• Übernimmt den ausdrücklich gespeicherten Schwellenwinkel des '
-    'bestätigten Prozessprofils, gemessen zur Horizontalen. Die Eingabe wird '
-    'gesperrt und zeigt diesen Wert weiterhin an.<br>'
-    '• Der Turm darf sich dadurch nicht flacher aufweiten als diese Grenze. '
-    'Im manuellen Modus wird zugleich die Aufweitungsbegrenzung aktiviert.<br>'
-    '• Nach dem Ausschalten steht der vorherige freie Winkel wieder bereit.<br>'
-    '• Automatische Schwellen (0°), fehlende oder ungültige Profilwerte können '
-    'nicht übernommen werden. Die Einstellung wartet dann auf ein geeignetes Profil.</p>'
+PROFILE_ANGLE_EXPERIENCE = (
+    '...du mit deinem gewählten Prozessprofil bereits erfolgreich '
+    'ordentliche Überhänge gedruckt hast.'
 )
+PROFILE_ANGLE_HINT = (
+    '<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was ist das?</b></p>'
+    '<p style="margin-top:0; margin-bottom:10px;">'
+    '&#8226; Dieser Wert beschreibt den horizontalen Grenzwinkel, ab dessen Unterschreitung '
+    'der Slicer für die betreffenden Stellen Stützmaterial generieren würde.<br>'
+    '&#8226; Hier gilt: Je niedriger der Wert, desto flacher die Überhänge '
+    'und schwerer zu drucken.</p>'
+    '<p align="left" style="margin-top:0; margin-bottom:0px;"><b>Sollte ich das aktivieren?</b></p>'
+    '<p style="margin-top:0; margin-bottom:10px;">Ja, wenn...<br>'
+    f'&nbsp;&nbsp;{PROFILE_ANGLE_EXPERIENCE}<br>'
+    '&nbsp;&nbsp;...du diesen Wert nie manuell verändert hast '
+    'und er noch auf der Standardeinstellung steht.</p>'
+    '<p style="margin-top:0; margin-bottom:0px;">Nein, wenn...<br>'
+    '&nbsp;&nbsp;...du den Übergangswinkel zwischen 20° und '
+    '89° selbst bestimmen möchtest.</p>'
+)
+PROFILE_ANGLE_FALLBACK_NOTICE = 'Profilwinkel ≤ 0°: Automatisch auf 30° gesetzt.'
 
 
 def set_angle_editor_precision(editor, profile_angle=None, *, minimum=1):
     """Show fractional profile angles without rounding the copied limit."""
     decimals = minimum if profile_angle is None else max(
-        minimum, min(12, -Decimal(str(profile_angle)).as_tuple().exponent))
+        minimum, min(15, -Decimal(str(profile_angle)).as_tuple().exponent))
     if getattr(editor, '_display_decimals', None) == decimals:
         return
     editor.set_display_decimals(decimals)
@@ -44,7 +54,8 @@ class _ThresholdHint(QLabel):
 
     def enterEvent(self, event):
         self.setStyleSheet('color: #2784c5;')
-        show_window_hint(self, self.hint, duration_ms=15_000)
+        show_window_hint(self, self.hint, duration_ms=15_000,
+                         unwrapped_line='\u00a0\u00a0' + PROFILE_ANGLE_EXPERIENCE)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
@@ -72,69 +83,20 @@ class _CornerArrow(QWidget):
         painter.drawPolygon(QPolygonF([tip, QPointF(tip.x()-3, y-2.5), QPointF(tip.x()-3, y+2.5)]))
 
 
-class ProfileAngleLimitControl(QWidget):
-    """Overlay the unused space below the label, preserving every grid cell."""
-    def __init__(self, row, *, compact=False):
-        super().__init__(row)
+class SettingSubline(QWidget):
+    """Share the exact text baseline and lifetime handling of setting sublines."""
+
+    def _attach_to_row(self, row):
         self.row = row
         self._row_alive = True
         self._fit_key = None
-        self._suffix_text = ' begrenzen' if compact else ' des Slicer-Profils begrenzen'
-        self._label_text = 'Auf Threshold-angle'+self._suffix_text
-        self.state = ProfileAngleBinding()
-        self.setObjectName('profileAngleLimit')
-        font = QFont(row.label.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF()-1.5))
-        self._base_point_size = font.pointSizeF()
-        self.setFont(font)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.arrow = _CornerArrow(self)
-        self.prefix = QLabel('Auf ', self)
-        self.threshold_hint = _ThresholdHint(self)
-        self.suffix = QLabel(self._suffix_text, self)
-        self.checkbox = QCheckBox(self)
-        self.checkbox.setObjectName('limitExpansionToProfile')
-        self.checkbox.setStyleSheet('QCheckBox::indicator { width: 12px; height: 12px; }')
-        self.checkbox.setFixedSize(15, 15)
-        self.checkbox.setAccessibleName(self._label_text)
-        self.checkbox.setToolTip(PROFILE_ANGLE_HINT)
-        for child in (self.arrow, self.prefix, self.threshold_hint, self.suffix):
-            layout.addWidget(child)
-        layout.addSpacing(5)
-        layout.addWidget(self.checkbox)
-        layout.addStretch(1)
         row.installEventFilter(self)
         row.label.installEventFilter(self)
         row.destroyed.connect(self.deleteLater)
         row.destroyed.connect(self._row_destroyed)
         row.label.destroyed.connect(self._row_destroyed)
-        # Feedback is already an expanding block. Keep its first line clear of
-        # this subline without adding height to the ordinary numeric row.
         row.message_container.layout().setContentsMargins(0, 8, 0, 0)
         self._position()
-
-    def refresh(self, current, requested, threshold, *, minimum=None):
-        with QSignalBlocker(self.checkbox):
-            self.checkbox.setChecked(requested)
-        self.checkbox.setEnabled(threshold is not None)
-        self.applied_threshold = max(minimum, threshold) if threshold is not None and minimum is not None else threshold
-        effective = self.state.resolve(current, requested, self.applied_threshold)
-        extra = (f'<p>• Im automatischen Modus gilt mindestens {minimum:g}° zur Horizontalen. '
-                 'Flachere Profilwerte werden deshalb auf diese sichere Grenze begrenzt.</p>' if minimum is not None else '')
-        if threshold is not None and self.applied_threshold != threshold:
-            extra += f'<p>Profilwert: {threshold:g}°. Angewendeter Winkel: {self.applied_threshold:g}°.</p>'
-        self.threshold_hint.hint = PROFILE_ANGLE_HINT+extra
-        self.threshold_hint.setAccessibleDescription(self.threshold_hint.hint)
-        self.checkbox.setToolTip(self.threshold_hint.hint)
-        self.checkbox.setAccessibleDescription(
-            (f'Profilwinkel: {threshold:g} Grad. Angewendeter Winkel: '
-             f'{self.applied_threshold:g} Grad zur Horizontalen.') if threshold is not None
-            else 'Kein ausdrücklich gespeicherter, gültiger Profilwinkel verfügbar.'
-        )
-        self._position()
-        return effective
 
     def eventFilter(self, watched, event):
         if self._row_alive and event.type() in {QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show,
@@ -167,6 +129,64 @@ class ProfileAngleLimitControl(QWidget):
         text_bottom = origin.y()+(label.height()+label.fontMetrics().height())//2
         self.setGeometry(origin.x(), text_bottom, available, height)
         self.raise_()
+
+
+class ProfileAngleLimitControl(SettingSubline):
+    """Overlay the unused space below the label, preserving every grid cell."""
+    def __init__(self, row, *, compact=False):
+        super().__init__(row)
+        self.row = row
+        self._row_alive = True
+        self._fit_key = None
+        self._suffix_text = ' begrenzen' if compact else ' des Slicer-Profils begrenzen'
+        self._label_text = 'Auf Threshold-angle'+self._suffix_text
+        self.state = ProfileAngleBinding()
+        self.setObjectName('profileAngleLimit')
+        font = QFont(row.label.font())
+        font.setPointSizeF(max(7.0, font.pointSizeF()-1.5))
+        self._base_point_size = font.pointSizeF()
+        self.setFont(font)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.arrow = _CornerArrow(self)
+        self.prefix = QLabel('Auf ', self)
+        self.threshold_hint = _ThresholdHint(self)
+        self.suffix = QLabel(self._suffix_text, self)
+        self.checkbox = QCheckBox(self)
+        self.checkbox.setObjectName('limitExpansionToProfile')
+        self.checkbox.setStyleSheet('QCheckBox::indicator { width: 12px; height: 12px; }')
+        self.checkbox.setFixedSize(15, 15)
+        self.checkbox.setAccessibleName(self._label_text)
+        self.checkbox.setToolTip(PROFILE_ANGLE_HINT)
+        for child in (self.arrow, self.prefix, self.threshold_hint, self.suffix):
+            layout.addWidget(child)
+        layout.addSpacing(5)
+        layout.addWidget(self.checkbox)
+        layout.addStretch(1)
+        self._attach_to_row(row)
+
+    def refresh(self, current, requested, threshold):
+        with QSignalBlocker(self.checkbox):
+            self.checkbox.setChecked(requested)
+        self.applied_threshold = profile_binding_angle(threshold)
+        self.checkbox.setEnabled(self.applied_threshold is not None)
+        effective = self.state.resolve(current, requested, self.applied_threshold)
+        self.profile_warning = (PROFILE_ANGLE_FALLBACK_NOTICE
+                                if self.state.active and threshold is not None and threshold <= 0 else '')
+        extra = f'<p>{self.profile_warning}</p>' if self.profile_warning else ''
+        if self.applied_threshold is not None and self.applied_threshold != threshold:
+            extra += f'<p>Profilwert: {threshold:g}°. Angewendeter Winkel: {self.applied_threshold:g}°.</p>'
+        self.threshold_hint.hint = PROFILE_ANGLE_HINT+extra
+        self.threshold_hint.setAccessibleDescription(self.threshold_hint.hint)
+        self.checkbox.setToolTip(self.threshold_hint.hint)
+        self.checkbox.setAccessibleDescription(
+            (f'Profilwinkel: {threshold:g} Grad. Angewendeter Winkel: '
+             f'{self.applied_threshold:g} Grad zur Horizontalen.') if self.applied_threshold is not None
+            else 'Kein ausdrücklich gespeicherter, gültiger Profilwinkel verfügbar.'
+        )
+        self._position()
+        return effective
 
     def _fit_text(self, available):
         # Elide only the trailing explanation on narrow forms. The full wording

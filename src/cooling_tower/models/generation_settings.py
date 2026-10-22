@@ -55,6 +55,8 @@ class GenerationSettings:
     maximum_expansion_angle_deg: float
     maximum_contraction_angle_deg: float
     limit_expansion_to_profile: bool
+    automatic_circle_segments: bool
+    circle_segments: int
 
     local_reference_window: int
     # Object-bound session data; deliberately absent from global user defaults.
@@ -94,7 +96,9 @@ class GenerationSettings:
         maximum_radius_change_per_mm_z: float = GENERATION_DEFAULTS["maximum_radius_change_per_mm_z"],
         maximum_expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"],
         maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
-        limit_expansion_to_profile: bool = False,
+        limit_expansion_to_profile: bool = GENERATION_DEFAULTS["limit_expansion_to_profile"],
+        automatic_circle_segments: bool = GENERATION_DEFAULTS["automatic_circle_segments"],
+        circle_segments: int = GENERATION_DEFAULTS["circle_segments"],
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
         layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"],
         excluded_layer_ranges: tuple[LayerRange, ...] = (),
@@ -140,6 +144,8 @@ class GenerationSettings:
             "maximum_expansion_angle_deg": maximum_expansion_angle_deg,
             "maximum_contraction_angle_deg": maximum_contraction_angle_deg,
             "limit_expansion_to_profile": limit_expansion_to_profile,
+            "automatic_circle_segments": automatic_circle_segments,
+            "circle_segments": circle_segments,
             "local_reference_window": local_reference_window,
         }
         for name, value in public_values.items():

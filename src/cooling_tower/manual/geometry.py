@@ -61,7 +61,7 @@ class ManualSettings:
     circle_segments: int | None = None
     expansion_enabled: bool = False
     expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"]
-    limit_expansion_to_profile: bool = False
+    limit_expansion_to_profile: bool = GENERATION_DEFAULTS["limit_expansion_to_profile"]
     contraction_enabled: bool = False
     contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"]
     overhang_enabled: bool = True
@@ -258,7 +258,11 @@ def validate_settings(s):
     if s.minimum_diameter_mm > s.maximum_foot_diameter_mm or s.foot_diameter_mm > s.maximum_foot_diameter_mm:
         raise GeometryError("maximum_foot_diameter_mm", "Die Fußgrenze reicht für Fuß und Körperanschluss nicht aus.")
     for name in ("expansion_angle_deg", "contraction_angle_deg", "overhang_angle_deg"):
-        maximum = 89.9 if name == "expansion_angle_deg" and s.limit_expansion_to_profile else 89.0
+        if name == "expansion_angle_deg" and s.limit_expansion_to_profile:
+            if not 0 < s.expansion_angle_deg < 90:
+                raise GeometryError(name, "Der Profilwinkel muss größer als 0° und kleiner als 90° sein.")
+            continue
+        maximum = 89.0
         if not 0.1 <= getattr(s, name) <= maximum:
             minimum_text = format(90-maximum, 'g').replace('.', ',')
             raise GeometryError(name, f"Der Winkel zur Horizontalen muss zwischen {minimum_text}° und 89,9° liegen.")

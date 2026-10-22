@@ -23,7 +23,7 @@ from cooling_tower.models import (
 )
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.calibration.candidate_evaluation import minimum_combined_layer_time
-from cooling_tower.tower.mesh_generator import automatic_mesh_segments
+from cooling_tower.tower.mesh_generator import configured_mesh_segments
 from cooling_tower.preview.models import (
     LineSegment3D,
     OutputMode,
@@ -87,11 +87,11 @@ def _suggest_placement(
     )
 
 
-def _tower_wireframe(profile: object, placement: TowerPlacement) -> tuple[LineSegment3D, ...]:
+def _tower_wireframe(profile: object, placement: TowerPlacement, settings: object) -> tuple[LineSegment3D, ...]:
     points = tuple(getattr(profile, "points"))
     if not points:
         return ()
-    segment_count = automatic_mesh_segments(profile)
+    segment_count = configured_mesh_segments(profile, settings)
     rings: list[tuple[Point3D, ...]] = []
     for profile_point in points:
         radius = float(getattr(profile_point, "outer_radius_mm"))
@@ -387,7 +387,7 @@ class PreviewService:
                             joint_scene_callback(PreviewScene(
                                 object_segments=object_segments,
                                 tower_segments=_tower_wireframe(
-                                    candidate_profile, candidate_placement
+                                    candidate_profile, candidate_placement, request.settings
                                 ),
                                 bed_bounds=candidate_placement.bed_bounds,
                                 tower_center_xy_mm=(
@@ -404,8 +404,8 @@ class PreviewService:
                                     "printable_layer_count",
                                     len(tuple(getattr(candidate_profile, "layers", ()))),
                                 )),
-                                tower_circle_segments=automatic_mesh_segments(
-                                    candidate_profile
+                                tower_circle_segments=configured_mesh_segments(
+                                    candidate_profile, request.settings
                                 ),
                             ))
                 if joint_progress_callback is not None:
@@ -600,7 +600,7 @@ class PreviewService:
             if joint_sliced:
                 use_joint_source(getattr(calibration, "best_iteration", None), placement,
                                  getattr(calibration, "gcode_path", None))
-            tower_segments = _tower_wireframe(profile, placement)
+            tower_segments = _tower_wireframe(profile, placement, request.settings)
             tower_height = max(
                 float(getattr(point, "z_mm"))
                 for point in getattr(profile, "points")
@@ -649,7 +649,7 @@ class PreviewService:
                         profile, "printable_layer_count",
                         len(tuple(getattr(profile, "layers", ()))),
                     )),
-                    tower_circle_segments=automatic_mesh_segments(profile),
+                    tower_circle_segments=configured_mesh_segments(profile, request.settings),
                 ),
                 artifact_path=artifact.resolve(),
                 source_sha256=final_sha256,

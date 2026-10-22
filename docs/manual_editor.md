@@ -949,12 +949,21 @@ Profilwert- und Farbvergleichstexte entfallen aus der linken Leiste.
 
 Die Profilbegrenzung unter dem maximalen Aufweitungswinkel übernimmt denselben
 Schwellenwinkel wie im automatischen Modus. Die kompakte Beschriftung lautet
-„Auf Threshold-angle begrenzen“. Anders als automatisch darf hier auch ein
-Winkel unter 20° gewählt oder aus dem Profil übernommen werden. Bei 28° und
-flacher erscheint eine gelbe Warnung; der Kalibrierungshinweis für 35° und
+„Auf Threshold-angle begrenzen“. Freie Eingaben sind wie im automatischen
+Modus auf 20° bis 89° begrenzt. Kleinere positive Profilwinkel sind nur bei
+aktiver Profilbindung zulässig; ausgelesene Werte ≤ 0° verwenden mit einem
+Hinweis im Hovertext 30°. Die Profilbegrenzung ist für neue Einstellungen und
+beim Gesamtreset standardmäßig aktiviert; gespeicherte Auswahlen bleiben erhalten.
+Fehlende oder nicht interpretierbare Werte aktivieren
+keine Bindung. Die gemeinsame Erklärung und die Regeln stehen unter
+[Profilwinkelbindung](tower_geometry.md). Bei 29° und
+flacher erscheint bei manueller Eingabe eine gelbe Warnung. Bei aktiver
+Profilbindung werden gelbe Hinweise ausgeblendet; rote Fehler bleiben sichtbar.
+Der Kalibrierungshinweis für 35° und
 flacher bleibt im Hovertext. Sie aktiviert zugleich die
 Aufweitungsbegrenzung der Vorschau, sperrt deren Eingabe und merkt sich den
-vorherigen freien Winkel. Unvereinbare bestehende Kurven werden durch die
+vorherigen freien Winkel. Beschriftung und angehakte Checkbox der gesperrten
+Vorschaubegrenzung werden ausgegraut dargestellt. Unvereinbare bestehende Kurven werden durch die
 atomare Geometrievalidierung mit einer verständlichen Fehlermeldung abgewiesen;
 Entwurf und bisherige Einstellung bleiben erhalten. Bei Quellen-/Profilwechsel
 wird erst der neue verifizierte Kontext verwendet. Undo/Redo und globale

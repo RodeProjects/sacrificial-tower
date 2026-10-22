@@ -222,7 +222,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(artifact.exists())
         dispose.assert_not_called()
 
-    def test_result_offer_uses_manual_navigation_and_preserves_automatic_result(self) -> None:
+    def test_result_hint_and_header_navigation_preserve_automatic_result(self) -> None:
         window = self.window
         self.finish_preparation()
         window.automatic_generation_card.click()
@@ -239,6 +239,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         panel.start_slice(6, 10)
         panel.set_achieved(9.8)
         panel.mark_finished(paused=True, can_continue=True)
+        self.assertFalse(hasattr(panel, "manual_creation_button"))
+        self.assertIn("manuellen Modus", panel.manual_mode_hint.text())
         with patch.object(window, "_export_block_reason", return_value=None), \
              patch.object(window.manual_controller, "ensure_context") as prepare:
             for kind in (JobKind.PREVIEW, JobKind.EXPORT):
@@ -248,12 +250,11 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 ):
                     window._refresh_workflow_navigation_actions()
                     self.assertFalse(window.manual_method_button.isEnabled())
-                    self.assertFalse(panel.manual_creation_button.isEnabled())
-                    panel.manual_creation_button.click()
+                    window.manual_method_button.click()
                     self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
             window._refresh_workflow_navigation_actions()
-            self.assertTrue(panel.manual_creation_button.isEnabled())
-            panel.manual_creation_button.click()
+            self.assertTrue(window.manual_method_button.isEnabled())
+            window.manual_method_button.click()
             self.app.processEvents()
             prepare.assert_called_once_with()
             self.assertIs(window.generation_mode, GenerationMode.MANUAL)
@@ -266,7 +267,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertEqual(window.target_time_spin.value(), original_value)
         self.assertEqual(window._preview_request_id, original_request_id)
         self.assertEqual(window._joint_slices_completed, 6)
-        self.assertFalse(panel.manual_creation_offer.isHidden())
+        self.assertFalse(panel.manual_mode_hint.isHidden())
         self.assertTrue(window.export_button.isEnabled())
         preview.dispose.assert_not_called()
 
@@ -287,9 +288,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                     for _ in range(5):
                         self.app.processEvents()
                     row = panel.result_actions
-                    buttons = ([panel.continue_button] if paused else []) + [
-                        panel.manual_creation_button, panel.export_button,
-                    ]
+                    buttons = ([panel.continue_button] if paused else []) + [panel.export_button]
                     right = -1
                     bottoms = []
                     for button in buttons:

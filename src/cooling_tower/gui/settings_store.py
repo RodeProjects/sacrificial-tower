@@ -433,6 +433,17 @@ def _migrate_settings_21_to_22(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_22_to_23(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preserve automatic tessellation and add an independent manual count."""
+    migrated = dict(payload)
+    generation = dict(migrated.get("generation", {}))
+    generation["automatic_circle_segments"] = True
+    generation["circle_segments"] = 32
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -442,6 +453,7 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
         ("minimum_outer_diameter_mm", 3.0, 99.0),
         ("maximum_outer_diameter_mm", 5.0, 100.0),
         ("manual_base_width_mm", 20.0, 80.0),
+        ("circle_segments", 4, 256),
     ):
         value = generation.get(name)
         if value is not None and not minimum <= value <= maximum:
@@ -578,6 +590,7 @@ _USER_SETTINGS_MIGRATIONS = {
     19: _migrate_settings_19_to_20,
     20: _migrate_settings_20_to_21,
     21: _migrate_settings_21_to_22,
+    22: _migrate_settings_22_to_23,
 }
 
 
