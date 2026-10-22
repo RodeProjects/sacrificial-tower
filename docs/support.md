@@ -5,13 +5,12 @@
 Freiwilliger Support erfolgt über die
 [GitHub-Issue-Auswahl](https://github.com/RodeProjects/sacrificial-tower/issues/new/choose).
 Die Vorlagen unterscheiden Fehler, Funktionswünsche und sonstige Fragen.
-Ein GitHub-Konto und Repositoryzugriff sind erforderlich. Issues sind bereits
-aktiviert. Solange das Repository privat ist, können Außenstehende keine Meldung
-erstellen. Die Vorlagen unter `.github/ISSUE_TEMPLATE/` müssen auf dem
-Standardbranch liegen, bevor GitHub sie anbietet. Diese Dokumentation ändert weder
-Sichtbarkeit noch Zugriffsrechte des Repositorys.
+Das Repository und seine aktivierten Issues sind öffentlich. Zum Erstellen einer
+Meldung ist ein GitHub-Konto erforderlich. Die Vorlagen unter
+`.github/ISSUE_TEMPLATE/` liegen auf dem Standardbranch und sind über die
+Issue-Auswahl erreichbar.
 
-Bei einem öffentlichen Repository sind Texte und Anhänge öffentlich. Vertrauliche
+Texte und Anhänge der Issues sind öffentlich. Vertrauliche
 Informationen gehören nicht in Issues. Die Datenschutzbestimmungen von GitHub
 gelten zusätzlich zur [Datenschutzerklärung der Anwendung](../legal/privacy.md).
 Support erfolgt nach verfügbarer Zeit ohne zugesicherte Antwortzeit oder Umsetzung;

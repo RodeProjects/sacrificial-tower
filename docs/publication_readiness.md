@@ -13,7 +13,7 @@ Anhänge. Der öffentliche Versionsübergang bestand in privatem Actions-Lauf
 wurde nicht verwendet. Anonyme Downloads, Signaturen und Hashes sind bestätigt.
 Der alte Kanal ist archiviert und seine Actions sind deaktiviert. Haupt- und
 Alt-Repository besitzen weiterhin keinen lokalen Runner; die gemeinsame CI bleibt
-privat. Der nachfolgende reine Dokumentationsstand 0.9.29 ist kein neuer Installer.
+privat. Die nachfolgenden reinen Dokumentationsstände 0.9.29/0.9.30 sind keine neuen Installer.
 
 ## Erreichte Voraussetzungen
 

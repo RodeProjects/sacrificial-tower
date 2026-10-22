@@ -36,16 +36,17 @@ Topics: `3d-printing`, `fdm`, `fff`, `sacrificial-tower`, `cooling-tower`,
 `minimum-layer-time`, `gcode`, `gcode-analysis`, `stl`, `3mf`, `orcaslicer`,
 `prusaslicer`, `bambu-studio`, `anycubic-slicer-next`, `windows`.
 
-Der frühere Updatekanal `RodeProjects/sacrificial-tower-updates` wird nach der
-öffentlichen Kanalabnahme als abgelöst markiert und archiviert. Die einzige
+Der frühere Updatekanal `RodeProjects/sacrificial-tower-updates` ist nach der
+erfolgreichen öffentlichen Kanalabnahme als abgelöst markiert und archiviert. Die einzige
 maßgebliche Download-README ist die README des Hauptrepositorys; keine doppelte
 Pflege einer separaten Downloadseite. Historische Releases bleiben erhalten.
 
 ## Sichtbarkeit und Pflege
 
-Die Öffnung ist ausdrücklich beauftragt und folgt erst nach den Prüfungen unter
-[Veröffentlichungsprüfung](publication_readiness.md). Anschließend sind Quellcode,
-Releases und GitHub Issues öffentlich erreichbar. Private CI-Steuerung,
+Die beauftragte Öffnung erfolgte nach den vorher möglichen Prüfungen unter
+[Veröffentlichungsprüfung](publication_readiness.md); die anschließende öffentliche
+Kanalabnahme ist erfolgreich. Quellcode, Releases und GitHub Issues sind öffentlich
+erreichbar. Private CI-Steuerung,
 Verwaltungsnachweise und lokale Anmeldungen bleiben getrennt. Die Metadaten und
 Downloadlinks werden bei dieser Umstellung auf das Hauptrepository ausgerichtet.
 

@@ -53,7 +53,8 @@ Visual-Studio-Lizenz; eine Ausnahme betrifft das Bauen von Open-Source-Abhängig
 Diese Ausnahme ist keine pauschale Erlaubnis zur eigenen Entwicklung und zum Testen
 dieser Komponenten. Die Umstellung des eigenen C++-Codes auf Apache-2.0 ersetzt
 daher weder den Nachweis für die konkret verwendete Toolchain noch die Prüfung
-der Runtime-Weitergabe; das Repository ist derzeit zudem noch privat.
+der Runtime-Weitergabe. Das Repository ist seit 22.10.2026 öffentlich; die
+Sichtbarkeit ersetzt diesen Berechtigungsnachweis ebenfalls nicht.
 Die vorhandene Installation ist kein Nachweis dieser Berechtigung.
 [Microsoft-Downloadbedingungen](https://visualstudio.microsoft.com/downloads/),
 [Lizenzierungs-Whitepaper, Open Source Dependencies (April 2025)](https://visualstudio.microsoft.com/wp-content/uploads/2025/04/Visual-Studio-Licensing-Whitepaper-April2025.pdf).
