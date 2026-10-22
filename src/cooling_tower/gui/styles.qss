@@ -1953,23 +1953,162 @@ QLabel#supportReportTitle {
     font-weight: 700;
 }
 
-QLabel#supportReportIntroduction,
-QLabel#supportReportPrivacyText {
+QLabel#supportReportIntroduction {
+    color: #526b7e;
+    font-size: 9.5pt;
+}
+
+QDialog#supportReportDialog QPushButton {
+    min-height: 22px;
+    padding: 5px 11px;
+    border-radius: 6px;
+    font-size: 9pt;
+}
+
+QWidget#supportReportContent, QScrollArea#supportReportScroll {
+    background: #f5f8fb;
+}
+
+QTabWidget#supportReportPages::pane {
+    border: none;
+    background: #f5f8fb;
+}
+
+QDialog#supportReportDialog QWidget#preparationTransitionViewport {
+    background: #f5f8fb;
+}
+
+QDialog#supportReportDialog QPushButton#supportTopicCard {
+    background: #ffffff;
+    border: 1px solid #d6e1ea;
+    border-radius: 9px;
+    padding: 0;
+    min-height: 0;
+    text-align: left;
+}
+
+QDialog#supportReportDialog QPushButton#supportTopicCard:hover {
+    background: #f6faff;
+    border-color: #a9c6dc;
+}
+
+QLabel#supportTopicTitle {
+    color: #173f60;
+    font-size: 10.5pt;
+    font-weight: 600;
+}
+
+QLabel#supportTopicDescription {
+    color: #617487;
+    font-size: 9pt;
+}
+
+QFrame#supportInfoPanel {
+    background: #ffffff;
+    border: 1px solid #d6e1ea;
+    border-radius: 10px;
+}
+
+QLabel#supportRouteDescription, QLabel#supportReviewPlaceholder {
     color: #405b73;
+    font-size: 10pt;
 }
 
-QTextEdit#supportReportDescription {
-    min-height: 105px;
+QDialog#supportReportDialog QPushButton#supportReportSkip {
+    color: #526b7e;
+    background: transparent;
+    border: none;
+    padding: 5px 2px;
+    font-size: 8.5pt;
 }
 
-QFrame#supportReportPrivacy {
-    background: #edf6fc;
-    border: 1px solid #b6d4e9;
-    border-radius: 8px;
+QDialog#supportReportDialog QPushButton#supportReportSkip:hover {
+    color: #174b73;
+    text-decoration: underline;
+}
+
+QDialog#supportReportDialog QPushButton[supportAction="true"]:focus,
+QDialog#supportReportDialog QPushButton#supportReportBack:focus,
+QDialog#supportReportDialog QPushButton#supportReportClose:focus {
+    border-width: 1px;
+    outline: none;
+    border-color: #bdcad5;
+}
+
+QFrame#supportContactDivider {
+    background: #e2e9ef;
+    border: none;
+}
+
+QLabel#supportContactGuidanceTitle {
+    color: #405b73;
+    font-size: 9.5pt;
+    font-weight: 600;
+}
+
+QLabel#supportContactGuidanceText {
+    color: #617487;
+    font-size: 9pt;
+}
+
+QDialog#supportReportDialog QPushButton#supportReportContact {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 0;
+}
+
+QPushButton#supportReportContact QLabel#supportContactLinkText {
+    color: #1769aa;
+    font-size: 11pt;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+QPushButton#supportReportContact QLabel#supportContactLinkText[linkHovered="true"] {
+    color: #00355e;
+    text-decoration: underline;
+}
+
+QDialog#supportReportDialog QPushButton#supportReportContact:focus {
+    border-color: transparent;
+    outline: none;
+}
+
+QFrame#supportReportWorkflow {
+    background: #ffffff;
+    border: 1px solid #d6e1ea;
+    border-radius: 10px;
+}
+
+QLabel#supportReportStepTitle {
+    color: #123c63;
+    font-size: 11pt;
+    font-weight: 700;
+}
+
+QLabel#supportReportStepMarker {
+    background: #eaf4fc;
+    color: #365b78;
+    border: 1px solid #c1d9eb;
+    border-radius: 12px;
+    font-size: 9pt;
+    font-weight: 600;
+}
+
+QLabel#supportReportCreateHint, QLabel#supportReportReviewHint,
+QLabel#supportReportIssueHint {
+    color: #405b73;
+    font-size: 9.5pt;
+}
+
+QLabel#supportReportPrivacySummary {
+    color: #5b7080;
+    font-size: 8.5pt;
 }
 
 QLabel#supportReportResult {
     color: #526274;
+    font-size: 9pt;
     background: transparent;
     border: none;
     padding: 3px 1px;
@@ -1981,6 +2120,52 @@ QLabel#supportReportResult[state="success"] {
 
 QLabel#supportReportResult[state="error"] {
     color: #9b1c1c;
+}
+
+QPushButton#supportReportIssueButton {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #547d9c, stop:1 #3d6481);
+    border: 1px solid #355a76;
+    font-weight: 600;
+}
+
+QPushButton#supportReportIssueButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #608baa, stop:1 #446f8e);
+    border-color: #2a4d68;
+}
+
+QPushButton#supportReportIssueButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #345a76, stop:1 #416a88);
+    border-color: #24445d;
+}
+
+QDialog#supportReportDialog QPushButton#primaryButton:focus,
+QDialog#supportReportDialog QPushButton#supportReportOpenFolder:focus,
+QDialog#supportReportDialog QPushButton#supportReportIssueButton:focus {
+    border-width: 1px;
+    border-style: solid;
+    outline: none;
+}
+
+QDialog#supportReportDialog QPushButton#primaryButton:focus {
+    border-color: #105784;
+}
+
+QDialog#supportReportDialog QPushButton#supportReportOpenFolder:focus {
+    border-color: #bdcad5;
+}
+
+QDialog#supportReportDialog QPushButton#supportReportIssueButton:focus {
+    border-color: #355a76;
+}
+
+QLabel#supportReportAccountHint {
+    color: #526274;
+    font-size: 9pt;
+    padding: 0 2px;
 }
 
 QFrame#aboutHero {
@@ -3802,6 +3987,50 @@ QPushButton#exportButton:disabled {
 QLabel#generationResultDescription {
     padding-top: 3px;
     padding-bottom: 3px;
+}
+QWidget#manualCreationOffer {
+    background: transparent;
+    border: none;
+}
+QLabel#manualCreationOfferTitle {
+    color: #21384f;
+    font-size: 11pt;
+    font-weight: 650;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+QLabel#manualCreationOfferText {
+    color: #526274;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+QPushButton#generationManualButton {
+    color: #214d75;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #ffffff, stop: 1 #e3eefb);
+    border: 1px solid #a2bdd9;
+    border-radius: 7px;
+    min-height: 34px;
+    padding: 7px 13px;
+    font-weight: 650;
+}
+QPushButton#generationManualButton:hover {
+    background: #dbeafb;
+    border-color: #6f9dc8;
+}
+QPushButton#generationManualButton:pressed {
+    background: #cfdfef;
+}
+QPushButton#generationManualButton:disabled {
+    color: #8995a0;
+    background: #edf1f5;
+    border-color: #d0dae4;
+}
+/* Keep measured action widths stable when keyboard focus moves along the row. */
+QWidget#generationResultActions QPushButton:focus {
+    border: 1px solid #3b82f6;
 }
 QWidget#embeddedPreviewPanel QLabel#previewStateLabel {
     padding: 3px 8px;

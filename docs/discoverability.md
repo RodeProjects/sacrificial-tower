@@ -1,17 +1,21 @@
 # Auffindbarkeit von Sacrificial Tower in Suchmaschinen und KI-Suche
 
-Stand: 21.10.2026. Ziel ist, Zweck, Plattform, Eingaben, Ausgaben, Grenzen und
+Stand: 22.10.2026. Ziel ist, Zweck, Plattform, Eingaben, Ausgaben, Grenzen und
 getestete Slicer für Menschen und Suchsysteme klar zu beschreiben. Verwendete
-Begriffe sind unter anderem „3D printing sacrificial tower tool“, „minimum layer
-time cooling optimizer“, „G-code analyzer“, Kühlturm und minimale Schichtzeit.
-Sie stehen im fachlichen Zusammenhang mit den tatsächlichen Funktionen.
+Begriffe sind unter anderem „sacrificial cooling tower“, „minimum layer time“,
+FDM-/FFF-3D-Druck, Kühlturm und Mindest-Layerzeit. Im Mittelpunkt stehen der
+Nutzen bei kurzen Layerzeiten, die automatische oder manuelle Turmerstellung
+und das gemeinsame 3MF-Projekt mit Modell und Turm. Die G-Code-Auswertung dient
+der Bewertung der Layerzeiten; „G-code analyzer“ wird nicht als Produktbezeichnung
+verwendet. Für den grafischen Ablauf genügt als Voraussetzung der Hinweis auf
+einen installierten unterstützten Slicer mit eingerichtetem Drucker.
 
 ## Sichtbare Projektinhalte
 
 - Die [README](../README.md) beschreibt den Nutzen auf Deutsch und Englisch,
   enthält offizielle Downloadlinks, die getesteten Slicerversionen, Voraussetzungen,
   einen kurzen Bedienungsablauf, konkrete Funktionen und häufige Fragen.
-- Die [englische FAQ](faq.md) beantwortet Fragen zu Schichtzeit, Kühltürmen,
+- Die [englische FAQ](faq.md) beantwortet Fragen zu Layerzeit, Kühltürmen,
   STL/G-Code, 3MF-Export, Profilen, Stützen, lokalen Dateien und Nutzungsrechten.
   Fachliche Details werden über beschreibende interne Links erschlossen.
 - Der [Dokumentationsindex](README.md) verbindet diese Einstiege mit den
@@ -19,7 +23,9 @@ Sie stehen im fachlichen Zusammenhang mit den tatsächlichen Funktionen.
   [Slicer-Unterstützung](slicer_detection_modules.md#zuletzt-erfolgreich-getestete-versionen).
 - Künftige, ausdrücklich beauftragte Releases erhalten über
   `scripts/publish_update.ps1` eine verständliche Produktbeschreibung in ihren
-  Release Notes. Die Kennzeichnung als Entwicklungsversion bleibt erhalten.
+  Release Notes, zuerst auf Deutsch und anschließend auf Englisch. Die
+  Kennzeichnung als Entwicklungsversion bleibt erhalten. Beide Sprachen nennen
+  den 3MF-Export in beiden Modi; die Turm-STL ist eine zusätzliche Ausgabe.
 
 ## GitHub-Metadaten
 
@@ -28,9 +34,10 @@ Sie sind keine aus einer Markdown-Datei automatisch übernommenen Einstellungen.
 Der Projektlink beider Repositories führt zum öffentlichen Windows-Download:
 `https://github.com/RodeProjects/sacrificial-tower/releases/latest`.
 
-Haupt-Repository `RodeProjects/sacrificial-tower`:
+Vorgesehene Kurzbeschreibung für das Haupt-Repository
+`RodeProjects/sacrificial-tower`:
 
-> Free Windows 3D printing sacrificial tower tool and G-code analyzer for minimum layer time cooling optimization. Supports Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer; STL/3MF export.
+> Add cooling time when FDM/FFF layer times are too short: create a matching sacrificial cooling tower automatically or shape it yourself, check layer times and export your model with its tower as a 3MF project. Free for Windows; supports Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer.
 
 Topics: `3d-printing`, `fdm`, `fff`, `sacrificial-tower`, `cooling-tower`,
 `minimum-layer-time`, `gcode`, `gcode-analysis`, `stl`, `3mf`, `orcaslicer`,

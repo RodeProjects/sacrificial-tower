@@ -11,7 +11,7 @@ body:
         automatisch angehängt. Die Filterung garantiert keine vollständige Anonymität.
         Für Datenschutzanfragen und Sicherheitslücken den vertraulichen Kontakt aus den
         Datenschutzinformationen verwenden. Support erfolgt freiwillig ohne zugesicherte
-        Antwortzeit oder Umsetzung. Solange das Repository privat ist, ist Zugriff erforderlich.
+        Antwortzeit oder Umsetzung. Zum Erstellen einer Meldung ist ein GitHub-Konto erforderlich.
   - type: textarea
     id: need
     attributes:

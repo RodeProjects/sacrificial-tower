@@ -175,10 +175,7 @@ class SupportDiagnosticEventTests(unittest.TestCase):
                 source_path="C:\\Private\\customer.gcode",
             )
             service = SupportReportService(root, diagnostic_journal=journal)
-            bundle = service.create_bundle(
-                title="Profilproblem",
-                description="Beschreibung",
-            )
+            bundle = service.create_bundle()
 
             with zipfile.ZipFile(bundle.path) as archive:
                 diagnostics = archive.read("diagnose.log").decode("utf-8")

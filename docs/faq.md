@@ -1,10 +1,14 @@
-# Sacrificial Tower FAQ: minimum layer time, cooling towers and G-code analysis
+# Sacrificial Tower FAQ: cooling towers and minimum layer time
 
 ## What is Sacrificial Tower?
 
-Sacrificial Tower is a free Windows desktop tool for FDM/FFF 3D printing.
-It analyzes layer times and creates an additional printable cooling tower
-to help give short layers more cooling time. RodeProjects develops the application.
+Sacrificial Tower is a free Windows application that creates cooling towers for
+FDM/FFF 3D printing. A tower is printed alongside your model to add time before
+the next layer, helping the model cool when layer times would otherwise be too short.
+Automatic mode calculates and tests a tower for your desired minimum layer
+time; manual mode lets you shape the tower yourself and check the resulting
+layer times. Both modes export a 3MF project containing your model and tower,
+plus a separate tower STL. RodeProjects develops the application.
 The [main README](../README.md) contains downloads, setup and the supported slicers.
 
 ## How does a sacrificial cooling tower help with minimum layer time?
@@ -15,6 +19,11 @@ printer, process and filament profiles to evaluate that extra time. Automatic
 generation searches for a suitable tower; manual generation keeps the edited
 shape fixed and reports the measured timing. The result depends on the actual
 profiles, printer, material and cooling settings.
+How closely an automatically generated tower matches your desired layer time
+depends substantially on the profiles selected in the application and their settings.
+The target is evaluated from slicer output; actual cooling and print quality
+also depend on conditions at the printer. The extra object uses additional
+material and printing time.
 
 ## Which slicers and versions are supported?
 
@@ -25,11 +34,11 @@ versions and profiles do not establish compatibility with every other version.
 
 ## Do I need to install and configure a slicer?
 
-The STL workflow needs a supported local slicer and saved printer, process
-and filament profiles. Configure your own printer in the slicer first. The
+The STL workflow needs a supported local slicer with your printer configured. The
 application can detect installations or accept a manually selected slicer EXE.
-The [command-line analyzer](../README.md#kommandozeile) can analyze existing
-text G-code separately.
+Select the slicer and confirm your settings in Sacrificial Tower before starting.
+Existing text G-code can be evaluated separately for layer timing through the
+[command-line interface](../README.md#kommandozeile).
 
 ## Does the graphical interface accept STL or G-code?
 
@@ -40,10 +49,11 @@ textual G-code from the slicer; binary Prusa G-code is not an analysis input.
 
 ## What can I export?
 
-The workflow exports a tower STL and, where the supported integration provides
-it, a native 3MF project containing the model and tower. Reports describe the
-measured times and any simulated settings. Check the final arrangement and
-settings in your slicer before printing. See [export and source workflow](source_workflow.md).
+With an STL model and any of the four supported slicers, both automatic and
+manual mode export a native 3MF project containing the model and tower. The tower
+STL is saved alongside it. Reports describe the measured times and any simulated
+settings. Open the 3MF in the selected slicer and check the final arrangement and
+settings before printing. See [export and source workflow](source_workflow.md).
 
 ## Does the cooling tower replace model supports?
 

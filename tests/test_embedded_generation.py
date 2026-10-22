@@ -26,6 +26,7 @@ from cooling_tower.models import BedBounds
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene, PreviewState
 from cooling_tower.persistence import ConcurrentDocumentChangeError, VersionedDocumentWriteBlockedError
 from cooling_tower.settings_compatibility import SETTING_COMPATIBILITY_CATALOG, merge_compatible_setting_changes
+from gui_lifecycle import dispose_test_widget
 
 
 class EmbeddedGenerationTests(unittest.TestCase):
@@ -139,6 +140,40 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertIn('color:#22854b">11.05 s</span>', p.best_minimum_value.text())
         self.assertIn('color:#000000"> / 11.00 s', p.best_minimum_value.text())
         self.assertIn("#22854b", p.best_deviation_value.styleSheet())
+
+    def test_manual_creation_offer_follows_retained_result_lifecycle(self):
+        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+        self.addCleanup(dispose_test_widget, panel)
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.begin(10, .2, 0, 10)
+        panel.start_slice(0, 10)
+        candidate = SimpleNamespace(evaluation=SimpleNamespace(
+            layer_timings=(SimpleNamespace(combined_layer_time_s=9.0),)
+        ))
+        panel.complete_slice(3, 10, candidate, 10)
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        for paused in (True, False):
+            with self.subTest(paused=paused):
+                panel.mark_finished(paused=paused, can_continue=paused)
+                self.assertFalse(panel.manual_creation_offer.isHidden())
+                layout = panel.result_widget.layout()
+                self.assertIs(layout.itemAt(layout.count() - 1).widget(), panel.result_actions)
+                panel.resume_waiting()
+                self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.show_error("Fortsetzung fehlgeschlagen", retain_result=True)
+        self.assertFalse(panel.manual_creation_offer.isHidden())
+        panel.start_slice(3, 10)
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.show_error("Kein verwertbarer Turm")
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.mark_finished(paused=True, can_continue=False, has_result=False)
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.mark_finished(paused=False, can_continue=False)
+        panel.mark_interrupted("Generierung abgebrochen")
+        self.assertTrue(panel.manual_creation_offer.isHidden())
+        panel.mark_finished(paused=False, can_continue=False)
+        panel.begin(10, .2, 0, 10)
+        self.assertTrue(panel.manual_creation_offer.isHidden())
 
     def test_best_layer_time_caption_uses_available_horizontal_space(self):
         panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")

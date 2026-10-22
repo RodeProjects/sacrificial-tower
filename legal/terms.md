@@ -1,6 +1,6 @@
 # Nutzungsbedingungen für Sacrificial Tower
 
-Stand: 21. Oktober 2026.
+Stand: 22. Oktober 2026.
 
 ## Anbieter
 
@@ -118,12 +118,13 @@ und Beifügung der Projektlizenz nicht erforderlich.
 
 Fehler, Funktionswünsche und andere Fragen können über GitHub Issues gemeldet
 werden: {{support_url}}. Die Bearbeitung erfolgt freiwillig nach verfügbarer Zeit,
-ohne zugesicherte Antwortzeit, Fehlerbehebung oder Umsetzung. Ein GitHub-Konto
-und Repositoryzugriff sind erforderlich. Solange das Repository privat ist,
-können nur berechtigte Personen diesen Weg verwenden.
+ohne zugesicherte Antwortzeit, Fehlerbehebung oder Umsetzung. Zum Erstellen einer
+Meldung ist ein GitHub-Konto erforderlich; Repository und Issues sind öffentlich.
 
-Bei einem öffentlichen Repository sind Meldungen und Anhänge öffentlich zugänglich.
-Diagnosepakete sind freiwillig und werden nicht automatisch versendet. Nutzer
+Meldungen und Anhänge sind öffentlich zugänglich. Diagnosepakete sind freiwillig
+und werden nicht automatisch versendet. Die Problembeschreibung erfolgt direkt
+im GitHub-Formular. Neue Diagnosepakete enthalten technische Angaben und eine
+Anleitung, keine eingegebene Zusammenfassung oder Problembeschreibung. Nutzer
 sollen Texte, Screenshots und Anhänge vor Veröffentlichung prüfen und persönliche,
 vertrauliche oder fremde geschützte Inhalte entfernen. Das gilt auch für frei
 gewählte Profilnamen und sichtbare Dateipfade. Fremde Inhalte dürfen nur mit

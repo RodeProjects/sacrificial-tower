@@ -11,7 +11,7 @@ body:
         automatisch angehängt. Die Filterung garantiert keine vollständige Anonymität.
         Für Datenschutzanfragen und Sicherheitslücken den vertraulichen Kontakt aus den
         Datenschutzinformationen verwenden. Support erfolgt freiwillig ohne zugesicherte
-        Antwortzeit oder Umsetzung. Solange das Repository privat ist, ist Zugriff erforderlich.
+        Antwortzeit oder Umsetzung. Zum Erstellen einer Meldung ist ein GitHub-Konto erforderlich.
   - type: textarea
     id: version
     attributes:
@@ -30,7 +30,7 @@ body:
     id: diagnostics
     attributes:
       label: "Freiwilliges Diagnosepaket oder bereinigte Screenshots"
-      description: "ZIP über Support & Diagnose erstellen, entpacken und ALLE enthaltenen Dateien prüfen. Insbesondere problembericht.txt enthält eigene Texte unverändert. Eine geprüfte ZIP kann hier manuell angehängt werden. Originalprofile, Rohlogs und Modelle bitte nicht ungeprüft hochladen."
+      description: "Technisches Diagnosepaket über Support & Diagnose erstellen, die ZIP öffnen und ALLE enthaltenen Dateien prüfen; nur bei Bedarf entpacken. Das Problem nur hier im GitHub-Formular beschreiben. Eine geprüfte ZIP kann hier manuell angehängt werden. Ältere Pakete können in problembericht.txt eigene Texte enthalten; diese ebenfalls prüfen. Originalprofile, Rohlogs und Modelle bitte nicht ungeprüft hochladen."
     validations:
       required: false
   - type: checkboxes

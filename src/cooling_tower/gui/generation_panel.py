@@ -3,13 +3,17 @@ from __future__ import annotations
 
 from html import escape
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout
+from PySide6.QtWidgets import (
+    QWidget, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QGridLayout,
+)
 from cooling_tower.calibration.candidate_evaluation import minimum_combined_layer_time
 
 from cooling_tower.gui.generation_progress_dialog import (
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
     TowerImageProgress,
 )
+from cooling_tower.gui.widgets.generation_result_actions import GenerationResultActions
 
 
 def result_description(deviation: float, tolerance: float) -> str:
@@ -25,6 +29,7 @@ class GenerationPanel(QWidget):
     accept_requested = Signal()
     continue_requested = Signal()
     export_requested = Signal()
+    manual_creation_requested = Signal()
     layout_changed = Signal()
 
     def __init__(self, image_path, parent=None):
@@ -88,7 +93,6 @@ class GenerationPanel(QWidget):
             label.setWordWrap(True)
         heading.addLayout(grid)
         result_layout_outer.addLayout(header)
-        actions = QHBoxLayout()
         self.continue_button = QPushButton("Angleichung fortsetzen")
         self.continue_button.setObjectName("generationContinueButton")
         self.continue_button.clicked.connect(self.continue_requested)
@@ -101,11 +105,16 @@ class GenerationPanel(QWidget):
         self.export_button.clicked.connect(self.export_requested)
         self.export_button.setEnabled(False)
         self.export_button.hide()
-        actions.addWidget(self.continue_button)
-        actions.addStretch()
-        actions.addWidget(self.export_button)
-        actions.addWidget(self.accept_button)
-        result_layout_outer.addLayout(actions)
+        self.result_actions = GenerationResultActions(
+            self.continue_button, self.export_button, self.accept_button, self.result_widget,
+        )
+        self.manual_creation_offer = self.result_actions.manual_offer
+        self.manual_creation_title = self.result_actions.title_label
+        self.manual_creation_description = self.result_actions.description_label
+        self.manual_creation_button = self.result_actions.manual_button
+        self.manual_creation_button.clicked.connect(self.manual_creation_requested)
+        self.result_actions.layout_changed.connect(self.layout_changed)
+        result_layout_outer.addWidget(self.result_actions)
         layout.addWidget(self.result_widget)
         self.result_widget.hide()
         self.hide()
@@ -143,11 +152,13 @@ class GenerationPanel(QWidget):
         self.accept_button.setText("Bestes bisheriges\nErgebnis übernehmen")
         self.accept_button.setVisible(completed >= minimum_joint_slices)
         self.accept_button.setEnabled(completed >= minimum_joint_slices)
+        self._refresh_manual_creation_offer()
         self.show()
         self.layout_changed.emit()
 
     def start_slice(self, completed, maximum):
         self._running = True
+        self._refresh_manual_creation_offer()
         self.image_progress.set_display_complete(False)
         self._completed, self._maximum = completed, maximum
         self.title_label.setText("Kühlturm wird generiert …")
@@ -209,10 +220,12 @@ class GenerationPanel(QWidget):
         self.export_button.setVisible(has_result)
         self.continue_button.setVisible(has_result and paused and can_continue)
         self.continue_button.setEnabled(has_result and paused and can_continue)
+        self._refresh_manual_creation_offer()
         self.layout_changed.emit()
 
     def resume_waiting(self):
         self._running = True
+        self._refresh_manual_creation_offer()
         self.image_progress.set_display_complete(False)
         self.title_label.setText("Kühlturm wird generiert …")
         self.counter_label.setText(f"{self._completed} von {self._maximum} gemeinsamen Slices abgeschlossen · Fortsetzung wird vorbereitet")
@@ -243,11 +256,14 @@ class GenerationPanel(QWidget):
         self.export_button.setVisible(self._has_result)
         self.continue_button.setVisible(self._has_result and can_continue)
         self.continue_button.setEnabled(self._has_result and can_continue)
+        self._refresh_manual_creation_offer()
         self.setVisible(self._has_result)
         self.layout_changed.emit()
 
     def mark_interrupted(self, reason):
         self._running = False
+        self._has_result = False
+        self._refresh_manual_creation_offer()
         self.title_label.setText("Generierung gestoppt")
         self.counter_label.setText(reason)
         self.result_widget.hide()
@@ -259,3 +275,6 @@ class GenerationPanel(QWidget):
 
     def allow_programmatic_close(self):
         pass
+
+    def _refresh_manual_creation_offer(self):
+        self.result_actions.set_offer_visible(self._has_result and not self._running)

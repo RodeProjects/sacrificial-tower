@@ -277,7 +277,7 @@ class VoluntarySupportDialog(QDialog):
         hero_text.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._label(hero_text, 'BUY ME A COFFEE', 'supportEyebrow')
         self._label(hero_text, 'Ein kleines Dankeschön.', 'supportHeading')
-        self._label(hero_text, 'Mit einem Kaffee die Entwicklung von Sacrificial Tower unterstützen.', 'supportIntroduction')
+        self._label(hero_text, 'Mit einem Kaffee meine Arbeit an Sacrificial Tower unterstützen.', 'supportIntroduction')
         hero_row.addLayout(hero_text, 1)
         layout.addWidget(hero)
 

@@ -191,23 +191,58 @@ try {
         --installer $installer.FullName
     Assert-NativeSuccess "Die kryptografische Prüfung des Update-Manifests"
 
-    $releaseSummary = (
-        "Sacrificial Tower is a free Windows 3D printing cooling tower tool and G-code analyzer " +
-        "for minimum layer time optimization. Supports Anycubic Slicer Next, Bambu Studio, " +
-        "PrusaSlicer and OrcaSlicer. Configure your printer in a supported slicer before use."
-    )
+    $releaseSummaryDe = @'
+**Sacrificial Tower / Kühlturm-Generator - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit**
+
+Bei kurzen Layerzeiten kann beim FDM-/FFF-3D-Druck zu wenig Zeit zum Abkühlen bleiben. Sacrificial Tower erstellt dafür einen zusätzlichen Kühlturm (bzw. ein Opferobjekt): Er wird neben deinem Modell mitgedruckt und erzeugt durch seine dynamische Form an den nötigen Stellen zusätzliche Layerzeit.
+
+Das kostenlose Windows-Programm wertet die Layerzeiten deines STL-Modells mit dem gewählten Slicer aus und bietet zwei Wege zum passenden Turm:
+
+- **Automatisch:** Die gewünschte Layerzeit vorgeben und die Berechnung über zusätzliche Einstellungen beeinflussen; das Programm passt die Turmform anhand wiederholter Slices schrittweise an, um die Zielzeit möglichst genau zu erreichen.
+- **Manuell:** Die Turmform einfach in einem visuellen Editor selbst gestalten und die daraus resultierenden Layerzeiten mit dem gewählten Slicer prüfen lassen
+
+Wie gut ein automatisch erstellter Turm die gewünschte Layerzeit erreicht, hängt maßgeblich von den im Programm gewählten Profilen und deren Einstellungen ab.
+
+Beide Modi speichern Modell und Kühlturm als gemeinsames **3MF-Projekt** für deinen Slicer. Die Turm-STL wird zusätzlich exportiert.
+
+Unterstützt werden **Anycubic Slicer Next, Bambu Studio, PrusaSlicer und OrcaSlicer**. Installiere einen dieser Slicer und richte darin deinen Drucker ein. Öffne das exportierte 3MF im gewählten Slicer und prüfe vor dem Druck Anordnung und Einstellungen. Getestete Versionen und Details stehen in der [Projektbeschreibung](https://github.com/RodeProjects/sacrificial-tower#unterst%C3%BCtzte-slicer-und-getestete-versionen).
+'@
+    $releaseSummaryEn = @'
+**Sacrificial Tower / Cooling Tower Generator - Creating dynamic sacrificial objects tailored to your desired layer time**
+
+Short layer times can leave too little time for cooling in FDM/FFF 3D printing. Sacrificial Tower creates an additional cooling tower (a sacrificial object), printed alongside your model. Its dynamic shape adds layer time where needed.
+
+This free Windows application for FDM/FFF 3D printing evaluates your STL model's layer times using your selected slicer and offers two ways to create your tower:
+
+- **Automatic:** Set your desired layer time and influence the calculation through additional settings; the application gradually adjusts the tower shape based on repeated slices to get as close as possible to the target time.
+- **Manual:** Easily shape the tower yourself in a visual editor and let your selected slicer check the resulting layer times.
+
+How closely an automatically generated tower matches your desired layer time depends substantially on the profiles selected in the application and their settings.
+
+Both modes save your model and cooling tower as a single **3MF project** for your slicer. A separate tower STL is also exported.
+
+Supports **Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer**. Install one of these slicers and configure your printer in it first. Open the exported 3MF in the selected slicer and check the arrangement and settings before printing. See the [project description](https://github.com/RodeProjects/sacrificial-tower#unterst%C3%BCtzte-slicer-und-getestete-versionen) for tested versions and details.
+'@
     if ($DevelopmentRelease) {
         $releaseTitle = "Sacrificial Tower $version (Entwicklungsversion)"
-        $releaseNotes = (
-            $releaseSummary + "`n`nKostenlose Entwicklungsversion " +
+        $releaseStatusDe = (
+            "Kostenlose Entwicklungsversion " +
             "für Tests und Evaluation. Offene Anbieter- und Vertriebsangaben " +
             "werden vor einer regulären kostenlosen Veröffentlichung nachgetragen."
         )
+        $releaseStatusEn = (
+            "Free development version for testing and evaluation. Outstanding provider and " +
+            "distribution details will be completed before a regular free release."
+        )
     } else {
         $releaseTitle = "Sacrificial Tower $version"
-        $releaseNotes = $releaseSummary + "`n`nSacrificial-Tower-Update auf Version $version."
+        $releaseStatusDe = "Sacrificial-Tower-Update auf Version $version."
+        $releaseStatusEn = "Sacrificial Tower update to version $version."
     }
+    $releaseNotes = $releaseSummaryDe.Trim() + "`n`n" + $releaseStatusDe
     $releaseNotes += "`n`nQuellcode: $SourceRepository, Tag $tag, Commit $localCommit.`nInstaller und signiertes latest.json gehören unveränderlich zu diesem Release."
+    $releaseNotes += "`n`n---`n`n" + $releaseSummaryEn.Trim() + "`n`n" + $releaseStatusEn
+    $releaseNotes += "`n`nSource: $SourceRepository, tag $tag, commit $localCommit.`nThe installer and signed latest.json are immutable assets of this release."
     $notesPath=Join-Path $resolvedTemporaryRoot 'release-notes.md'
     [IO.File]::WriteAllText($notesPath,$releaseNotes,[Text.UTF8Encoding]::new($false))
     $legalRoot=Join-Path $resolvedTemporaryRoot 'legal-texts'

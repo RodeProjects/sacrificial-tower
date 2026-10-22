@@ -1,6 +1,6 @@
 # Datenschutzinformationen
 
-Stand: 17. Oktober 2026.
+Stand: 22. Oktober 2026.
 
 ## Verantwortlicher und Kontakt
 
@@ -127,11 +127,14 @@ PayPal-Datenschutzhinweise: https://www.paypal.com/de/legalhub/paypal/privacy-fu
 
 ## Diagnosepakete und freiwillige Veröffentlichung
 
-Diagnosepakete entstehen nur auf Nutzeraktion lokal. Sie enthalten die eingegebene
-Zusammenfassung und Problembeschreibung, eine begrenzte technische Diagnose und
-ein Inhaltsverzeichnis. Die Anwendung überträgt sie nicht automatisch.
-Selbst eingegebene Texte werden unverändert gespeichert und können persönliche
-Angaben enthalten. Die technische Diagnose lässt frei gewählte Namen, Pfade,
+Diagnosepakete entstehen nur auf Nutzeraktion lokal. Sie enthalten eine begrenzte
+technische Diagnose, ein Inhaltsverzeichnis und eine Anleitung mit Programmversion,
+Bericht-ID und Erstellungszeitpunkt. Zusammenfassung und Problembeschreibung werden
+im Dialog nicht erhoben und nicht in neu erstellten Paketen gespeichert. Nutzer
+beschreiben ihr Anliegen direkt im GitHub-Formular. Die Anwendung überträgt Pakete
+nicht automatisch. Ältere Pakete können eigene Texte unverändert in
+`problembericht.txt` enthalten; diese vor einer Weitergabe ebenfalls prüfen.
+Die technische Diagnose lässt frei gewählte Namen, Pfade,
 Profilinhalte, beliebige Fehlermeldungstexte und unbekannte Felder weg oder ersetzt
 sie durch neutrale Angaben. Originalmodelle, Profile, Konfigurationen und Rohlogs
 werden nicht beigefügt. Zustände, Anzahlen, Zeitpunkte und Versionen können trotzdem
@@ -150,11 +153,19 @@ Kontaktadresse melden, ohne sie in einer weiteren öffentlichen Meldung zu kopie
 
 ## GitHub Issues und vertrauliche Kontaktaufnahme
 
-Freiwilliger Support erfolgt über {{support_url}}. GitHub erfordert ein Konto
-und Repositoryzugriff. Solange das Repository privat ist, haben gewöhnliche Nutzer
-keinen Zugriff; eine öffentliche Supportmöglichkeit wird dadurch nicht behauptet.
-Bei öffentlichen Repositorys sind Benutzername, Beiträge, Antworten und Anhänge
-grundsätzlich öffentlich zugänglich; Dateien können über separate Links
+Die Themenauswahl im Supportdialog erfolgt lokal. Ein Browser wird erst durch
+einen ausdrücklichen Klick auf die entsprechende Aktion geöffnet. Die Anwendung
+erstellt oder versendet keine GitHub-Meldung und keinen Anhang automatisch.
+Unter „Etwas anderes“ öffnet ein Klick auf die angezeigte E-Mail-Adresse das
+lokale E-Mail-Programm mit der Anbieteradresse. Erst dort können Sie eine Nachricht
+verfassen und selbst versenden; Diagnosepakete werden nicht automatisch angehängt.
+Für Bewertungen werden derzeit nur
+lokale Hinweise angezeigt; es wird kein Bewertungsdienst aufgerufen.
+
+Freiwilliger Support erfolgt über {{support_url}}. Zum Erstellen einer Meldung
+ist ein GitHub-Konto erforderlich. Das Repository und seine Issues sind öffentlich.
+Benutzername, Beiträge, Antworten und Anhänge sind grundsätzlich öffentlich
+zugänglich; Dateien können über separate Links
 erreichbar bleiben.
 
 Der Anbieter verarbeitet Beiträge, GitHub-Benutzernamen, freiwillige Anhänge und

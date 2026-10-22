@@ -1,9 +1,10 @@
 # Sicherheitslücken vertraulich melden
 
 Bitte keine Sicherheitslücken, Zugangsdaten oder persönlichen Daten in öffentliche
-Issues einstellen. Den vertraulichen Kontakt des Anbieters aus den
-[Datenschutzinformationen](../legal/privacy.md) verwenden; die eingesetzte
-E-Mail-Adresse steht in [config/legal_profile.json](../config/legal_profile.json).
+Issues einstellen. Bitte vertraulich per E-Mail an
+[florian.rode@outlook.com](mailto:florian.rode@outlook.com) melden.
+Die [Datenschutzinformationen](https://github.com/RodeProjects/sacrificial-tower/blob/main/legal/privacy.md)
+erläutern den Umgang mit solchen Anfragen.
 
 Die Beschreibung sollte betroffene Programmversion, Auswirkungen und eine sichere
 Reproduktion enthalten. Keine fremden personenbezogenen Daten oder Zugangsdaten

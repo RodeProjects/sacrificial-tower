@@ -164,10 +164,11 @@ Das exportierte gemeinsame Projekt übernimmt die 100-%-Füllung objektspezifisc
 
 ## Vorschau und Bedienung
 
-### Bereichseditor für ausgeschlossene Layer
+### Bereichseditor für ausgeschlossene Turmaufweitungen
 
 Nach dem abgeschlossenen Pre-Slice öffnet **Erweiterte Turmeinstellungen →
-Bereichseditor öffnen** ein separates, am Hauptfenster zentriertes Fenster.
+Editor: Turmaufweitungen bereichsweise ausschließen** ein separates, am
+Hauptfenster zentriertes Fenster.
 Der Button steht als letztes Element dieses Einstellungsbereichs, mit einem
 Info-Button links daneben. Seine Breite folgt dem Text einschließlich der
 Innenabstände; seine Höhe entspricht „Standardwerte wiederherstellen“ im Footer.
@@ -691,7 +692,37 @@ als aktuell angezeigt; Export bleibt bis zur Ergebnisübernahme gesperrt.
 Außerhalb einer Generierung erscheint das Turm-Fortschrittsbild vollständig,
 während sein letzter interner Fortschrittswert für die Fortsetzung erhalten bleibt.
 
+Die abschließende Aktionszeile eines automatischen Ergebnisses bietet zwischen
+**Angleichung fortsetzen** und **Kühlturm exportieren** eine Alternative:
+„Noch nicht das gewünschte Ergebnis?“ und „Gestalte deinen Turm im manuellen
+Modus nach deinen Vorstellungen.“ Darunter steht **Manuell gestalten →** auf
+derselben Grundlinie wie die anderen Buttons. Entfällt die Fortsetzung, steht
+der Hinweis neben dem Export. Der Bereich ist transparent und ohne Rahmen.
+Bei weniger Platz entfällt zuerst „nach deinen Vorstellungen.“ im Subtext.
+Danach wird der Subtext ausgeblendet und die Überschrift zweizeilig angezeigt.
+Reicht auch das nicht, bleiben nur die Buttons nebeneinander; erst dann werden
+ihre horizontalen Innenabstände von regulär 13 beziehungsweise 25 Pixeln auf
+mindestens 4 Pixel verkleinert.
+Die Stufen richten sich nach den tatsächlichen Schrift- und Buttonbreiten;
+beim Verbreitern erscheinen die Texte wieder. Die umgebende Ansicht behält ihren
+bisherigen Wechsel zu einer Spalte.
+
+**Manuell gestalten →** öffnet denselben manuellen Modus wie die Methodenwahl im
+Header. Der Hinweis erscheint sowohl nach vorzeitiger Übernahme als auch nach dem
+automatischen Ende und nach einer fehlgeschlagenen Fortsetzung mit erhaltenem,
+exportierbarem Turm. Während der Berechnung, beim Fortsetzen und ohne verwertbares
+Ergebnis bleibt er verborgen. Der Wechsel erhält die getrennten Sitzungen und
+das automatische Ergebnis; laufende Generierungen oder Exporte sperren den Button
+genauso wie die Methodenwahl im Header.
+
 ## Prüfungen
+
+`test_generation_result_actions.py` prüft die Textstufen, die Rückkehr zur vollen
+Beschriftung, die Buttonabstände und die Anordnung ohne Fortsetzung.
+`test_generation_method_selection.py` deckt den Wechsel in den manuellen Modus,
+den Sitzungserhalt und die Aktionszeile auf beiden Seiten des Spaltenumbruchs ab.
+Die Ergebniszustände einschließlich fehlgeschlagener Fortsetzungen mit erhaltenem
+Turm werden in `test_embedded_generation.py` geprüft.
 
 `test_october_editor_changes.py` deckt die unabhängige Wiederherstellung der
 Profilrollen, Historienschritte und Wiederholungszweige, schmale Vorschauleisten,

@@ -81,7 +81,8 @@ from cooling_tower.gui.widgets.activity_progress_bar import (
     ActivityProgressBar, ACTIVITY_FRAMES, ACTIVITY_FRAME_INTERVAL_MS,
 )
 from cooling_tower.gui.widgets.preparation_controls import (
-    _SequentialPreparationTabs, _PreparationState, _PreparationStepSelector, _PreparationRequirementsPanel, _ConfirmationProgressBar
+    _SequentialPreparationTabs, _PreparationState, _PreparationStepSelector, _PreparationRequirementsPanel, _ConfirmationProgressBar,
+    PREPARATION_TRANSITION_DURATION_MS,
 )
 from cooling_tower.gui.background_jobs import (
     BackgroundJob,
@@ -272,7 +273,6 @@ OPTIONAL_DIALOG_PARENT_MARGIN_PX = 80
 OUTPUT_DIALOG_MINIMUM_WIDTH_PX = 600
 EXPORT_SUCCESS_DIALOG_PREFERRED_WIDTH_PX = 540
 SUPPORT_DIALOG_PREFERRED_WIDTH_PX = 700
-SUPPORT_DIALOG_PREFERRED_HEIGHT_PX = 670
 INTERNAL_DIALOG_REVEAL_DELAY_MS = 40
 _PREPARATION_CONTENT_GAP_PX = 8
 PRESLICE_ACTIVITY_FRAME_INTERVAL_MS = ACTIVITY_FRAME_INTERVAL_MS
@@ -1891,7 +1891,7 @@ class MainWindow(QMainWindow):
         # top-level card header.  The centred shell uses most of the available
         # width while remaining pleasantly bounded on very wide windows.
         self.preparation_tabs = _SequentialPreparationTabs(
-            transition_duration_ms=400,
+            transition_duration_ms=PREPARATION_TRANSITION_DURATION_MS,
         )
         self.preparation_tabs.setObjectName("preparationSteps")
         self.preparation_tabs.set_step_guard(
@@ -2608,7 +2608,7 @@ class MainWindow(QMainWindow):
             "Maximaler Turmdurchmesser",
             self.maximum_outer_spin,
         )
-        self.layer_range_button = QPushButton("Bereichseditor öffnen")
+        self.layer_range_button = QPushButton("Editor: Turmaufweitungen bereichsweise ausschließen")
         self.layer_range_button.setObjectName("layerRangeToolButton")
         self.layer_range_button.setFixedHeight(METRICS.info_button_diameter_px)
         self.layer_range_button.setSizePolicy(
@@ -3772,6 +3772,8 @@ class MainWindow(QMainWindow):
         self.preparation_view_button.setEnabled(available)
         for button in (self.automatic_method_button, self.manual_method_button):
             button.setEnabled(available and ready)
+        if self._joint_generation_dialog is not None:
+            self._joint_generation_dialog.manual_creation_button.setEnabled(available and ready)
 
     def _show_preparation_workspace(self, view: str) -> None:
         if not self._generation_method_change_available():
@@ -4878,6 +4880,17 @@ class MainWindow(QMainWindow):
                 open_directory=open_directory,
                 asset_root=GUI_ASSET_ROOT,
                 parent=self,
+            )
+            self._support_report_dialog.bundle_created.connect(
+                lambda: self._resize_support_report_dialog(preserve_width=True)
+            )
+            self._support_report_dialog.geometry_requested.connect(
+                lambda grow_only: self._resize_support_report_dialog(
+                    preserve_width=True, grow_only=grow_only
+                )
+            )
+            self._support_report_dialog.voluntary_support_requested.connect(
+                self.show_voluntary_support_dialog
             )
         return self._support_report_dialog
 
@@ -11808,25 +11821,86 @@ class MainWindow(QMainWindow):
         """Show the local report composer without transmitting any data."""
 
         dialog = self.support_report_dialog
+        opening = not dialog.isVisible()
+
+        def finalize_geometry() -> None:
+            self._resize_support_report_dialog(
+                preserve_width=not opening, initialize_position=opening,
+            )
+
         dialog.setWindowState(Qt.WindowState.WindowNoState)
+        finalize_geometry()
         self._show_internal_dialog_without_flash(
             dialog,
-            self._resize_support_report_dialog,
+            finalize_geometry,
         )
 
-    def _resize_support_report_dialog(self) -> None:
+    def _resize_support_report_dialog(
+        self, *, preserve_width: bool = True, grow_only: bool = False,
+        initialize_position: bool = False,
+    ) -> None:
         dialog = self.support_report_dialog
-        if not dialog.isVisible():
-            return
-        target_width = SUPPORT_DIALOG_PREFERRED_WIDTH_PX
-        target_height = SUPPORT_DIALOG_PREFERRED_HEIGHT_PX
-        screen = dialog.screen() or self.screen()
+        target_width = dialog.width() if preserve_width else SUPPORT_DIALOG_PREFERRED_WIDTH_PX
+        screen = self.screen() if initialize_position else dialog.screen()
+        screen = screen or self.screen()
         if screen is not None:
             available = screen.availableGeometry()
-            target_width = min(target_width, max(620, available.width() - 40))
-            target_height = min(target_height, max(590, available.height() - 40))
+            target_width = min(target_width, max(520, available.width() - 40))
+        dialog.ensurePolished()
+        layout = dialog.layout()
+        layout.invalidate()
+        margins = layout.contentsMargins()
+        content_width = target_width - margins.left() - margins.right()
+        chrome_height = (
+            margins.top() + margins.bottom() + layout.spacing()
+            + dialog.close_button.sizeHint().height()
+        )
+        frame = dialog.frameGeometry()
+        frame_extra_height = max(0, frame.height() - dialog.height())
+        frame_top_left = frame.topLeft()
+        if initialize_position:
+            # Centre a virtual frame for the tallest page, then show only the
+            # current page's height at that upper edge. Never flash the large frame.
+            reference_height = max(
+                360, dialog.maximum_content_height_for_width(content_width) + chrome_height,
+            )
+            if screen is not None:
+                reference_height = min(
+                    reference_height, max(360, available.height() - 40 - frame_extra_height),
+                )
+            reference_frame = QRect(
+                0, 0, target_width + max(0, frame.width() - dialog.width()),
+                reference_height + frame_extra_height,
+            )
+            reference_frame.moveCenter(self.frameGeometry().center())
+            if screen is not None:
+                reference_frame.moveLeft(max(
+                    available.left() + 20,
+                    min(reference_frame.left(), available.right() - reference_frame.width() - 19),
+                ))
+                reference_frame.moveTop(max(
+                    available.top() + 20,
+                    min(reference_frame.top(), available.bottom() - reference_frame.height() - 19),
+                ))
+            frame_top_left = reference_frame.topLeft()
+
+        natural_height = dialog.content_height_for_width(content_width) + chrome_height
+        target_height = max(360, natural_height)
+        if grow_only:
+            target_height = max(dialog.height(), target_height)
+        if screen is not None:
+            target_height = min(target_height, max(
+                360, available.bottom() - frame_top_left.y() + 1 - frame_extra_height - 20,
+            ))
         dialog.resize(target_width, target_height)
-        self._place_dialog_centered(dialog)
+        dialog.move(frame_top_left)
+        layout.setGeometry(dialog.rect())
+        # A previously visible scrollbar narrows wrapped text. Re-evaluate
+        # the viewport at full width to avoid keeping that scrollbar alive.
+        if dialog.content_height_for_width(content_width) <= target_height - chrome_height:
+            dialog.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            dialog.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog.update()
 
     def _show_internal_dialog_without_flash(
         self,
@@ -13109,6 +13183,9 @@ class MainWindow(QMainWindow):
             dialog.export_requested.connect(self._on_main_export_clicked)
             dialog.layout_changed.connect(self._refresh_ready_grid_layout)
             dialog.continue_requested.connect(self._continue_joint_generation)
+            dialog.manual_creation_requested.connect(
+                lambda: self.select_generation_mode(GenerationMode.MANUAL)
+            )
             self._joint_generation_dialog = dialog
         return self._joint_generation_dialog
 

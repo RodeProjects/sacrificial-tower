@@ -27,8 +27,6 @@ from cooling_tower.support_privacy import (
 SUPPORT_REPORT_DIRECTORY_NAME = "support_reports"
 MAXIMUM_JOURNAL_BYTES = 8 * 1024 * 1024
 MAXIMUM_AUXILIARY_LOG_BYTES = 512 * 1024
-MAXIMUM_TITLE_LENGTH = 500
-MAXIMUM_DESCRIPTION_LENGTH = 20_000
 MAXIMUM_JOURNAL_LINE_BYTES = 256 * 1024
 _TRACEBACK_FRAME_PATTERN = re.compile(r'^\s*File\s+"[^"]+",\s+line\s+(?P<line>\d{1,8}),\s+in\s+')
 _ERROR_SUMMARY_PATTERN = re.compile(r"^\s*(?P<type>[A-Za-z_][\w.]*(?:Error|Exception|Warning|Fault))\s*:")
@@ -213,19 +211,8 @@ class SupportReportService:
     def create_bundle(
         self,
         *,
-        title: str,
-        description: str,
         application_context: Mapping[str, Any] | None = None,
     ) -> SupportReportBundle:
-        if len(str(title)) > MAXIMUM_TITLE_LENGTH or len(str(description)) > MAXIMUM_DESCRIPTION_LENGTH:
-            raise ValueError("Zusammenfassung maximal 500, Beschreibung maximal 20.000 Zeichen.")
-        normalized_title = " ".join(str(title).split())
-        normalized_description = str(description).strip()
-        if not normalized_title:
-            raise ValueError("Eine kurze Zusammenfassung ist erforderlich.")
-        if not normalized_description:
-            raise ValueError("Eine Problembeschreibung ist erforderlich.")
-
         created_at = self._now_provider()
         if created_at.tzinfo is None:
             created_at = created_at.astimezone()
@@ -238,11 +225,9 @@ class SupportReportService:
         if journal is not None:
             journal.record("support_report_bundle_started", report_id=report_id)
 
-        report_text = self._build_user_report(
+        report_text = self._build_bundle_instructions(
             report_id=report_id,
             created_at=created_at,
-            title=normalized_title,
-            description=normalized_description,
         )
         diagnostic_text = self._build_diagnostic_log(
             report_id=report_id,
@@ -250,17 +235,17 @@ class SupportReportService:
             application_context=application_context or {},
         )
         manifest = {
-            "support_report_schema_version": 3,
+            "support_report_schema_version": 4,
             "report_id": report_id,
             "created_at": created_at.isoformat(),
             "program_name": APP_NAME,
             "program_version": APP_VERSION,
-            "files": ["problembericht.txt", "diagnose.log", "manifest.json"],
+            "files": ["hinweise.txt", "diagnose.log", "manifest.json"],
             "privacy": {
                 "raw_logs_included": False,
                 "user_files_included": False,
                 "structured_diagnostics_allowlisted": True,
-                "user_text_stored_verbatim": True,
+                "user_text_included": False,
                 "technical_strings_allowlisted": True,
                 "unknown_fields_omitted": True,
                 "review_before_upload_required": True,
@@ -284,7 +269,7 @@ class SupportReportService:
                 compression=zipfile.ZIP_DEFLATED,
                 compresslevel=6,
             ) as archive:
-                archive.writestr("problembericht.txt", report_text)
+                archive.writestr("hinweise.txt", report_text)
                 archive.writestr("diagnose.log", diagnostic_text)
                 archive.writestr(
                     "manifest.json",
@@ -321,7 +306,7 @@ class SupportReportService:
     @staticmethod
     def _available_target_path(directory: Path, created_at: datetime) -> Path:
         base_name = (
-            "SacrificialTower_Problembericht_"
+            "SacrificialTower_Diagnosepaket_"
             f"{created_at:%Y-%m-%d_%H-%M-%S}"
         )
         target = directory / f"{base_name}.zip"
@@ -337,29 +322,30 @@ class SupportReportService:
                 return target
 
     @staticmethod
-    def _build_user_report(
+    def _build_bundle_instructions(
         *,
         report_id: str,
         created_at: datetime,
-        title: str,
-        description: str,
     ) -> str:
         timezone_name = created_at.strftime("UTC%z")
         return (
-            f"{APP_NAME} – Problembericht\n"
+            f"{APP_NAME} – Diagnosepaket\n"
             f"{'=' * 48}\n\n"
             f"Bericht-ID: {report_id}\n"
             f"Erstellt: {created_at:%d.%m.%Y um %H:%M:%S Uhr} "
             f"({timezone_name})\n"
             f"Programmversion: {APP_VERSION}\n\n"
-            "Vor Veröffentlichung alle Dateien prüfen. Eigene Texte sind unverändert.\n"
-            "Issues und Anhänge können öffentlich zugänglich sein.\n\n"
-            f"Zusammenfassung\n"
-            f"---------------\n"
-            f"{title}\n\n"
-            f"Problembeschreibung\n"
-            f"-------------------\n"
-            f"{description}\n"
+            "Dieses Paket enthält technische Diagnosedaten, keine Problembeschreibung.\n"
+            "Es wurde lokal erstellt und noch nicht gesendet.\n\n"
+            "1. Dieses Diagnosepaket als ZIP öffnen und alle enthaltenen Dateien\n"
+            "   vor der Weitergabe prüfen; nur bei Bedarf entpacken.\n"
+            "2. In Support & Diagnose das Anliegen Fehler melden wählen und das\n"
+            "   Fehlerformular auf GitHub öffnen.\n"
+            "3. Das Problem direkt im GitHub-Formular beschreiben, die geprüfte ZIP\n"
+            "   manuell anhängen und die Meldung absenden.\n\n"
+            "GitHub-Meldungen und Anhänge sind öffentlich sichtbar. Keine persönlichen\n"
+            "oder vertraulichen Inhalte veröffentlichen. Eine vollständig anonyme ZIP\n"
+            "wird nicht garantiert. Für Fragen und Wünsche ist kein Diagnosepaket nötig.\n"
         )
 
     def _build_diagnostic_log(

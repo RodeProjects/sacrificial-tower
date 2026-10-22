@@ -1,7 +1,11 @@
-# Sacrificial Tower: Dokumentation für 3D-Druck, Kühltürme und G-Code-Analyse
+# Sacrificial Tower: Dokumentation für Kühltürme und Layerzeiten im 3D-Druck
 
-Sacrificial Tower analysiert lokale G-Code-/STL-Daten und erzeugt einen
-druckzeitabhängigen Hilfskörper. Einstieg und Startbefehle stehen im
+Sacrificial Tower erstellt zusätzliche Kühltürme, die beim FDM-/FFF-3D-Druck
+mehr Zeit zum Abkühlen zwischen den Layern schaffen. Die Turmform wird
+automatisch berechnet oder manuell gestaltet und mit dem gewählten Slicer auf
+ihre Layerzeiten geprüft. Beide Modi exportieren im STL-Ablauf ein gemeinsames
+3MF-Projekt mit Modell und Turm sowie die zusätzliche Turm-STL.
+Einstieg und Startbefehle stehen im
 [Repository-README](../README.md). Diese Übersicht ist der zentrale Wegweiser.
 Für die Bedienung mit [Manuellem Editor](manual_editor.md) und
 [Turmgeometrie](tower_geometry.md) beginnen; für Installation und Tests mit

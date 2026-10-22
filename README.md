@@ -1,32 +1,48 @@
-# Sacrificial Tower – 3D Printing Cooling Tower & G-code Analyzer
+# Sacrificial Tower / Kühlturm-Generator - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit
 
-**Sacrificial Tower** ist ein kostenloses Windows-Programm für den FDM-/FFF-3D-Druck.
-Es analysiert die **minimale Schichtzeit (minimum layer time)** und erzeugt einen
-zusätzlichen **Kühlturm (sacrificial cooling tower)**, damit kleine Druckschichten
-mehr Zeit zum Abkühlen erhalten. Die Turmform lässt sich automatisch berechnen
-oder manuell bearbeiten und mit dem gewählten Slicer prüfen.
+Bei kurzen Layerzeiten kann beim FDM-/FFF-3D-Druck zu wenig Zeit zum Abkühlen bleiben.
+**Sacrificial Tower** erstellt dafür einen zusätzlichen **Kühlturm (bzw. ein
+Opferobjekt)**: Er wird neben deinem Modell mitgedruckt und erzeugt durch seine
+dynamische Form an den nötigen Stellen zusätzliche Layerzeit.
 
-**English:** Sacrificial Tower is a free Windows **3D printing sacrificial tower
-tool** and **G-code analyzer**. It works as a **minimum layer time cooling optimizer**
-by generating a separate printable cooling tower for short FDM/FFF layers.
-Analyze STL models through your installed slicer, inspect layer times and export
-a tower STL or a supported native 3MF project. Existing text G-code can be analyzed
-with the separate command-line interface.
+Das kostenlose Windows-Programm wertet die Layerzeiten deines STL-Modells mit
+dem gewählten Slicer aus. Im **automatischen Modus** berechnet und prüft es einen
+Turm für die gewünschte Mindest-Layerzeit. Im **manuellen Modus** gestaltest du die
+Turmform selbst und lässt ihre Wirkung auf die Layerzeiten prüfen.
+Wie gut ein automatisch erstellter Turm die gewünschte Layerzeit erreicht,
+hängt maßgeblich von den im Programm gewählten Profilen und deren Einstellungen ab.
+Beide Modi
+exportieren ein **gemeinsames 3MF-Projekt mit Modell und Kühlturm** für deinen
+Slicer; die Turm-STL wird zusätzlich gespeichert.
+
+**English: Sacrificial Tower / Cooling Tower Generator - Creating dynamic
+sacrificial objects tailored to your desired layer time**
+
+Short layer times can leave too little time for cooling. Sacrificial Tower is a
+free Windows application for FDM/FFF 3D printing that creates an additional
+**cooling tower (a sacrificial object)**, printed alongside your model. Its dynamic
+shape adds layer time where needed. It evaluates your STL model's layer times using your selected
+slicer. **Automatic mode** calculates and tests a tower for your desired minimum
+layer time; **manual mode** lets you shape the tower yourself and check the
+resulting layer times. How closely an automatically generated tower matches your
+desired layer time depends substantially on the profiles selected in the
+application and their settings. Both modes export a **3MF project containing your model
+and tower**, plus a separate tower STL.
 
 **[Windows-Installer herunterladen](https://github.com/RodeProjects/sacrificial-tower/releases/latest)**
 · [Getestete Slicer](#unterstützte-slicer-und-getestete-versionen)
 · [FAQ / English answers](docs/faq.md)
 · [Dokumentation](docs/README.md)
 
-## Funktionen für 3D-Druck und minimale Schichtzeit
+## Funktionen für 3D-Druck und minimale Layerzeit
 
-- Lokale STL-Analyse mit bestätigten Drucker-, Prozess- und Filamentprofilen;
-  G-Code-Analyse über die CLI.
+- Lokale Auswertung der Layerzeiten eines STL-Modells über den gewählten
+  Slicer; Analyse der Layerzeiten von vorhandenem G-Code über die CLI.
 - Automatischer Kühlturm mit Ziel-Layerzeit oder manueller Béziereditor mit
   festem Prüfslice und tatsächlicher Zeitbewertung.
-- Gemeinsame Objekt-/Turmvorschau, STL-Export und native 3MF-Projekte für die
-  unterstützten Integrationen.
-- Hinweise auf erkannte leere Schichten und optionale objektspezifische
+- Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden
+  Modi; zusätzliche STL-Datei des Turms.
+- Hinweise auf erkannte leere Layer und optionale objektspezifische
   Stützensimulation bei erkanntem, global ausgeschaltetem Stützenprofil.
 - Originalmodelle und installierte Slicerprofile bleiben unverändert;
   abgeleitete Dateien entstehen in eigenen Arbeitsbereichen.
@@ -46,9 +62,9 @@ enthalten den Windows-Installer. Aktuelle Fassungen sind **Entwicklungsversionen
 für Tests und Evaluation**. Die Apache-2.0-Umstellung betrifft den aktuellen
 Quellstand und daraus kommende Builds. Für bereits veröffentlichte Installer gilt
 die jeweils mitgelieferte Lizenz; sie werden durch diese README nicht umlizenziert.
-Für den STL-Ablauf zuerst einen unterstützten Slicer
-installieren und darin den eigenen Drucker, das Filament und ein Prozessprofil
-einrichten. Danach die Profile im Slicer speichern und im Turmprogramm auswählen.
+Für den STL-Ablauf zuerst einen unterstützten Slicer installieren und darin den
+eigenen Drucker einrichten. Danach den Slicer und die gewünschten Einstellungen
+im Turmprogramm auswählen und bestätigen.
 Die Verwendung des Windows-Installers erfordert keine eigene Python-Installation.
 
 Der Entwicklungsstand auf `main` kann neuer als der veröffentlichte Installer
@@ -103,9 +119,9 @@ und erkannte Slicer-Verzeichnisse sind als Ausgabeziele gesperrt. Der detaillier
 
 ## Häufige Fragen zu Kühltürmen und G-Code
 
-**Wann hilft ein sacrificial cooling tower?** Bei sehr kurzen Druckschichten
-kann ein zusätzlicher Druckkörper den zeitlichen Abstand bis zur nächsten
-Schicht am Originalobjekt erhöhen. Die Wirkung hängt vom verwendeten Drucker,
+**Wann hilft ein sacrificial cooling tower?** Bei sehr kurzen Layerzeiten
+kann ein zusätzlicher Druckkörper den zeitlichen Abstand bis zum nächsten
+Layer am Originalobjekt erhöhen. Die Wirkung hängt vom verwendeten Drucker,
 Material und Slicerprofil ab.
 
 **Ersetzt der Kühlturm Stützen am Originalmodell?** Stützen werden weiterhin

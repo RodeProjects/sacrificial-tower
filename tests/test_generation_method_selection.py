@@ -222,6 +222,87 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(artifact.exists())
         dispose.assert_not_called()
 
+    def test_result_offer_uses_manual_navigation_and_preserves_automatic_result(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        preview = SimpleNamespace(
+            request_signature="automatic", artifact_sha256="auto-sha", dispose=Mock()
+        )
+        window.current_preview = preview
+        window.preview_state = PreviewState.CURRENT
+        window._joint_slices_completed = 6
+        original_value = window.target_time_spin.value()
+        original_request_id = window._preview_request_id
+        panel = window.joint_generation_dialog
+        panel.begin(10, .2, 6, 10)
+        panel.start_slice(6, 10)
+        panel.set_achieved(9.8)
+        panel.mark_finished(paused=True, can_continue=True)
+        with patch.object(window, "_export_block_reason", return_value=None), \
+             patch.object(window.manual_controller, "ensure_context") as prepare:
+            for kind in (JobKind.PREVIEW, JobKind.EXPORT):
+                with self.subTest(active_job=kind), patch.object(
+                    window.background_job_manager, "has_active",
+                    side_effect=lambda requested, active=kind: requested is active,
+                ):
+                    window._refresh_workflow_navigation_actions()
+                    self.assertFalse(window.manual_method_button.isEnabled())
+                    self.assertFalse(panel.manual_creation_button.isEnabled())
+                    panel.manual_creation_button.click()
+                    self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
+            window._refresh_workflow_navigation_actions()
+            self.assertTrue(panel.manual_creation_button.isEnabled())
+            panel.manual_creation_button.click()
+            self.app.processEvents()
+            prepare.assert_called_once_with()
+            self.assertIs(window.generation_mode, GenerationMode.MANUAL)
+            self.assertTrue(window.manual_generation_panel.isVisible())
+            self.assertTrue(window.ready_grid.isHidden())
+            self.assertIs(window.window_pages.currentWidget(), window.main_surface)
+            window.automatic_method_button.click()
+        self.assertIs(window.current_preview, preview)
+        self.assertIs(window.preview_state, PreviewState.CURRENT)
+        self.assertEqual(window.target_time_spin.value(), original_value)
+        self.assertEqual(window._preview_request_id, original_request_id)
+        self.assertEqual(window._joint_slices_completed, 6)
+        self.assertFalse(panel.manual_creation_offer.isHidden())
+        self.assertTrue(window.export_button.isEnabled())
+        preview.dispose.assert_not_called()
+
+    def test_result_actions_fit_on_both_sides_of_column_breakpoint(self) -> None:
+        window = self.window
+        self.finish_preparation()
+        window.automatic_generation_card.click()
+        panel = window.joint_generation_dialog
+        panel.begin(10, .2, 6, 10)
+        panel.start_slice(6, 10)
+        panel.set_achieved(9.8)
+        column_modes = set()
+        for paused in (True, False):
+            panel.mark_finished(paused=paused, can_continue=paused)
+            for width in (2200, 1600, 1200, 1100, 1060, 1040, 1000, 720, 1600):
+                with self.subTest(paused=paused, width=width):
+                    window.resize(width, 1000)
+                    for _ in range(5):
+                        self.app.processEvents()
+                    row = panel.result_actions
+                    buttons = ([panel.continue_button] if paused else []) + [
+                        panel.manual_creation_button, panel.export_button,
+                    ]
+                    right = -1
+                    bottoms = []
+                    for button in buttons:
+                        position = button.mapTo(row, QPoint())
+                        self.assertGreater(position.x(), right)
+                        right = position.x() + button.width() - 1
+                        self.assertLess(right, row.width())
+                        bottoms.append(position.y() + button.height())
+                    self.assertLessEqual(max(bottoms) - min(bottoms), 1)
+                    self.assertEqual(window.settings_scroll.horizontalScrollBar().maximum(), 0)
+                    column_modes.add(window.ready_grid.is_two_column())
+        self.assertEqual(column_modes, {True, False})
+
     def test_preparation_uses_body_hides_footer_and_preserves_header_and_current_method(self) -> None:
         window = self.window
         self.finish_preparation()

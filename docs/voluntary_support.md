@@ -6,6 +6,13 @@ Buy Me a Coffee, kein SDK, kein Zahlungsbackend und kein Abonnement.
 
 ## Bedienung und Datenfluss
 
+Der Dialog ist außerdem über „Support Diagnose …“ → „Entwickler unterstützen“
+erreichbar. Diese Auswahl öffnet direkt denselben lokalen „Buy me a coffee“-
+Betragsdialog wie der Menüpunkt, ohne Zwischenseite oder Schiebeanimation.
+Das Fenster „Support & Diagnose“ wird davor geschlossen.
+Die Auswahl öffnet weder PayPal noch ein anderes externes Ziel; es gibt keinen
+zweiten Zahlungsablauf.
+
 Der lokale Dialog bietet 3,50 €, 5 €, 10 €, 15 € und 20 € sowie eine freie Eingabe
 von 2,50 bis 50,00 EUR pro Zahlung. Beim erstmaligen Öffnen sind 5 EUR als
 unverbindlicher, frei änderbarer Vorschlag vorausgewählt und sichtbar markiert.

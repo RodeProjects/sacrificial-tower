@@ -575,12 +575,15 @@ class LayerRangeUiTests(unittest.TestCase):
         QTest.mouseDClick(slider,Qt.MouseButton.LeftButton,pos=target)
         self.assertNotEqual(slider.value(),0)
 
-    def _styled_dialog(self):
+    def _ensure_offscreen_font(self):
         # Windows' offscreen backend does not enumerate installed fonts.
         font_path = Path("C:/Windows/Fonts/segoeui.ttf")
         if not QFontDatabase.families() and font_path.exists():
             font_id = QFontDatabase.addApplicationFont(str(font_path))
             self.addCleanup(lambda: QFontDatabase.removeApplicationFont(font_id))
+
+    def _styled_dialog(self):
+        self._ensure_offscreen_font()
         # Keep the styling local: changing QApplication's stylesheet also
         # repolishes every widget retained by earlier GUI tests in the suite.
         # A styled parent supplies the font and metrics during construction.
@@ -1197,13 +1200,17 @@ class LayerRangeUiTests(unittest.TestCase):
         self.assertFalse(self.dialog.fit_button.isEnabled())
 
     def test_main_window_apply_cancel_reset_and_center(self):
+        self._ensure_offscreen_font()
         with tempfile.TemporaryDirectory() as temporary:
             window = MainWindow(user_settings_path=Path(temporary) / "settings.json",
                 enable_update_check=False, enable_startup_slicer_discovery=False)
             window.show()
             self.app.processEvents()
             self.assertFalse(window.layer_range_button.isEnabled())
-            self.assertEqual(window.layer_range_button.text(), "Bereichseditor öffnen")
+            self.assertEqual(
+                window.layer_range_button.text(),
+                "Editor: Turmaufweitungen bereichsweise ausschließen",
+            )
             window.layer_range_button_row.layout().activate()
             self.assertEqual(window.layer_range_button.width(), window.layer_range_button.sizeHint().width())
             self.assertEqual(window.layer_range_button.height(), window.reset_button.height())

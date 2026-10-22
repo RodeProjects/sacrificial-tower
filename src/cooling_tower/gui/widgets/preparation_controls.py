@@ -2,11 +2,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Callable
-from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt, Signal
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QLabel, QStackedWidget, QTabWidget, QWidget, QPushButton, QFrame, QHBoxLayout
 
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
+
+PREPARATION_TRANSITION_DURATION_MS = 400
 
 class _SequentialPreparationTabs(QTabWidget):
     """Guarded preparation pages with a directional card transition."""
@@ -31,7 +33,7 @@ class _SequentialPreparationTabs(QTabWidget):
         self._step_guard: Callable[[int], bool] | None = None
         self._transition_targets: tuple[QWidget, ...] = ()
         self._transition_prepare: Callable[[], None] | None = None
-        self._transition_animation: QParallelAnimationGroup | None = None
+        self._transition_animation: QAbstractAnimation | None = None
         self._transition_viewport: QWidget | None = None
         self._transition_overlays: list[QLabel] = []
         self._pending_transition_index: int | None = None
@@ -177,30 +179,34 @@ class _SequentialPreparationTabs(QTabWidget):
             new_position.x() - viewport_left,
             new_position.y() - viewport_top,
         )
-        old_overlay.move(old_start)
-        new_overlay.move(
-            new_end + QPoint(direction * viewport_width, 0)
-        )
         self._transition_overlays = [old_overlay, new_overlay]
         self._pending_transition_index = index
 
-        animation_group = QParallelAnimationGroup(self)
-        for overlay, end_position in (
+        animation_group = self._create_overlay_animation((
             (
                 old_overlay,
+                old_start,
                 old_start + QPoint(-direction * viewport_width, 0),
             ),
-            (new_overlay, new_end),
-        ):
+            (new_overlay, new_end + QPoint(direction * viewport_width, 0), new_end),
+        ))
+        animation_group.finished.connect(self._complete_transition)
+        self._transition_animation = animation_group
+        animation_group.start()
+
+    def _create_overlay_animation(
+        self, overlays: tuple[tuple[QLabel, QPoint, QPoint], ...],
+    ) -> QAbstractAnimation:
+        animation_group = QParallelAnimationGroup(self)
+        for overlay, start_position, end_position in overlays:
+            overlay.move(start_position)
             animation = QPropertyAnimation(overlay, b"pos", animation_group)
             animation.setDuration(self._effective_transition_duration_ms)
             animation.setStartValue(overlay.pos())
             animation.setEndValue(end_position)
             animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
             animation_group.addAnimation(animation)
-        animation_group.finished.connect(self._complete_transition)
-        self._transition_animation = animation_group
-        animation_group.start()
+        return animation_group
 
     def _complete_transition(self) -> None:
         index = self._pending_transition_index

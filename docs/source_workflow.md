@@ -405,8 +405,9 @@ Analyse-G-Codes, Slicer und Version, bestätigte Profile, Profilfingerabdruck,
 Pre-Slice-Zeitpunkt, Dauer und Cache-Status. Dieser lokale technische Laufbericht
 ist vom freiwilligen Support-ZIP zu unterscheiden: Ein Supportpaket übernimmt
 nur ausdrücklich freigegebene Felder und technische Werte, keine Originalprofile,
-Rohlogs oder freien Fehlermeldungen. Eigene Problembeschreibungen bleiben
-unverändert. Details: [Support und Diagnose](support.md). Es gibt keine automatische
+Rohlogs oder freien Fehlermeldungen. Eine Problembeschreibung wird ausschließlich
+direkt im GitHub-Issue eingegeben, nicht im Paket gespeichert.
+Details: [Support und Diagnose](support.md). Es gibt keine automatische
 Netzwerkübertragung des Modells oder Supportpakets.
 
 ## Tests und reale Abnahme
