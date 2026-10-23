@@ -818,6 +818,7 @@ class LayerRangeUiTests(unittest.TestCase):
 
     def test_target_label_and_reset_height_and_standard_value(self):
         dialog = self._styled_dialog()
+        dialog.set_target_time(9)
         self._settle_layout()
         self.assertIn("Gew. Min-Layerzeit", [label.text() for label in dialog.settings_panel.findChildren(QLabel)])
         reset, spin = dialog.target_reset_button, dialog.target_spin
@@ -830,13 +831,13 @@ class LayerRangeUiTests(unittest.TestCase):
         spin.setValue(15)
         self.assertTrue(reset.isEnabled())
         reset.click()
-        self.assertEqual(spin.value(), 10)
-        self.assertEqual(dialog.canvas.target_time_s, 10)
-        self.assertEqual(changed, [15, 10])
+        self.assertEqual(spin.value(), 9)
+        self.assertEqual(dialog.canvas.target_time_s, 9)
+        self.assertEqual(changed, [15, 9])
         self.assertFalse(reset.isEnabled())
         dialog.set_target_time(12)
         self.assertTrue(reset.isEnabled())
-        dialog.set_target_time(10)
+        dialog.set_target_time(9)
         self.assertFalse(reset.isEnabled())
         custom = LayerRangeDialog(self.layers, object_segments(self.layers), target_time_s=15,
             target_minimum=5, target_maximum=120, target_default=12)
