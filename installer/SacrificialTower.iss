@@ -91,8 +91,7 @@ Filename: "{app}\SacrificialTower.exe"; WorkingDir: "{app}"; Flags: nowait skipi
 #endif
 
 [UninstallDelete]
-; Nur einen nach der protokollierten Deinstallation leeren Programmordner entfernen.
-; Benutzerdaten werden ausschließlich durch den eng begrenzten Code unten behandelt.
+; Nicht protokollierte Laufzeitdaten und danach leere Ordner behandelt der Code.
 Type: dirifempty; Name: "{app}"
 
 [Code]
@@ -496,45 +495,114 @@ begin
       'gelöscht werden?' #13#10#13#10 +
       'Dazu gehören Einstellungen, Profilzuordnungen, Logs und Standardausgaben ' +
       'unter:' #13#10 + UserDataRoot + #13#10#13#10 +
+      'Auch ältere Einstellungen und Ausgaben in den Unterordnern config und ' +
+      'output des Programmordners sowie unter _internal werden gelöscht.' #13#10#13#10 +
       'Wählen Sie Nein, um die Daten für eine spätere Neuinstallation zu behalten.',
       mbConfirmation,
       MB_YESNO or MB_DEFBUTTON2,
       IDNO) = IDYES;
 end;
 
+function CleanupGetFileAttributes(const Path: String): LongWord;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+function HasReparsePointParent(const Path: String): Boolean;
+var
+  Parent, NextParent: String;
+  Attributes: LongWord;
+begin
+  Result := False;
+  Parent := ExtractFileDir(Path);
+  while Parent <> '' do
+  begin
+    Attributes := CleanupGetFileAttributes(Parent);
+    if Attributes <> $FFFFFFFF then
+      if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+      begin
+        Result := True;
+        Exit;
+      end;
+    NextParent := ExtractFileDir(Parent);
+    if CompareText(Parent, NextParent) = 0 then
+      Exit;
+    Parent := NextParent;
+  end;
+end;
+
+procedure DeleteUserDataDirectory(const Path: String; var FailedPaths: String);
+begin
+  { DelTree selbst folgt keinen Reparse Points; auch übergeordnete Junctions
+    dürfen die Löschung nicht in ein fremdes Verzeichnis umlenken. Vor DirExists
+    prüfen: Windows kann den Zugriff durch eine Junction bereits verweigern. }
+  if not HasReparsePointParent(Path) then
+  begin
+    if not DirExists(Path) then
+      Exit;
+    Log('Lösche persönliche Daten: ' + Path);
+    if DelTree(Path, True, True, True) and not DirExists(Path) then
+      Exit;
+  end;
+  Log('WARNUNG: Persönliche Daten konnten nicht vollständig gelöscht werden: ' + Path);
+  FailedPaths := FailedPaths + #13#10 + Path;
+end;
+
 procedure DeleteSelectedUserData();
 var
-  UserDataRoot: String;
+  FailedPaths: String;
 begin
   if not DeleteStandaloneUserData then
     Exit;
 
-  UserDataRoot := StandaloneUserDataRoot();
-  if not DirExists(UserDataRoot) then
-  begin
-    Log('Keine persönlichen Standalone-Daten zum Löschen gefunden: ' + UserDataRoot);
-    Exit;
-  end;
-
-  Log('Lösche persönliche Standalone-Daten: ' + UserDataRoot);
-  if DelTree(UserDataRoot, True, True, True) and not DirExists(UserDataRoot) then
-  begin
-    Log('Persönliche Standalone-Daten wurden vollständig gelöscht.');
-    Exit;
-  end;
-
-  Log('WARNUNG: Persönliche Standalone-Daten konnten nicht vollständig gelöscht werden.');
-  if not IsNonInteractiveUninstall() then
+  FailedPaths := '';
+  DeleteUserDataDirectory(StandaloneUserDataRoot(), FailedPaths);
+  DeleteUserDataDirectory(ExpandConstant('{app}\config'), FailedPaths);
+  DeleteUserDataDirectory(ExpandConstant('{app}\output'), FailedPaths);
+  DeleteUserDataDirectory(ExpandConstant('{app}\_internal\config'), FailedPaths);
+  DeleteUserDataDirectory(ExpandConstant('{app}\_internal\output'), FailedPaths);
+  if FailedPaths = '' then
+    Log('Persönliche Standalone-Daten einschließlich älterer Speicherorte wurden vollständig gelöscht.')
+  else if not IsNonInteractiveUninstall() then
   begin
     SuppressibleMsgBox(
       'Ein Teil der persönlichen Daten konnte nicht gelöscht werden.' #13#10#13#10 +
       'Bitte schließen Sie Programme, die Dateien in diesem Ordner verwenden, ' +
-      'und entfernen Sie den verbleibenden Ordner bei Bedarf manuell:' #13#10 +
-      UserDataRoot,
+      'und prüfen Sie die verbleibenden Ordner. Verknüpfte übergeordnete Ordner ' +
+      'werden aus Sicherheitsgründen nicht durchsucht:' #13#10 + FailedPaths,
       mbError,
       MB_OK,
       IDOK);
   end;
+end;
+
+procedure RemoveEmptyProgramDirectories(const Path: String);
+var
+  FindRec: TFindRec;
+  Attributes: LongWord;
+begin
+  Attributes := CleanupGetFileAttributes(Path);
+  if Attributes = $FFFFFFFF then
+    Exit;
+  if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+    Exit;
+  if HasReparsePointParent(Path) then
+    Exit;
+
+  if FindFirst(AddBackslash(Path) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+           ((FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) = 0) then
+          RemoveEmptyProgramDirectories(AddBackslash(Path) + FindRec.Name);
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  { Ausschließlich leere Verzeichnisse entfernen, niemals fremde Dateien. }
+  if RemoveDir(Path) then
+    Log('Leerer Programmordner entfernt: ' + Path);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -542,5 +610,14 @@ begin
   if CurUninstallStep = usUninstall then
     SelectUserDataPolicy()
   else if CurUninstallStep = usPostUninstall then
+  begin
     DeleteSelectedUserData();
+    RemoveEmptyProgramDirectories(ExpandConstant('{app}\config'));
+    RemoveEmptyProgramDirectories(ExpandConstant('{app}\output'));
+    RemoveEmptyProgramDirectories(ExpandConstant('{app}\_internal'));
+    { Außerhalb der bekannten Programm-Unterordner nichts durchsuchen. }
+    if RemoveDir(ExpandConstant('{app}')) then
+      Log('Leerer Programmordner entfernt: ' + ExpandConstant('{app}'));
+    Log('Sacrificial Tower: Deinstallationsbereinigung abgeschlossen.');
+  end;
 end;

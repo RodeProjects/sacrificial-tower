@@ -98,6 +98,18 @@ class DistributionAndPathTests(unittest.TestCase):
             DistributionChannel.STANDALONE,
         )
 
+    def test_development_and_installed_variants_use_separate_data_roots(self) -> None:
+        environment = {"LOCALAPPDATA": str(self.root / "LocalAppData")}
+        with patch("cooling_tower.runtime_paths.IS_FROZEN", False):
+            development = resolve_user_data_root(environment)
+        with patch("cooling_tower.runtime_paths.IS_FROZEN", True):
+            installed = resolve_user_data_root(environment)
+
+        self.assertEqual(development.name, "development")
+        self.assertEqual(installed.name, "standalone")
+        self.assertEqual(development.parent, installed.parent)
+        self.assertNotEqual(development, installed)
+
     def test_legacy_copy_preserves_source_and_never_overwrites_target(self) -> None:
         source = self.root / "legacy" / "settings.json"
         target = self.root / "current" / "settings.json"

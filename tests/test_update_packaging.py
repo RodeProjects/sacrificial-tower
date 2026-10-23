@@ -281,7 +281,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("HasCommandLineSwitch('SUPPRESSMSGBOXES')", installer)
         self.assertIn("MB_YESNO or MB_DEFBUTTON2", installer)
         self.assertIn("IDNO) = IDYES", installer)
-        self.assertIn("DelTree(UserDataRoot, True, True, True)", installer)
+        self.assertIn("DelTree(Path, True, True, True)", installer)
         self.assertIn("CurUninstallStep = usPostUninstall", installer)
         self.assertIn("CheckForMutexes('{#ApplicationMutexName}')", installer)
         self.assertIn('Type: dirifempty; Name: "{app}"', installer)
