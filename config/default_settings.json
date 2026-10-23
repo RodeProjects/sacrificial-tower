@@ -22,5 +22,5 @@
   "minimum_radius_height_factor": 0.04,
   "simulate_full_tower_infill": false,
   "simulate_tower_without_supports": false,
-  "target_layer_time_s": 10.0
+  "target_layer_time_s": 9.0
 }

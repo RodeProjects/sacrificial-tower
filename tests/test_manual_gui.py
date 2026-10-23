@@ -228,7 +228,7 @@ class ManualGuiTests(unittest.TestCase):
         p.color_enabled_checkbox.click()
         self.assertFalse(p.color_settings.isHidden())
         p.color_range_slider.request_value("red",6)
-        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(10,6))
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(9,6))
         p.color_range_slider.request_value("green",12)
         self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(12,6))
         p.color_range_slider.request_value("red",3)
@@ -273,7 +273,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual((p.color_range_slider.green_time,p.color_range_slider.red_time),(12,6))
         p.reset_all()
         self.assertTrue(p.color_settings.isHidden())
-        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(10,6))
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s),(9,5))
 
     def test_color_scale_and_points_follow_busy_state_and_all_reset(self):
         p=self.panel
@@ -286,7 +286,7 @@ class ManualGuiTests(unittest.TestCase):
         p.color_range_slider.request_value("green",20)
         self.assertEqual(p.settings.color_reference_time_s,12)
         p.set_busy(False);p.reset_all()
-        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s,p.settings.color_scale_max_time_s),(10,6,14))
+        self.assertEqual((p.settings.color_reference_time_s,p.settings.color_red_time_s,p.settings.color_scale_max_time_s),(9,5,14))
 
     def test_tower_reset_preserves_options_and_restores_all_points_and_controls(self):
         p=self.panel
@@ -1083,7 +1083,7 @@ class ManualGuiTests(unittest.TestCase):
         p.checks["critical_layers_enabled"].setChecked(True)
         handle=p.color_range_slider.green_handle
         handle.setFocus();QTest.keyClick(handle,Qt.Key.Key_Right)
-        self.assertEqual(p.settings.color_reference_time_s,10.1)
+        self.assertEqual(p.settings.color_reference_time_s,9.1)
         self.assertTrue(handle.hasFocus())
 
     def test_resolution_slider_uses_requested_percentages(self):

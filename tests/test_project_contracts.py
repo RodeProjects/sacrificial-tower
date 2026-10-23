@@ -33,6 +33,7 @@ from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 class ProjectContractTests(unittest.TestCase):
     def test_current_domain_and_cli_defaults_agree(self):
         self.assertEqual(GenerationSettings().to_dict(), dict(GENERATION_DEFAULTS))
+        self.assertEqual(GenerationSettings().target_layer_time_s, 9.0)
         args = build_argument_parser().parse_args(["--gcode", "example.gcode"])
         self.assertNotIn("base_height_mm", GENERATION_DEFAULTS)
         self.assertNotIn("--base-height ", build_argument_parser().format_help())

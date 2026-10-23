@@ -261,7 +261,9 @@ Bereich von 0,01 bis 30 Sekunden und verwerfen inkompatible Werte.
 
 Bei Einführung des Schemas verwendeten neue Einstellungen und Zurücksetzen
 eine Ziel-Layerzeit von 9 s. Der aktuelle, zentral in
-`config/default_settings.json` gepflegte Produktstandard beträgt 10 s. Die
+`config/default_settings.json` gepflegte Produktstandard beträgt 9 s. Er gilt
+für neue Konfigurationen und das Zurücksetzen; gespeicherte gültige Benutzerwerte
+bleiben unverändert. Dieser Standardwechsel benötigt keine Schemamigration. Die
 weiteren damaligen Vorgaben waren Toleranz ±0,25 s,
 minimaler Turmdurchmesser 5 mm, Verjüngungswinkel 55°, Objektabstand 15 mm und
 Zeit-Sicherheitsfaktor 1,0. Diese historischen Vorgaben wurden in Schema 16

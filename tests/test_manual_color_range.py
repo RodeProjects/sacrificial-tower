@@ -467,7 +467,7 @@ class ManualColorRangeIntegrationTests(unittest.TestCase):
         self.assertIs(c._rings,rings);self.assertIs(c._placement,placement)
         self.assertEqual(p.draft.artifact_payload(),artifact)
         p.undo();self.assertEqual(p.settings,before)
-        self.assertEqual((p.color_range_slider.red_time,p.color_range_slider.green_time,p.color_scale_spin.value()),(6,10,14))
+        self.assertEqual((p.color_range_slider.red_time,p.color_range_slider.green_time,p.color_scale_spin.value()),(5,9,14))
 
     def test_increasing_scale_preserves_historical_subtenth_fade_precision(self):
         p=self.panel
@@ -493,7 +493,7 @@ class ManualColorRangeIntegrationTests(unittest.TestCase):
                 p.color_scale_spin.setValue(limit+10)
                 self.assertEqual(p.settings.color_scale_max_time_s,limit)
                 self.assertEqual(p.color_range_slider.maximum_time,limit)
-                self.assertEqual((p.settings.color_red_time_s,p.settings.color_reference_time_s),(6,10))
+                self.assertEqual((p.settings.color_red_time_s,p.settings.color_reference_time_s),(5,9))
 
     def test_object_change_clamps_loaded_preferences_and_keeps_undo_in_range(self):
         p=self.panel
@@ -530,14 +530,14 @@ class ManualColorRangeIntegrationTests(unittest.TestCase):
         slider=self.panel.color_range_slider;p=self.panel;p.color_enabled_checkbox.click()
         slider.request_value("red",10)
         self.assertEqual(p.settings.color_deficit_time_s,0)
-        self.assertEqual((slider.red_time,slider.green_time),(10,10))
+        self.assertEqual((slider.red_time,slider.green_time),(9,9))
         self.assertTrue(slider.zone_labels[1].isHidden())
         self.assertFalse(slider.red_handle.geometry().intersects(slider.green_handle.geometry()))
         slider.green_handle.setFocus();QTest.keyClick(slider.green_handle,Qt.Key.Key_Right)
-        self.assertEqual((slider.red_time,slider.green_time),(10,10.1))
+        self.assertEqual((slider.red_time,slider.green_time),(9,9.1))
         self.assertFalse(slider.zone_labels[1].isHidden())
         QTest.keyClick(slider.green_handle,Qt.Key.Key_Left)
-        self.assertEqual((slider.red_time,slider.green_time),(10,10))
+        self.assertEqual((slider.red_time,slider.green_time),(9,9))
         self.assertTrue(slider.zone_labels[1].isHidden())
         handle=slider.red_handle;center=handle.rect().center()
         QTest.mousePress(handle,Qt.MouseButton.LeftButton,pos=center)
@@ -550,11 +550,11 @@ class ManualColorRangeIntegrationTests(unittest.TestCase):
         slider=self.panel.color_range_slider;self.panel.color_enabled_checkbox.click()
         slider.request_value("red",10)
         image=slider.grab().toImage();y=round(slider.track_rect().center().y())
-        self.assertEqual(image.pixelColor(round(slider.x_for_time(9)),y),QColor(LayerRangeCanvas.CRITICAL_COLOR))
+        self.assertEqual(image.pixelColor(round(slider.x_for_time(8)),y),QColor(LayerRangeCanvas.CRITICAL_COLOR))
         self.assertEqual(image.pixelColor(round(slider.x_for_time(11)),y),QColor(LayerRangeCanvas.OBJECT_COLOR))
         for handle in (slider.red_handle,slider.green_handle):
             handle.setFocus();image=slider.grab().toImage()
-            self.assertEqual(image.pixelColor(round(slider.x_for_time(10)),y),QColor("#1769aa"))
+            self.assertEqual(image.pixelColor(round(slider.x_for_time(9)),y),QColor("#1769aa"))
 
     def test_marker_uses_actual_original_minimum_and_reuses_it_during_color_edits(self):
         from cooling_tower.gui import manual_panel

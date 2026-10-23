@@ -52,7 +52,7 @@ SETTING_INFO_TEXTS = {
         "Kürzeste gewünschte Druckzeit je Layer. Der Kühlturm ergänzt "
         "Druckzeit, wenn das eigentliche Objekt diesen Wert unterschreitet. "
         "Die kürzeste Layerzeit des Originalobjekts wird beim Pre-Slice "
-        "ermittelt. Bereich: 5 bis 30 Sekunden; Standard: 10 Sekunden."
+        "ermittelt. Bereich: 5 bis 30 Sekunden; Standard: 9 Sekunden."
     ),
     "minimum_outer_diameter_mm": (
         "Kleinster zulässiger Außendurchmesser oberhalb des Standfußes. "

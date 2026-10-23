@@ -108,7 +108,7 @@ class SettingsAndValidationTests(GuiTestCase):
         self.window.target_time_spin.setValue(99.0)
         self.window.full_infill_checkbox.setChecked(True)
         self.window.reset_defaults()
-        self.assertAlmostEqual(self.window.target_time_spin.value(), 10.0)
+        self.assertAlmostEqual(self.window.target_time_spin.value(), 9.0)
         self.assertFalse(self.window.full_infill_checkbox.isChecked())
 
 

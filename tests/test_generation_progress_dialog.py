@@ -477,6 +477,20 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 self.assertEqual(json.loads(path.read_text())["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
                 self.assertEqual(store.last_migration_backup.read_bytes(), original)
 
+    def test_target_time_default_is_nine_and_saved_values_are_preserved(self) -> None:
+        path = self.root / "target-time.json"
+        store = UserSettingsStore(path, PROJECT_ROOT / "config/default_settings.json")
+        self.assertEqual(store.load_defaults().target_layer_time_s, 9.0)
+        self.assertEqual(store.load()[0].target_layer_time_s, 9.0)
+        for generation, expected in (({}, 9.0), ({"target_layer_time_s": 10.0}, 10.0),
+                                     ({"target_layer_time_s": 17.5}, 17.5)):
+            with self.subTest(generation=generation):
+                path.write_text(json.dumps({
+                    "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+                    "generation": generation,
+                }), encoding="utf-8")
+                self.assertEqual(store.load()[0].target_layer_time_s, expected)
+
     def test_local_window_is_only_reset_in_general_settings(self) -> None:
         window = MainWindow(
             user_settings_path=self.root / 'local-window.json',
@@ -494,7 +508,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         window.target_time_spin.setValue(12)
         window.reset_defaults()
         self.assertEqual(window.local_window_spin.value(), 31)
-        self.assertEqual(window.target_time_spin.value(), 10)
+        self.assertEqual(window.target_time_spin.value(), 9)
         window.show_joint_slice_settings()
         dialog = window._joint_slice_settings_dialog
         self.assertEqual(dialog.local_window_spin_box.value(), 31)

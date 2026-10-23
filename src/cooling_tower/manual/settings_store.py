@@ -13,7 +13,7 @@ def migrate_manual_v1(payload):
     """Keep the old threshold only as a visual reference; discard tolerance."""
     raw = payload.get("manual",{})
     manual = dict(raw) if isinstance(raw,dict) else {}
-    manual["color_reference_time_s"] = manual.pop("target_layer_time_s",ManualSettings().color_reference_time_s)
+    manual["color_reference_time_s"] = manual.pop("target_layer_time_s",10.0)
     manual.pop("layer_time_tolerance_s",None)
     return {**payload,"manual_settings_schema_version":2,"manual":manual}
 
@@ -145,9 +145,9 @@ def migrate_manual_v10(payload):
     """Replace deficit thresholds with absolute green/red layer times."""
     raw = payload.get("manual", {})
     manual = dict(raw) if isinstance(raw,dict) else {}
-    reference = manual.get("color_reference_time_s",ManualSettings().color_reference_time_s)
+    reference = manual.get("color_reference_time_s",10.0)
     if type(reference) not in (int,float) or not math.isfinite(reference) or not 5 <= reference <= 30:
-        reference = ManualSettings().color_reference_time_s
+        reference = 10.0
     start = manual.pop("gradient_start_deficit_s",0.0)
     full = manual.pop("gradient_full_deficit_s",1.0)
     valid = (all(type(value) in (int,float) and math.isfinite(value) for value in (start,full))

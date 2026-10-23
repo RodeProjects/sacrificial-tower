@@ -27,7 +27,7 @@ class LayerTimeColorTests(unittest.TestCase):
 
     def test_layer_time_deficit_green_to_red_and_clamped_endpoints(self):
         settings=ManualSettings()
-        self.assertEqual((settings.color_reference_time_s,settings.color_deficit_time_s,settings.color_red_time_s),(10,4,6))
+        self.assertEqual((settings.color_reference_time_s,settings.color_deficit_time_s,settings.color_red_time_s),(9,4,5))
         green,red=QColor(LayerRangeCanvas.OBJECT_COLOR),QColor(LayerRangeCanvas.CRITICAL_COLOR)
         for actual in (10,11,20,100):
             self.assertEqual(LayerRangeCanvas.layer_time_color(10,6,actual),green)
@@ -45,10 +45,10 @@ class LayerTimeColorTests(unittest.TestCase):
                                  LayerRangeCanvas.layer_color(10,actual,start,full))
 
     def test_deficit_requires_valid_type_and_nonnegative_seconds(self):
-        for value in (True,"6",None,{},float("nan"),float("inf"),-1,10.1,60.1):
+        for value in (True,"6",None,{},float("nan"),float("inf"),-1,9.1,60.1):
             with self.subTest(value=value),self.assertRaises(GeometryError):
                 validate_settings(replace(ManualSettings(),color_deficit_time_s=value))
-        for value in (0,.001,6,10):
+        for value in (0,.001,6,9):
             validate_settings(replace(ManualSettings(),color_deficit_time_s=value))
 
     def test_equal_bounds_use_a_hard_boundary_and_green_includes_the_exact_time(self):

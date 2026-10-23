@@ -13,9 +13,9 @@ from cooling_tower.persistence.versioned_json import (ConcurrentDocumentChangeEr
                                                     VersionedJsonStore, FutureSchemaVersionError)
 
 
-def migrated_default_settings():
+def migrated_default_settings(reference=10.0):
     """Defaults for legacy files whose profile binding was disabled."""
-    return replace(ManualSettings(), limit_expansion_to_profile=False)
+    return replace(ManualSettings(), color_reference_time_s=reference, limit_expansion_to_profile=False)
 
 
 class ManualPersistenceTests(unittest.TestCase):
@@ -24,6 +24,12 @@ class ManualPersistenceTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.path = self.root/"manual_settings.json"
     def tearDown(self): self.temp.cleanup()
+
+    def test_new_reference_defaults_to_nine_and_saved_ten_is_preserved(self):
+        store=ManualSettingsStore(self.path)
+        self.assertEqual(store.load().color_reference_time_s,9.0)
+        store.save(replace(store.load(),color_reference_time_s=10.0))
+        self.assertEqual(ManualSettingsStore(self.path).load().color_reference_time_s,10.0)
 
     def test_v10_absolute_color_migration_keeps_reference_and_fade_width_with_backup(self):
         original=json.dumps({"manual_settings_schema_version":10,"manual":{
@@ -252,7 +258,7 @@ class ManualPersistenceTests(unittest.TestCase):
         for maximum in (3600.1,7200,True,"120",{"unit":"ms","value":120000},float("inf"),float("nan")):
             self.path.write_text(json.dumps({"manual_settings_schema_version":15,"manual":{
                 "color_scale_max_time_s":maximum}}))
-            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings())
+            self.assertEqual(ManualSettingsStore(self.path).load(),migrated_default_settings(reference=9.0))
 
     def test_v16_allows_finite_long_object_scales_without_serializing_object_data(self):
         from cooling_tower.manual.geometry import validate_settings
@@ -418,7 +424,7 @@ class ManualPersistenceTests(unittest.TestCase):
                 "target_layer_time_s":value,"foot_diameter_mm":35}}))
             store=ManualSettingsStore(self.path)
             s=store.load()
-            self.assertEqual(s.color_reference_time_s,ManualSettings().color_reference_time_s)
+            self.assertEqual(s.color_reference_time_s,10.0)
             self.assertEqual(s.foot_diameter_mm,35)
             self.assertIsNone(store.warning)
 

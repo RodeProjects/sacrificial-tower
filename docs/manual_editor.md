@@ -850,11 +850,11 @@ sich bis kurz vor den verschobenen Wert und lassen Text und Greifpunkte frei.
 Auch in normaler Position sind die äußeren Striche etwas länger, ohne die
 Werte weiter nach unten zu setzen.
 
-Layer ab einschließlich der grünen Layerzeit (Standard 10 s) sind grün.
+Layer ab einschließlich der grünen Layerzeit (Standard 9 s) sind grün.
 Die grüne Grenze reicht von 3 s bis zum gewählten Skalenende.
-Layer bis einschließlich der roten Layerzeit (Standard 6 s) sind vollständig rot.
+Layer bis einschließlich der roten Layerzeit (Standard 5 s) sind vollständig rot.
 Dazwischen liegt ein linearer Übergang, bei den Standards mit dem mittleren
-Mischton bei 8 s. Die rote Grenze darf nicht negativ sein und darf die grüne
+Mischton bei 7 s. Die rote Grenze darf nicht negativ sein und darf die grüne
 nicht überschreiten. Bei gleicher Zeit entfällt der Übergang samt Überschrift:
 unter der gemeinsamen Grenze ist das Original rot, ab der Grenze grün.
 Die Greifpunkte bleiben auch dann horizontal getrennt und lassen sich mit Maus
@@ -909,7 +909,7 @@ nur die proportionalen Positionen; geänderte Grenzen färben die vorbereitete
 Originaldarstellung neu ein. Turm und Platzierung werden nicht neu aufgebaut.
 Die Eingabe akzeptiert Punkt und Komma und
 zeigt ein Komma. Während laufender Aufträge sind Greifer und Eingabe gesperrt.
-„Alles zurücksetzen“ stellt Rot bei 6 s, Grün bei 10 s und das Skalenende 14 s her.
+„Alles zurücksetzen“ stellt Rot bei 5 s, Grün bei 9 s und das Skalenende 14 s her.
 „Turmform zurücksetzen“ erhält diese Darstellungseinstellungen.
 
 Gespeichert werden ab Schema 12 `color_reference_time_s` und
