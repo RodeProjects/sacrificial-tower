@@ -1,6 +1,6 @@
 # Veröffentlichungsprüfung: Quellcode, Entwicklungsreleases und Microsoft Store
 
-Stand: 22.10.2026. Die Quellcodeveröffentlichung und die technische Umstellung sind
+Stand: 23.10.2026. Die Quellcodeveröffentlichung und die technische Umstellung sind
 ausdrücklich beauftragt. Eine reguläre Binär-/Storefreigabe ist davon getrennt.
 Der aktuelle Nachweis zum öffentlichen Installerübergang steht in der Beschreibung
 des [neuesten Releases](https://github.com/RodeProjects/sacrificial-tower/releases/latest).
@@ -11,9 +11,11 @@ Entwicklungsreleases 0.9.26 und 0.9.28 besitzen unveränderliche Quellcode-Tags 
 Anhänge. Der öffentliche Versionsübergang bestand in privatem Actions-Lauf
 `39711833966` unter einem eigenen GitHub-Standardkonto; die Entwicklerinstallation
 wurde nicht verwendet. Anonyme Downloads, Signaturen und Hashes sind bestätigt.
-Der alte Kanal ist archiviert und seine Actions sind deaktiviert. Haupt- und
-Alt-Repository besitzen weiterhin keinen lokalen Runner; die gemeinsame CI bleibt
-privat. Die nachfolgenden reinen Dokumentationsstände 0.9.29/0.9.30 sind keine neuen Installer.
+Das alte Update-Repository bleibt seit dem 23.10.2026 privat archiviert; die
+historischen Releases sind erhalten und öffentliche Downloads gesperrt.
+Seine Actions sind deaktiviert. Haupt- und Alt-Repository besitzen keinen lokalen
+Runner; die gemeinsame CI bleibt privat. Die nachfolgenden reinen
+Dokumentationsstände 0.9.29/0.9.30 sind keine neuen Installer.
 
 ## Erreichte Voraussetzungen
 
@@ -145,9 +147,10 @@ Standardkonto ab. Details und die präzise Testgrenze stehen unter
 [Updatekanal](update_channel.md#abnahme-des-veröffentlichten-versionsübergangs).
 Die Entwicklerinstallation und deren Daten werden nicht verwendet.
 
-Nach erfolgreichem öffentlichen Kanaltest wird das alte Update-Repository in
-Beschreibung und Projektlink eindeutig als abgelöst gekennzeichnet und archiviert.
-Historische Releases bleiben erhalten. Abschließend die Runnertrennung erneut
+Nach erfolgreichem öffentlichen Kanaltest ist ausschließlich das Hauptrepository
+für Downloads und Programmaktualisierungen maßgeblich. Der frühere separate
+Updatekanal bleibt als privates Archiv erhalten; Details unter
+[Updatekanal](update_channel.md). Abschließend die Runnertrennung erneut
 serverseitig bestätigen. Erst bei Erfolg aller Kriterien gilt die Gesamtaufgabe
 als abgeschlossen. Der datierte Abschlussbericht in der neuesten Releasebeschreibung
 und die geschützten Originalnachweise dokumentieren das tatsächliche Ergebnis.

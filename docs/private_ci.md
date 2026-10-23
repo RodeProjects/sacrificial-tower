@@ -1,7 +1,7 @@
 # Private CI und geprüfte Veröffentlichung
 
-Stand: 22.10.2026. **Phase 1 vollständig abgenommen.** Das Hauptrepository ist
-öffentlich; der alte Updatekanal ist abgelöst und archiviert. Die
+Stand: 23.10.2026. **Phase 1 vollständig abgenommen.** Das Hauptrepository ist
+öffentlich; der alte Updatekanal bleibt als privates historisches Archiv erhalten. Die
 [Kanal- und Veröffentlichungsprüfung](publication_readiness.md) beschreibt die Nachweise.
 Die direkte Runnerregistrierung am Hauptrepository wurde entfernt.
 

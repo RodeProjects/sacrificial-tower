@@ -157,7 +157,7 @@ class ManualGenerationTests(unittest.TestCase):
         adapter.fail=True
         with self.assertRaises(ValueError):service.prepare(request)
         self.assertFalse(list(f.root.glob("manual_tower_*")))
-        failure=list(f.root.glob("manual_failed_*/diagnostics/manual_slice.json"))
+        failure=list(f.root.glob("manual_failures/slice-*/diagnostics/manual_slice.json"))
         self.assertEqual(len(failure),1)
         self.assertFalse(json.loads(failure[0].read_text())["success"])
         self.assertFalse(list(failure[0].parent.rglob("*.stl")))

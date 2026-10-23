@@ -18,9 +18,15 @@ tatsächlich geprüften Quellcommit.
 
 **Bisherige Tester müssen die neue Version einmal manuell installieren.**
 Testinstallationen aus `RodeProjects/sacrificial-tower-updates` wechseln nicht
-automatisch. Der alte Kanal ist nach erfolgreicher öffentlicher Abnahme als
-abgelöst gekennzeichnet und archiviert. Kein paralleler aktiver Kanal, keine
-Übergangsarchitektur und keine dauerhafte Kompatibilität zum alten Kanal.
+automatisch. Das alte Repository bleibt seit dem 23.10.2026 als privates,
+schreibgeschütztes Archiv erhalten. Seine 27 historischen Releases samt
+Installer-Anhängen und Veröffentlichungsmetadaten wurden bei der Umstellung
+unverändert bestätigt. Öffentliche Zugriffe auf Repository und Release-Downloads
+sind gesperrt; berechtigte Konten behalten Zugriff auf das Archiv.
+Aktuelle Downloads und Programmaktualisierungen stehen ausschließlich im
+öffentlichen Hauptrepository bereit.
+Kein paralleler aktiver Kanal, keine Übergangsarchitektur und keine dauerhafte
+Kompatibilität zum alten Kanal.
 
 ## Signierung und Integrität
 

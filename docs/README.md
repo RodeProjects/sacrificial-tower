@@ -28,6 +28,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Aktueller Gesamtabgleich: offene GitHub-/Store-Schritte, Runner-Sicherheit und öffentliche Rechtstexte | [Veröffentlichungsprüfung](publication_readiness.md) |
 | Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |
 | GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
+| Lebensdauer von 3D-Vorschauen, Cachegrößen, Fehlerarchiv und Protokollrotation | [Lokale Daten und Speichergrenzen](local_storage.md) |
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
 | G-Code-/STL-Prüfung, Profile, Preslice und Cache | [Quellenablauf](source_workflow.md) |
 | Slicer-Erkennung und neue Adapter | [Erkennungsmodule](slicer_detection_modules.md) |

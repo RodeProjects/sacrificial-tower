@@ -263,7 +263,11 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 timeout_s=request.timeout_s,
                 cancellation_event=request.cancellation_event,
             )
-            if outcome.return_code != 0 or not native_project.is_file():
+            if outcome.cancelled or outcome.timed_out or outcome.crashed or outcome.return_code != 0 or not native_project.is_file():
+                self._write_failure_diagnostic(
+                    request, outcome, "Die native gemeinsame Projekterstellung ist fehlgeschlagen oder wurde abgebrochen.",
+                    working_root=prepared.working_root,
+                )
                 details = (outcome.stderr or outcome.stdout).strip()
                 if len(details) > 1000:
                     details = details[-1000:]

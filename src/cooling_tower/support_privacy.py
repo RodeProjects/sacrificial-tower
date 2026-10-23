@@ -180,6 +180,8 @@ SAFE_EVENTS = frozenset({
     'session_finished',
     'session_started',
     'slice_job_failed',
+    'slicer_failure_retained',
+    'slicer_failure_retention_failed',
     'slice_job_prepared',
     'slice_output_files_checked',
     'slicer_candidate_rejected',

@@ -55,17 +55,26 @@ def write_slice_diagnostics(result, root):
     (destination / "stderr.log").write_text(result.stderr, encoding="utf-8")
 
 
-def retain_failure_diagnostics(root):
+def retain_failure_diagnostics(root, result):
     """Keep only diagnostic files outside the disposable unsuccessful job."""
+    diagnostic = getattr(result, "diagnostic_path", None)
+    if diagnostic is not None and diagnostic.is_file() and not diagnostic.is_relative_to(root):
+        return f" Diagnose: {diagnostic}"
+    from cooling_tower.slicers.failure_diagnostics import SlicerFailureArchive, session_failure_archive
+
     try:
-        destination = Path(tempfile.mkdtemp(prefix="manual_failed_", dir=root.parent))
+        archive = session_failure_archive() or SlicerFailureArchive(root.parent / "manual_failures")
+        files = []
         for name in ("diagnostics", "project_diagnostics"):
             source = root / name
             if source.is_dir():
-                shutil.copytree(source, destination / name)
-        return f" Diagnose: {destination}"
-    except OSError:
-        return " Die Fehlerdiagnose konnte nicht dauerhaft gespeichert werden."
+                files.extend((p, p.relative_to(root).as_posix()) for p in source.rglob("*") if p.is_file())
+        path = archive.retain({"success": False, "purpose": "manual_calibration"}, files)
+        if path is not None:
+            return f" Diagnose: {path}"
+    except (OSError, ValueError):
+        pass
+    return " Die Fehlerdiagnose konnte nicht dauerhaft gespeichert werden."
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,7 +282,7 @@ class ManualGenerationService:
                 check_cancel(cancellation_event)
                 write_slice_diagnostics(sliced, root)
                 if not sliced.success or sliced.gcode_path is None:
-                    diagnostic_note = retain_failure_diagnostics(root)
+                    diagnostic_note = retain_failure_diagnostics(root, sliced)
                     raise ValueError((sliced.failure_reason or "Der manuelle Prüfslice ist fehlgeschlagen.") + " " + (sliced.stderr or sliced.stdout)[-1500:] + diagnostic_note)
                 notify(75, "G-Code und tatsächliche Layerzeiten werden ausgewertet …")
                 analysis = _CancelableAnalysis(self.analysis_service, cancellation_event)

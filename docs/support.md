@@ -1,5 +1,11 @@
 # Support, Diagnosepakete und vertrauliche Anliegen
 
+Lebensdauer, Größenbegrenzung und Bereinigung lokaler Hintergrundlogs,
+Slicer-Fehlernachweise und Vorschau-Caches stehen unter
+[Lokale Daten und Speichergrenzen](local_storage.md). Das begrenzte lokale
+Slicer-Fehlerarchiv enthält Rohdaten und gehört nicht automatisch zu den hier
+beschriebenen datensparsamen Diagnosepaketen.
+
 ## Eine Meldung erstellen
 
 Freiwilliger Support erfolgt über die

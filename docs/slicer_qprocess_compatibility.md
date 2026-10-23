@@ -23,6 +23,12 @@ jeweils auf 1 MiB begrenzt. Bei Überschreitung bleibt der letzte relevante
 Teil im Ergebnis; die vollständigen Bytes werden in einer `.binlog`-Datei im
 Diagnoseverzeichnis archiviert.
 
+Fehlgeschlagene und abgebrochene Aufrufe sichern innerhalb einer
+Anwendungs-Sitzung ihre konkreten Eingaben und begrenzten Prozessdaten vor
+dem Aufräumen nach `logs/slicer_failures/`. Das gilt auch für die native
+Projekterstellung. Aufbewahrungsgrenzen, Datenschutz und Headless-Verhalten
+stehen unter [Lokale Daten und Speichergrenzen](local_storage.md).
+
 Negative Anwendungs-Exitcodes sind keine Windows-Abstürze. Insbesondere
 Anycubics `-100` (`0xFFFFFF9C`) bezeichnet einen Slicing-/Exportfehler.
 `windows_process_status` prüft auch das reservierte NTSTATUS-Bit 28;

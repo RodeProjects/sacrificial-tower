@@ -385,6 +385,9 @@ def run_application(
     )
     diagnostic_journal.start_session()
     set_current_diagnostic_journal(diagnostic_journal)
+    from cooling_tower.slicers.failure_diagnostics import prune_session_failure_archive
+
+    prune_session_failure_archive()
     process_policy = configure_windows_process_policy()
     diagnostic_journal.record(
         "windows_process_policy",

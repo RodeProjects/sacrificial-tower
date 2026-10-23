@@ -116,6 +116,14 @@ def build_prusa_joint_project(
             working_directory=work, timeout_s=request.timeout_s,
             cancellation_event=request.cancellation_event,
         )
+        if outcome.cancelled or outcome.timed_out or outcome.crashed or outcome.return_code != 0 or not complete_ini.is_file():
+            from cooling_tower.slicers.failure_diagnostics import retain_slicer_failure
+
+            retain_slicer_failure(
+                request, outcome, "Die vollständigen Prusa-Projekteinstellungen konnten nicht bereitgestellt werden.",
+                working_root=work,
+                extra_files=((source_path, "input/source.stl"), (tower_path, "input/tower.stl")),
+            )
         if outcome.cancelled:
             raise JointProjectError("Die Erstellung des gemeinsamen PrusaSlicer-Projekts wurde abgebrochen.")
         if outcome.timed_out:

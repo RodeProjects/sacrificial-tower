@@ -814,12 +814,16 @@ class BaseSlicerAdapter:
                 request,
                 outcome,
                 failure_reason,
+                working_root=prepared.working_root,
             )
+            output_diagnostic = outcome.output_diagnostic_path
+            if diagnostic is not None and (diagnostic.parent / "process_output.binlog").is_file():
+                output_diagnostic = diagnostic.parent / "process_output.binlog"
             record_diagnostic(
                 "slice_job_failed",
                 failure_reason=failure_reason,
                 diagnostic_path=diagnostic,
-                process_output_diagnostic_path=outcome.output_diagnostic_path,
+                process_output_diagnostic_path=output_diagnostic,
             )
             return SliceResult(
                 success=False,
@@ -839,7 +843,7 @@ class BaseSlicerAdapter:
                 process_backend=outcome.backend,
                 stdout_truncated=outcome.stdout_truncated,
                 stderr_truncated=outcome.stderr_truncated,
-                process_output_diagnostic_path=outcome.output_diagnostic_path,
+                process_output_diagnostic_path=output_diagnostic,
             )
 
         ensure_writable_output(
@@ -970,9 +974,19 @@ class BaseSlicerAdapter:
         request: SliceRequest,
         outcome: ProcessOutcome,
         failure_reason: str,
+        *,
+        working_root: Path | None = None,
     ) -> Path | None:
         if not request.retain_failure_diagnostics:
             return None
+        from cooling_tower.slicers.failure_diagnostics import (
+            retain_slicer_failure, session_failure_archive,
+        )
+
+        if session_failure_archive() is not None and working_root is not None:
+            return retain_slicer_failure(
+                request, outcome, failure_reason, working_root=working_root,
+            )
         root = request.diagnostics_root or (
             request.output_directory.parent / "slicer_diagnostics"
         )

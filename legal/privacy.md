@@ -1,6 +1,6 @@
 # Datenschutzinformationen
 
-Stand: 22. Oktober 2026.
+Stand: 23. Oktober 2026.
 
 ## Verantwortlicher und Kontakt
 
@@ -24,6 +24,17 @@ sie werden nicht automatisch versendet. Einstellungen, Ausgaben und exportierte
 Diagnosepakete bleiben lokal bis zur Löschung durch den Nutzer gespeichert.
 Das technische Diagnosejournal wird größenabhängig begrenzt und rotiert;
 andere Fehlerprotokolle können bis zur Nutzerlöschung bestehen bleiben.
+Nach fehlgeschlagenen, abgebrochenen oder ins Zeitlimit gelaufenen
+Sliceraufrufen kann die Anwendung zusätzlich lokale Fehlernachweise mit
+Modell-/Projektkopien, temporären Profilkopien, Dateipfaden und Prozessausgaben
+sichern. Diese Rohdaten gehören nicht automatisch zu den exportierbaren
+Diagnosepaketen und werden nicht automatisch übertragen. Die Ablage hält
+höchstens zehn Fälle, insgesamt 128 MiB und höchstens 32 MiB je Fall.
+Ältere Fälle werden nach 14 Tagen beim nächsten Programmstart oder weiteren
+Sicherungsvorgang bereinigt; Größen- und Anzahlgrenzen können früher zur
+Löschung führen. Zu große Dateien können ausgelassen werden. Vor einer
+gesonderten manuellen Weitergabe sind die Rohdaten auf vertrauliche Inhalte
+zu prüfen.
 Eine automatische Löschung sämtlicher lokaler Daten nach einer festen Zeit
 findet nicht statt.
 

@@ -31,7 +31,7 @@ einen installierten unterstützten Slicer mit eingerichtetem Drucker.
 
 Die Beschreibungen und Topics werden direkt in GitHubs „About“-Bereich gepflegt.
 Sie sind keine aus einer Markdown-Datei automatisch übernommenen Einstellungen.
-Der Projektlink beider Repositories führt zum öffentlichen Windows-Download:
+Der Projektlink des Hauptrepositorys führt zum öffentlichen Windows-Download:
 `https://github.com/RodeProjects/sacrificial-tower/releases/latest`.
 
 Vorgesehene Kurzbeschreibung für das Haupt-Repository
@@ -43,10 +43,11 @@ Topics: `3d-printing`, `fdm`, `fff`, `sacrificial-tower`, `cooling-tower`,
 `minimum-layer-time`, `gcode`, `gcode-analysis`, `stl`, `3mf`, `orcaslicer`,
 `prusaslicer`, `bambu-studio`, `anycubic-slicer-next`, `windows`.
 
-Der frühere Updatekanal `RodeProjects/sacrificial-tower-updates` ist nach der
-erfolgreichen öffentlichen Kanalabnahme als abgelöst markiert und archiviert. Die einzige
-maßgebliche Download-README ist die README des Hauptrepositorys; keine doppelte
-Pflege einer separaten Downloadseite. Historische Releases bleiben erhalten.
+Die einzige maßgebliche Download-README ist die README des Hauptrepositorys;
+keine doppelte Pflege einer separaten Downloadseite. Der frühere separate
+Updatekanal bleibt als privates, schreibgeschütztes historisches Archiv erhalten;
+siehe [Updatekanal](update_channel.md). Öffentliche Downloads und neue
+Programmaktualisierungen werden ausschließlich im Hauptrepository bereitgestellt.
 
 ## Sichtbarkeit und Pflege
 
