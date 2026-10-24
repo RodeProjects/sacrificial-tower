@@ -191,10 +191,17 @@ class PreprocessorPanel(QWidget):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        if self.isVisible():
+            self._layout_timer.start(0)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
         self._layout_timer.start(0)
 
     def refresh_layout(self):
         """Reserve expanded content before the scroll area can compress rows."""
+        if not self.isVisible():
+            return
         for card in (self.input_group, self.advanced_group, self.preview_group):
             card.content_layout.invalidate()
             card.layout().invalidate()
