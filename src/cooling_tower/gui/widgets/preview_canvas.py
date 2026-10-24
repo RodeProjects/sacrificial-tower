@@ -51,6 +51,7 @@ class _PreparedLineFrame:
     bed_blocks: _LineBlocks
     object_blocks: _LineBlocks
     tower_blocks: _LineBlocks
+    travel_blocks: _LineBlocks
 
 
 class PreviewCanvas(QWidget):
@@ -83,6 +84,7 @@ class PreviewCanvas(QWidget):
         self._drag_button = Qt.MouseButton.NoButton
         self._navigation_enabled = False
         self._fit_whole_bed = False
+        self._travel_visible = True
         self._prepared_frame: _PreparedLineFrame | None = None
         self._rendered_frame: QPixmap | None = None
         self._rendered_frame_key: tuple[object, ...] | None = None
@@ -544,7 +546,8 @@ class PreviewCanvas(QWidget):
         context = context or self._projection_context()
         if self._fit_whole_bed:
             bed = scene.bed_bounds
-            z_max = max(1.0, scene.tower_height_mm)
+            z_max = max(1.0, scene.tower_height_mm,
+                scene.object_height_mm or 0.0, *(point.z for point in scene.wait_points))
             fit_points: Iterable[Point3D] = (
                 Point3D(x, y, z)
                 for x in (bed.minimum_x_mm, bed.maximum_x_mm)
@@ -557,6 +560,7 @@ class PreviewCanvas(QWidget):
                 for segment in chain(
                     scene.object_segments,
                     scene.tower_segments,
+                    scene.travel_segments if self._travel_visible else (),
                 )
                 for point in (segment.start, segment.end)
             )
@@ -607,7 +611,13 @@ class PreviewCanvas(QWidget):
             self.pan_x,
             self.pan_y,
             self._fit_whole_bed,
+            self._travel_visible,
         )
+
+    def set_travel_visible(self, visible: bool) -> None:
+        self._travel_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
 
     def _line_blocks(
         self,
@@ -661,9 +671,14 @@ class PreviewCanvas(QWidget):
             Point3D(bed.maximum_x_mm, bed.maximum_y_mm, 0.0),
             Point3D(bed.minimum_x_mm, bed.maximum_y_mm, 0.0),
         )
+        polygons = (
+            (scene.bed_geometry.printable_polygon, *scene.bed_geometry.excluded_polygons)
+            if scene.bed_geometry is not None else
+            (tuple((point.x, point.y) for point in bed_points),)
+        )
         bed_segments = tuple(
-            LineSegment3D(point, bed_points[(index + 1) % 4])
-            for index, point in enumerate(bed_points)
+            LineSegment3D(Point3D(*point, 0), Point3D(*polygon[(index + 1) % len(polygon)], 0))
+            for polygon in polygons for index, point in enumerate(polygon)
         )
         prepared = _PreparedLineFrame(
             key=key,
@@ -678,6 +693,10 @@ class PreviewCanvas(QWidget):
                 scene.tower_segments,
                 parameters,
                 context,
+            ),
+            travel_blocks=self._line_blocks(
+                scene.travel_segments if self._travel_visible else (), parameters, context,
+                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
             ),
         )
         self._prepared_frame = prepared
@@ -741,6 +760,30 @@ class PreviewCanvas(QWidget):
         frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         frame_painter.setPen(QPen(QColor(self.TOWER_COLOR), 1.5))
         self._draw_line_blocks(frame_painter, prepared.tower_blocks)
+        if self._travel_visible:
+            frame_painter.setPen(QPen(QColor("#e9d271"), 1.0, Qt.PenStyle.DashLine))
+            self._draw_line_blocks(frame_painter, prepared.travel_blocks)
+            if scene.wait_position_xy_mm is not None:
+                context = self._projection_context()
+                parameters = self._fit_parameters(context)
+                # Mark the actual lifted G4 position; when no pause is needed,
+                # retain the planned XY waypoint at bed level.
+                position = scene.wait_points[-1] if scene.wait_points else Point3D(*scene.wait_position_xy_mm, 0)
+                marker = self._project(position, parameters, context)
+                frame_painter.setPen(QPen(QColor("#ffe48a"), 2.0))
+                frame_painter.drawEllipse(marker, 5, 5)
+                frame_painter.drawText(marker + QPointF(9, -7), "Warten")
+        if scene.bed_geometry is not None:
+            context = self._projection_context()
+            parameters = self._fit_parameters(context)
+            origin = self._project(Point3D(0, 0, 0), parameters, context)
+            length = min(30.0, (scene.bed_bounds.maximum_x_mm-scene.bed_bounds.minimum_x_mm) / 8)
+            for label, color, endpoint in (("X+", "#f07575", Point3D(length, 0, 0)),
+                    ("Y+", "#75d18c", Point3D(0, length, 0))):
+                point = self._project(endpoint, parameters, context)
+                frame_painter.setPen(QPen(QColor(color), 1.5))
+                frame_painter.drawLine(QLineF(origin, point))
+                frame_painter.drawText(point + QPointF(4, -4), label)
         frame_painter.end()
         self._rendered_frame = frame
         self._rendered_frame_key = current_key

@@ -72,7 +72,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
 
     def test_both_methods_require_source_slicer_and_preparation_confirmation(self) -> None:
         window = self.window
-        self.assertEqual(set(GenerationMode), {GenerationMode.AUTOMATIC, GenerationMode.MANUAL})
+        self.assertEqual(set(GenerationMode), {GenerationMode.AUTOMATIC, GenerationMode.MANUAL, GenerationMode.PREPROCESSOR})
         self.assertEqual(set(window.generation_sessions), set(GenerationMode))
         workflow = window.workflow
         workflow.set_slicer_step_visible(True)
@@ -102,7 +102,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertFalse(window.workflow_group.isVisible())
                 self.assertTrue(window.preparation_open_button.isVisible())
                 self.assertIs(window.window_pages.currentWidget(), window.main_surface)
-                self.assertTrue(window.footer.isVisible())
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
                 window.show_generation_method_selection()
 
     def test_startup_divider_and_overlay_shadow_preserve_brand_top_and_bottom_insets(self) -> None:
@@ -367,7 +367,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         for mode in GenerationMode:
             with self.subTest(mode=mode), patch.object(window.manual_controller,"ensure_context"):
                 window.select_generation_mode(mode)
-                self.assertTrue(window.footer.isVisible())
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
                 window.show_preparation_workspace()
                 self.app.processEvents()
                 self.assertTrue(window.workflow_group.isVisible())
@@ -379,7 +379,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 window.close_preparation_workspace()
                 self.app.processEvents()
                 self.assertIs(window.generation_mode,mode)
-                self.assertTrue(window.footer.isVisible())
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
 
     def test_manual_mode_only_shows_centered_red_notice_in_single_column_layout(self) -> None:
         window = self.window
@@ -524,7 +524,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         card_width = preparation.preferred_width()
         right_width = header.right_widget.sizeHint().width()
         brand_width = header.brand_widget.sizeHint().width()
-        centered_boundary = 2 * (card_width + gap) + brand_width
+        centered_boundary = 2 * (max(card_width, right_width) + gap) + brand_width
         text_boundary = card_width + right_width + brand_width + 2 * gap
         anchored_width = (centered_boundary + text_boundary) // 2
         for width, state in ((centered_boundary + 20, "full"), (anchored_width, "full"),
@@ -546,10 +546,13 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertEqual(preparation.mapTo(header, QPoint()), QPoint(0, 0))
                 if state == "full":
                     brand_rect = QRect(header.brand_widget.mapTo(header, QPoint()), header.brand_widget.size())
-                    self.assertEqual(brand_rect.x(), max((width - brand_width) // 2, preparation.width() + gap))
+                    self.assertEqual(brand_rect.x(), min(max((width - brand_width) // 2, preparation.width() + gap), width - right_width - gap - brand_width))
                     self.assertGreaterEqual(header.right_widget.x() - brand_rect.right() - 1, gap)
                     if width <= centered_boundary:
-                        self.assertEqual(brand_rect.x() - preparation.width(), gap)
+                        if card_width >= right_width:
+                            self.assertEqual(brand_rect.x() - preparation.width(), gap)
+                        else:
+                            self.assertEqual(header.right_widget.x() - brand_rect.right() - 1, gap)
                     for label in (window.title_label, window.subtitle_label):
                         self.assertTrue(label.alignment() & Qt.AlignmentFlag.AlignHCenter)
                         self.assertFalse(label.wordWrap())

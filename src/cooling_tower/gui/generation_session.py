@@ -11,6 +11,7 @@ from cooling_tower.preview import PreviewExportResult, PreviewResult, PreviewSta
 class GenerationMode(str, Enum):
     AUTOMATIC = "automatic"
     MANUAL = "manual"
+    PREPROCESSOR = "preprocessor"
 
 
 @dataclass(slots=True)

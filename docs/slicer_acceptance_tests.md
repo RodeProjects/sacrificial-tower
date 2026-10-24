@@ -43,6 +43,7 @@ Die Vorlage enthält unter anderem diese Abnahmen:
 | `orca_unselected_system_filament` | Orca-Maschine, Prozess und Systemfilament |
 | `orca_confirmation_preslice` | Orca-Benutzerprofile und Preslice |
 | `prusa_confirmation_preslice` | Prusa-Benutzerprofile und Preslice |
+| `preprocessor_acceptance` | Vollständiger Präprozessorablauf für alle vier Slicer mit eigenen Profilkombinationen |
 | `phase14_anycubic_base_slice` | Anycubic-Systemprofile für einen realen STL-Slice |
 | `phase16_sparse_user_profile` | Anycubic-Systemmaschine und Benutzerprofile für die Sparse-Profilprüfung |
 | `phase16_system_profile_slice` | Anycubic-Systemprofile für eine Kalibrierungsprüfung |
@@ -66,7 +67,7 @@ jeweilige Opt-in-Schalter gesetzt sein:
 | Support-Regressionsläufe | `COOLING_TOWER_RUN_SUPPORT_REGRESSION=1` |
 | Orca-Integration | `COOLING_TOWER_RUN_INSTALLED_ORCA_INTEGRATION_TEST=1` |
 | Prusa-Integration | `COOLING_TOWER_RUN_INSTALLED_PRUSA_INTEGRATION_TEST=1` |
-| Reale Bambu-/Anycubic-Abnahmen | `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` |
+| Reale Bambu-/Anycubic-Abnahmen und Präprozessor-Vier-Slicer-Abnahme | `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` |
 | Benutzer-Slicer-Regressionen | `COOLING_TOWER_RUN_USER_SLICER_REGRESSION=1` |
 | Microsoft-Store-Slicer-Erkennung | `COOLING_TOWER_RUN_INSTALLED_STORE_SLICER_TEST=1` |
 
@@ -74,3 +75,16 @@ Ohne passenden Store-Slicer wird die Store-Prüfung mit einem verständlichen
 Grund übersprungen. Eine fehlerhafte JSON-Konfiguration wird dagegen als
 Konfigurationsfehler gemeldet, damit ungültige lokale Angaben nicht still
 übersehen werden.
+
+Die vollständige Präprozessor-Abnahme wird mit den vier Profilkombinationen
+unter `tests.preprocessor_acceptance` gestartet:
+
+```powershell
+$env:COOLING_TOWER_RUN_REAL_SLICER_TESTS='1'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_preprocessor_real_slicers.py -v
+```
+
+Sie verwendet einen kleinen eigenen STL-Testkörper, prüft die Schichtzeiten
+des fertigen G-Codes, eine Neuberechnung aus demselben Pre-Slice und die
+Unverändertheit der ausgewählten Originalprofile. Fehlende lokale Konfiguration
+ist ein Skip und ersetzt keine tatsächlich ausgeführte Slicer-Abnahme.

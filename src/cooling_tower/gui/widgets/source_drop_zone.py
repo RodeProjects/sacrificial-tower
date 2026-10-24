@@ -362,6 +362,14 @@ class SourceDropZone(QFrame):
             int(self.width() if width is None else width)
             - self.frameWidth() * 2,
         )
+        if not self.info_widget.isHidden() and self.info_widget.hasHeightForWidth():
+            margins = self.root_layout.contentsMargins()
+            info_width = max(1, layout_width - margins.left() - margins.right())
+            # AlignTop otherwise caps this child at its unconstrained sizeHint,
+            # while the parent reserves the wrapped path's larger height.
+            # Publish the measured height so both layouts use the same rows.
+            self.info_widget.setFixedHeight(self.info_widget.heightForWidth(info_width))
+            self.root_layout.invalidate()
         required_height = max(
             0,
             self.root_layout.minimumSize().height(),
