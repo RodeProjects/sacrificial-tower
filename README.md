@@ -14,6 +14,10 @@ hängt maßgeblich von den im Programm gewählten Profilen und deren Einstellung
 Beide Modi
 exportieren ein **gemeinsames 3MF-Projekt mit Modell und Kühlturm** für deinen
 Slicer; die Turm-STL wird zusätzlich gespeichert.
+Die dritte Methode **Präprozessor** ergänzt den vorhandenen Pre-Slice um
+Abkühlpausen und einen standardmäßig hohlen Abstreifturm. Sie berücksichtigt
+Fahr- und Turmzeiten, zeigt Druckbett, Modell und Turm in rekonstruierten
+G-Code-Koordinaten und exportiert direkt geprüften G-Code.
 
 **English: Sacrificial Tower / Cooling Tower Generator - Creating dynamic
 sacrificial objects tailored to your desired layer time**
@@ -28,6 +32,9 @@ resulting layer times. How closely an automatically generated tower matches your
 desired layer time depends substantially on the profiles selected in the
 application and their settings. Both modes export a **3MF project containing your model
 and tower**, plus a separate tower STL.
+The third **Preprocessor** method adds cooling pauses and a hollow wiping tower
+to the existing pre-slice. It accounts for travel and tower time, reconstructs
+the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 
 **[Windows-Installer herunterladen](https://github.com/RodeProjects/sacrificial-tower/releases/latest)**
 · [Getestete Slicer](#unterstützte-slicer-und-getestete-versionen)
@@ -42,14 +49,18 @@ and tower**, plus a separate tower STL.
   festem Prüfslice und tatsächlicher Zeitbewertung.
 - Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden
   Modi; zusätzliche STL-Datei des Turms.
+- [Präprozessor](docs/preprocessor.md) mit hohlem Abstreifturm, automatischer
+  sicherer Platzierung, Restwartezeiten und direktem G-Code-Export.
 - Hinweise auf erkannte leere Layer und optionale objektspezifische
   Stützensimulation bei erkanntem, global ausgeschaltetem Stützenprofil.
 - Originalmodelle und installierte Slicerprofile bleiben unverändert;
   abgeleitete Dateien entstehen in eigenen Arbeitsbereichen.
 
 Außendurchmesser, Übergangswinkel und Standfuß begrenzen die Turmgeometrie.
-Der geschlossene Turmkörper hat keinen modellierten inneren Hohlraum; das
-tatsächliche Infill bestimmt der Slicer. Wenn die Analyse keinen Turm benötigt,
+In den Geometriemodi hat der geschlossene Turmkörper keinen modellierten
+inneren Hohlraum; das tatsächliche Infill bestimmt der Slicer. Der
+Präprozessor erzeugt dagegen standardmäßig eine hohle Abstreifwand.
+Wenn die Analyse keinen Turm benötigt,
 ist das ein erfolgreicher Ausgang ohne zusätzliche STL. Die Anwendung ist
 vom Anbieter kostenlos erhältlich und unter der **Apache-2.0-Lizenz** lizenziert;
 die [Projektlizenz](LICENSE.md) beschreibt

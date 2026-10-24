@@ -125,6 +125,13 @@
         }
       }
     },
+    "preprocessor_acceptance": {
+      "_comment": "Vollständiger STL-/Präprozessor-/G-Code-Exporttest. Vorhandene kompatible Profile mit sicherer Endsequenz auswählen; kein Z-Homing nach dem Druck. Die Profile bleiben unverändert.",
+      "anycubic_slicer_next": {"profiles": {"machine": "", "process": "", "filament": ""}},
+      "bambu_studio": {"profiles": {"machine": "", "process": "", "filament": ""}},
+      "orca_slicer": {"profiles": {"machine": "", "process": "", "filament": ""}},
+      "prusa_slicer": {"profiles": {"machine": "", "process": "", "filament": ""}}
+    },
     "user_slicer_regressions": {
       "_comment": "source_stl und reference_gcode erwarten Dateipfade; relative Pfade gelten ab Projektordner. Der Test prüft Referenzergebnisse, keine beliebigen Daten. Manifold- und non-manifold-STLs sind verschieden.",
       "orca_slicer": {

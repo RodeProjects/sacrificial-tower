@@ -190,7 +190,7 @@ class HeaderMethodSelection(QWidget):
         self.buttons_layout.setSpacing(0)
         self.group = QButtonGroup(self)
         self.buttons: dict[str, QPushButton] = {}
-        for mode, text in (("automatic", "Automatisch"), ("manual", "Manuell")):
+        for mode, text in (("automatic", "Automatisch"), ("manual", "Manuell"), ("preprocessor", "Präprozessor")):
             button = QPushButton(text)
             button.setObjectName("headerMethodButton")
             button.setProperty("generationMode", mode)
@@ -199,7 +199,7 @@ class HeaderMethodSelection(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFixedHeight(button_height)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setToolTip(f"{text}e Turmerstellung öffnen")
+            button.setToolTip("Präprozessor öffnen" if mode == "preprocessor" else f"{text}e Turmerstellung öffnen")
             button.clicked.connect(button.clearFocus)
             self.group.addButton(button)
             self.buttons[mode] = button
@@ -382,8 +382,8 @@ class WorkflowHeader(QWidget):
             left_limit = card_width + gap if preparation_visible else 0
             right_limit = available - right_width - gap
             brand_width = self.brand_widget.sizeHint().width()
-            brand_x = max((available - brand_width) // 2, left_limit)
-            text_fits = brand_x + brand_width <= right_limit
+            brand_x = min(max((available - brand_width) // 2, left_limit), right_limit - brand_width)
+            text_fits = brand_x >= left_limit
             self.layout_state = "full" if text_fits else "brand_hidden"
             self.brand_widget.setVisible(text_fits)
             self.grid.setColumnMinimumWidth(0, card_width)

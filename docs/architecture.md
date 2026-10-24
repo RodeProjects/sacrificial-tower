@@ -382,19 +382,23 @@ steht als Badge direkt neben „3D-Vorschau“.
 ### Auswahl der Generierungsmethode und Sitzungszustände
 
 Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt der Inhaltsbereich
-zunächst zwei responsive Methodenkarten mit einem dezenten Lilaton für
-„Automatisch“ und einem dunkleren Blauton für „Manuell“. Die hellen Aktionsflächen
+zunächst drei responsive Methodenkarten für „Automatisch“, „Manuell“ und
+„Präprozessor“. Die bestehenden Geometriemodi behalten ihren dezenten Lilaton
+beziehungsweise dunkleren Blauton. Die hellen Aktionsflächen
 innerhalb der Karten zeigen dauerhaft ihren bisherigen violetten bzw. blauen
 Hover-Verlauf. Beim Hover werden ausschließlich diese inneren Flächen zusätzlich
 farblich kräftiger und ihre Konturen deutlicher; die bestehende Hover-Darstellung
 der äußeren Karten bleibt erhalten. Beim Verlassen wird der neue Normalzustand
 wiederhergestellt. `GenerationMode` kennzeichnet die
 ausgewählte Methode; `None` bedeutet, dass noch keine Methode gewählt wurde. Die Vorbereitung und
-deren Analysequelle werden von beiden Methoden gemeinsam genutzt.
+deren Analysequelle werden von allen drei Methoden gemeinsam genutzt.
 `window_pages` wechselt im Inhaltsbereich zwischen `settings_scroll` und
 `preparation_workspace`. Der Header bleibt sichtbar. Solange „Datei und Slicer
 vorbereiten“ geöffnet ist, bleibt der gesamte Footer ausgeblendet. Nach Rückkehr
-zur Methodenwahl oder zum bestätigten Generierungsmodus erscheint er wieder.
+zur Methodenwahl oder zu einem Geometriemodus erscheint er wieder.
+Der Präprozessor verwendet eigene Fortschritts-, Fehler- und Exportaktionen
+in einem ebenfalls geteilten Footer außerhalb des scrollbaren Arbeitsbereichs;
+der gemeinsame Geometrie-Footer bleibt dort verborgen.
 Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
 Vorbereitungskarte dauerhaft in dieser Ansicht und ist kein Dropdown mehr.
 `WorkflowHeader` verankert den kompakten `PreparationFactsButton` direkt am
@@ -498,9 +502,12 @@ Turmstands. Die bisherigen Attribute `current_preview`, `preview_state`,
 `last_export_result` und `_last_exported_preview_identity` greifen ausdrücklich
 auf die automatische Sitzung zu. So können automatische Callbacks kein
 manuelles Ergebnis überschreiben, auch wenn die automatische Ansicht verborgen ist.
-Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen beider Methoden;
+Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen aller Methoden;
 beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
 Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
+Der Präprozessor besitzt eine eigene Sitzung, einen verwalteten Vorschaujob und
+einen unmittelbaren G-Code-Export. Sein Datenfluss und seine Sicherheits-/
+Zeitinvarianten stehen unter [Präprozessor](preprocessor.md).
 Die Einstellungen und Fortschrittssteuerung der Automatik bleiben in ihrem
 bestehenden Arbeitsbereich. Manuelle Eingaben verwenden ausschließlich die
 manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.

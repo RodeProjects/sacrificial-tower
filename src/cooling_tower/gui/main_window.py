@@ -104,6 +104,7 @@ from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_session import GenerationMode, GenerationSession
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.manual_controller import ManualGenerationController
+from cooling_tower.gui.preprocessor_panel import PreprocessorController, PreprocessorPanel
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
 from cooling_tower.gui.widgets.workflow_header import WorkflowHeader
 from cooling_tower.gui.widgets.header_update_controls import HeaderUpdateControls
@@ -3187,6 +3188,7 @@ class MainWindow(QMainWindow):
         self.header_method_selection = self.workflow_header.method_selection
         self.automatic_method_button = self.header_method_selection.buttons["automatic"]
         self.manual_method_button = self.header_method_selection.buttons["manual"]
+        self.preprocessor_method_button = self.header_method_selection.buttons["preprocessor"]
         self.header_method_selection.method_selected.connect(self.select_generation_mode)
         self.generation_method_recommendation = QLabel("(Zweispaltige Ansicht empfohlen - Fenster verbreitern)")
         self.generation_method_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -3228,6 +3230,17 @@ class MainWindow(QMainWindow):
         self.generation_method_grid.add_pair(
             self.automatic_generation_card, self.manual_generation_card
         )
+        self.preprocessor_generation_card = GenerationModeCard(
+            "Präprozessor",
+            "Den Pre-Slice um Park- und Wartephasen sowie einen Opferturm zum "
+            "Abwischen und Primen ergänzen. Mit rekonstruierter Vorschau und G-Code-Export.",
+            "Präprozessor öffnen →",
+        )
+        self.preprocessor_generation_card.setProperty("generationMode", "preprocessor")
+        self.preprocessor_generation_card.clicked.connect(
+            lambda: self.select_generation_mode(GenerationMode.PREPROCESSOR)
+        )
+        self.generation_method_grid.add_full_width(self.preprocessor_generation_card)
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
         )
@@ -3236,6 +3249,10 @@ class MainWindow(QMainWindow):
         self.manual_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.manual_controller = ManualGenerationController(self, self.manual_generation_panel)
         generation_layout.addWidget(self.manual_generation_panel)
+        self.preprocessor_panel = PreprocessorPanel()
+        self.preprocessor_panel.layout_changed.connect(self._refresh_settings_content_minimum_height)
+        self.preprocessor_controller = PreprocessorController(self, self.preprocessor_panel)
+        generation_layout.addWidget(self.preprocessor_panel)
         self.content_layout.addWidget(self.generation_workspace)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
@@ -3664,6 +3681,7 @@ class MainWindow(QMainWindow):
         self._footer_narrow_layout: bool | None = None
         self._refresh_footer_responsive_layout(force=True)
         root_layout.addWidget(footer)
+        root_layout.addWidget(self.preprocessor_panel.footer_widget)
         self.setCentralWidget(central)
         self._footer_height_timer = QTimer(self)
         self._footer_height_timer.setSingleShot(True)
@@ -3806,7 +3824,7 @@ class MainWindow(QMainWindow):
         )
         self.preparation_open_button.setEnabled(available)
         self.preparation_view_button.setEnabled(available)
-        for button in (self.automatic_method_button, self.manual_method_button):
+        for button in (self.automatic_method_button, self.manual_method_button, self.preprocessor_method_button):
             button.setEnabled(available and ready)
 
     def _show_preparation_workspace(self, view: str) -> None:
@@ -3919,7 +3937,9 @@ class MainWindow(QMainWindow):
             and self._preparation_workspace_view == "preparation"
         )
         ready = self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged
-        self.footer.setVisible(ready and not preparation_open)
+        self.footer.setVisible(ready and not preparation_open and self.generation_mode is not GenerationMode.PREPROCESSOR)
+        self.preprocessor_panel.footer_widget.setVisible(
+            ready and not preparation_open and self.generation_mode is GenerationMode.PREPROCESSOR)
 
     def _generation_method_change_available(self) -> bool:
         return not (
@@ -3945,6 +3965,8 @@ class MainWindow(QMainWindow):
             self.manual_controller.ensure_context()
             if changed:
                 self.manual_controller.panel.select("")
+        elif mode is GenerationMode.PREPROCESSOR:
+            self.preprocessor_controller.ensure_context()
         self._refresh_phase17_actions()
 
     def show_generation_method_selection(self) -> None:
@@ -3956,11 +3978,12 @@ class MainWindow(QMainWindow):
         workspace_visible = preparation_ready
         source_ready = (self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged)
         self.generation_workspace.setVisible(workspace_visible)
-        for card in (self.automatic_generation_card,self.manual_generation_card):
+        for card in (self.automatic_generation_card,self.manual_generation_card,self.preprocessor_generation_card):
             card.setEnabled(source_ready)
             card.setToolTip("" if source_ready else "Zuerst Datei, Slicer und Druckprofile vorbereiten.")
         self.ready_grid.setVisible(source_ready and self.generation_mode is GenerationMode.AUTOMATIC)
         self.manual_generation_panel.setVisible(source_ready and self.generation_mode is GenerationMode.MANUAL)
+        self.preprocessor_panel.setVisible(source_ready and self.generation_mode is GenerationMode.PREPROCESSOR)
         self._refresh_generation_method_recommendation()
 
     def _refresh_generation_method_recommendation(self, *_):
@@ -5172,6 +5195,9 @@ class MainWindow(QMainWindow):
         self._refresh_workflow_navigation_actions()
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.refresh()
+            return
+        if self.generation_mode is GenerationMode.PREPROCESSOR:
+            self.preprocessor_controller.refresh()
             return
         self._refresh_layer_range_tool()
         block_reason = self._export_block_reason()
@@ -8081,6 +8107,7 @@ class MainWindow(QMainWindow):
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
         self.manual_controller.invalidate_context()
+        self.preprocessor_controller.invalidate()
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -10175,6 +10202,7 @@ class MainWindow(QMainWindow):
             JobKind.PREVIEW,
             reason="source_removed",
         )
+        self.preprocessor_controller.invalidate()
         for session in self.generation_sessions.values():
             session.discard_preview()
         self.preview_state = PreviewState.EMPTY

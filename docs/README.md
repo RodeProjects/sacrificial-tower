@@ -3,8 +3,11 @@
 Sacrificial Tower erstellt zusätzliche Kühltürme, die beim FDM-/FFF-3D-Druck
 mehr Zeit zum Abkühlen zwischen den Layern schaffen. Die Turmform wird
 automatisch berechnet oder manuell gestaltet und mit dem gewählten Slicer auf
-ihre Layerzeiten geprüft. Beide Modi exportieren im STL-Ablauf ein gemeinsames
+ihre Layerzeiten geprüft. Beide Geometriemodi exportieren im STL-Ablauf ein gemeinsames
 3MF-Projekt mit Modell und Turm sowie die zusätzliche Turm-STL.
+Als dritte Methode ergänzt der [Präprozessor](preprocessor.md) den vorhandenen
+Pre-Slice um sichere Fahrwege, Abkühlpausen und einen standardmäßig hohlen
+Abstreifturm. Er bietet eine rekonstruierte Vorschau und direkten G-Code-Export.
 Einstieg und Startbefehle stehen im
 [Repository-README](../README.md). Diese Übersicht ist der zentrale Wegweiser.
 Für die Bedienung mit [Manuellem Editor](manual_editor.md) und
@@ -19,6 +22,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Komponenten, Verantwortlichkeiten, Datenfluss und Erweiterung | [Architektur](architecture.md) |
 | Turmhöhe, lineare Verbreiterung, konkave Verjüngung und Absätze | [Turmgeometrie](tower_geometry.md) |
 | Manueller Béziereditor, Slicervoraussetzungen, feste Slicerprüfung, Zustände und Abnahme | [Manueller Editor](manual_editor.md) |
+| Abkühlpausen, hohler Abstreifturm, sichere Fahrwege, G-Code-Vorschau und Export | [Präprozessor](preprocessor.md) |
 | Direkte Vorschauaktionen sowie entfernte und verbleibende Einstellungen links | [Manuelle Bedienelemente](manual_controls_analysis.md) |
 | Installation, Tests, Build, gezielte Testauswahl | [Entwicklung](development.md) |
 | Konfiguration und Start optionaler Abnahmen mit installierten Slicern | [Slicer-Abnahmetests](slicer_acceptance_tests.md) |

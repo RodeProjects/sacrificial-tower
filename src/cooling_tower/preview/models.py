@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from cooling_tower.models import (
     BedBounds,
+    BedGeometry,
     CalibrationConfig,
     CalibrationMode,
     GenerationSettings,
@@ -69,6 +70,10 @@ class PreviewScene:
     object_layer_count: int | None = None
     tower_layer_count: int | None = None
     tower_circle_segments: int | None = None
+    bed_geometry: BedGeometry | None = None
+    travel_segments: tuple[LineSegment3D, ...] = ()
+    wait_points: tuple[Point3D, ...] = ()
+    wait_position_xy_mm: tuple[float, float] | None = None
 
 
 def _json_value(value: Any) -> Any:

@@ -140,7 +140,7 @@ def _numbers(value: object) -> tuple[float, ...]:
         return tuple(result)
     if isinstance(value, str):
         result = []
-        for match in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value):
+        for match in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", value):
             try:
                 number = float(match)
             except (ValueError, OverflowError):

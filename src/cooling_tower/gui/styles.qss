@@ -91,7 +91,8 @@ QLabel#preparationFactsStatus[confirmed="false"] {
     color: #526274;
 }
 
-QWidget#mainFooter {
+QWidget#mainFooter,
+QWidget#preprocessorFooter {
     background: #f3f6f9;
     border-top: 1px solid #cbd6e1;
 }
@@ -4066,10 +4067,12 @@ QWidget#generationResultActions QPushButton {
     min-height: 34px; max-height: 34px; padding: 0 12px;
 }
 /* Left controls stay compact; all right-side actions retain their original size. */
-QWidget#mainFooter QPushButton {
+QWidget#mainFooter QPushButton,
+QWidget#preprocessorFooter QPushButton {
     min-height: 30px; max-height: 30px; padding: 0 12px;
 }
-QWidget#mainFooter QWidget#footerActionArea QPushButton {
+QWidget#mainFooter QWidget#footerActionArea QPushButton,
+QWidget#preprocessorFooter QWidget#footerActionArea QPushButton {
     min-height: 34px; max-height: 34px; padding: 7px 13px;
 }
 QWidget#mainFooter QFrame#previewActionControl { border: none; }
@@ -4081,6 +4084,14 @@ QWidget#mainFooter QFrame#previewActionControl[cancelAction="true"] QPushButton#
 }
 QWidget#mainFooter QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton {
     border-color: #a4d5b6;
+}
+QWidget#preprocessorFooter QPushButton#preprocessorCancelButton {
+    color: #8c2820;
+    background: #f8e4e4;
+    border: 1px solid #dfbcbc;
+}
+QWidget#preprocessorFooter QPushButton#preprocessorCancelButton:hover {
+    background: #eac5c5;
 }
 QSpinBox#circleSegments:disabled {
     color: #748396; background: #f1f4f6; border-color: #d6dee4;

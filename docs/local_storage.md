@@ -22,7 +22,10 @@ Diese Ansichten belegen keine zunehmend wachsende Dateisammlung auf der Platte.
 ebenfalls nur im Arbeitsspeicher. Die automatische und manuelle Methode
 besitzen jeweils ihren aktuellen Sitzungsstand. Ihre temporären STL-, 3MF-
 und Prüfdaten werden beim Verwerfen des Ergebnisses und beim regulären
-Schließen freigegeben. Slicer-Arbeits- und isolierte Umgebungsordner werden
+Schließen freigegeben. Der Präprozessor hält seinen abgeleiteten G-Code und
+seine vorübergehende Zeitbasis ebenfalls nur in einem eigenen Arbeitsordner;
+Verwerfen, Abbruch und reguläres Schließen geben diese Dateien frei.
+Slicer-Arbeits- und isolierte Umgebungsordner werden
 nach dem jeweiligen Aufruf entfernt.
 
 Nach einem Prozessabsturz, erzwungenem Beenden oder fehlgeschlagener

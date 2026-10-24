@@ -36,7 +36,7 @@ Beide Methoden verwenden die Hauptfenster-Fußleiste; manuelle Resetaktionen bet
 nur den manuellen Editor. Bei geöffneter Datei-/Slicervorbereitung ist die gesamte
 Fußleiste ausgeblendet und erscheint bei Rückkehr zum Editor wieder.
 Änderungen der Quelle oder Profile verwerfen die
-betroffenen Ergebnisse beider Methoden und den manuellen Kontext. Laufende
+betroffenen Ergebnisse aller Methoden und den manuellen Kontext. Laufende
 Generierungen und Exporte sperren den Methodenwechsel. Beim Schließen werden
 die temporären Ergebnisdateien beider Sitzungen freigegeben.
 
