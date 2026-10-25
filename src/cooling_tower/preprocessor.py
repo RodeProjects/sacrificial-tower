@@ -171,7 +171,7 @@ def _number(values, key, default):
         return default
 
 
-def _profile_line_width(values, keys, nozzle, default):
+def _profile_line_width(values, keys, nozzle, default, *, percent_base=None):
     for key in keys:
         value = values.get(key)
         while isinstance(value, (tuple, list)):
@@ -179,7 +179,7 @@ def _profile_line_width(values, keys, nozzle, default):
         if value is None:
             continue
         try:
-            width = (float(value.strip()[:-1]) * nozzle / 100
+            width = (float(value.strip()[:-1]) * (percent_base if percent_base is not None else nozzle) / 100
                 if isinstance(value, str) and value.strip().endswith("%") else float(value))
         except (TypeError, ValueError):
             raise ValueError(f"Ungültige Profil-Linienbreite: {key}.") from None
@@ -423,21 +423,33 @@ class PreprocessorService:
         filament = _number(values, "filament_diameter", 1.75)
         if not 0.1 <= nozzle <= 2 or not 1 <= filament <= 4:
             raise ValueError("Düsen- oder Filamentdurchmesser ist ungültig.")
-        general_width = _profile_line_width(values, ("line_width", "extrusion_width"), nozzle, nozzle * 1.1)
-        width = _profile_line_width(values, ("outer_wall_line_width", "external_perimeter_extrusion_width"), nozzle, general_width)
-        inner_width = _profile_line_width(values, ("inner_wall_line_width", "perimeter_extrusion_width"), nozzle, general_width)
+        prusa_widths = request.profile.installation.adapter_id == "prusa_slicer"
+        width_records = []
+        for layer in layers[:count] or layers[:1]:
+            percent_base = layer.height_mm if prusa_widths else nozzle
+            general = _profile_line_width(values, ("extrusion_width", "line_width") if prusa_widths else ("line_width", "extrusion_width"),
+                nozzle, nozzle * 1.1, percent_base=percent_base)
+            outer = _profile_line_width(values, ("external_perimeter_extrusion_width", "outer_wall_line_width") if prusa_widths
+                else ("outer_wall_line_width", "external_perimeter_extrusion_width"), nozzle, general, percent_base=percent_base)
+            inner = _profile_line_width(values, ("perimeter_extrusion_width", "inner_wall_line_width") if prusa_widths
+                else ("inner_wall_line_width", "perimeter_extrusion_width"), nozzle, general, percent_base=percent_base)
+            width_records.append((general, outer, inner))
+        general_width, width, inner_width = (max(record[i] for record in width_records) for i in range(3))
         first_layer = first_layer_parameters(values, print_speed=settings.print_speed_mm_s,
-            nozzle=nozzle, line_width=width)
+            nozzle=nozzle, line_width=width_records[0][1], layer_height=layers[0].height_mm,
+            adapter_id=request.profile.installation.adapter_id)
         profile_notes += first_layer.notes
-        widths = [first_layer.line_width_mm if i == 0 else width for i in range(count)]
-        inner_widths = [first_layer.line_width_mm if i == 0 else inner_width for i in range(count)]
+        widths = [first_layer.line_width_mm if i == 0 else width_records[i][1] for i in range(count)]
+        inner_widths = [first_layer.line_width_mm if i == 0 else width_records[i][2] for i in range(count)]
         if count and first_layer.line_width_mm <= layers[0].height_mm:
             raise ValueError("Die Erstschicht-Linienbreite muss größer als die erste Turm-Schichthöhe sein.")
-        if any(min(width, inner_width) <= layer.height_mm for layer in layers[:count]):
+        if any(min(widths[i], inner_widths[i]) <= layer.height_mm for i, layer in enumerate(layers[:count])):
             raise ValueError("Die Profil-Linienbreite muss größer als die Turm-Schichthöhe sein.")
-        wall_widths = (width,) + (inner_width,) * (settings.wall_count - 1)
-        thicknesses = [_wall_thickness(wall_widths, layer.height_mm) for layer in layers[:count]]
-        minimum_hollow_diameter = 2 * max(thicknesses, default=sum(wall_widths)) + max(width, inner_width)
+        # First-layer widening applies to the solid foot, not the hollow
+        # shaft's specified wall count or its reported radial thickness.
+        thicknesses = [_wall_thickness((width_records[i][1],) + (width_records[i][2],) * (settings.wall_count - 1), layer.height_mm)
+            for i, layer in enumerate(layers[:count])]
+        minimum_hollow_diameter = 2 * max(thicknesses, default=width + inner_width*(settings.wall_count-1)) + max(width, inner_width)
         if settings.automatic_diameter and settings.hollow_tower:
             diameter = max(diameter, minimum_hollow_diameter)
             if settings.automatic_base:

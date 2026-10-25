@@ -27,6 +27,21 @@ def inserted_movements(path):
             active = False
 
 
+def variable_gcode(heights):
+    lines, index, z = [], -1, 0.0
+    for line in make_gcode(layers=len(heights)).splitlines():
+        if line.startswith(";Z:"):
+            index += 1
+            z += heights[index]
+            line = f";Z:{z:.5f}"
+        elif line.startswith(";HEIGHT:"):
+            line = f";HEIGHT:{heights[index]:.5f}"
+        elif line.startswith("G1 Z"):
+            line = f"G1 Z{z:.5f} F1200"
+        lines.append(line)
+    return "\n".join(lines)+"\n"
+
+
 class PreprocessorRefinementTests(unittest.TestCase):
     def test_plain_flow_and_tool_qualified_bambu_commands_are_distinct(self):
         for adapter in ("prusa_slicer", "bambu_studio", "orca_slicer", "anycubic_slicer_next"):
@@ -60,22 +75,24 @@ class PreprocessorRefinementTests(unittest.TestCase):
                 # physical E and distance, independently of timing analysis.
                 _, event, _, factor = first[-1]
                 cross_section = event.delta_e * factor * math.pi * .875**2 / event.endpoint_distance_xy_mm
-                self.assertAlmostEqual(cross_section, .6 * .2 - (1-math.pi/4)*.2**2, delta=1e-5)
+                expected_width = .3 if adapter == "prusa_slicer" else .6
+                self.assertAlmostEqual(cross_section, expected_width * .2 - (1-math.pi/4)*.2**2, delta=1e-5)
                 self.assertAlmostEqual(result.scene.tower_segments[0].start.x - result.scene.tower_center_xy_mm[0],
-                    result.base_width_mm/2 - .3, places=5)
+                    result.base_width_mm/2 - expected_width/2, places=5)
 
     def test_first_layer_percentages_auto_width_fallback_and_manual_lower_cap(self):
         first = first_layer_parameters({"perimeter_speed": 120, "external_perimeter_speed": "50%",
             "solid_infill_speed": 100, "first_layer_speed": "25%", "first_layer_infill_speed": "30%",
-            "first_layer_extrusion_width": "125%"}, print_speed=90, nozzle=.4, line_width=.45)
-        self.assertEqual((first.wall_speed_mm_s, first.infill_speed_mm_s, first.line_width_mm), (15, 30, .5))
+            "first_layer_extrusion_width": "125%"}, print_speed=90, nozzle=.4, line_width=.45, layer_height=.2, adapter_id="prusa_slicer")
+        self.assertEqual((first.wall_speed_mm_s, first.infill_speed_mm_s, first.line_width_mm), (15, 30, .25))
         first = first_layer_parameters({"first_layer_speed": 40, "first_layer_extrusion_width": 0},
-            print_speed=7, nozzle=.4, line_width=.45)
+            print_speed=7, nozzle=.4, line_width=.45, layer_height=.2, adapter_id="prusa_slicer")
         self.assertEqual((first.wall_speed_mm_s, first.infill_speed_mm_s, first.line_width_mm), (7, 7, .45))
-        first = first_layer_parameters({}, print_speed=80, nozzle=.4, line_width=.45)
+        first = first_layer_parameters({}, print_speed=80, nozzle=.4, line_width=.45, layer_height=.2, adapter_id="prusa_slicer")
         self.assertEqual(first.wall_speed_mm_s, 20)
         with self.assertRaises(ValueError):
-            first_layer_parameters({"initial_layer_line_width": 3}, print_speed=80, nozzle=.4, line_width=.45)
+            first_layer_parameters({"initial_layer_line_width": 3}, print_speed=80, nozzle=.4, line_width=.45,
+                layer_height=.2, adapter_id="orca_slicer")
 
     def test_signed_restart_extra_nil_zero_and_manual_retraction(self):
         for extra in (-.2, 0, .15):
@@ -129,18 +146,8 @@ class PreprocessorRefinementTests(unittest.TestCase):
     def test_variable_heights_long_dwells_and_tall_thin_tower(self):
         # A 48 mm tower with changing layer heights and several minute-long
         # pauses exercises the full foot-to-shaft transition and G4 splitting.
-        text = make_gcode(layers=200)
-        lines, z = [], 0.0
-        for line in text.splitlines():
-            if line.startswith(";Z:"):
-                z += .16 if len(lines) % 2 else .28
-                line = f";Z:{z:.5f}"
-            elif line.startswith(";HEIGHT:"):
-                line = ";HEIGHT:0.2"
-            elif line.startswith("G1 Z"):
-                line = f"G1 Z{z:.5f} F1200"
-            lines.append(line)
-        request = self.fixture.request("\n".join(lines)+"\n", settings=replace(PreprocessorSettings(),
+        text = variable_gcode((.2,) + (.16, .28)*99 + (.2,))
+        request = self.fixture.request(text, settings=replace(PreprocessorSettings(),
             automatic_target_time=False, target_layer_time_s=180, automatic_diameter=False, diameter_mm=6))
         result = self.fixture.prepare(request)
         self.assertGreater(result.height_mm, 30)
@@ -150,6 +157,26 @@ class PreprocessorRefinementTests(unittest.TestCase):
             if line.command == "G4":
                 self.assertLessEqual(line.parameters.get("P", 0), 60_000)
         self.assertLessEqual(result.placement_statistics["indexed_moves"], 200*7+5)
+
+    def test_prusa_percentage_widths_follow_each_actual_layer_height(self):
+        heights = (.2, .25, .15, .3, .2)
+        request = self.fixture.request(variable_gcode(heights))
+        request.profile.effective_values.update({"extrusion_width": "200%",
+            "external_perimeter_extrusion_width": "200%", "perimeter_extrusion_width": "250%",
+            "first_layer_extrusion_width": "250%"})
+        result = self.fixture.prepare(request)
+        self.assertAlmostEqual(result.first_layer.line_width_mm, .5)
+        overlap = 1-math.pi/4
+        expected = tuple(2*h + (2.5*h-overlap*h) for h in heights)
+        self.assertAlmostEqual(result.wall_thickness_range_mm[0], min(expected))
+        self.assertAlmostEqual(result.wall_thickness_range_mm[1], max(expected))
+        last_by_layer = {}
+        for layer, _, event, _, factor in inserted_movements(result.gcode_path):
+            if event.category == "deposition" and event.endpoint_distance_xy_mm > 0:
+                last_by_layer[layer] = event.delta_e * factor * math.pi * .875**2 / event.endpoint_distance_xy_mm
+        for i, h in enumerate(heights):
+            width = .5 if i == 0 else 2.5*h
+            self.assertAlmostEqual(last_by_layer[i], width*h - overlap*h*h, delta=1e-5)
 
     def test_index_preserves_chronology_arc_enclosures_and_cancellation(self):
         path = self.fixture.root / "index.gcode"

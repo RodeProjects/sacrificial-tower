@@ -68,6 +68,7 @@ class PreprocessorRealSlicerTests(unittest.TestCase):
             second = None
             fallback = None
             automatic = None
+            percentage_result = None
             try:
                 artifacts = os.environ.get("COOLING_TOWER_PREPROCESSOR_ARTIFACT_ROOT")
                 if artifacts:
@@ -109,6 +110,14 @@ class PreprocessorRealSlicerTests(unittest.TestCase):
                 self.assertLessEqual(automatic.effective_settings.print_speed_mm_s, expected_settings.print_speed_mm_s)
                 self.assertLessEqual(automatic.effective_settings.travel_speed_mm_s, expected_settings.travel_speed_mm_s)
                 self.assertGreaterEqual(min(automatic.layer_times_s), expected_settings.target_layer_time_s - .01)
+                if adapter.adapter_id == "prusa_slicer":
+                    percentage_profile = replace(profile, effective_values={**profile.effective_values,
+                        "first_layer_extrusion_width": "200%", "external_perimeter_extrusion_width": "200%",
+                        "perimeter_extrusion_width": "250%"})
+                    percentage_result = service.prepare(replace(request, profile=percentage_profile))
+                    first_height = percentage_result.layer_heights_mm[0]
+                    self.assertAlmostEqual(percentage_result.first_layer.line_width_mm, 2*first_height)
+                    self.assertGreaterEqual(min(percentage_result.layer_times_s), 59.9)
                 # Exercise loss of the machine's geometry on each actual
                 # native pre-slice, including its original end movements.
                 fallback_values = {key: value for key, value in profile.effective_values.items()
@@ -136,6 +145,8 @@ class PreprocessorRealSlicerTests(unittest.TestCase):
                     self.assertEqual(len(fallback.wipe_angles_rad), fallback.scene.tower_layer_count)
                 self.assertEqual({path: hashlib.sha256(path.read_bytes()).hexdigest() for path in protected}, protected)
             finally:
+                if percentage_result is not None:
+                    percentage_result.dispose()
                 if automatic is not None:
                     automatic.dispose()
                 if fallback is not None:

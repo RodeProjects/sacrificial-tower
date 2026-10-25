@@ -77,6 +77,8 @@ Turmwert bleibt maßgeblich. Ohne eindeutiges Erstschichttempo gilt höchstens
 `initial_layer_line_width`/`first_layer_extrusion_width` bestimmen Bahnmitten,
 Ringabstände und Materialmenge der ersten Schicht. 0 bedeutet automatische
 Breite und verwendet die reguläre Profilbreite als gekennzeichneten Ersatz.
+Bei Prusa beziehen sich Prozentbreiten auf die erste tatsächliche Schichthöhe;
+bei Anycubic, Orca und Bambu auf den Düsendurchmesser.
 Volumenstrom und zusätzliche Prime-Mengen begrenzen das Tempo weiterhin.
 
 Bei automatischem Rückzug wird auch `filament_retract_restart_extra`,
@@ -151,7 +153,10 @@ zum Ausgleichen der Schichtzeit dynamisch kalibriert.
   weitere Linien `inner_wall_line_width` beziehungsweise
   `perimeter_extrusion_width`. Fehlende oder automatische Werte (0) verwenden
   die allgemeine `line_width`/`extrusion_width`, ersatzweise 110 % des
-  Düsendurchmessers. Prozentwerte beziehen sich auf den Düsendurchmesser.
+  Düsendurchmessers. Prozentwerte beziehen sich bei Anycubic, Orca und Bambu
+  auf den Düsendurchmesser. Prusa verwendet die jeweilige tatsächliche
+  Schichthöhe; die Breiten werden bei variablen Schichten deshalb neu bestimmt.
+  Die Bezugsgröße beschreibt die [Prusa-Profildokumentation](https://help.prusa3d.com/article/creating-profiles-for-different-nozzles_127540).
   Bei Schichthöhe `h` und `n` Linien beträgt die radiale Wandstärke
   `w_außen + (n − 1) × (w_innen − h × (1 − π/4))`.
   Der Innendurchmesser ist `Außendurchmesser − 2 × Wandstärke`; ein eigenes

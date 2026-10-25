@@ -324,7 +324,8 @@ class PreprocessorTests(unittest.TestCase):
                     before = dict(request.profile.effective_values)
                     result = self.prepare(request)
                     self.assertEqual(request.profile.effective_values, before)
-                    expected_thickness = .48 + (count - 1) * (.52 - .2 * (1 - math.pi / 4))
+                    outer_width, inner_width = (.24, .26) if adapter == "prusa_slicer" else (.48, .52)
+                    expected_thickness = outer_width + (count - 1) * (inner_width - .2 * (1 - math.pi / 4))
                     self.assertAlmostEqual(result.wall_thickness_range_mm[0], expected_thickness)
                     self.assertAlmostEqual(result.wall_thickness_range_mm[1], expected_thickness)
                     # Measure the actual emitted shaft rings rather than just
@@ -334,8 +335,8 @@ class PreprocessorTests(unittest.TestCase):
                         s.end.y - result.scene.tower_center_xy_mm[1]), 4)
                         for s in result.scene.tower_segments if abs(s.end.z - last_z) < 1e-6}, reverse=True)
                     self.assertEqual(len(radii), count)
-                    self.assertAlmostEqual(2 * radii[0] + .48, 6, places=3)
-                    innermost_width = .48 if count == 1 else .52
+                    self.assertAlmostEqual(2 * radii[0] + outer_width, 6, places=3)
+                    innermost_width = outer_width if count == 1 else inner_width
                     self.assertAlmostEqual(2 * radii[-1] - innermost_width, 6 - 2 * expected_thickness, places=3)
 
     def test_automatic_width_fallback_and_invalid_widths_or_wall_counts(self):

@@ -97,11 +97,11 @@ class FirstLayerParameters:
     notes: tuple[str, ...]
 
 
-def first_layer_parameters(values, *, print_speed, nozzle, line_width):
+def first_layer_parameters(values, *, print_speed, nozzle, line_width, layer_height, adapter_id):
     """First-layer caps also apply to a manually selected tower speed.
 
     Prusa percentages refer to the corresponding normal feature speed, while
-    extrusion-width percentages refer to the nozzle diameter.
+    width percentages use layer height on Prusa and nozzle diameter on Orca.
     """
     perimeter, _ = profile_number(values, ("perimeter_speed", "inner_wall_speed"))
     reference, _ = profile_number(values, ("external_perimeter_speed", "outer_wall_speed", "perimeter_speed"), percent_base=perimeter)
@@ -110,10 +110,13 @@ def first_layer_parameters(values, *, print_speed, nozzle, line_width):
     if wall is None:
         wall = min(print_speed, 20.0)
         notes.append("Erstschichttempo fehlt oder ist automatisch: begrenzter Ersatzwert bis 20 mm/s.")
-    infill_reference, _ = profile_number(values, ("solid_infill_speed", "internal_solid_infill_speed"), percent_base=perimeter)
+    regular_infill, _ = profile_number(values, ("infill_speed", "sparse_infill_speed"))
+    infill_reference, _ = profile_number(values, ("solid_infill_speed", "internal_solid_infill_speed"), percent_base=regular_infill)
     infill, _ = profile_number(values, ("initial_layer_infill_speed", "first_layer_infill_speed"),
         percent_base=infill_reference)
-    width, _ = profile_number(values, ("initial_layer_line_width", "first_layer_extrusion_width"), percent_base=nozzle)
+    width_keys = (("first_layer_extrusion_width", "initial_layer_line_width") if adapter_id == "prusa_slicer"
+        else ("initial_layer_line_width", "first_layer_extrusion_width"))
+    width, _ = profile_number(values, width_keys, percent_base=layer_height if adapter_id == "prusa_slicer" else nozzle)
     if width is None:
         width = line_width
         notes.append("Erstschicht-Linienbreite nicht explizit angegeben: reguläre Profil-Linienbreite verwendet.")
