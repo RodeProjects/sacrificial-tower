@@ -414,7 +414,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
             PROJECT_ROOT / "config/default_settings.json",
         )
         _settings, state = store.load()
-        self.assertEqual(SETTINGS_SCHEMA_VERSION, 23)
+        self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
         self.assertEqual(state["maximum_joint_slices"], 10)
         self.assertEqual(state["maximum_separate_slices"], 6)
         migrated = json.loads(user_path.read_text(encoding="utf-8"))

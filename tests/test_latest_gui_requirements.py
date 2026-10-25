@@ -413,12 +413,14 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.addCleanup(window.close)
         window.joint_slice_settings_action.trigger()
         dialog = window._joint_slice_settings_dialog
+        other_destinations = {key: path for key, path in window.export_roots.items() if key != "automatic"}
         self.assertEqual(dialog.output_root_edit.text(), window.output_root_edit.text())
         dialog.output_root_edit.setText(str(self.root / "custom-output"))
         dialog.accept()
         self.assertEqual(window.output_root_edit.text(), str(self.root / "custom-output"))
         window._reset_output_root()
-        self.assertEqual(Path(window.output_root_edit.text()), window.settings_store.load_default_output_root())
+        self.assertEqual(Path(window.output_root_edit.text()), window.settings_store.load_default_output_root() / "automatic")
+        self.assertEqual({key: path for key, path in window.export_roots.items() if key != "automatic"}, other_destinations)
 
     def test_program_information_contains_requested_icons_and_scrolling(self) -> None:
         window = self.window()

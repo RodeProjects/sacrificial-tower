@@ -166,8 +166,10 @@ class DistributionAndPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 window.default_output_root,
-                window.user_data_root / "output",
+                window.user_data_root / "output" / "automatic",
             )
+            for method, path in window.default_export_roots.items():
+                self.assertEqual(Path(path), window.user_data_root / "output" / method)
             self.assertEqual(
                 window.slicer_service.preference_store.path,
                 window.user_data_root / "config" / "slicer_settings.json",
