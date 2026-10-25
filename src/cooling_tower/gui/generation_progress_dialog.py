@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 from cooling_tower.gui.texts import SETTING_INFO_TEXTS
+from cooling_tower.export_paths import EXPORT_METHOD_LABELS, normalize_export_roots
 
 
 DEFAULT_MAXIMUM_JOINT_SLICES = 12
@@ -609,6 +610,7 @@ class JointSliceSettingsDialog(QDialog):
     value_applied = Signal(int)
     separate_value_applied = Signal(int)
     output_root_applied = Signal(str)
+    export_roots_applied = Signal(dict)
     local_window_applied = Signal(int)
     layer_time_tolerance_applied = Signal(float)
 
@@ -619,6 +621,8 @@ class JointSliceSettingsDialog(QDialog):
         *,
         output_root: str = "",
         default_output_root: str = "",
+        export_roots: dict[str, str] | None = None,
+        default_export_roots: dict[str, str] | None = None,
         maximum_separate_slices: int = DEFAULT_MAXIMUM_SEPARATE_SLICES,
         default_maximum_separate_slices: int = DEFAULT_MAXIMUM_SEPARATE_SLICES,
         default_maximum_joint_slices: int = DEFAULT_MAXIMUM_JOINT_SLICES,
@@ -884,42 +888,50 @@ class JointSliceSettingsDialog(QDialog):
         )
         local_row.addWidget(self.local_window_reset_button)
         settings_panel_layout.addLayout(local_row)
-        layout.addWidget(QLabel("Exportordner"))
-        export_row = QHBoxLayout()
-        self.output_root_edit = QLineEdit(output_root)
-        self.output_root_edit.setObjectName("generalSettingsOutputRoot")
-        self.output_root_edit.setAccessibleName("Exportordner")
-        self.output_root_edit.setFixedHeight(METRICS.form_control_height_px)
-        export_row.addWidget(self.output_root_edit, 1, Qt.AlignmentFlag.AlignVCenter)
-        browse = QPushButton("Auswählen …")
-        browse.setObjectName("generalSettingsBrowseButton")
-        browse.setFixedHeight(METRICS.form_control_height_px)
-        def select_output():
-            selected = QFileDialog.getExistingDirectory(self, "Exportordner auswählen", self.output_root_edit.text())
-            if selected:
-                self.output_root_edit.setText(selected)
-        browse.clicked.connect(select_output)
-        export_row.addWidget(browse, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.output_reset_button = QPushButton("↺")
-        self.output_reset_button.setObjectName("settingResetButton")
-        self.output_reset_button.setFixedSize(
-            METRICS.reset_button_size_px,
-            METRICS.reset_button_size_px,
-        )
-        self.output_reset_button.setToolTip(
-            "Exportordner auf Standardwert zurücksetzen"
-        )
-        self.output_reset_button.setAccessibleName(
-            "Exportordner auf Standardwert zurücksetzen"
-        )
-        self.output_reset_button.clicked.connect(
-            lambda: self.output_root_edit.setText(default_output_root)
-        )
-        self.output_root_edit.textChanged.connect(
-            self._refresh_output_reset_button
-        )
-        export_row.addWidget(self.output_reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addLayout(export_row)
+        self.export_root_edits = {}
+        self.export_reset_buttons = {}
+        self.export_browse_buttons = {}
+        self._default_export_roots = normalize_export_roots(default_export_roots)
+        roots = normalize_export_roots(export_roots)
+        # Preserve the dialog's existing automatic-folder API for other callers.
+        self._default_export_roots.setdefault("automatic", default_output_root or str(Path("output") / "automatic"))
+        roots.setdefault("automatic", output_root or self._default_export_roots["automatic"])
+        for method, label in EXPORT_METHOD_LABELS.items():
+            default = self._default_export_roots.get(method,
+                str(Path(self._default_export_roots["automatic"]).parent / method))
+            self._default_export_roots[method] = default
+            export_row = QHBoxLayout()
+            folder_label = QLabel(f"Exportordner · {label}")
+            folder_label.setFixedWidth(185)
+            export_row.addWidget(folder_label)
+            edit = QLineEdit(roots.get(method, default))
+            edit.setMinimumWidth(0)
+            folder_label.setBuddy(edit)
+            edit.setObjectName("generalSettingsOutputRoot" if method == "automatic" else f"{method}ExportRoot")
+            edit.setProperty("methodExportRoot", True)
+            edit.setAccessibleName(f"Exportordner {label}")
+            edit.setFixedHeight(METRICS.form_control_height_px)
+            export_row.addWidget(edit, 1, Qt.AlignmentFlag.AlignVCenter)
+            browse = QPushButton("Auswählen …")
+            browse.setObjectName("generalSettingsBrowseButton")
+            browse.setAccessibleName(f"Exportordner {label} auswählen")
+            browse.setFixedHeight(METRICS.form_control_height_px)
+            browse.clicked.connect(lambda _checked=False, key=method: self._select_export_root(key))
+            export_row.addWidget(browse, 0, Qt.AlignmentFlag.AlignVCenter)
+            reset = QPushButton("↺")
+            reset.setObjectName("settingResetButton")
+            reset.setFixedSize(METRICS.reset_button_size_px, METRICS.reset_button_size_px)
+            reset.setToolTip(f"Exportordner {label} auf Standardwert zurücksetzen")
+            reset.setAccessibleName(f"Exportordner {label} auf Standardwert zurücksetzen")
+            reset.clicked.connect(lambda _checked=False, key=method: self.export_root_edits[key].setText(self._default_export_roots[key]))
+            edit.textChanged.connect(self._refresh_output_reset_button)
+            export_row.addWidget(reset, 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.addLayout(export_row)
+            self.export_root_edits[method] = edit
+            self.export_reset_buttons[method] = reset
+            self.export_browse_buttons[method] = browse
+        self.output_root_edit = self.export_root_edits["automatic"]
+        self.output_reset_button = self.export_reset_buttons["automatic"]
         self.footer_divider = QFrame(self)
         self.footer_divider.setObjectName("generalSettingsFooterDivider")
         self.footer_divider.setFrameShape(QFrame.Shape.HLine)
@@ -961,7 +973,7 @@ class JointSliceSettingsDialog(QDialog):
             self.spin_box.valueChanged,
             self.tolerance_spin_box.valueChanged,
             self.local_window_spin_box.valueChanged,
-            self.output_root_edit.textChanged,
+            *(edit.textChanged for edit in self.export_root_edits.values()),
         ):
             signal.connect(self._refresh_general_reset_button)
         self._refresh_separate_reset_button()
@@ -990,7 +1002,8 @@ class JointSliceSettingsDialog(QDialog):
         self.spin_box.setValue(self.default_maximum_joint_slices)
         self.tolerance_spin_box.setValue(self.default_layer_time_tolerance_s)
         self.local_window_spin_box.setValue(self.default_local_reference_window)
-        self.output_root_edit.setText(self._default_output_root)
+        for method, edit in self.export_root_edits.items():
+            edit.setText(self._default_export_roots[method])
 
     def _refresh_general_reset_button(self) -> None:
         self.general_reset_button.setEnabled(
@@ -1002,14 +1015,18 @@ class JointSliceSettingsDialog(QDialog):
                 != self.default_layer_time_tolerance_s
                 or self.local_window_spin_box.value()
                 != self.default_local_reference_window
-                or self.output_root_edit.text() != self._default_output_root
+                or any(edit.text() != self._default_export_roots[method]
+                       for method, edit in self.export_root_edits.items())
             )
         )
 
     def accept(self) -> None:
-        if not self.output_root_edit.text().strip() and self.output_root_edit.text() != "":
-            self.output_root_edit.setFocus()
-            return
+        for edit in self.export_root_edits.values():
+            text = edit.text()
+            if not text.strip() or any(ord(char) < 32 for char in text):
+                edit.setFocus()
+                return
+        self.export_roots_applied.emit({method: edit.text().strip() for method, edit in self.export_root_edits.items()})
         self.output_root_applied.emit(self.output_root_edit.text().strip())
         self.layer_time_tolerance_applied.emit(self.tolerance_spin_box.value())
         self.separate_value_applied.emit(self.separate_spin_box.value())
@@ -1036,13 +1053,20 @@ class JointSliceSettingsDialog(QDialog):
         style.unpolish(self.separate_reset_button)
         style.polish(self.separate_reset_button)
 
+    def _select_export_root(self, method: str) -> None:
+        edit = self.export_root_edits[method]
+        selected = QFileDialog.getExistingDirectory(self, "Exportordner auswählen", edit.text())
+        if selected:
+            edit.setText(selected)
+
     def _refresh_output_reset_button(self) -> None:
-        modified = self.output_root_edit.text() != self._default_output_root
-        self.output_reset_button.setEnabled(modified)
-        self.output_reset_button.setProperty("modified", modified)
-        style = self.output_reset_button.style()
-        style.unpolish(self.output_reset_button)
-        style.polish(self.output_reset_button)
+        for method, edit in self.export_root_edits.items():
+            button = self.export_reset_buttons[method]
+            modified = edit.text() != self._default_export_roots[method]
+            button.setEnabled(modified)
+            button.setProperty("modified", modified)
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def _refresh_local_window_reset_button(self) -> None:
         modified = (

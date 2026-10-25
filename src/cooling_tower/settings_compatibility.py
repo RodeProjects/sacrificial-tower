@@ -36,6 +36,11 @@ class SettingCompatibilityRule:
             ):
                 raise ValueError("endlicher Zahlenwert erwartet")
             normalized = float(value)
+        elif self.value_type == "path":
+            if (not isinstance(value, str) or not value.strip()
+                    or any(ord(char) < 32 for char in value)):
+                raise ValueError("gültiger Ordnerpfad erwartet")
+            normalized = value.strip()
         elif self.value_type == "string":
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("nicht leerer Text erwartet")
@@ -150,8 +155,12 @@ SETTING_COMPATIBILITY_RULES = (
         group="generation.circle-segments-v1", minimum=4, maximum=256,
     ),
     SettingCompatibilityRule(
-        "output_root", "output-directory-path-v1", ("output_root",), "string", "output_root"
+        "output_root", "automatic-export-directory-path-v2", ("output_root",), "path", "output_root"
     ),
+    *(SettingCompatibilityRule(
+        f"export_roots.{method}", "method-export-directory-path-v1",
+        ("export_roots", method), "path", f"export_roots.{method}",
+    ) for method in ("automatic", "manual", "preprocessor")),
     SettingCompatibilityRule(
         "window.width", "window-pixel-width-v1", ("window", "width"), "int",
         "window.width", minimum=100, maximum=100_000,

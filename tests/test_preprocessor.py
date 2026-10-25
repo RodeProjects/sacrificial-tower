@@ -70,7 +70,8 @@ class PreprocessorTests(unittest.TestCase):
         profile = SimpleNamespace(installation=SimpleNamespace(adapter_id=adapter,
             executable_path=self.root / "slicer-installation" / "slicer.exe", profile_roots=(self.root / "slicer-profiles",)),
             effective_values={"bed_shape": ["0x0", "220x0", "220x220", "0x220"], "max_print_height": 250,
-                "nozzle_diameter": .4, "filament_diameter": 1.75}, source_paths=())
+                "nozzle_diameter": .4, "filament_diameter": 1.75,
+                "extruder_clearance_radius": 12, "extruder_clearance_height": 10}, source_paths=())
         return PreprocessorRequest(prepared, snapshot, profile, settings or PreprocessorSettings())
 
     def prepare(self, request):
@@ -157,10 +158,15 @@ class PreprocessorTests(unittest.TestCase):
         layer_z = 0
         waiting_points = []
         travel = []
+        grouped_travel = {True: [], False: []}
+        wait_travel = True
         wiped = False
         for line in iter_parsed_gcode_lines(result.gcode_path):
             if line.raw_text == BEGIN:
                 phase, wiped = "lifting", False
+                wait_travel = True
+            if line.raw_text.startswith("; sacrificial wipe / prime and "):
+                wait_travel = False
             if line.raw_text.startswith("; layer_z = "):
                 layer_z = float(line.raw_text.split("=")[1])
             if "SACRIFICIAL_TOWER_TRAVEL_TO_WAIT" in line.raw_text:
@@ -185,6 +191,7 @@ class PreprocessorTests(unittest.TestCase):
                     self.assertAlmostEqual(event.end_z, layer_z)
                 elif event.endpoint_distance_xyz_mm > 1e-6:
                     travel.append((event.start_x, event.start_y, event.start_z, event.end_x, event.end_y, event.end_z))
+                    grouped_travel[wait_travel].append(travel[-1])
                     if event.endpoint_distance_xy_mm > 1e-6 and (phase != "wipe" or not wiped):
                         self.assertGreaterEqual(event.start_z, layer_z + request.settings.z_hop_mm - 1e-6)
                         self.assertAlmostEqual(event.end_z, event.start_z)
@@ -193,6 +200,13 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(waiting_points, [(p.x, p.y, p.z) for p in result.scene.wait_points])
         self.assertEqual(travel, [(s.start.x, s.start.y, s.start.z, s.end.x, s.end.y, s.end.z)
             for s in result.scene.travel_segments if s.start.z >= 0])
+        for expected, segments in ((grouped_travel[True], result.scene.wait_travel_segments),
+                (grouped_travel[False], result.scene.tower_travel_segments)):
+            self.assertTrue(segments)
+            self.assertEqual(expected, [(s.start.x, s.start.y, s.start.z, s.end.x, s.end.y, s.end.z) for s in segments])
+            self.assertTrue(any(s.start.z != s.end.z for s in segments))
+        self.assertEqual(len(result.scene.travel_segments),
+            len(result.scene.wait_travel_segments) + len(result.scene.tower_travel_segments))
 
     def test_manual_park_outside_model_and_tower_and_rejects_unsafe_positions(self):
         settings = replace(PreprocessorSettings(), automatic_position=False, center_x_mm=30, center_y_mm=40,
@@ -257,11 +271,99 @@ class PreprocessorTests(unittest.TestCase):
         self.assertTrue(request.prepared_source.matches_analysis_gcode())
 
     def test_hollow_default_uses_fewer_paths_than_solid(self):
-        request = self.request(make_gcode(layers=20))
+        request = self.request(make_gcode(layers=60))
         hollow = self.prepare(request)
         solid = self.prepare(replace(request, settings=replace(request.settings, hollow_tower=False)))
-        self.assertLess(hollow.gcode_path.stat().st_size, solid.gcode_path.stat().st_size * .7)
+        self.assertLess(hollow.gcode_path.stat().st_size, solid.gcode_path.stat().st_size)
         self.assertTrue(PreprocessorSettings().hollow_tower)
+
+    def test_concave_foot_matches_full_infill_automatic_profile_and_is_supported(self):
+        from cooling_tower.models import GenerationSettings
+        from cooling_tower.tower.profile import TowerRadiusProfile, TowerProfileConfig
+        from cooling_tower.tower.solid_profile import build_solid_tower_profile
+        from test_solid_tower_changes import radius_layer
+
+        request = self.request(make_gcode(layers=45), settings=replace(PreprocessorSettings(),
+            automatic_diameter=False, diameter_mm=6, automatic_base=False, base_width_mm=20))
+        result = self.prepare(request)
+        source = TowerRadiusProfile(TowerProfileConfig(10), .1, tuple(
+            radius_layer(index=i + 1, z=layer.z_mm, calculated_radius=3, radius=3)
+            for i, layer in enumerate(request.snapshot.layers)))
+        automatic = build_solid_tower_profile(source, GenerationSettings(
+            minimum_outer_diameter_mm=6, maximum_outer_diameter_mm=40,
+            automatic_base_width=False, manual_base_width_mm=20, simulate_full_tower_infill=True),
+            object_height_mm=9)
+        center = result.scene.tower_center_xy_mm
+        measured = {}
+        for segment in result.scene.tower_segments:
+            radius = math.hypot(segment.end.x - center[0], segment.end.y - center[1])
+            measured[round(segment.end.z, 5)] = max(radius, measured.get(round(segment.end.z, 5), 0))
+        for layer in automatic.layers:
+            self.assertAlmostEqual(measured[round(layer.z, 5)] + .22, layer.outer_radius_mm, places=5)
+        # A concave foot is filled below the hollow shaft, including the layers
+        # where its steep inward step would otherwise leave an unsupported wall.
+        blocks = result.gcode_path.read_text().split(BEGIN)[1:]
+        self.assertIn("solid base / tower", blocks[2])
+        self.assertIn("hollow tower", blocks[-1])
+        slopes = [(b.outer_radius_mm - a.outer_radius_mm) / (b.z - a.z)
+            for a, b in zip(automatic.layers, automatic.layers[1:])]
+        self.assertTrue(all(b >= a - 1e-8 for a, b in zip(slopes, slopes[1:])))
+
+    def test_one_to_three_walls_use_profile_widths_and_derived_inner_diameter(self):
+        for adapter, values in (
+            ("orca_slicer", {"line_width": .45, "outer_wall_line_width": [.48], "inner_wall_line_width": .52}),
+            ("prusa_slicer", {"extrusion_width": "112.5%", "external_perimeter_extrusion_width": "120%",
+                "perimeter_extrusion_width": "130%"}),
+        ):
+            for count in (1, 2, 3):
+                with self.subTest(adapter=adapter, walls=count):
+                    request = self.request(make_gcode(layers=5), adapter=adapter,
+                        settings=replace(PreprocessorSettings(), wall_count=count,
+                            automatic_diameter=False, diameter_mm=6, automatic_base=False, base_width_mm=6))
+                    request.profile.effective_values.update(values)
+                    before = dict(request.profile.effective_values)
+                    result = self.prepare(request)
+                    self.assertEqual(request.profile.effective_values, before)
+                    expected_thickness = .48 + (count - 1) * (.52 - .2 * (1 - math.pi / 4))
+                    self.assertAlmostEqual(result.wall_thickness_range_mm[0], expected_thickness)
+                    self.assertAlmostEqual(result.wall_thickness_range_mm[1], expected_thickness)
+                    # Measure the actual emitted shaft rings rather than just
+                    # checking the same formula used by the planner.
+                    last_z = result.height_mm
+                    radii = sorted({round(math.hypot(s.end.x - result.scene.tower_center_xy_mm[0],
+                        s.end.y - result.scene.tower_center_xy_mm[1]), 4)
+                        for s in result.scene.tower_segments if abs(s.end.z - last_z) < 1e-6}, reverse=True)
+                    self.assertEqual(len(radii), count)
+                    self.assertAlmostEqual(2 * radii[0] + .48, 6, places=3)
+                    innermost_width = .48 if count == 1 else .52
+                    self.assertAlmostEqual(2 * radii[-1] - innermost_width, 6 - 2 * expected_thickness, places=3)
+
+    def test_automatic_width_fallback_and_invalid_widths_or_wall_counts(self):
+        from cooling_tower.preprocessor import _profile_line_width
+        self.assertAlmostEqual(_profile_line_width({"line_width": ["0%"]}, ("line_width",), .4, .44), .44)
+        for value in (True, -1, "nan", "wide", "1000%"):
+            with self.subTest(width=value), self.assertRaisesRegex(ValueError, "Linienbreite"):
+                _profile_line_width({"line_width": value}, ("line_width",), .4, .44)
+        for count in (0, 4, 6, 1.5, True):
+            with self.subTest(walls=count), self.assertRaises(ValueError):
+                replace(PreprocessorSettings(), wall_count=count)
+
+    def test_profile_wall_loops_are_ignored_and_profile_is_not_modified(self):
+        request = self.request(make_gcode(layers=5), settings=replace(PreprocessorSettings(),
+            wall_count=2, automatic_diameter=False, diameter_mm=6,
+            automatic_base=False, base_width_mm=6))
+        original_source = request.prepared_source.analysis_gcode_path.read_bytes()
+        outputs = []
+        for profile_count in (1, 7):
+            values = {**request.profile.effective_values,
+                "wall_loops": profile_count, "perimeters": profile_count,
+                "outer_wall_line_width": .48, "inner_wall_line_width": .52}
+            profile = SimpleNamespace(**{**vars(request.profile), "effective_values": values})
+            before = dict(values)
+            outputs.append(self.prepare(replace(request, profile=profile)).gcode_path.read_bytes())
+            self.assertEqual(values, before)
+        self.assertEqual(outputs[0], outputs[1])
+        self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), original_source)
 
     def test_export_identity_overwrite_and_source_protection(self):
         request = self.request()

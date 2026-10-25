@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from cooling_tower.preview import PreviewExportResult, PreviewResult, PreviewState
@@ -23,6 +24,10 @@ class GenerationSession:
     manual_draft: Any = None
     successful_request: Any = None
     running_request: Any = None
+    last_export_report: Any = None
+    latest_export_directory: Path | None = None
+    latest_export_root: str | None = None
+    latest_export_unavailable_reason: str = "Kein Exportordner gefunden."
 
     def discard_preview(self) -> None:
         if self.preview is not None:

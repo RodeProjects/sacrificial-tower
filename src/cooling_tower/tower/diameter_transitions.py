@@ -56,6 +56,20 @@ class Taper:
         return radius
 
 
+def full_infill_foot_taper(
+    z: tuple[float, ...], base_radius: float, minimum_radius: float,
+    reference_height: float,
+) -> Taper:
+    """The full-infill foot shared by automatic meshes and direct toolpaths."""
+    start_z = z[0]
+    minimum_layer_height = z[min(22, len(z) - 1)] - start_z
+    duration = min(z[-1] - start_z, max(6.0, minimum_layer_height, 0.025 * reference_height))
+    if duration < z[-1] - start_z - EPSILON:
+        target = next(index for index, height in enumerate(z) if height >= start_z + duration - EPSILON)
+        duration = z[min(target + 5, len(z) - 1)] - start_z
+    return Taper(start_z, base_radius, minimum_radius, max(EPSILON, duration), foot_curve_power=3.2)
+
+
 @dataclass(frozen=True, slots=True)
 class DiameterSegment:
     start_z: float

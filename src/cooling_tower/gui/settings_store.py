@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
+from cooling_tower.export_paths import default_export_roots, normalize_export_roots
 from cooling_tower.models import GenerationSettings
 from cooling_tower.persistence import (
     FutureSchemaVersionError,
@@ -444,6 +445,19 @@ def _migrate_settings_22_to_23(payload: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _migrate_settings_23_to_24(payload: dict[str, Any]) -> dict[str, Any]:
+    """Separate future exports without moving any existing user files."""
+    migrated = dict(payload)
+    root = migrated.get("output_root")
+    migrated["export_roots"] = default_export_roots(root) if (
+        isinstance(root, str) and root.strip() and not any(ord(c) < 32 for c in root)
+    ) else {}
+    if migrated["export_roots"]:
+        migrated["output_root"] = migrated["export_roots"]["automatic"]
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -463,8 +477,10 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
     normalized["show_setting_limits"] = nested.get("show_setting_limits", False) is True
-    output_root = nested.get("output_root")
-    if isinstance(output_root, str) and output_root.strip():
+    normalized["export_roots"] = normalize_export_roots(nested.get("export_roots"))
+    output_root = normalized["export_roots"].get("automatic") or normalize_export_roots(
+        {"automatic": nested.get("output_root")}).get("automatic")
+    if output_root is not None:
         normalized["output_root"] = output_root
 
     raw_window = nested.get("window")
@@ -591,6 +607,7 @@ _USER_SETTINGS_MIGRATIONS = {
     20: _migrate_settings_20_to_21,
     21: _migrate_settings_21_to_22,
     22: _migrate_settings_22_to_23,
+    23: _migrate_settings_23_to_24,
 }
 
 
@@ -724,6 +741,7 @@ class UserSettingsStore:
         generation: GenerationSettings,
         *,
         output_root: str,
+        export_roots: Mapping[str, str] | None = None,
         window_width: int,
         window_height: int,
         window_x: int | None = None,
@@ -738,6 +756,7 @@ class UserSettingsStore:
         payload = self._build_payload(
             generation,
             output_root=output_root,
+            export_roots=export_roots,
             window_width=window_width,
             window_height=window_height,
             window_x=window_x,
@@ -762,6 +781,7 @@ class UserSettingsStore:
         generation: GenerationSettings,
         *,
         output_root: str,
+        export_roots: Mapping[str, str] | None = None,
         window_width: int,
         window_height: int,
         window_x: int | None = None,
@@ -779,6 +799,7 @@ class UserSettingsStore:
             self._build_payload(
                 generation,
                 output_root=output_root,
+                export_roots=export_roots,
                 window_width=window_width,
                 window_height=window_height,
                 window_x=window_x,
@@ -799,6 +820,7 @@ class UserSettingsStore:
         generation: GenerationSettings,
         *,
         output_root: str,
+        export_roots: Mapping[str, str] | None = None,
         window_width: int,
         window_height: int,
         window_x: int | None,
@@ -820,6 +842,7 @@ class UserSettingsStore:
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
             "generation": generation.to_dict(),
             "output_root": output_root,
+            "export_roots": normalize_export_roots(export_roots),
             "window": window,
             "preview_iterations": (
                 _MAXIMUM_PREVIEW_ITERATIONS
@@ -847,7 +870,8 @@ class UserSettingsStore:
         return {
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
             "generation": defaults.to_dict(),
-            "output_root": str(self.load_default_output_root()),
+            "output_root": str(self.load_default_output_root() / "automatic"),
+            "export_roots": default_export_roots(self.load_default_output_root()),
             "preview_iterations": _DEFAULT_PREVIEW_ITERATIONS,
             "maximum_joint_slices": self.load_default_maximum_joint_slices(),
             "maximum_separate_slices": (

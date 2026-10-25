@@ -726,6 +726,34 @@ QPushButton[generationMode="manual"] QLabel#generationModeCardAction[cardHover="
     border-color: #6c96bc;
 }
 
+QPushButton[generationMode="preprocessor"] {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
+    border-color: #91b69e;
+}
+QPushButton[generationMode="preprocessor"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #edf9f0, stop:0.45 #d2e9da, stop:1 #a5ceb3);
+    border-color: #528567;
+}
+QPushButton[generationMode="preprocessor"]:focus { border-color: #27643f; }
+QPushButton[generationMode="preprocessor"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #d5e9dc, stop:1 #a9cbb6);
+    border-color: #27643f;
+}
+QPushButton[generationMode="preprocessor"] QLabel#generationModeCardTitle,
+QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction {
+    color: #245b3b;
+}
+QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f3fcf6, stop:1 #d2e9da);
+    border-color: #91b69e;
+}
+QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction[cardHover="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #effbf3, stop:1 #bfdfcb);
+    border-color: #6c9b7e;
+}
+
 QGroupBox {
     background: #ffffff;
     border: 1px solid #d6dee8;
@@ -2811,6 +2839,7 @@ QPushButton#headerMethodButton[generationMode="automatic"] {
 QPushButton#headerMethodButton[generationMode="manual"] {
     color: #22486f;
     border-color: #91aecb;
+    border-right: 0;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f4f9fe, stop:0.45 #e0eaf5, stop:1 #bad0e7);
 }
@@ -2857,6 +2886,35 @@ QPushButton#headerMethodButton[generationMode="manual"]:pressed {
 QPushButton#headerMethodButton[generationMode="automatic"]:focus,
 QPushButton#headerMethodButton[generationMode="manual"]:focus {
     border-bottom: 1px dotted #1769aa;
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"] {
+    color: #245b3b;
+    border-color: #91b69e;
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
+        stop:0 #edf9f0, stop:0.45 #d2e9da, stop:1 #a5ceb3);
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"]:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #c3ddcc, stop:0.18 #deefe4, stop:1 #eff8f2);
+    border-top: 1px solid #97bca4;
+    border-bottom: 1px solid #f8fdf9;
+    padding: 1px 10px 0;
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"]:checked:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #bad7c5, stop:0.18 #d5eade, stop:1 #e8f5ed);
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #bad7c5, stop:0.18 #d5eade, stop:1 #e8f5ed);
+    border-top: 1px solid #97bca4;
+}
+QPushButton#headerMethodButton[generationMode="preprocessor"]:focus {
+    border-bottom: 1px dotted #27643f;
 }
 QPushButton#headerMethodButton:disabled {
     color: #8995a0;
@@ -3774,12 +3832,12 @@ QPushButton#generalSettingsBrowseButton {
     padding: 0 13px;
 }
 
-QLineEdit#generalSettingsOutputRoot {
+QLineEdit[methodExportRoot="true"] {
     min-height: 34px;
     padding: 0 8px;
 }
 
-QLineEdit#generalSettingsOutputRoot:focus,
+QLineEdit[methodExportRoot="true"]:focus,
 QPushButton#generalSettingsBrowseButton:focus {
     border-width: 1px;
 }
@@ -4092,6 +4150,20 @@ QWidget#preprocessorFooter QPushButton#preprocessorCancelButton {
 }
 QWidget#preprocessorFooter QPushButton#preprocessorCancelButton:hover {
     background: #eac5c5;
+}
+QWidget#preprocessorPanel QDoubleSpinBox:disabled,
+QWidget#preprocessorPanel QSpinBox:disabled {
+    color: #74808c;
+    background: #edf0f2;
+    border-color: #d6dde3;
+}
+QWidget#preprocessorPanel QDoubleSpinBox::up-button:disabled,
+QWidget#preprocessorPanel QDoubleSpinBox::down-button:disabled {
+    background: #e4e9ed;
+    border-color: #d6dde3;
+}
+QWidget#preprocessorPanel QLabel#numericEditorUnit:disabled {
+    color: #8995a0;
 }
 QSpinBox#circleSegments:disabled {
     color: #748396; background: #f1f4f6; border-color: #d6dee4;

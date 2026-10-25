@@ -115,6 +115,8 @@ from cooling_tower.gui.generation_progress_dialog import (
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
 )
 from cooling_tower.gui.export_history import resolve_latest_export_directory
+from cooling_tower.export_paths import default_export_roots, normalize_export_roots
+from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.preview_dialog import PreviewDialog
 from cooling_tower.gui.layer_range_dialog import LayerRangeDialog
@@ -958,6 +960,8 @@ class MainWindow(QMainWindow):
             self.default_settings.automatic_base_width
         )
         self.default_output_root = self.settings_store.load_default_output_root()
+        self.default_export_roots = default_export_roots(self.default_output_root)
+        self.default_output_root = Path(self.default_export_roots["automatic"])
         self.default_maximum_joint_slices = (
             self.settings_store.load_default_maximum_joint_slices()
         )
@@ -965,6 +969,10 @@ class MainWindow(QMainWindow):
             self.settings_store.load_default_maximum_separate_slices()
         )
         initial_settings, ui_state = self.settings_store.load()
+        self.export_roots = dict(self.default_export_roots)
+        self.export_roots.update(normalize_export_roots(ui_state.get("export_roots")))
+        if "automatic" not in normalize_export_roots(ui_state.get("export_roots")):
+            self.export_roots["automatic"] = str(ui_state.get("output_root", self.default_output_root))
         self.show_setting_limits = ui_state.get("show_setting_limits", False) is True
         raw_joint_slices = ui_state.get(
             "maximum_joint_slices",
@@ -1031,7 +1039,7 @@ class MainWindow(QMainWindow):
         )
         self.apply_settings(initial_settings)
         self.output_root_edit.setText(
-            str(ui_state.get("output_root", self.default_output_root))
+            self.export_roots["automatic"]
         )
         self._restore_phase17_ui_state(ui_state)
         window = ui_state.get("window", {})
@@ -4007,6 +4015,52 @@ class MainWindow(QMainWindow):
     # The existing generator owns the automatic session even while its view
     # is hidden. Manual generation can use its own session and controls without
     # routing automatic callbacks into a different method's result.
+    def export_directory(self, mode: GenerationMode | None = None) -> Path:
+        method = (mode or self.generation_mode or GenerationMode.AUTOMATIC).value
+        return Path(self.export_roots[method]).expanduser()
+
+    def _apply_export_roots(self, roots: dict[str, str]) -> None:
+        self.export_roots.update(normalize_export_roots(roots))
+        self.output_root_edit.setText(self.export_roots["automatic"])
+        self._refresh_folder_action_states(rescan=True)
+        self.preprocessor_controller.refresh()
+        self._save_user_settings()
+
+    def _export_history_session(self) -> GenerationSession:
+        return self.generation_sessions[self.generation_mode or GenerationMode.AUTOMATIC]
+
+    @property
+    def _last_export_report_result(self):
+        return self._export_history_session().last_export_report
+
+    @_last_export_report_result.setter
+    def _last_export_report_result(self, value):
+        self._export_history_session().last_export_report = value
+
+    @property
+    def _latest_export_directory(self):
+        return self._export_history_session().latest_export_directory
+
+    @_latest_export_directory.setter
+    def _latest_export_directory(self, value):
+        self._export_history_session().latest_export_directory = value
+
+    @property
+    def _latest_export_root_text(self):
+        return self._export_history_session().latest_export_root
+
+    @_latest_export_root_text.setter
+    def _latest_export_root_text(self, value):
+        self._export_history_session().latest_export_root = value
+
+    @property
+    def _latest_export_unavailable_reason(self):
+        return self._export_history_session().latest_export_unavailable_reason
+
+    @_latest_export_unavailable_reason.setter
+    def _latest_export_unavailable_reason(self, value):
+        self._export_history_session().latest_export_unavailable_reason = value
+
     @property
     def current_preview(self) -> PreviewResult | None:
         return self.generation_sessions[GenerationMode.AUTOMATIC].preview
@@ -4042,9 +4096,9 @@ class MainWindow(QMainWindow):
     def _set_preparation_viewport_fill(self, enabled: bool) -> None:
         """Fill preparation and attach automatic sections to the window edges."""
 
-        edge_attached = enabled or self.generation_mode is GenerationMode.AUTOMATIC
+        edge_attached = enabled or self.generation_mode in (GenerationMode.AUTOMATIC, GenerationMode.PREPROCESSOR)
         inset = 0 if edge_attached else MAIN_CONTENT_EDGE_PADDING_PX
-        bottom_inset = 0 if enabled else MAIN_CONTENT_EDGE_PADDING_PX
+        bottom_inset = 0 if enabled or self.generation_mode is GenerationMode.PREPROCESSOR else MAIN_CONTENT_EDGE_PADDING_PX
         self._settings_content_bottom_margin_px = bottom_inset
         left_inset = 0 if self.generation_mode is GenerationMode.MANUAL else inset
         self.content_layout.setContentsMargins(left_inset, inset, inset, bottom_inset)
@@ -10165,6 +10219,7 @@ class MainWindow(QMainWindow):
         self._on_value_changed(None)
 
     def _on_output_root_changed(self, _text: str) -> None:
+        self.export_roots["automatic"] = _text.strip()
         if not self._loading_phase17_state:
             self._last_changed_setting_name = "output_root"
         self._update_section_summaries()
@@ -11565,6 +11620,8 @@ class MainWindow(QMainWindow):
             self,
             output_root=self.output_root_edit.text(),
             default_output_root=str(self.default_output_root),
+            export_roots=self.export_roots,
+            default_export_roots=self.default_export_roots,
             maximum_separate_slices=self.maximum_separate_slices,
             default_maximum_separate_slices=(
                 self.default_maximum_separate_slices
@@ -11581,6 +11638,7 @@ class MainWindow(QMainWindow):
             ),
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
+        dialog.export_roots_applied.connect(self._apply_export_roots)
         dialog.separate_value_applied.connect(
             self._apply_maximum_separate_slices
         )
@@ -11802,6 +11860,21 @@ class MainWindow(QMainWindow):
         self.export_success_deviation_label.show()
         if getattr(result, "generation_method", None) == "manual":
             self.manual_controller.describe_export(result)
+        elif getattr(result, "generation_method", None) == "preprocessor":
+            self.export_success_usage_label.setText(
+                "Der exportierte G-Code enthält das Druckobjekt und alle für diesen Lauf "
+                "erzeugten Turm-, Warte- und Fahrbefehle. Verwenden Sie ihn direkt für den vorbereiteten "
+                "Drucker. Erneutes Slicen würde diese Befehle ersetzen."
+            )
+            self.export_success_achieved_label.setText(
+                "Kürzeste berechnete Schichtzeit: "
+                f"{self._format_export_number(achieved)} Sekunden · Mindest-Schichtzeit: "
+                f"{self._format_export_number(target)} Sekunden"
+            )
+            self.export_success_deviation_label.setText(
+                "Fahrten, Sicherheitshübe, Turmdruck, Primen und Restwartezeit sind eingerechnet."
+            )
+            self.export_success_deviation_label.setProperty("status", "within")
         self._refresh_widget_style(self.export_success_deviation_label)
         self.export_success_error_label.clear()
         self.export_success_error_label.hide()
@@ -14050,7 +14123,7 @@ class MainWindow(QMainWindow):
             request_id,
             preview,
             request,
-            Path(self.output_root_edit.text()).expanduser(),
+            self.export_directory(GenerationMode.AUTOMATIC),
             self.export_service,
         )
         worker.progress.connect(self._on_export_progress)
@@ -14109,7 +14182,7 @@ class MainWindow(QMainWindow):
             self.current_preview
         )
         self._latest_export_directory = result.output_path.parent.resolve()
-        self._latest_export_root_text = self.output_root_edit.text().strip()
+        self._latest_export_root_text = str(self.export_directory(GenerationMode.AUTOMATIC))
         self._latest_export_unavailable_reason = ""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
@@ -14194,18 +14267,24 @@ class MainWindow(QMainWindow):
     def open_output_directory(self) -> None:
         """Open the configured base output folder, creating it if necessary."""
 
-        output_text = self.output_root_edit.text().strip()
+        output_text = self.export_roots[(self.generation_mode or GenerationMode.AUTOMATIC).value].strip()
         if not output_text:
             return
         directory = Path(output_text).expanduser()
         try:
+            selected = getattr(self.profile_match_result, "selected", None)
+            profile = getattr(selected, "effective_profile", None)
+            roots = (() if profile is None else
+                (profile.installation.executable_path.parent, *profile.installation.profile_roots))
+            directory = ensure_writable_output(directory, protected_roots=roots)
             directory.mkdir(parents=True, exist_ok=True)
             open_directory(directory.resolve())
-        except OSError as error:
-            self.result_label.setText(
-                "Der Exportordner konnte nicht geöffnet werden: "
-                f"{german_user_message(error)}"
-            )
+        except (OSError, ValueError) as error:
+            message = "Der Exportordner konnte nicht geöffnet werden: " + german_user_message(error)
+            if self.generation_mode is GenerationMode.PREPROCESSOR:
+                self.preprocessor_panel.status.setText(message)
+            else:
+                self.result_label.setText(message)
             self._schedule_footer_height_update()
 
     def open_run_directory(self) -> None:
@@ -14509,7 +14588,7 @@ class MainWindow(QMainWindow):
     def _refresh_folder_action_states(self, *, rescan: bool = False) -> None:
         if not hasattr(self, "open_output_button"):
             return
-        output_root_text = self.output_root_edit.text().strip()
+        output_root_text = self.export_roots[(self.generation_mode or GenerationMode.AUTOMATIC).value].strip()
         self.open_output_button.setEnabled(bool(output_root_text))
         known_directory_missing = bool(
             self._latest_export_directory is not None
@@ -14614,6 +14693,7 @@ class MainWindow(QMainWindow):
             self.settings_store.save(
                 settings,
                 output_root=self.output_root_edit.text(),
+                export_roots=self.export_roots,
                 window_width=window_geometry.width(),
                 window_height=window_geometry.height(),
                 window_x=window_position.x(),

@@ -607,7 +607,8 @@ class Phase18UiTests(unittest.TestCase):
             label.text()
             for label in dialog.findChildren(QLabel)
         }
-        self.assertIn("Exportordner", dialog_labels)
+        self.assertTrue({"Exportordner · Automatisch", "Exportordner · Manuell",
+            "Exportordner · Präprozessor"}.issubset(dialog_labels))
         self.assertNotIn(
             "Hier legen Sie programmweite Ausgabeoptionen fest.",
             dialog_labels,
@@ -675,7 +676,8 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertEqual(
             dialog.footer_divider.y()
-            - browse.mapTo(dialog, QPoint(0, browse.height())).y(),
+            - dialog.export_browse_buttons["preprocessor"].mapTo(dialog,
+                QPoint(0, dialog.export_browse_buttons["preprocessor"].height())).y(),
             20,
         )
         self.assertEqual(

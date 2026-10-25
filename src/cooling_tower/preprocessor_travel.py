@@ -84,36 +84,38 @@ def segments_cross(a, b, c, d):
     return cross(a, b, c)*cross(a, b, d) < -1e-10 and cross(c, d, a)*cross(c, d, b) < -1e-10
 
 
-def original_paths_clear(source, center, base_radius, insertion_lines, *, cancellation_event=None):
-    """Reject a tower intersecting an unmodified later model/end-code move.
+def original_paths_clear(source, center, base_radius, insertion_lines, *, cancellation_event=None, head_radius=0.0, head_height=0.0, lower_head_radius=0.0, gantry_height=None):
+    """Convenience check; placement reuses a single OriginalMotionIndex."""
+    from cooling_tower.preprocessor_placement import OriginalMotionIndex
+    index = OriginalMotionIndex.capture(source, insertion_lines, cancellation_event=cancellation_event)
+    return index.tower_rejection(center, base_radius, head_radius=head_radius,
+        head_height=head_height, lower_head_radius=lower_head_radius, gantry_height=gantry_height) is None
 
-    The entire original program resumes at precisely its original coordinates.
-    Its future travels therefore also need to avoid the added structure.
-    """
+
+def original_exclusions_clear(source, polygons, head_radius, *, cancellation_event=None):
+    """Custom unknown-height obstacles cannot be crossed by retained moves."""
+    if not polygons:
+        return
     tracker = MachineStateTracker()
-    tower_z = 0.0
+    printed = False
     for parsed in iter_parsed_gcode_lines(source):
         if parsed.number % 2000 == 0 and cancellation_event is not None and cancellation_event.is_set():
             raise PreviewCancelled()
         event = tracker.process_line(parsed)
-        if tower_z and parsed.command in {"G28", "G29", "G53", "G54", "G55", "G56", "G57", "G58", "G59"}:
-            if parsed.command == "G28" and parsed.parameters and set(parsed.parameters).issubset({"X", "Y"}):
-                # The renderer adds a verified Z lift before terminal XY homing.
-                continue
-            raise ValueError("Der Original-G-Code enthält nach dem Turmaufbau eine Referenzfahrt oder einen "
-                "Koordinatenwechsel. Dafür kann kein kollisionsfreier Weg nachgewiesen werden. "
-                "Bitte ein Profil mit einer sicheren Endsequenz ohne erneutes Homing wählen.")
-        if tower_z and isinstance(event, Movement) and min(event.start_z, event.end_z) < tower_z + .1:
-            a, b = (event.start_x, event.start_y), (event.end_x, event.end_y)
-            if event.is_arc:
-                # Enclose a possible arc in a conservative swept envelope.
-                radius = 2 * (event.arc_radius_mm or 0)
-                near = (min(a[0], b[0])-radius <= center[0] <= max(a[0], b[0])+radius
-                    and min(a[1], b[1])-radius <= center[1] <= max(a[1], b[1])+radius)
-                if near:
-                    return False
-            elif _point_segment_distance(center, a, b) < base_radius + 1.0:
-                return False
-        if parsed.number in insertion_lines:
-            tower_z = insertion_lines[parsed.number]
-    return True
+        if printed and parsed.command in {"G28", "G29", "G53", "G54", "G55", "G56", "G57", "G58", "G59"}:
+            raise ValueError("Eine spätere Referenzfahrt kann mit eigenen Sperrflächen nicht sicher geprüft werden. "
+                "Bitte eine Quelle mit bekannter Endsequenz ohne erneute Referenzfahrt verwenden.")
+        if isinstance(event, Movement) and event.category == "deposition":
+            printed = True
+        if not isinstance(event, Movement) or event.endpoint_distance_xyz_mm <= 1e-9 and not event.is_arc:
+            continue
+        a, b = (event.start_x, event.start_y), (event.end_x, event.end_y)
+        margin = head_radius + 1 + (2 * (event.arc_radius_mm or 0) if event.is_arc else 0)
+        for polygon in polygons:
+            if (_point_in_polygon(a, polygon) or _point_in_polygon(b, polygon)
+                    or any(segments_cross(a, b, p, polygon[i - 1]) or
+                        min(_point_segment_distance(a, p, polygon[i - 1]), _point_segment_distance(b, p, polygon[i - 1]),
+                            _point_segment_distance(p, a, b), _point_segment_distance(polygon[i - 1], a, b)) < margin
+                        for i, p in enumerate(polygon))):
+                raise ValueError("Eine eigene Sperrfläche einschließlich Druckkopf-Abstand kollidiert mit dem unveränderten Original-G-Code. "
+                    "Sperrfläche prüfen oder die Quelle im Slicer neu platzieren; Originalbahnen werden nicht umgeleitet.")

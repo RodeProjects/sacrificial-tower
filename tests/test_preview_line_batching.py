@@ -223,6 +223,63 @@ class PreviewLineBatchingTests(unittest.TestCase):
         self.assertEqual(prepared.tower_blocks, ())
         canvas.close()
 
+    def test_wait_marker_and_route_groups_render_independently_in_distinct_colours(self):
+        canvas = PreviewCanvas()
+        canvas.resize(640, 480)
+        wait_route = LineSegment3D(Point3D(20, 45, 1), Point3D(80, 45, 1))
+        tower_route = LineSegment3D(Point3D(20, 65, 1), Point3D(80, 65, 1))
+        canvas.set_scene(PreviewScene(
+            object_segments=(LineSegment3D(Point3D(20, 20, 1), Point3D(30, 20, 1)),),
+            tower_segments=(LineSegment3D(Point3D(70, 20, 1), Point3D(80, 20, 1)),),
+            bed_bounds=BedBounds(0, 100, 0, 100), tower_center_xy_mm=(75, 20),
+            source_segment_count=1, displayed_segment_count=1, tower_height_mm=1,
+            travel_segments=(wait_route, tower_route), wait_travel_segments=(wait_route,),
+            tower_travel_segments=(tower_route,), wait_points=(Point3D(50, 85, 1),),
+            wait_position_xy_mm=(50, 85)))
+        canvas.yaw_deg, canvas.pitch_deg = 0, -89
+        canvas.fit_scene(emit=False)
+
+        def rendered_colours():
+            image = QImage(640, 480, QImage.Format.Format_RGBA8888)
+            painter = QPainter(image)
+            canvas.render(painter, QPoint())
+            painter.end()
+            data = bytes(image.constBits())
+            yellow = purple = pink = 0
+            for red, green, blue in zip(data[0::4], data[1::4], data[2::4]):
+                yellow += red > 130 and green > 110 and red - green < 45 and green - blue > 40
+                purple += blue > 80 and blue - red > 20 and red - green > 15
+                pink += red > 80 and red - blue > 30 and blue - green > 20
+            return bool(yellow), bool(purple), bool(pink)
+
+        try:
+            self.assertEqual(rendered_colours(), (True, False, False))
+            canvas.set_wait_position_visible(False)
+            canvas.set_wait_travel_visible(True)
+            self.assertEqual(rendered_colours(), (False, True, False))
+            canvas.set_wait_travel_visible(False)
+            canvas.set_tower_travel_visible(True)
+            self.assertEqual(rendered_colours(), (False, False, True))
+            canvas.set_tower_travel_visible(False)
+            self.assertEqual(rendered_colours(), (False, False, False))
+        finally:
+            canvas.close()
+
+    def test_uncategorized_older_route_scene_remains_displayable(self):
+        from dataclasses import replace
+        canvas = PreviewCanvas()
+        route = LineSegment3D(Point3D(5, 10, 1), Point3D(20, 15, 1))
+        canvas.set_scene(replace(make_scene(), travel_segments=(route,), wait_position_xy_mm=(5, 10)))
+        initial = canvas._prepare_line_frame()
+        self.assertFalse(initial.travel_blocks)
+        self.assertIsNotNone(initial.wait_position)
+        canvas.set_travel_visible(True)
+        enabled = canvas._prepare_line_frame()
+        self.assertEqual(sum(map(len, enabled.tower_travel_blocks)), 1)
+        self.assertFalse(enabled.wait_travel_blocks)
+        self.assertIsNotNone(enabled.wait_position)
+        canvas.close()
+
     def test_rotation_keeps_all_prepared_coordinates_finite(self) -> None:
         canvas = PreviewCanvas()
         canvas.set_scene(make_scene(object_count=200, tower_count=50))

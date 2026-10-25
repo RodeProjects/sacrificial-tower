@@ -74,6 +74,18 @@ class PreviewScene:
     travel_segments: tuple[LineSegment3D, ...] = ()
     wait_points: tuple[Point3D, ...] = ()
     wait_position_xy_mm: tuple[float, float] | None = None
+    wait_travel_segments: tuple[LineSegment3D, ...] = ()
+    tower_travel_segments: tuple[LineSegment3D, ...] = ()
+    layer_z_mm: tuple[float, ...] = ()
+    wait_travel_layer_indices: tuple[int, ...] = ()
+    tower_travel_layer_indices: tuple[int, ...] = ()
+    wait_point_layer_indices: tuple[int, ...] = ()
+    wait_height_offset_mm: float = 0.0
+    printhead_radius_mm: float = 0.0
+    printhead_lower_radius_mm: float = 0.0
+    printhead_clearance_height_mm: float = 0.0
+    printhead_estimated: bool = False
+    wipe_points: tuple[Point3D, ...] = ()
 
 
 def _json_value(value: Any) -> Any:

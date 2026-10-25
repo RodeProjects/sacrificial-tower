@@ -5,6 +5,18 @@ lokale Fehlernachweise und ausdrücklich erzeugte Exporte. Eine Sitzung endet,
 wenn der Anwendungsprozess beendet wird. Nicht alle lokalen Dateien werden
 dabei gelöscht.
 
+## Exportordner
+
+Neue Exporte werden standardmäßig unter `output/automatic`, `output/manual`
+beziehungsweise `output/preprocessor` abgelegt. Jede Methode erzeugt darin
+eigene Zeitstempel-Unterordner mit Druckdateien und Berichten. Die allgemeinen
+Einstellungen bieten für jede Methode eine unabhängige Ordnerauswahl und einen
+Reset auf ihren Standard. Bereits vorhandene Exporte bleiben an ihrem bisherigen
+Ort. Die zuletzt exportierte Datei und ihr erneut aufrufbarer Bericht werden
+je Methode während der Sitzung gemerkt; die Ordnersuche berücksichtigt den
+jeweiligen Methodenordner. Das gespeicherte Format ist unter
+[Schema 24](settings_migrations.md#schema-24-getrennte-exportordner) beschrieben.
+
 ## Vorschauen und Arbeitsdateien
 
 Die gemerkten Objektansichten des manuellen 3D-Editors sind `QPicture`-/Bild-

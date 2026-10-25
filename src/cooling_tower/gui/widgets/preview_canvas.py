@@ -51,7 +51,13 @@ class _PreparedLineFrame:
     bed_blocks: _LineBlocks
     object_blocks: _LineBlocks
     tower_blocks: _LineBlocks
-    travel_blocks: _LineBlocks
+    wait_travel_blocks: _LineBlocks
+    tower_travel_blocks: _LineBlocks
+    wait_position: QPointF | None
+
+    @property
+    def travel_blocks(self) -> _LineBlocks:
+        return self.wait_travel_blocks + self.tower_travel_blocks
 
 
 class PreviewCanvas(QWidget):
@@ -62,6 +68,9 @@ class PreviewCanvas(QWidget):
     BED_COLOR = "#667080"
     OBJECT_COLOR = "#67b7c7"
     TOWER_COLOR = "#ff9e4f"
+    WAIT_POSITION_COLOR = "#ffe48a"
+    WAIT_TRAVEL_COLOR = "#bc98f4"
+    TOWER_TRAVEL_COLOR = "#f080ad"
     MAXIMUM_OBJECT_DRAW_LINES = 32_000
     LINE_BLOCK_SIZE = 4_096
     # Ein Mausradschritt Abstand: gleicher Faktor wie die interaktive
@@ -84,7 +93,11 @@ class PreviewCanvas(QWidget):
         self._drag_button = Qt.MouseButton.NoButton
         self._navigation_enabled = False
         self._fit_whole_bed = False
-        self._travel_visible = True
+        self._wait_position_visible = True
+        self._wait_travel_visible = False
+        self._tower_travel_visible = False
+        self._layer_z = None
+        self._clearance_visible = False
         self._prepared_frame: _PreparedLineFrame | None = None
         self._rendered_frame: QPixmap | None = None
         self._rendered_frame_key: tuple[object, ...] | None = None
@@ -141,6 +154,7 @@ class PreviewCanvas(QWidget):
         # scrolling, panning or rotation in the surrounding page.
         self.set_navigation_enabled(False)
         self.scene = scene
+        self._layer_z = None
         self._prepared_frame = None
         self._invalidate_rendered_frame()
         if not preserve_view:
@@ -555,15 +569,19 @@ class PreviewCanvas(QWidget):
                 for z in (0.0, z_max)
             )
         else:
-            fit_points = (
+            segment_points = (
                 point
                 for segment in chain(
                     scene.object_segments,
                     scene.tower_segments,
-                    scene.travel_segments if self._travel_visible else (),
+                    scene.travel_segments or chain(scene.wait_travel_segments, scene.tower_travel_segments),
                 )
                 for point in (segment.start, segment.end)
             )
+            # Visibility changes must not move the objects or the camera. Keep
+            # the independent wait marker in the same fixed projection bounds.
+            wait_position = self._wait_marker_position()
+            fit_points = chain(segment_points, (wait_position,) if wait_position is not None else ())
         bounds = self._projected_bounds(fit_points, context)
         if bounds is None:
             bed = scene.bed_bounds
@@ -611,13 +629,93 @@ class PreviewCanvas(QWidget):
             self.pan_x,
             self.pan_y,
             self._fit_whole_bed,
-            self._travel_visible,
+            self._wait_position_visible,
+            self._wait_travel_visible,
+            self._tower_travel_visible,
+            self._layer_z,
+            self._clearance_visible,
         )
 
-    def set_travel_visible(self, visible: bool) -> None:
-        self._travel_visible = bool(visible)
+    def set_layer_height(self, z):
+        """Filter one planar deposition layer without changing camera or fitting."""
+        self._layer_z = z
         self._invalidate_rendered_frame()
         self.update()
+
+    def _layer_segments(self, segments, indices=()):
+        if self._layer_z is None:
+            return segments
+        if indices and self.scene is not None and len(indices) == len(segments):
+            return tuple(segment for segment, index in zip(segments, indices)
+                if index < len(self.scene.layer_z_mm) and abs(self.scene.layer_z_mm[index] - self._layer_z) < .001)
+        return tuple(segment for segment in segments if abs(segment.end.z - self._layer_z) < .001)
+
+    def set_travel_visible(self, visible: bool) -> None:
+        """Toggle both route groups while preserving the independent marker."""
+        self._wait_travel_visible = self._tower_travel_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def set_wait_position_visible(self, visible: bool) -> None:
+        self._wait_position_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def set_wait_travel_visible(self, visible: bool) -> None:
+        self._wait_travel_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def set_tower_travel_visible(self, visible: bool) -> None:
+        self._tower_travel_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def set_clearance_visible(self, visible: bool) -> None:
+        self._clearance_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def _clearance_segments(self):
+        scene = self.scene
+        if scene is None or scene.printhead_radius_mm <= 0 or not scene.wipe_points:
+            return ()
+        index = len(scene.wipe_points) - 1
+        if self._layer_z is not None:
+            index = next((i for i, z in enumerate(scene.layer_z_mm) if abs(z-self._layer_z) < .001), -1)
+            if not 0 <= index < len(scene.wipe_points):
+                return ()
+        wipe = scene.wipe_points[index]
+        centers = [wipe]
+        if scene.wait_position_xy_mm is not None:
+            centers.append(Point3D(*scene.wait_position_xy_mm, wipe.z))
+        segments = []
+        for center in centers:
+            for radius, height in ((scene.printhead_lower_radius_mm, center.z),
+                    (scene.printhead_radius_mm, center.z + scene.printhead_clearance_height_mm)):
+                points = [Point3D(center.x + radius*math.cos(i*math.tau/64),
+                    center.y + radius*math.sin(i*math.tau/64), height) for i in range(64)]
+                segments.extend(LineSegment3D(point, points[(i+1) % 64]) for i, point in enumerate(points))
+            for angle in range(0, 64, 16):
+                direction = angle*math.tau/64
+                segments.append(LineSegment3D(Point3D(center.x + scene.printhead_lower_radius_mm*math.cos(direction),
+                    center.y + scene.printhead_lower_radius_mm*math.sin(direction), center.z),
+                    Point3D(center.x + scene.printhead_radius_mm*math.cos(direction),
+                        center.y + scene.printhead_radius_mm*math.sin(direction), center.z+scene.printhead_clearance_height_mm)))
+        return tuple(segments)
+
+    def _wait_marker_position(self) -> Point3D | None:
+        scene = self.scene
+        if scene is None or scene.wait_position_xy_mm is None:
+            return None
+        if self._layer_z is not None:
+            if self._layer_z > scene.tower_height_mm + .001:
+                return None
+            for point, index in zip(scene.wait_points, scene.wait_point_layer_indices):
+                if index < len(scene.layer_z_mm) and abs(scene.layer_z_mm[index] - self._layer_z) < .001:
+                    return point
+            return Point3D(*scene.wait_position_xy_mm, self._layer_z + scene.wait_height_offset_mm)
+        return scene.wait_points[-1] if scene.wait_points else Point3D(*scene.wait_position_xy_mm, 0)
 
     def _line_blocks(
         self,
@@ -680,24 +778,32 @@ class PreviewCanvas(QWidget):
             LineSegment3D(Point3D(*point, 0), Point3D(*polygon[(index + 1) % len(polygon)], 0))
             for polygon in polygons for index, point in enumerate(polygon)
         )
+        wait_position = self._wait_marker_position() if self._wait_position_visible else None
+        # Older scenes may contain a single unclassified route list.
+        tower_travel = scene.tower_travel_segments if (scene.wait_travel_segments or scene.tower_travel_segments) else scene.travel_segments
         prepared = _PreparedLineFrame(
             key=key,
             bed_blocks=self._line_blocks(bed_segments, parameters, context),
             object_blocks=self._line_blocks(
-                scene.object_segments,
+                self._layer_segments(scene.object_segments),
                 parameters,
                 context,
                 maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
             ),
             tower_blocks=self._line_blocks(
-                scene.tower_segments,
+                self._layer_segments(scene.tower_segments),
                 parameters,
                 context,
             ),
-            travel_blocks=self._line_blocks(
-                scene.travel_segments if self._travel_visible else (), parameters, context,
+            wait_travel_blocks=self._line_blocks(
+                self._layer_segments(scene.wait_travel_segments, scene.wait_travel_layer_indices) if self._wait_travel_visible else (), parameters, context,
                 maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
             ),
+            tower_travel_blocks=self._line_blocks(
+                self._layer_segments(tower_travel, scene.tower_travel_layer_indices) if self._tower_travel_visible else (), parameters, context,
+                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
+            ),
+            wait_position=self._project(wait_position, parameters, context) if wait_position is not None else None,
         )
         self._prepared_frame = prepared
         return prepared
@@ -760,19 +866,22 @@ class PreviewCanvas(QWidget):
         frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         frame_painter.setPen(QPen(QColor(self.TOWER_COLOR), 1.5))
         self._draw_line_blocks(frame_painter, prepared.tower_blocks)
-        if self._travel_visible:
-            frame_painter.setPen(QPen(QColor("#e9d271"), 1.0, Qt.PenStyle.DashLine))
-            self._draw_line_blocks(frame_painter, prepared.travel_blocks)
-            if scene.wait_position_xy_mm is not None:
-                context = self._projection_context()
-                parameters = self._fit_parameters(context)
-                # Mark the actual lifted G4 position; when no pause is needed,
-                # retain the planned XY waypoint at bed level.
-                position = scene.wait_points[-1] if scene.wait_points else Point3D(*scene.wait_position_xy_mm, 0)
-                marker = self._project(position, parameters, context)
-                frame_painter.setPen(QPen(QColor("#ffe48a"), 2.0))
-                frame_painter.drawEllipse(marker, 5, 5)
-                frame_painter.drawText(marker + QPointF(9, -7), "Warten")
+        if self._clearance_visible:
+            context = self._projection_context()
+            parameters = self._fit_parameters(context)
+            pen = QPen(QColor("#f2bd64" if scene.printhead_estimated else "#8baadc"), 1)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            frame_painter.setPen(pen)
+            self._draw_line_blocks(frame_painter, self._line_blocks(self._clearance_segments(), parameters, context))
+        for blocks, color in ((prepared.wait_travel_blocks, self.WAIT_TRAVEL_COLOR),
+                (prepared.tower_travel_blocks, self.TOWER_TRAVEL_COLOR)):
+            frame_painter.setPen(QPen(QColor(color), 1.0, Qt.PenStyle.DashLine))
+            self._draw_line_blocks(frame_painter, blocks)
+        if prepared.wait_position is not None:
+            marker = prepared.wait_position
+            frame_painter.setPen(QPen(QColor(self.WAIT_POSITION_COLOR), 2.0))
+            frame_painter.drawEllipse(marker, 5, 5)
+            frame_painter.drawText(marker + QPointF(9, -7), "Warten")
         if scene.bed_geometry is not None:
             context = self._projection_context()
             parameters = self._fit_parameters(context)

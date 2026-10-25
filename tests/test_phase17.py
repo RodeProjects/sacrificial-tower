@@ -1024,7 +1024,7 @@ class Phase17Tests(unittest.TestCase):
         window = self.window()
         self.assertEqual(
             Path(window.output_root_edit.text()),
-            (PROJECT_ROOT / "output").resolve(),
+            (PROJECT_ROOT / "output" / "automatic").resolve(),
         )
         self.assertNotIn("slicer_iterations", window._setting_widgets)
         self.assertFalse(hasattr(window, "preview_iteration_slider"))

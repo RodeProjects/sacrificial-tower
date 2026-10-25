@@ -84,7 +84,20 @@ $env:COOLING_TOWER_RUN_REAL_SLICER_TESTS='1'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_preprocessor_real_slicers.py -v
 ```
 
-Sie verwendet einen kleinen eigenen STL-Testkörper, prüft die Schichtzeiten
+Sie verwendet eigene STL-Testkörper: einen kleinen Quader, einen 35 mm hohen
+schmalen Körper und getrennte Modellbereiche mit unterschiedlichen Höhen.
+Sie prüft die Schichtzeiten
 des fertigen G-Codes, eine Neuberechnung aus demselben Pre-Slice und die
-Unverändertheit der ausgewählten Originalprofile. Fehlende lokale Konfiguration
+Unverändertheit der ausgewählten Originalprofile. Zusätzlich werden die
+automatische Profilübernahme und ein eigener Durchlauf mit absichtlich
+entfernten Druckkopf-Freihüllen geprüft. Dieser muss Ersatzhülle, Hinweis,
+Sicherheitshub, erreichbare Turm-/Wartepositionen und geprüfte Fahrwege liefern.
+Zusätzliche synthetische Präprozessorfälle untersuchen wechselnde Schichthöhen,
+lange aufgeteilte Wartebefehle, Erstschichtgeschwindigkeit und Extrusionsvolumen,
+positive/negative Wiederanlaufmengen, Flussfaktoren, vollständige Kreisbögen und
+den Erhalt des Originalzustands. Die räumliche Vorauswahl wird außerdem mit
+umfangreicheren Bahnlisten und nach Entfernen der eingelesenen Testdatei geprüft.
+Diese Softwareprüfungen ersetzen keine Druckerprobung für Haftung, Turmstabilität,
+Wiederanlaufqualität oder die reale Maschinengeometrie.
+Fehlende lokale Konfiguration
 ist ein Skip und ersetzt keine tatsächlich ausgeführte Slicer-Abnahme.

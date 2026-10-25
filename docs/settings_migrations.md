@@ -33,6 +33,7 @@ einfacheres Format behalten.
 - [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
 - [Schema 22: Profilbindung des Aufweitungswinkels](#schema-22-profilbindung-des-aufweitungswinkels)
 - [Schema 23: Segmentwahl für automatisch erzeugte Türme](#schema-23-segmentwahl-für-automatisch-erzeugte-türme)
+- [Schema 24: getrennte Exportordner](#schema-24-getrennte-exportordner)
 - [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
 
@@ -408,11 +409,33 @@ Zielbereich bei gleicher Bedeutung; Gradangaben oder andere Einheiten sind
 inkompatibel. Neuere, beschädigte und extern geänderte Originaldateien bleiben
 nach den allgemeinen Schutzregeln erhalten.
 
+## Schema 24: getrennte Exportordner
+
+23→24 ergänzt `export_roots` mit den stabilen Methodenkennungen `automatic`,
+`manual` und `preprocessor`. Die Migration leitet unterhalb des bisherigen
+`output_root` je einen gleichnamigen Unterordner ab. Vorhandene Exporte werden
+weder verschoben noch verändert. Ohne gültigen bisherigen Pfad gelten die
+Standardordner der Anwendung. `output_root` bleibt als Schnittstelle zum
+automatischen Exportpfad erhalten und wird bei der Migration auf diesen gesetzt.
+Sein neues Kompatibilitätstoken `automatic-export-directory-path-v2` verhindert,
+dass eine ältere Version ihren gemeinsamen Exportpfad ungeprüft auf die drei
+unabhängigen Ziele überträgt.
+
+Jeder Methodenpfad lässt sich in den allgemeinen Einstellungen unabhängig
+auswählen und auf `output/<Methode>` im Datenverzeichnis der Anwendung
+zurücksetzen. Nur nicht leere Pfadzeichenketten ohne Steuerzeichen sind gültig.
+Ungültige Einzelwerte fallen auf den Methodenstandard zurück. Die neuen
+Kompatibilitätskennungen `export_roots.<Methode>` verwenden jeweils das Token
+`method-export-directory-path-v1`; andere Typen oder Bedeutungen werden auch
+bei Downgrade-Übernahmen abgewiesen. Bestehende Migrationsschritte, Sicherung,
+atomare Speicherung und Schutz vor neueren, beschädigten oder extern
+veränderten Dateien bleiben wirksam.
+
 ## Getrennte manuelle Einstellungen (eigenes Schema 19)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
-automatische Format verwendet Schema 23. `ManualSettingsStore` normalisiert
+gemeinsame Format verwendet Schema 24. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
 gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
 18→19 ergänzt die zunächst deaktivierte Option `limit_expansion_to_profile`.

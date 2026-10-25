@@ -160,7 +160,7 @@ class ManualGenerationController(QObject):
             self.refresh_footer()
             return
         worker = ExportWorker(self._next_id(),self.session.preview,self.session.successful_request,
-                              Path(self.window.output_root_edit.text()),self.export_service)
+                              self.window.export_directory(self.mode),self.export_service)
         self._start(worker,"export",JobKind.EXPORT)
 
     @staticmethod
@@ -228,7 +228,7 @@ class ManualGenerationController(QObject):
                 self.panel.result_label.setText(self.panel.result_label.text().partition("<br>")[0])
             self.window._last_export_report_result = result
             self.window._latest_export_directory = result.run_directory
-            self.window._latest_export_root_text = self.window.output_root_edit.text().strip()
+            self.window._latest_export_root_text = str(self.window.export_directory(self.mode))
             self.window._latest_export_unavailable_reason = ""
             self.window._refresh_last_export_report_action()
             self.window._show_export_success_dialog(result)

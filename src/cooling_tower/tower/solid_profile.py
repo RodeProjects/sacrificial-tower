@@ -13,7 +13,9 @@ from cooling_tower.tower.base_calculator import (
     MINIMUM_BASE_WIDTH_MM,
     calculate_phase10_base_outer_radius,
 )
-from cooling_tower.tower.diameter_transitions import DiameterSegment, plan_diameter_transitions
+from cooling_tower.tower.diameter_transitions import (
+    DiameterSegment, full_infill_foot_taper, plan_diameter_transitions,
+)
 from cooling_tower.tower.profile import LayerRadiusRecord, TowerRadiusProfile
 from cooling_tower.tower.spline_profile import (
     angle_to_radial_slope,
@@ -239,15 +241,11 @@ def build_solid_tower_profile(
         last_layer_z - taper_start_z,
         max(6.0, minimum_layer_height, 0.025 * base_reference_height),
     )
-    if (settings.simulate_full_tower_infill
-            and base_taper_height < last_layer_z - taper_start_z - EPSILON):
-        target_z = taper_start_z + base_taper_height
-        target_index = next(
-            index for index in range(taper_start_index - 1, len(phase2_profile.layers))
-            if phase2_profile.layers[index].z_mm >= target_z - EPSILON
-        )
-        raised_index = min(target_index + 5, len(phase2_profile.layers) - 1)
-        base_taper_height = phase2_profile.layers[raised_index].z_mm - taper_start_z
+    if settings.simulate_full_tower_infill:
+        base_taper_height = full_infill_foot_taper(
+            tuple(layer.z_mm for layer in phase2_profile.layers),
+            base_outer, minimum_outer, base_reference_height,
+        ).duration
     if calculated_base_outer > settings.maximum_outer_radius_mm + EPSILON:
         raise ProfileFeasibilityError(
             FeasibilityIssue(
