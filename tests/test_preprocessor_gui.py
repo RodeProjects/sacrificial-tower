@@ -487,7 +487,7 @@ class PreprocessorGuiTests(unittest.TestCase):
 
     def test_preprocessor_has_edge_attached_cards_and_draggable_resizing_preview(self):
         from PySide6.QtCore import QPoint, Qt
-        self.window.resize(2000, 1100)
+        self.window.resize(2400, 1100)
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
         panel = self.window.preprocessor_panel
         for _ in range(5):
@@ -515,7 +515,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         for _ in range(4):
             self.app.processEvents()
         self.assertFalse(panel.columns.is_two_column())
-        self.window.resize(2000, 1100)
+        self.window.resize(2400, 1100)
         for _ in range(4):
             self.app.processEvents()
         self.assertTrue(panel.columns.is_two_column())
@@ -525,13 +525,23 @@ class PreprocessorGuiTests(unittest.TestCase):
             self.app.processEvents()
         self.assertLessEqual(abs(splitter.sizes()[0] - splitter.sizes()[1]), 1)
         self.assertEqual(panel.columns._ratio, .5)
-        for width in (1999, 2001, 2000):
+        for width in (2399, 2401, 2400):
             self.window.resize(width, 1100)
             for _ in range(6):
                 self.app.processEvents()
             handle = splitter.handle(1)
             self.assertEqual(handle.x() + handle.rect().center().x(), splitter.rect().center().x())
             self.assertEqual(panel.columns._ratio, .5)
+        self.window.resize(2000, 1100)
+        for _ in range(6):
+            self.app.processEvents()
+        for widget, size in zip((panel.settings_column, panel.preview_group), splitter.sizes()):
+            self.assertGreaterEqual(size, widget.minimumSizeHint().width())
+        self.assertEqual(panel.columns._ratio, .5)
+        self.window.resize(2400, 1100)
+        for _ in range(6):
+            self.app.processEvents()
+        self.assertLessEqual(abs(splitter.sizes()[0] - splitter.sizes()[1]), 1)
         self.assertIsNone(self.controller.job_id)
 
     def test_initial_preview_and_resizes_never_overlap_legend_or_view_controls(self):

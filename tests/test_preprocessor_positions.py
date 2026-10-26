@@ -746,6 +746,7 @@ class PositionEditorGuiTests(unittest.TestCase):
             self.app.processEvents()
 
     def test_minimum_sidebar_gap_combined_fields_and_coloured_legends(self):
+        self.window.resize(2400, 1100)
         self.panel.advanced_group.setChecked(True)
         for flag in ("automatic_position", "automatic_wait_position"):
             self.panel.automatic[flag].setChecked(False)

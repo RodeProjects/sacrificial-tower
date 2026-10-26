@@ -1302,7 +1302,7 @@ class ManualGuiTests(unittest.TestCase):
                 self.assertEqual(gradient.finalStop(),end)
                 self.assertEqual(gradient.stops(),[(0.,QColor("#a3b1c0").darker(150)),(1.,QColor("#bec5ce"))])
 
-    def test_free_navigation_matches_automatic_preview_camera_gestures(self):
+    def test_free_navigation_matches_automatic_drag_and_zoom_steps(self):
         from cooling_tower.gui.widgets.preview_canvas import PreviewCanvas
         c=self.panel.canvas;c.set_view("free")
         auto=PreviewCanvas();self.addCleanup(auto.close)
@@ -1312,15 +1312,22 @@ class ManualGuiTests(unittest.TestCase):
         c.pitch_deg=auto.pitch_deg=25
         c.pan=QPointF();auto.pan_x=auto.pan_y=0
         before=self.panel.draft
+        def scroll(widget,delta):
+            # The automatic preview now anchors zoom at the cursor; compare
+            # shared gestures about its panned scene centre. The manual free
+            # view keeps its centre zoom even with an off-centre cursor.
+            anchor=(QPointF(auto.width()/2+auto.pan_x,auto.height()/2+auto.pan_y)
+                    if widget is auto else QPointF(25,30))
+            event=QWheelEvent(anchor,QPointF(widget.mapToGlobal(anchor.toPoint())),QPoint(),
+                              QPoint(0,delta),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,
+                              Qt.ScrollPhase.NoScrollPhase,False)
+            widget.wheelEvent(event)
         origin=QPoint(130,150)
         destination=origin+QPoint(80,60)
         for button in (Qt.MouseButton.LeftButton,Qt.MouseButton.RightButton,Qt.MouseButton.MiddleButton):
             for widget in (c,auto):
                 QTest.mousePress(widget,button,pos=origin)
-                event=QWheelEvent(QPointF(25,30),QPointF(widget.mapToGlobal(QPoint(25,30))),QPoint(),
-                                  QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,
-                                  Qt.ScrollPhase.NoScrollPhase,False)
-                widget.wheelEvent(event)
+                scroll(widget,120)
                 QTest.mouseMove(widget,destination)
                 QTest.mouseRelease(widget,button,pos=destination)
             self.assertEqual(c.yaw_deg,auto.yaw_deg)
@@ -1330,10 +1337,7 @@ class ManualGuiTests(unittest.TestCase):
         for zoom,delta in ((1,120),(1,-120),(49,120),(.051,-120)):
             c.zoom=auto.zoom=zoom
             for widget in (c,auto):
-                event=QWheelEvent(QPointF(25,30),QPointF(widget.mapToGlobal(QPoint(25,30))),QPoint(),
-                                  QPoint(0,delta),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,
-                                  Qt.ScrollPhase.NoScrollPhase,False)
-                widget.wheelEvent(event)
+                scroll(widget,delta)
             self.assertEqual(c.zoom,auto.zoom)
             self.assertEqual((c.pan.x(),c.pan.y()),(auto.pan_x,auto.pan_y))
         self.assertEqual(self.panel.draft,before)

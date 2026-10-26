@@ -363,8 +363,10 @@ Die **Draufsicht** erlaubt die Spitzenbreite und die Turm-Durchmessergrenze,
 die **Untersicht** die Fußbreite und die Fuß-Durchmessergrenze. Die **Freie 3D-Ansicht** beginnt in der 3/4-Ansicht
 und besitzt keine Greiferaktionen. Ihre Navigation entspricht der aktivierten
 Navigation der automatischen 3D-Vorschau: linke Maustaste dreht, rechte oder
-mittlere Maustaste verschiebt, Mausrad zoomt zur Ansichtsmitte. Drehgeschwindigkeit,
-Neigungsgrenzen und Zoomschritte/-grenzen stimmen ebenfalls überein. In den
+mittlere Maustaste verschiebt. Drehgeschwindigkeit,
+Neigungsgrenzen und Zoomschritte/-grenzen stimmen ebenfalls überein. Das Mausrad
+zoomt in der freien manuellen Ansicht zur Ansichtsmitte; die automatische
+Vorschau hält dabei den Punkt unter dem Mauszeiger fest. In den
 übrigen Ansichten zoomt das Mausrad weiterhin um die Mausposition und die
 mittlere Maustaste verschiebt.
 „Einpassen“ stellt beide

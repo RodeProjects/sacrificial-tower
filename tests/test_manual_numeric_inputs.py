@@ -53,12 +53,15 @@ class ManualNumericInputTests(unittest.TestCase):
 
     def test_invalid_letters_and_fractional_segments_have_explanations(self):
         spin=self.panel.editors["circle_segments"];row=self.panel.rows["circle_segments"]
+        previous=self.panel.settings.circle_segments
         spin.setFocus();spin.selectAll();QTest.keyClicks(spin,"abc");self.app.processEvents()
         self.assertTrue(row.message_label.isVisible())
         self.assertIn("gültige Zahl",row.message_label.text())
+        self.assertEqual(self.panel.settings.circle_segments,previous)
         self.enter(spin,"30,5")
         self.assertIn("ganze Zahl",row.message_label.text())
-        self.assertEqual(self.panel.settings.circle_segments,30)
+        self.assertEqual(self.panel.settings.circle_segments,previous)
+        self.assertEqual(spin.value(),previous)
 
     def test_dots_and_commas_produce_the_same_number_and_comma_display(self):
         self.panel.profile_angle_limit.checkbox.setChecked(False)

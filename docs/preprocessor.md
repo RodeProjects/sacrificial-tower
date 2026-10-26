@@ -19,7 +19,9 @@ Fensterhöhe; die vollständigen Bedienelemente darunter werden dabei reserviert
 Standardmäßig erhält die Einstellungsleiste nur die notwendige Breite. Zwischen
 Einstellungsname und erstem rechten Bedienelement bleiben mindestens 30 Pixel
 Abstand; alle Felder und Reset-Buttons bleiben rechts bündig. Doppelklick setzt
-die Trennlinie in die horizontale Mitte. Eine per Ziehen oder Doppelklick
+die Trennlinie in die horizontale Mitte, soweit die Mindestbreiten der
+Bedienelemente dies zulassen. Bei mehr Platz wird die mittige Aufteilung
+wiederhergestellt. Eine per Ziehen oder Doppelklick
 gewählte Aufteilung bleibt bei anschließenden Größenänderungen erhalten.
 Die Trennlinie stoppt an den Mindestbreiten der Bedienelemente. Einstellungsnamen,
 Schalterbeschriftungen und Vorschau-Buttons bleiben ohne zusätzliche Umbrüche

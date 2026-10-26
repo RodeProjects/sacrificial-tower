@@ -410,6 +410,9 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         canvas._prepare_line_frame()
         self.assertEqual([source[1].name() for source in canvas._lower_layer_frames.sources],
             [canvas.OBJECT_COLOR, canvas.BRIM_COLOR, canvas.TOWER_COLOR])
+        # A narrow window starts with scrolling enabled instead of camera
+        # navigation. Opt in before testing a deliberate camera gesture.
+        canvas.set_navigation_enabled(True)
         centre = canvas.rect().center()
         QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=centre)
         QTest.mouseMove(canvas, centre+QPoint(15, 8))
@@ -476,13 +479,15 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
 
     def test_time_chart_has_compact_width_and_one_column_legend(self):
         self.harness.wait_for_result()
-        self.window.resize(2000, 1100)
+        self.window.resize(2400, 1100)
         QTest.qWait(100)
-        self.assertEqual(self.panel.timing_panel.width(), 210)
+        compact_width = max(210, self.panel.timing_panel.minimumSizeHint().width())
+        self.assertEqual(self.panel.timing_panel.width(), compact_width)
+        self.assertEqual(self.panel.timing_panel.maximumWidth(), compact_width)
         layout = self.panel.time_legend.layout()
         self.assertEqual(layout.columnCount(), 1)
         self.assertEqual(layout.rowCount(), 4)
-        self.assertLessEqual(self.panel.time_chart.width(), 210)
+        self.assertLessEqual(self.panel.time_chart.width(), compact_width)
 
     def test_preview_function_rows_have_fixed_spacing_and_minimum_reset_gap(self):
         self.harness.wait_for_result()
