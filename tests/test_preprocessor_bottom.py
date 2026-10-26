@@ -1,7 +1,11 @@
 """Bottom-surface semantics and the open core of the annular tower foot."""
 from dataclasses import replace
 import math
+from pathlib import Path
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cooling_tower.calibration.gcode_integration import _point_segment_distance
 from cooling_tower.gcode.parser import MachineStateTracker, Movement, iter_parsed_gcode_lines
