@@ -107,7 +107,7 @@ class PreprocessorTests(unittest.TestCase):
                     retained = []
                     inserted = False
                     for line in raw:
-                        if line.strip() == b"; SACRIFICIAL_TOWER_PREPROCESSED":
+                        if line.strip() == b"; SACRIFICIAL_TOWER_POSTPROCESSED":
                             continue
                         if line.strip() == BEGIN.encode():
                             inserted = True
@@ -300,10 +300,10 @@ class PreprocessorTests(unittest.TestCase):
             measured[round(segment.end.z, 5)] = max(radius, measured.get(round(segment.end.z, 5), 0))
         for layer in automatic.layers:
             self.assertAlmostEqual(measured[round(layer.z, 5)] + .22, layer.outer_radius_mm, places=5)
-        # A concave foot is filled below the hollow shaft, including the layers
-        # where its steep inward step would otherwise leave an unsupported wall.
+        # The exterior curve remains supported by an annulus, while its core
+        # is open after its two closed bottom layers.
         blocks = result.gcode_path.read_text().split(BEGIN)[1:]
-        self.assertIn("solid base / tower", blocks[2])
+        self.assertIn("hollow tower / annular foot", blocks[2])
         self.assertIn("hollow tower", blocks[-1])
         slopes = [(b.outer_radius_mm - a.outer_radius_mm) / (b.z - a.z)
             for a, b in zip(automatic.layers, automatic.layers[1:])]
@@ -409,6 +409,13 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreviewCancelled):
             self.service.prepare(self.request(), cancellation_event=event)
         self.assertFalse(self.service.temporary_root.exists())
+
+    def test_current_and_legacy_processing_markers_prevent_duplicate_towers(self):
+        for marker in (BEGIN, "; SACRIFICIAL_TOWER_PREPROCESSOR_BEGIN", "; COOLING_TOWER_BEGIN"):
+            with self.subTest(marker=marker):
+                request = self.request(make_gcode().replace(";LAYER_CHANGE", marker+"\n;LAYER_CHANGE", 1))
+                with self.assertRaisesRegex(ValueError, "bereits einen bearbeiteten Turm"):
+                    self.prepare(request)
 
     def test_no_deficit_exports_unchanged_original(self):
         request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=.1))

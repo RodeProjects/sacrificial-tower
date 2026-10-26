@@ -5,8 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 import traceback
 
-from PySide6.QtCore import QObject, Signal, Slot, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject, Signal, Slot, QSignalBlocker
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.generation_session import GenerationMode
@@ -18,10 +17,8 @@ from cooling_tower.preview.toolpath import PreviewCancelled
 
 
 from cooling_tower.gui.preprocessor_controls import PreprocessorPanel
-from cooling_tower.gui.preprocessor_exclusions import PreprocessorExclusionDialog
+from cooling_tower.gui.preprocessor_positions import PreprocessorPositionDialog, PositionCache, position_cache_key, position_solution_key
 from cooling_tower.calibration.gcode_integration import parse_bed_geometry
-from cooling_tower.preview.toolpath import analyze_deposition_toolpaths
-from cooling_tower.preprocessor_profiles import printhead_envelope
 
 
 class PreprocessorWorker(CancelableWorker):
@@ -65,12 +62,14 @@ class PreprocessorController(QObject):
         self._locked_inputs = []
         self._zone_context = None
         self._profile_context = None
-        self.exclusion_dialog = None
+        self.position_dialog = None
+        self._position_cache = None
+        self._generation_position_key = None
         panel.changed.connect(self.changed)
         panel.generate_button.clicked.connect(self.generate)
         panel.cancel_button.clicked.connect(self.cancel)
         panel.export_button.clicked.connect(self.export)
-        panel.exclusions_button.clicked.connect(self.open_exclusion_editor)
+        panel.positions_button.clicked.connect(self.open_position_editor)
         panel.open_output_button.clicked.connect(window.open_output_directory)
         panel.open_last_button.clicked.connect(window.open_stl_directory)
         panel.open_report_button.clicked.connect(window.show_last_export_report)
@@ -98,60 +97,60 @@ class PreprocessorController(QObject):
         geometry = parse_bed_geometry(profile.effective_values)
         signature = (prepared.source_artifact.original_path, prepared.source_artifact.original_sha256, geometry)
         if self._zone_context is not None and signature != self._zone_context:
-            had_exclusions = bool(self.panel.exclusions)
+            self._position_cache = None
             self.panel.exclusions = ()
-            self.panel.exclusions_button.setText("Eigene Sperrflächen bearbeiten …")
-            if self.exclusion_dialog is not None:
-                self.exclusion_dialog.reject()
-            if had_exclusions:
-                self.panel.status.setText("Quelle oder Druckbett geändert: Eigene Sperrflächen wurden zurückgesetzt. Bitte Hindernisse erneut prüfen.")
+            if self.position_dialog is not None:
+                self.position_dialog.reject()
+            self.panel.manual_position_edits.clear()
         self._zone_context = signature
         profile_key = repr(profile.effective_values)
         if self._profile_context != profile_key:
+            self._position_cache = None
+            if self.position_dialog is not None:
+                self.position_dialog.reject()
             self._profile_context = profile_key
             self.panel.set_profile_values(profile.effective_values)
 
-    def open_exclusion_editor(self):
+    def open_position_editor(self):
         if self.job_id is not None:
+            return
+        if self.position_dialog is not None:
+            self.position_dialog.raise_()
             return
         try:
             request = self.request()
             geometry = parse_bed_geometry(request.profile.effective_values)
             if geometry is None:
-                raise ValueError("Für den Sperrflächeneditor fehlt eine bestätigte Druckbettgeometrie.")
-            request.validate_source()
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            try:
-                segments = (self.panel.canvas.scene.object_segments if self.panel.canvas.scene is not None else
-                    analyze_deposition_toolpaths(request.prepared_source.analysis_gcode_path,
-                        expected_layer_count=request.snapshot.layer_count).object_segments)
-            finally:
-                QApplication.restoreOverrideCursor()
+                raise ValueError("Für den Positionseditor fehlt eine bestätigte Druckbettgeometrie.")
         except (ValueError, OSError) as error:
             self.panel.status.setText(str(error))
             return
-        if self.exclusion_dialog is not None:
-            self.exclusion_dialog.raise_()
-            return
-        dialog = PreprocessorExclusionDialog(geometry, self.panel.exclusions, segments, self.window,
-            head_radius_mm=printhead_envelope(request.profile.effective_values, geometry).radius_mm + 1)
-        self.exclusion_dialog = dialog
-        context = self._zone_context
+        if self._position_cache is None or not self._position_cache.matches(request):
+            self._position_cache = PositionCache(position_cache_key(request))
+        dialog = PreprocessorPositionDialog(request, self.service, self.window.background_job_manager,
+            geometry, self.panel.manual_position_edits, self.window, cache=self._position_cache)
+        self.position_dialog = dialog
         def apply():
-            if self._zone_context != context:
-                return
-            zones = dialog.canvas.zones
-            if zones != self.panel.exclusions:
-                self.panel.exclusions = zones
-                self.panel.exclusions_button.setText(f"Eigene Sperrflächen bearbeiten … ({len(zones)})")
-                self.changed()
+            self._position_cache.requested_key = position_solution_key(dialog.settings)
+            for flag, fields in (("automatic_position", ("center_x_mm", "center_y_mm")),
+                    ("automatic_wait_position", ("wait_x_mm", "wait_y_mm"))):
+                with QSignalBlocker(self.panel.automatic[flag]):
+                    self.panel.automatic[flag].setChecked(getattr(dialog.settings, flag))
+                for field in fields:
+                    with QSignalBlocker(self.panel.inputs[field]):
+                        self.panel.inputs[field].setValue(getattr(dialog.settings, field))
+                if not getattr(dialog.settings, flag):
+                    self.panel.manual_position_edits.add(flag)
+            with QSignalBlocker(self.panel.inputs["edge_clearance_mm"]):
+                self.panel.inputs["edge_clearance_mm"].setValue(dialog.settings.edge_clearance_mm)
+            self.panel._changed()
         dialog.accepted.connect(apply)
         dialog.finished.connect(lambda _: self._close_editor(dialog))
         dialog.open()
 
     def _close_editor(self, dialog):
-        if self.exclusion_dialog is dialog:
-            self.exclusion_dialog = None
+        if self.position_dialog is dialog:
+            self.position_dialog = None
         dialog.deleteLater()
 
     def changed(self):
@@ -159,14 +158,16 @@ class PreprocessorController(QObject):
         self.panel.status.setText("Einstellungen geändert. G-Code und Vorschau bitte neu erzeugen.")
 
     def invalidate(self):
+        if self.position_dialog is not None and self.position_dialog.isVisible():
+            self.position_dialog.reject()
         if self.job_id is not None:
             self.cancel()
         self.session.discard_preview()
         self.panel.clear_automatic_values()
         self.panel.canvas.set_scene(None)
+        self.panel.canvas.set_busy(False)
         self.panel.clear_timing()
         self.panel.error_label.hide()
-        self.panel.summary.setText("G-Code und Vorschau bitte aus dem ursprünglichen Pre-Slice neu erzeugen.")
         self.refresh()
 
     def generate(self):
@@ -193,7 +194,9 @@ class PreprocessorController(QObject):
         self.cancelled = False
         self.session.preview_state = PreviewState.BUILDING
         self.panel.progress.setValue(0)
-        self.panel.status.setText("Präprozessor startet …")
+        self.panel.status.setText("Postprozessor startet …")
+        self.panel.canvas.set_busy(True, step="Originalquelle und Druckprofil prüfen …")
+        self._generation_position_key = position_cache_key(request)
         self.job_id = self.window.background_job_manager.start_job(kind=JobKind.PREVIEW,
             request_id=self.request_id, worker=worker, parent_operation_id="preprocessor")
         self._locked_inputs = [(widget, widget.isEnabled()) for widget in (
@@ -209,6 +212,7 @@ class PreprocessorController(QObject):
         if request_id == self.request_id and not self.window._closing:
             self.panel.progress.setValue(percent)
             self.panel.status.setText(status)
+            self.panel.canvas.set_busy(True, percent=percent, step=status)
 
     def succeeded(self, request_id, result):
         if request_id != self.request_id or self.cancelled or self.window._closing:
@@ -217,13 +221,18 @@ class PreprocessorController(QObject):
         self.session.preview = result
         self.session.preview_state = PreviewState.CURRENT
         self.session.successful_request = result.request
+        self.panel.canvas.set_busy(False)
+        if result.placement is not None:
+            self._position_cache = PositionCache(self._generation_position_key, result.placement)
+            self._position_cache.remember(result.effective_settings, result.placement_solution, "")
         self.panel.canvas.set_scene(result.scene)
-        self.panel.canvas.apply_camera_state({**self.panel.canvas.camera_state(), "yaw_deg": -38, "pitch_deg": -28})
+        self.panel.canvas.apply_camera_state({**self.panel.canvas.camera_state(),
+            "yaw_deg": self.panel.canvas.separated_yaw(), "pitch_deg": -28})
         self.panel.canvas.fit_scene()
-        self.panel.canvas.set_navigation_enabled(True)
         self.panel.show_automatic_values({
             **{name: getattr(result.effective_settings, name) for name in (
-                "target_layer_time_s", "print_speed_mm_s", "travel_speed_mm_s", "retract_mm", "retract_speed_mm_s")},
+                "target_layer_time_s", "print_speed_mm_s", "travel_speed_mm_s", "retract_mm", "retract_speed_mm_s",
+                "tower_brim_width_mm", "tower_brim_gap_mm")},
             "height_mm": result.height_mm, "diameter_mm": result.diameter_mm,
             "base_width_mm": result.base_width_mm,
             **dict(zip(("center_x_mm", "center_y_mm"), result.scene.tower_center_xy_mm if result.height_mm else (None, None))),
@@ -231,25 +240,6 @@ class PreprocessorController(QObject):
         })
         self.panel.refresh_resets()
         self.panel.show_timing(result)
-        self.panel.summary.setText(f"Höhe {result.height_mm:.2f} mm · Durchmesser {result.diameter_mm:.2f} mm · "
-            f"Standfuß {result.base_width_mm:.2f} mm · Mitte X {result.scene.tower_center_xy_mm[0]:.2f}, "
-            f"Y {result.scene.tower_center_xy_mm[1]:.2f} mm\n"
-            f"{result.wait_count} Wartephasen · {result.total_wait_s:.1f} s Restwartezeit. "
-            f"Kürzeste berechnete Schichtzeit: {min(result.layer_times_s):.2f} s. "
-            + (f"Warteposition X {result.scene.wait_position_xy_mm[0]:.2f}, Y {result.scene.wait_position_xy_mm[1]:.2f} mm · "
-                if result.scene.wait_position_xy_mm else "")
-            + f"Sicherheitshub {result.effective_z_hop_mm:.2f} mm. "
-            +
-            "Fahrten, Abstreifen und Primen sind eingerechnet. Automatische Maße sind Stabilitätsrichtwerte; "
-            "Material, Haftung und Drucker beeinflussen die tatsächliche Stabilität.")
-        if result.height_mm and result.request.settings.hollow_tower:
-            low, high = result.wall_thickness_range_mm
-            thickness = f"{low:.2f} mm" if abs(high - low) < .005 else f"{low:.2f}–{high:.2f} mm"
-            inner_low, inner_high = result.diameter_mm - 2 * high, result.diameter_mm - 2 * low
-            inner = f"{inner_low:.2f} mm" if abs(inner_high - inner_low) < .005 else f"{inner_low:.2f}–{inner_high:.2f} mm"
-            self.panel.summary.setText(self.panel.summary.text()
-                + f"\n{result.request.settings.wall_count} Wandlinien · Wandstärke {thickness} · "
-                + f"Schaft-Innendurchmesser {inner}.")
         self.panel.status.setText("G-Code und rekonstruierte Vorschau sind bereit." if result.height_mm else
             "Alle Schichten erreichen die Zielzeit. Der G-Code bleibt unverändert; kein Turm erforderlich.")
         self.panel.refresh_layout()
@@ -260,6 +250,7 @@ class PreprocessorController(QObject):
             self.critical_error(message)
 
     def critical_error(self, message):
+        self.panel.canvas.set_busy(False)
         self.session.discard_preview()
         self.panel.clear_automatic_values()
         self.session.preview_state = PreviewState.FAILED
@@ -276,12 +267,13 @@ class PreprocessorController(QObject):
         if job.job_id != self.job_id:
             return
         self.job_id = None
+        self.panel.canvas.set_busy(False)
         for widget, enabled in self._locked_inputs:
             widget.setEnabled(enabled)
         self._locked_inputs = []
         if not self.window._closing:
             if self.cancelled:
-                self.panel.status.setText("Präprozessor abgebrochen.")
+                self.panel.status.setText("Postprozessor abgebrochen.")
                 self.session.preview_state = PreviewState.EMPTY
             self.refresh()
             self.window._refresh_phase17_actions()

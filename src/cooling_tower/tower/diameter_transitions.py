@@ -14,6 +14,15 @@ EPSILON = 1e-9
 NORMAL_FOOT_START_FRACTION = 0.02
 
 
+def _foot_start_fraction(z: tuple[float, ...], duration: float) -> float:
+    """Keep the second foot layer broad, joining the curve at the third layer.
+
+    Real layer heights determine the join; short towers still reach their
+    shaft radius at the original curve end.
+    """
+    return min(1.0, max(0.0, (z[min(2, len(z) - 1)] - z[0]) / max(EPSILON, duration)))
+
+
 def _foot_radial_fraction(t: float, power: float, start_fraction: float) -> float:
     """Radial progress on the drawn curve, with an optional finite start slope."""
     if start_fraction > 0.0 and t < start_fraction:
@@ -67,7 +76,8 @@ def full_infill_foot_taper(
     if duration < z[-1] - start_z - EPSILON:
         target = next(index for index, height in enumerate(z) if height >= start_z + duration - EPSILON)
         duration = z[min(target + 5, len(z) - 1)] - start_z
-    return Taper(start_z, base_radius, minimum_radius, max(EPSILON, duration), foot_curve_power=3.2)
+    return Taper(start_z, base_radius, minimum_radius, max(EPSILON, duration), foot_curve_power=3.2,
+        foot_start_fraction=_foot_start_fraction(z, duration))
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +166,10 @@ def plan_diameter_transitions(
         # 100% infill rises by about 6%, normal infill by about 13% of the
         # transition height.  A larger power keeps the outer foot flatter.
         foot_curve_power = 3.2 if allow_steps else 2.15
-        foot_start_fraction = 0.0 if allow_steps else NORMAL_FOOT_START_FRACTION
+        foot_start_fraction = max(
+            0.0 if allow_steps else NORMAL_FOOT_START_FRACTION,
+            _foot_start_fraction(z[base_index:], base_taper_height),
+        )
         end_z = z[base_index] + base_taper_height
         target_radius = minimum_radius
         for j in range(base_index + 1, len(z)):

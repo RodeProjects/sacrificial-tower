@@ -8,6 +8,10 @@ class PreprocessorStateTracker(MachineStateTracker):
         self.adapter_id = adapter_id
 
     def process_line(self, parsed):
+        # Bambu's viewer treats these as printer-specific control commands,
+        # not physical tool selections. Keep the actual extruder selected.
+        if self.adapter_id == "bambu_studio" and parsed.command in {"T255", "T1000", "T1100"}:
+            return None
         event = super().process_line(parsed)
         if parsed.command == "M221" and "S" in parsed.parameters:
             # Bambu uses M221 T... for soft endstops. A plain S command is

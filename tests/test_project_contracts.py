@@ -59,6 +59,8 @@ class ProjectContractTests(unittest.TestCase):
         for path in ("PySide6/Qt6VirtualKeyboard.dll", "PySide6/Qt6Pdf.dll", "PySide6/Qt6Qml.dll", "PySide6/opengl32sw.dll", "PySide6/plugins/platforminputcontexts/qtvirtualkeyboardplugin.dll"):
             self.assertFalse(keep_qt_binary(path), path)
         self.assertTrue(keep_qt_binary("PySide6/Qt6Widgets.dll"))
+        self.assertTrue(keep_qt_binary("PySide6/Qt6SvgWidgets.dll"))
+        self.assertTrue(keep_qt_binary("PySide6/QtSvgWidgets.pyd"))
         self.assertTrue(keep_qt_binary("PySide6/plugins/platforms/qwindows.dll"))
         with self.assertRaises(ValueError):
             keep_qt_binary("PySide6/Qt6FutureModule.dll")

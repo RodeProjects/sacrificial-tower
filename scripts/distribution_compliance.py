@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from cooling_tower.legal_documents import DOCUMENTS, PROJECT_LEGAL_FILES, export_legal_documents, render_legal_document
 
-QT_LIBRARIES = frozenset({"qt6core.dll", "qt6gui.dll", "qt6widgets.dll", "qt6network.dll", "qt6svg.dll", "qt6opengl.dll"})
+QT_LIBRARIES = frozenset({"qt6core.dll", "qt6gui.dll", "qt6widgets.dll", "qt6network.dll", "qt6svg.dll", "qt6svgwidgets.dll", "qt6opengl.dll"})
 QT_PLUGINS = frozenset({
     "qwindows.dll", "qoffscreen.dll", "qminimal.dll", "qmodernwindowsstyle.dll",
     "qsvgicon.dll", "qsvg.dll", "qgif.dll", "qico.dll", "qjpeg.dll",

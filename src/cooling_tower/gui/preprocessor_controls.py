@@ -1,11 +1,13 @@
-"""Preprocessor controls using the application's shared settings and card design."""
+"""Postprocessor controls using the application's shared settings and card design."""
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QSignalBlocker, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget,
+    QBoxLayout, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from cooling_tower.gui.design_tokens import METRICS
@@ -16,11 +18,12 @@ from cooling_tower.gui.widgets.preview_canvas import PreviewCanvas
 from cooling_tower.gui.widgets.responsive_card_grid import ResponsiveCardGrid
 from cooling_tower.gui.widgets.resizable_preview_columns import ResizablePreviewColumns
 from cooling_tower.gui.widgets.section_card import SectionCard
-from cooling_tower.gui.widgets.wheel_safe_inputs import WheelSafeDoubleSpinBox, WheelSafeSpinBox
+from cooling_tower.gui.widgets.committed_numeric_inputs import CommittedDoubleSpinBox, CommittedSpinBox
 from cooling_tower.preprocessor import PreprocessorSettings
 from cooling_tower.preprocessor_profiles import resolve_profile_settings, printhead_envelope
 from cooling_tower.calibration.gcode_integration import parse_bed_geometry
 from cooling_tower.gui.widgets.preprocessor_time_chart import PreprocessorTimeChart
+from cooling_tower.gui.widgets.preprocessor_widgets import ColourLegend, LayerNumberSpinBox, PreprocessorFooter
 
 
 AUTOMATIC_FIELDS = {
@@ -31,24 +34,34 @@ AUTOMATIC_FIELDS = {
     "automatic_height": ("height_mm",),
     "automatic_diameter": ("diameter_mm",),
     "automatic_base": ("base_width_mm",),
+    "automatic_tower_brim_width": ("tower_brim_width_mm",),
+    "automatic_tower_brim_gap": ("tower_brim_gap_mm",),
     "automatic_position": ("center_x_mm", "center_y_mm"),
     "automatic_wait_position": ("wait_x_mm", "wait_y_mm"),
 }
-VIEW_DEFAULTS = {"show_wait_position": True, "show_wait_travel": False, "show_tower_travel": False, "show_clearance": False}
-PROFILE_FIELDS = {name for flag in ("automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed")
+VIEW_DEFAULTS = {"show_wait_position": True, "show_wait_travel": False, "show_tower_travel": False}
+PROFILE_FIELDS = {name for flag in ("automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed",
+    "automatic_tower_brim_width", "automatic_tower_brim_gap")
     for name in AUTOMATIC_FIELDS[flag]}
 
 HINTS = {
-    "show_clearance": ("Zeigt die verwendete Druckkopf-Freihülle am Warteplatz und am Turm-Anfahrpunkt der gewählten Schicht.",
-        "Blau gestrichelt: Profilabstände. Gelb gestrichelt: geschätzte Ersatzhülle. Das ist keine vermessene Maschinengeometrie; bei allen Schichten wird die letzte Turmschicht dargestellt."),
-    "target_layer_time_s": ("Jede Schicht soll mindestens diese Zeit erreichen.",
-        "Automatisch gilt die aktive Kühlungsvorgabe des bestätigten Filamentprofils; fehlt sie, bleibt der Ersatzwert sichtbar. Fahrten, Turmdruck und Primen zählen mit."),
-    "height_mm": ("Automatisch reicht der Turm bis zur letzten Originalschicht mit Zeitdefizit.",
+    "target_layer_time_s": ("Jeder Layer soll mindestens die eingestellte Mindest-Layerzeit erreichen.",
+        "Standard sind manuelle 10 Sekunden. Bei aktivierter Automatik gilt die Kühlungsvorgabe des bestätigten Filamentprofils; fehlt sie, bleibt der Ersatzwert sichtbar. Fahrten, Turmdruck und Primen zählen zur Layerzeit mit."),
+    "normalize_time_scale": ("Layer 1 bleibt mit seiner vollständigen Zeit in Berechnung, Layerauswahl und Zeitangabe erhalten, erhält im Diagramm aber keinen Farbbalken.",
+        "Die Zeitskala richtet sich nach den übrigen Layern und der Mindest-Layerzeit. So drückt eine lange erste Schicht die übrigen Balken nicht zusammen.",
+        "Zu Beginn aktiviert, wenn Layer 1 allein die längste Gesamtzeit hat. Die Option ändert weder G-Code noch berechnete Zeiten."),
+    "height_mm": ("Automatisch wird der Turm nur bis zur letzten Schicht mit Layerzeitdefizit erzeugt. Sobald alle folgenden Schichten die Mindest-Layerzeit ohne Turm erreichen, endet er.",
         "Manuelle Höhen werden auf vorhandene Schichten abgerundet. Ein zu kurzer Turm sperrt den Export."),
     "diameter_mm": ("Bestimmt die Breite des hohlen Turmschafts.",
         "Dies ist der Außendurchmesser. Der Innendurchmesser ergibt sich aus Profil-Linienbreiten, Schichthöhe und Wandlinienzahl."),
     "base_width_mm": ("Der breitere Standfuß verbessert Haftung und Stabilität.",
-        "Automatisch berücksichtigt er Turmhöhe und Schaftbreite. Die konkave Form entspricht der Automatik bei 100 % Füllung; der gekrümmte Fuß wird zur sicheren Unterstützung gefüllt."),
+        "Die Breite ist der Außendurchmesser ohne Brim. Automatisch berücksichtigt sie Turmhöhe und Schaftbreite. Die ersten beiden Fußschichten sind verbreitert; darüber verjüngt sich der Fuß konkav, also mit nach innen gekrümmter Flanke, zum Turmschaft."),
+    "tower_brim_width_mm": ("Ein eigener Brim verbessert die Haftung des Turms. Die Brim-Art und Brimbreite des Modellprofils werden dafür nicht übernommen.",
+        "Automatisch beträgt die Breite 0,2 mm pro Seite; manuell sind 0 bis 20 mm möglich. 0 mm deaktiviert den Turm-Brim. Die Runden ergeben sich aus der Profil-Linienbreite für Brims, begrenzt auf die gewählte Brimbreite. Brim und Abstand zählen zusätzlich zur Standfußbreite."),
+    "tower_brim_gap_mm": ("Abstand zwischen Turmfuß und eigenem Turm-Brim.",
+        "Automatisch gilt der Brimabstand des bestätigten Profils, ersatzweise 0,2 mm. Manuell sind 0,1 bis 1 mm möglich. Der Modell-Brim bleibt unverändert."),
+    "positions": ("Turm und Warteplatz werden gemeinsam mit freien Abständen und möglichst kurzen, modellschonenden Fahrwegen platziert.",
+        "Ohne Automatik öffnet Positionen bearbeiten die Draufsicht: Turm und Wartepunkt lassen sich ziehen oder über X/Y eingeben. Nur gültige Positionen können übernommen werden; am Warteplatz wartet die angehobene Düse die fehlende Schichtzeit ab. Erreicht die Originalschicht allein die Mindest-Layerzeit, fährt die Düse direkt zum Turm."),
     "center_x_mm": ("X-Koordinate der Turmmitte im G-Code-Koordinatensystem.",
         "Automatisch wird eine erreichbare Position mit kurzen Wegen und ausreichend Abstand zu Modell, Bettkante und Sperrflächen gesucht."),
     "center_y_mm": ("Y-Koordinate der Turmmitte; dieselbe Platzierungsautomatik gilt für X und Y.",
@@ -66,7 +79,7 @@ HINTS = {
     "print_speed_mm_s": ("Geschwindigkeit der zusätzlich gedruckten Turmbahnen.",
         "Automatisch gilt das äußere Wandtempo des Profils. Bekannte Material-Volumenströme begrenzen auch manuelle Werte; die zusätzliche Prime-Menge ist eingerechnet."),
     "travel_speed_mm_s": ("Geschwindigkeit der zusätzlichen Fahrten ohne Materialablage.",
-        "Automatisch gilt das Profil-Fahrtempo, begrenzt durch bekannte X-/Y-Maschinengrenzen. Die Fahrzeiten zählen zur Mindest-Schichtzeit."),
+        "Automatisch gilt das Profil-Fahrtempo, begrenzt durch bekannte X-/Y-Maschinengrenzen. Die Fahrzeiten zählen zur Mindest-Layerzeit."),
     "retract_mm": ("Zusätzlicher Filamentrückzug vor Parken und Rückfahrt.",
         "Automatisch werden Länge und Tempo des aktiven Extruders aus dem bestätigten Profil übernommen, einschließlich gültiger Filamentüberschreibungen."),
     "retract_speed_mm_s": ("Geschwindigkeit für zusätzlichen Rückzug und dessen Ausgleich.",
@@ -77,7 +90,7 @@ HINTS = {
         "Diese Menge wird während der ersten Wandumrundung verteilt. Der Startpunkt wandert mit jeder Schicht; bekannte Volumenstromgrenzen bleiben eingehalten."),
     "wall_count": ("Anzahl der gedruckten Wandlinien des hohlen Turms.",
         "1 bis 3 Linien, Standard 2. Die Wandstärke folgt aus den äußeren/inneren Profil-Linienbreiten und ihrer schichthöhenabhängigen Überlappung."),
-    "hollow_tower": ("Standard ist ein hohler Schaft mit gefülltem konkavem Fuß und mindestens zwei geschlossenen Bodenlagen.",
+    "hollow_tower": ("Standard ist ein hohler Schaft mit massivem äußeren Fußbereich und zwei geschlossenen Bodenlagen.",
         "Ohne Hohlbauweise wird auch der Turmkörper gefüllt. Die nötige Restzeit entsteht weiterhin durch Warten."),
     "show_wait_position": ("Zeigt den freien Warteplatz als gelbe Markierung an.",
         "Die Markierung bleibt unabhängig von den Fahrwegen sichtbar. Dieser Schalter ändert nur die Ansicht."),
@@ -94,7 +107,7 @@ def setting_hint(label, name):
         f'<p style="margin-top:0; margin-bottom:10px;">{bullets}</p>')
 
 
-class PreprocessorValueSpinBox(WheelSafeDoubleSpinBox):
+class PreprocessorValueSpinBox(CommittedDoubleSpinBox):
     """Show calculated values without changing the valid manual input range."""
 
     _automatic_text: str | None = None
@@ -103,8 +116,10 @@ class PreprocessorValueSpinBox(WheelSafeDoubleSpinBox):
         return self._automatic_text if self._automatic_text is not None else super().textFromValue(value)
 
     def show_automatic_value(self, enabled: bool, value: float | None = None):
+        previous = self._automatic_text
         self._automatic_text = ("—" if value is None else self.locale().toString(float(value), "f", self.decimals())) if enabled else None
-        self.lineEdit().setText(self.textFromValue(self.value()))
+        if previous != self._automatic_text:
+            self.lineEdit().setText(self.textFromValue(self.value()))
         self.setToolTip("Automatischer Wert steht nach der Erzeugung von G-Code und Vorschau fest."
             if enabled and value is None else "")
 
@@ -128,13 +143,20 @@ class PreprocessorPanel(QWidget):
         self._layout_timer = QTimer(self)
         self._layout_timer.setSingleShot(True)
         self._layout_timer.timeout.connect(self.refresh_layout)
+        self._layer_view_timer = QTimer(self)
+        self._layer_view_timer.setSingleShot(True)
+        self._layer_view_timer.setInterval(33)
+        self._layer_view_timer.timeout.connect(self._apply_layer_view)
+        self._preview_viewport = None
+        self._navigation_columns = None
+        self._navigation_before_stack = True
         left = QWidget()
         self.settings_column = left
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.input_group = SectionCard("Präprozessor-Einstellungen")
+        self.input_group = SectionCard("Postprozessor-Einstellungen")
         left_layout.addWidget(self.input_group)
         self.inputs, self.automatic, self.rows = {}, {}, {}
         self._automatic_values: dict[str, float | None] = {}
@@ -142,21 +164,19 @@ class PreprocessorPanel(QWidget):
         self._profile_safety_note = ""
         self._profile_safety_estimated = False
         self.exclusions = ()
+        self.manual_position_edits = set()
         self.reset_buttons, self.info_buttons = {}, {}
         for name, label, unit, low, high, automatic in (
-            ("target_layer_time_s", "Mindest-Schichtzeit", "s", .1, 3600, "automatic_target_time"),
+            ("target_layer_time_s", "Mindest-Layerzeit", "s", .1, 3600, "automatic_target_time"),
             ("height_mm", "Turmhöhe", "mm", .01, 1000, "automatic_height"),
             ("diameter_mm", "Außendurchmesser", "mm", 3, 100, "automatic_diameter"),
             ("base_width_mm", "Standfußbreite", "mm", 3, 150, "automatic_base"),
-            ("center_x_mm", "Turmmitte X", "mm", -2000, 2000, "automatic_position"),
-            ("center_y_mm", "Turmmitte Y", "mm", -2000, 2000, None),
+            ("tower_brim_width_mm", "Turm-Brim Breite", "mm", 0, 20, "automatic_tower_brim_width"),
+            ("tower_brim_gap_mm", "Turm-Brim Abstand", "mm", .1, 1, "automatic_tower_brim_gap"),
             ("clearance_mm", "Modellabstand", "mm", 5, 100, None),
-            ("wait_x_mm", "Warteposition X", "mm", -2000, 2000, "automatic_wait_position"),
-            ("wait_y_mm", "Warteposition Y", "mm", -2000, 2000, None),
         ):
             self._numeric(self.input_group.content_layout, name, label, unit, low, high, automatic)
-        self.exclusions_button = QPushButton("Eigene Sperrflächen bearbeiten …")
-        self.input_group.content_layout.addWidget(self.exclusions_button)
+        self._positions_row()
         self.profile_hint = QLabel()
         self.profile_hint.setWordWrap(True)
         self.profile_hint.setObjectName("helpText")
@@ -186,6 +206,7 @@ class PreprocessorPanel(QWidget):
                 "retract_mm": "automatic_retraction"}.get(name)
             self._numeric(self.advanced_group.content_layout, name, label, unit, low, high, automatic)
         self.preview_group = SectionCard("G-Code-Vorschau")
+        self.preview_group.content_layout.setAlignment(Qt.AlignmentFlag(0))
         for card in (self.input_group, self.advanced_group, self.preview_group):
             card.setProperty("outerDropdown", True)
             card.setProperty("edgeAttached", True)
@@ -193,10 +214,26 @@ class PreprocessorPanel(QWidget):
         self.columns.layout_changed.connect(lambda: self._layout_timer.start(0))
         layout.addWidget(self.columns)
         self.canvas = PreviewCanvas()
+        self.canvas.set_rotation_drag_inverted(True)
+        self.canvas.set_navigation_default(True)
+        self.canvas.set_layer_context_enabled(True)
+        self.canvas.set_layer_selection_persistent(True)
+        self.canvas.layer_highlight_cleared.connect(self._clear_layer_focus)
         self.canvas.setMinimumWidth(0)
         self.canvas.setFixedHeight(420)
-        self.canvas.set_navigation_enabled(True)
+        self.preview_display = QWidget()
+        self.preview_display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.display_layout = QHBoxLayout(self.preview_display)
+        self.display_layout.setContentsMargins(0, 0, 0, 0)
+        self.display_layout.setSpacing(12)
+        self.preview_view = QWidget()
+        preview_layout = QVBoxLayout(self.preview_view)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(6)
+        self.display_layout.addWidget(self.preview_view, 3, Qt.AlignmentFlag.AlignTop)
+        self.preview_group.content_layout.addWidget(self.preview_display)
         camera_row = QHBoxLayout()
+        self.camera_row = camera_row
         camera_row.setSpacing(6)
         self.camera_buttons = {}
         for name, label, method in (
@@ -216,61 +253,134 @@ class PreprocessorPanel(QWidget):
             button.clicked.connect(method)
             self.camera_buttons[name] = button
             camera_row.addWidget(button, 1)
-        self.preview_group.content_layout.addLayout(camera_row)
-        self.preview_group.content_layout.addWidget(self.canvas)
-        legend = QLabel("Türkis: Modell · Orange: Turm · Gelb: Warteposition.\n"
-            "Violett: Fahrten zum/vom Warteplatz · Rosa: Modell-/Turmfahrwege.\n"
-            "Freihüllen gestrichelt: Blau aus Profilwerten, Gelb geschätzt.\n"
-            "Die Koordinaten und Bettform entsprechen dem Pre-Slice und dem gewählten Druckprofil.")
-        legend.setWordWrap(True)
-        legend.setObjectName("helpText")
-        self.preview_group.content_layout.addWidget(legend)
+        self.timing_toggle = QPushButton()
+        self.timing_toggle.setObjectName("previewLayerTimesToggle")
+        self.timing_toggle.setCheckable(True)
+        self.timing_toggle.setChecked(True)
+        self.timing_toggle.setFixedSize(32, 32)
+        self.timing_toggle.setIconSize(QSize(22, 22))
+        self.timing_toggle.setIcon(QIcon(str(Path(__file__).parent / "assets" / "layer_times_panel.svg")))
+        self.timing_toggle.setAccessibleName("Layerzeiten ein- oder ausblenden")
+        self.timing_toggle.setToolTip("Layerzeiten")
+        self.timing_toggle.setStyleSheet("QPushButton { min-width: 0; min-height: 0; padding: 0; border-radius: 6px; }"
+            "QPushButton:checked { background: #dcebf7; border: 1px solid #afc0d0; }"
+            "QPushButton:focus { border: 1px solid #afc0d0; }")
+        self.timing_toggle.toggled.connect(self._toggle_timing)
+        camera_row.addWidget(self.timing_toggle)
+        preview_layout.addLayout(camera_row)
+        preview_layout.addWidget(self.canvas)
+        for name, title, action in (("preview_reset", "Vorschau zurücksetzen", self.reset_preview),
+                ("colour_reset", "Färbung zurücksetzen", self.canvas.reset_layer_colours),
+                ("all_travel", "Alle Fahrwege anzeigen", None)):
+            button = QPushButton(title, self.canvas)
+            button.setAutoDefault(False)
+            button.setFixedHeight(32)
+            button.setStyleSheet("QPushButton { min-height: 32px; max-height: 32px; border: 0; border-radius: 0; "
+                "padding: 0 12px; background: #243344; color: #dbe8f2; }"
+                "QPushButton:hover { background: #355269; }"
+                "QPushButton:focus { border: 0; background: #355269; }"
+                "QPushButton:pressed { background: #1c4561; }"
+                "QPushButton:checked { background: #244436; }"
+                "QPushButton:checked:hover, QPushButton:checked:focus { background: #355c49; }"
+                "QPushButton:checked:pressed { background: #1d4c35; }"
+                "QPushButton:disabled { background: #20272e; color: #7b8b98; }")
+            if name == "all_travel":
+                button.setCheckable(True)
+                button.setChecked(False)
+                button.setToolTip("Schaltet beide Fahrweggruppen gemeinsam ein oder aus und zeigt sie für alle Layer statt nur für den aktuellen Layer.")
+                button.toggled.connect(self._toggle_all_travel)
+            else:
+                button.clicked.connect(action)
+            button.setEnabled(False)
+            setattr(self, name, button)
+        self.canvas.installEventFilter(self)
+        self.legend = ColourLegend((("Modell", PreviewCanvas.OBJECT_COLOR), ("Turm", PreviewCanvas.TOWER_COLOR),
+            ("Warteposition", PreviewCanvas.WAIT_POSITION_COLOR), ("Warteplatzfahrten", PreviewCanvas.WAIT_TRAVEL_COLOR),
+            ("Modell-/Turmfahrten", PreviewCanvas.TOWER_TRAVEL_COLOR), ("Brim", PreviewCanvas.BRIM_COLOR)),
+            columns=2, column_major=True, horizontal_spacing=15, compact=True)
+        self.preview_details = QWidget()
+        self.details_layout = QHBoxLayout(self.preview_details)
+        self.details_layout.setContentsMargins(0, 0, 0, 0)
+        self.details_layout.setSpacing(18)
+        self.view_controls = QWidget()
+        controls_layout = QVBoxLayout(self.view_controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(6)
+        controls_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.details_layout.addWidget(self.view_controls, 0, Qt.AlignmentFlag.AlignTop)
+        self.details_layout.addWidget(self.legend, 1, Qt.AlignmentFlag.AlignTop)
+        preview_layout.addWidget(self.preview_details)
         self.view_checkboxes = {}
         for name, label, action in (
             ("show_wait_position", "Warteposition anzeigen", self.canvas.set_wait_position_visible),
             ("show_wait_travel", "Fahrwege zum/vom Warteplatz anzeigen", self.canvas.set_wait_travel_visible),
             ("show_tower_travel", "Fahrwege Modell ↔ Turm anzeigen", self.canvas.set_tower_travel_visible),
-            ("show_clearance", "Druckkopf-Freihüllen anzeigen", self.canvas.set_clearance_visible),
         ):
             checkbox = QCheckBox(label)
             checkbox.setChecked(VIEW_DEFAULTS[name])
             self.view_checkboxes[name] = checkbox
-            self.preview_group.content_layout.addWidget(self._check_row(name, checkbox, VIEW_DEFAULTS[name], view_action=action))
+            controls_layout.addWidget(self._check_row(name, checkbox, VIEW_DEFAULTS[name], view_action=action))
             action(VIEW_DEFAULTS[name])
-        self.summary = QLabel("Einstellungen wählen und G-Code und Vorschau erzeugen.")
-        self.summary.setWordWrap(True)
         self.safety_hint = QLabel()
         self.safety_hint.setWordWrap(True)
         self.safety_hint.setTextFormat(Qt.TextFormat.PlainText)
-        self.preview_group.content_layout.addWidget(self.safety_hint)
+        self.safety_hint.hide()
+        preview_layout.addWidget(self.safety_hint)
+        self.timing_panel = QWidget()
+        self.timing_panel.setObjectName("preprocessorLayerTimes")
+        self.display_layout.addWidget(self.timing_panel, 2, Qt.AlignmentFlag.AlignTop)
+        timing_layout = QVBoxLayout(self.timing_panel)
+        timing_layout.setContentsMargins(0, 0, 0, 0)
+        timing_layout.setSpacing(6)
+        timing_layout.addWidget(QLabel("<b>Layerzeiten</b>"))
         self.time_chart = PreprocessorTimeChart()
-        self.preview_group.content_layout.addWidget(self.time_chart)
-        self.time_legend = QLabel("Türkis: Original · Orange: zusätzliche Bewegung · Violett: Restwartezeit · Grün: Zielzeit")
-        self.time_legend.setWordWrap(True)
-        self.preview_group.content_layout.addWidget(self.time_legend)
-        self.layer_slider = QSlider(Qt.Orientation.Horizontal)
-        self.layer_slider.setAccessibleName("Vorschau-Schicht auswählen")
-        self.layer_slider.setRange(1, 1)
-        self.layer_spin = WheelSafeSpinBox()
+        timing_layout.addWidget(self.time_chart, 1)
+        self.time_legend = ColourLegend(tuple(zip(("Original", "Zusätzliche Bewegung", "Restwartezeit", "Zielzeit"),
+            (*PreprocessorTimeChart.COLORS, PreprocessorTimeChart.TARGET_COLOR))), columns=1)
+        timing_layout.addWidget(self.time_legend)
+        self.logarithmic_scale = QCheckBox("Logarithmische Zeitskala")
+        self.logarithmic_scale.setChecked(True)
+        self.logarithmic_scale.setToolTip("Zeigt kurze und lange Layerzeiten gemeinsam lesbar. Alle Zeiten bleiben erhalten; abschalten für eine lineare Skala.")
+        self.logarithmic_scale.toggled.connect(self.time_chart.set_logarithmic)
+        timing_layout.addWidget(self.logarithmic_scale)
+        normalization_row = QWidget()
+        normalization_layout = QHBoxLayout(normalization_row)
+        normalization_layout.setContentsMargins(0, 0, 0, 0)
+        normalization_layout.setSpacing(6)
+        self.normalized_scale = QCheckBox("Zeitskala normalisieren")
+        self.normalized_scale.toggled.connect(self.time_chart.set_normalized)
+        self.normalization_info = InfoToolButton(setting_hint("Zeitskala normalisieren", "normalize_time_scale"),
+            object_name="settingInfoButton", diameter_px=METRICS.setting_info_diameter_px,
+            accessible_name="Informationen zu Zeitskala normalisieren")
+        normalization_layout.addWidget(self.normalization_info)
+        normalization_layout.addWidget(self.normalized_scale)
+        normalization_layout.addStretch(1)
+        timing_layout.addWidget(normalization_row)
+        self.layer_spin = LayerNumberSpinBox()
         self.layer_spin.setRange(1, 1)
-        self.layer_spin.setAccessibleName("Vorschau-Schichtnummer")
-        self.all_layers = QCheckBox("Alle Schichten anzeigen")
-        self.all_layers.setChecked(True)
+        self.layer_spin.setAccessibleName("Layernummer in der Vorschau")
+        self.layer_reset = QPushButton("↺")
+        self.layer_reset.setObjectName("settingResetButton")
+        self.layer_reset.setFixedSize(METRICS.reset_button_size_px, METRICS.reset_button_size_px)
+        self.layer_reset.setAccessibleName("Letzten Layer und vollständiges Modell anzeigen")
+        self.layer_reset.setToolTip("Letzten Layer und vollständiges Modell anzeigen")
+        self.layer_reset.clicked.connect(self.reset_layer)
         layer_row = QHBoxLayout()
-        layer_row.addWidget(self.layer_slider, 1)
+        layer_row.setSpacing(6)
+        layer_row.addWidget(QLabel("Layer"))
         layer_row.addWidget(self.layer_spin)
-        layer_row.addWidget(self.all_layers)
-        self.preview_group.content_layout.addLayout(layer_row)
+        layer_row.addWidget(self.layer_reset)
+        layer_row.addStretch(1)
+        timing_layout.addLayout(layer_row)
         self.layer_details = QLabel()
         self.layer_details.setWordWrap(True)
-        self.preview_group.content_layout.addWidget(self.layer_details)
+        timing_layout.addWidget(self.layer_details)
         self._timing_result = None
+        self._layer_focus_active = False
         self.time_chart.layer_selected.connect(self.select_layer)
+        self.time_chart.drag_finished.connect(lambda _layer: self._apply_layer_view())
         self.layer_spin.valueChanged.connect(self.select_layer)
-        self.layer_slider.valueChanged.connect(self.select_layer)
-        self.all_layers.toggled.connect(self._apply_layer_view)
         self.clear_timing()
-        self.preview_group.content_layout.addWidget(self.summary)
         self._build_footer()
         self._sync_automatic()
         self.wall_count_spin.setEnabled(self.hollow_checkbox.isChecked())
@@ -285,12 +395,34 @@ class PreprocessorPanel(QWidget):
         super().showEvent(event)
         self._layout_timer.start(0)
 
+    def eventFilter(self, watched, event):  # noqa: N802
+        if watched is self.canvas and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._position_preview_reset()
+        if watched is self._preview_viewport and event.type() == QEvent.Type.Resize:
+            self._layout_timer.start(0)
+        return super().eventFilter(watched, event)
+
+    def _position_preview_reset(self):
+        self.preview_reset.adjustSize()
+        self.all_travel.adjustSize()
+        self.colour_reset.adjustSize()
+        self.colour_reset.setFixedWidth(self.all_travel.width())
+        self.preview_reset.move(0, max(0, self.canvas.height()-self.preview_reset.height()))
+        self.colour_reset.move(self.canvas.width()-self.colour_reset.width(),
+            max(0, self.canvas.height()-self.colour_reset.height()))
+        self.preview_reset.raise_()
+        self.colour_reset.raise_()
+        self.all_travel.move(self.canvas.width()-self.all_travel.width(),
+            max(0, self.colour_reset.y()-self.all_travel.height()))
+        self.all_travel.raise_()
+
     def refresh_layout(self):
         """Reserve expanded content before the scroll area can compress rows."""
         if not self.isVisible():
             return
         for row in self.rows.values():
-            row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 2))
+            row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 30))
+        self.positions_label.setMinimumWidth(self.positions_label.fontMetrics().horizontalAdvance(self.positions_label.text()) + 30)
         for card in (self.input_group, self.advanced_group, self.preview_group):
             card.content_layout.invalidate()
             card.layout().invalidate()
@@ -301,31 +433,147 @@ class PreprocessorPanel(QWidget):
         for _ in range(3):
             self.columns.layout().activate()
             self.columns.splitter.refresh()
-            self.canvas.setFixedHeight(max(280, round(self.canvas.width() * .65)))
-            self.preview_group.setMinimumHeight(0)
-            self.preview_group.content_layout.invalidate()
-            self.preview_group.layout().invalidate()
-            self.preview_group.setMinimumHeight(ResponsiveCardGrid._height_for_width(
-                self.preview_group, self.preview_group.width()))
+            self._arrange_preview_content()
+            self.preview_group.content_layout.activate()
+            self.display_layout.activate()
+            self.preview_view.layout().activate()
+            self._fit_preview_height()
+            self.preview_view.layout().invalidate()
+            self.preview_view.updateGeometry()
+            self.display_layout.invalidate()
+            self.preview_display.updateGeometry()
+            self._reserve_card_height(self.preview_group)
             required = self.columns.content_height_hint()
             self.columns.setFixedHeight(required)
             self.columns.layout().activate()
             self.columns.splitter.refresh()
+            self.preview_group.layout().activate()
+            self.preview_group.content_layout.activate()
             if required == self.columns.content_height_hint():
                 break
+        self._sync_navigation_columns()
         self.updateGeometry()
         self.layout_changed.emit()
 
+    def _sync_navigation_columns(self):
+        two_column = self.columns.is_two_column()
+        if two_column == self._navigation_columns:
+            return
+        previous = self._navigation_columns
+        self._navigation_columns = two_column
+        if not two_column:
+            self._navigation_before_stack = self.canvas.navigation_enabled
+            self.canvas.set_navigation_default(False)
+        elif previous is False:
+            # A manual activation in the stacked view wins when widening.
+            self.canvas.set_navigation_default(self.canvas.navigation_enabled or self._navigation_before_stack)
+
+    @staticmethod
+    def _reserve_card_height(card):
+        """Publish wrapped details before a parent can compress their layout."""
+        card.setMinimumHeight(0)
+        body = card.content_widget
+        body.setMinimumHeight(0)
+        card.content_layout.invalidate()
+        layout = card.content_layout
+        margins = layout.contentsMargins()
+        width = max(1, body.width()-margins.left()-margins.right())
+        heights = []
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
+            preferred = (widget.heightForWidth(width) if widget is not None and widget.hasHeightForWidth()
+                else item.heightForWidth(width) if item.hasHeightForWidth() else item.sizeHint().height())
+            heights.append(max(item.minimumSize().height(), preferred))
+        # Nested grids can report a zero height-for-width despite a positive
+        # minimum. Sum each vertical item's real requirement to preserve gaps.
+        required = sum(heights)+max(0, len(heights)-1)*layout.spacing()+margins.top()+margins.bottom()
+        body.setMinimumHeight(required)
+        body.updateGeometry()
+        card.layout().invalidate()
+        card.setMinimumHeight(card.layout().minimumSize().height())
+        card.updateGeometry()
+
+    def _arrange_preview_content(self):
+        """Keep the chart beside the canvas whenever both columns remain readable."""
+        body = self.preview_group.content_widget
+        margins = self.preview_group.content_layout.contentsMargins()
+        width = max(1, body.width()-margins.left()-margins.right())
+        self.view_controls.setFixedWidth(self.view_controls.layout().minimumSize().width())
+        self.view_controls.setFixedHeight(self.view_controls.layout().minimumSize().height())
+        height = max(button.sizeHint().height() for button in self.camera_buttons.values())
+        self.timing_toggle.setFixedSize(height, height)
+        self.layer_spin.fit_text()
+        preferred_left = self.view_controls.minimumSizeHint().width()+self.legend.minimumSizeHint().width()+18
+        preferred_pair = preferred_left+self.timing_panel.minimumSizeHint().width()+12
+        # Choose from intrinsic widths rather than last frame's wrapped layout.
+        # Otherwise scrolling can alternate between stacked and paired layouts.
+        side_by_side = self.timing_panel.isHidden() or width >= preferred_pair
+        self.display_layout.setDirection(QBoxLayout.Direction.LeftToRight if side_by_side else QBoxLayout.Direction.TopToBottom)
+        chart_width = max(210, self.timing_panel.minimumSizeHint().width())
+        self.timing_panel.setMaximumWidth(chart_width if side_by_side else 16777215)
+        details_width = width
+        if side_by_side and not self.timing_panel.isHidden():
+            details_width -= min(chart_width, max(self.timing_panel.minimumSizeHint().width(), round(width*2/5)))+12
+        self.details_layout.setDirection(QBoxLayout.Direction.LeftToRight if details_width >= preferred_left else QBoxLayout.Direction.TopToBottom)
+        whole_width = self.width()-margins.left()-margins.right()
+        minimum = (preferred_pair if not self.timing_panel.isHidden() and whole_width >= preferred_pair else
+            preferred_left if whole_width >= preferred_left else max(self.view_controls.minimumSizeHint().width(), self.legend.minimumSizeHint().width()))
+        self.preview_display.setMinimumWidth(minimum)
+        self.display_layout.invalidate()
+        self.details_layout.invalidate()
+        self.preview_display.updateGeometry()
+        self.preview_details.updateGeometry()
+
+    def _fit_preview_height(self):
+        """Let the viewport and the left preview determine the right column's height."""
+        ancestor = self.parentWidget()
+        while ancestor is not None and not isinstance(ancestor, QScrollArea):
+            ancestor = ancestor.parentWidget()
+        available = ancestor.viewport().height() if ancestor is not None else self.window().height()-180
+        if ancestor is not None and self._preview_viewport is not ancestor.viewport():
+            self._preview_viewport = ancestor.viewport()
+            self._preview_viewport.installEventFilter(self)
+        # Reserve the card header/body, camera row and the complete controls.
+        footer_height = max(self.view_controls.minimumSizeHint().height(), self.legend.minimumSizeHint().height())
+        if self.details_layout.direction() == QBoxLayout.Direction.TopToBottom:
+            footer_height = self.view_controls.minimumSizeHint().height()+self.legend.minimumSizeHint().height()+18
+        overhead = self.preview_group.header.height()+28+self.camera_row.sizeHint().height()+12+footer_height
+        if self.safety_hint.text():
+            overhead += max(0, self.safety_hint.heightForWidth(max(1, self.preview_view.width())))+6
+        canvas_height = max(160, min(round(self.canvas.width()*.75), available-overhead))
+        self.canvas.setFixedHeight(canvas_height)
+        self.preview_view.layout().invalidate()
+        self.preview_view.layout().activate()
+        left_height = self.preview_view.layout().sizeHint().height()
+        self.timing_panel.setMinimumHeight(0)
+        self.timing_panel.setMaximumHeight(16777215)
+        self.timing_panel.layout().invalidate()
+        if self.timing_panel.isVisible():
+            minimum = self.timing_panel.layout().minimumSize().height()
+            if minimum > left_height:
+                self.canvas.setFixedHeight(canvas_height+minimum-left_height)
+                self.preview_view.layout().invalidate()
+                self.preview_view.layout().activate()
+                left_height = self.preview_view.layout().sizeHint().height()
+        self.timing_panel.setFixedHeight(left_height)
+        self.timing_panel.layout().activate()
+
     def _numeric(self, layout, name, label, unit, low, high, automatic=None, *, integer=False):
         defaults = PreprocessorSettings()
-        spin = WheelSafeSpinBox() if integer else PreprocessorValueSpinBox()
+        spin = CommittedSpinBox() if integer else PreprocessorValueSpinBox()
         spin.setRange(low, high)
         if not integer:
             spin.setDecimals(2)
+        if name == "tower_brim_gap_mm":
+            spin.setSingleStep(.1)
         spin.setValue(getattr(defaults, name))
         self.inputs[name] = spin
         row = NumericSettingWidget(setting_name=name, label=label, editor=spin,
             default_provider=lambda: getattr(defaults, name), unit=unit, info_text=setting_hint(label, name))
+        spin.setKeyboardTracking(False)
         row.label.setWordWrap(False)
         self.rows[name] = row
         self.reset_buttons[name], self.info_buttons[name] = row.reset_button, row.info_button
@@ -333,7 +581,7 @@ class PreprocessorPanel(QWidget):
         row.reset_button.clicked.connect(lambda: self.reset_field(name))
         if automatic:
             checkbox = QCheckBox()
-            checkbox.setChecked(True)
+            checkbox.setChecked(getattr(defaults, automatic))
             checkbox.setAccessibleName(label + " automatisch berechnen")
             self.automatic[automatic] = checkbox
             grid = row.layout()
@@ -343,13 +591,67 @@ class PreprocessorPanel(QWidget):
             automatic_label.setBuddy(checkbox)
             grid.addWidget(automatic_label, 0, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(checkbox, 0, 3, Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(spin, 0, 4, Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(spin, 0, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(row.reset_button, 0, 5, Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(row.range_label, 1, 4, Qt.AlignmentFlag.AlignRight)
+            grid.addWidget(row.range_label, 1, 1, 1, 4, Qt.AlignmentFlag.AlignRight)
             grid.addWidget(row.message_container, 2, 0, 1, 6)
             checkbox.toggled.connect(self._changed)
         spin.valueChanged.connect(self._changed)
         layout.addWidget(row)
+
+    def _positions_row(self):
+        # Keep independent editor drafts internally; the settings row controls
+        # the pair together, while the dialog can still place just one manually.
+        defaults = PreprocessorSettings()
+        for flag in ("automatic_position", "automatic_wait_position"):
+            checkbox = QCheckBox(self)
+            checkbox.setChecked(True)
+            checkbox.hide()
+            checkbox.toggled.connect(self._changed)
+            self.automatic[flag] = checkbox
+            for name in AUTOMATIC_FIELDS[flag]:
+                spin = PreprocessorValueSpinBox(self)
+                spin.setRange(-2000, 2000)
+                spin.setDecimals(2)
+                spin.setValue(getattr(defaults, name))
+                spin.hide()
+                spin.valueChanged.connect(lambda _value, key=flag: self.manual_position_edits.add(key))
+                spin.valueChanged.connect(self._changed)
+                self.inputs[name] = spin
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, METRICS.form_row_vertical_padding_px, 0, 2)
+        layout.setSpacing(METRICS.form_control_gap_px)
+        title = "Turm- und Warteposition"
+        info = InfoToolButton(setting_hint(title, "positions"), object_name="settingInfoButton",
+            diameter_px=METRICS.setting_info_diameter_px, accessible_name="Informationen zu " + title)
+        label = QLabel(title)
+        self.positions_label = label
+        label.setWordWrap(False)
+        label.setMinimumWidth(label.fontMetrics().horizontalAdvance(title) + 30)
+        self.positions_automatic = QCheckBox()
+        self.positions_automatic.setAccessibleName(title + " automatisch berechnen")
+        automatic_label = QLabel("Automatisch")
+        automatic_label.setBuddy(self.positions_automatic)
+        self.positions_button = QPushButton("Positionen bearbeiten")
+        self.positions_button.setFixedHeight(METRICS.form_control_height_px)
+        self.positions_button.setStyleSheet("QPushButton { min-height: 34px; max-height: 34px; padding: 0 10px; }")
+        self.positions_button.setToolTip("Turm- und Warteposition bearbeiten")
+        layout.addWidget(info)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        layout.addWidget(automatic_label)
+        layout.addWidget(self.positions_automatic)
+        layout.addWidget(self.positions_button)
+        self.info_buttons["positions"] = info
+        self.positions_automatic.toggled.connect(self._positions_automatic_changed)
+        self.input_group.content_layout.addWidget(row)
+
+    def _positions_automatic_changed(self, enabled):
+        for flag in ("automatic_position", "automatic_wait_position"):
+            with QSignalBlocker(self.automatic[flag]):
+                self.automatic[flag].setChecked(enabled)
+        self._changed()
 
     def _check_row(self, name, checkbox, default, *, view_action=None):
         row = QWidget()
@@ -374,15 +676,21 @@ class PreprocessorPanel(QWidget):
             layout.addWidget(checkbox)
             layout.addStretch(1)
         else:
-            layout.addWidget(checkbox, 1)
+            layout.addWidget(checkbox)
+            if view_action is not None:
+                checkbox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+                layout.addSpacing(30-METRICS.form_control_gap_px)
+            layout.addStretch(1)
         layout.addWidget(reset)
         self.reset_buttons[name], self.info_buttons[name] = reset, info
         checkbox.toggled.connect(view_action or self._changed)
         checkbox.toggled.connect(self.refresh_resets)
+        if view_action is not None:
+            row.setFixedHeight(layout.sizeHint().height())
         return row
 
     def _build_footer(self):
-        self.footer_widget = QWidget()
+        self.footer_widget = PreprocessorFooter()
         self.footer_widget.setObjectName("preprocessorFooter")
         self.footer_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(self.footer_widget)
@@ -449,6 +757,8 @@ class PreprocessorPanel(QWidget):
         self.footer_columns.set_vertical_separator(vertical)
         self.footer_columns.set_stacked_separator(horizontal)
         self.footer_columns.add_pair(self.footer_message_area, self.footer_action_area)
+        self.footer_widget.watch_content(self.footer_columns, self.footer_action_area, (self.footer_message_area, self.footer_action_area,
+            self.status, self.progress, self.export_actions, self.cancel_button, self.export_button))
         self.footer_widget.hide()
 
     def settings(self):
@@ -464,7 +774,7 @@ class PreprocessorPanel(QWidget):
     def set_profile_values(self, values):
         profile_error = None
         try:
-            effective, notes = resolve_profile_settings(PreprocessorSettings(), values)
+            effective, notes = resolve_profile_settings(PreprocessorSettings(automatic_target_time=True), values)
         except ValueError as error:
             effective, notes, profile_error = PreprocessorSettings(), (str(error),), str(error)
         self._profile_values = {name: getattr(effective, name) for name in PROFILE_FIELDS}
@@ -476,76 +786,146 @@ class PreprocessorPanel(QWidget):
                     if name in PROFILE_FIELDS:
                         with QSignalBlocker(self.inputs[name]):
                             self.inputs[name].setValue(self._profile_values[name])
-        self.profile_hint.setText(profile_error or "Profilvorgaben werden automatisch übernommen; eigene Werte sind über die jeweilige Automatik wählbar.")
+        self.profile_hint.setText(profile_error or "Profilvorgaben werden bei aktiver Automatik übernommen; eigene Werte sind manuell einstellbar.")
         self.profile_hint.setToolTip("\n".join(notes))
         geometry = parse_bed_geometry(values)
         if geometry is not None:
             head = printhead_envelope(values, geometry)
-            self._profile_safety_note, self._profile_safety_estimated = head.note, head.estimated
-            self.safety_hint.setText(head.note)
+            self._profile_safety_estimated = head.estimated and bool(geometry.excluded_polygons)
+            self._profile_safety_note = ("Feste Hindernisse werden mit vorsichtigen Ersatzmaßen geprüft; Druckkopfmaße im Profil sind unvollständig."
+                if self._profile_safety_estimated else "")
+            self.safety_hint.setText(self._profile_safety_note)
             self.safety_hint.setStyleSheet("color: #8a4b08;" if head.estimated else "color: #526b7e;")
         else:
             self._profile_safety_note = "Für diese Quelle fehlt eine bestätigte Druckbettgeometrie."
             self._profile_safety_estimated = True
             self.safety_hint.setText(self._profile_safety_note)
             self.safety_hint.setStyleSheet("color: #8a4b08;")
+        self.safety_hint.setVisible(bool(self.safety_hint.text()))
         self._sync_automatic()
 
     def clear_timing(self):
+        self._layer_view_timer.stop()
         self._timing_result = None
+        self._layer_focus_active = False
+        self.timing_panel.hide()
+        self.timing_toggle.hide()
+        self.timing_toggle.setEnabled(False)
         self.time_chart.set_data()
-        for widget in (self.layer_spin, self.layer_slider, self.all_layers):
+        with QSignalBlocker(self.normalized_scale):
+            self.normalized_scale.setChecked(False)
+        self.preview_reset.setEnabled(False)
+        self.colour_reset.setEnabled(False)
+        self.all_travel.setEnabled(False)
+        for widget in (self.layer_spin, self.layer_reset):
             widget.setEnabled(False)
         self.layer_details.clear()
         self.safety_hint.setText(self._profile_safety_note)
+        self.safety_hint.setVisible(bool(self.safety_hint.text()))
         self.safety_hint.setStyleSheet("color: #8a4b08;" if self._profile_safety_estimated else "color: #526b7e;")
         self.canvas.set_layer_height(None)
+        self.canvas.set_travel_layer_height(None)
+        self._layout_timer.start(0)
 
     def show_timing(self, result):
         self._timing_result = result
         self.time_chart.set_data(result.original_layer_times_s, result.added_motion_times_s, result.layer_waits_s,
             result.layer_heights_mm, result.effective_settings.target_layer_time_s)
-        for widget in (self.layer_spin, self.layer_slider):
+        with QSignalBlocker(self.normalized_scale):
+            self.normalized_scale.setChecked(self.time_chart.normalized)
+        for widget in (self.layer_spin,):
             with QSignalBlocker(widget):
                 widget.setRange(1, len(result.layer_times_s))
-                widget.setValue(1)
+                widget.setValue(len(result.layer_times_s))
             widget.setEnabled(True)
-        self.all_layers.setEnabled(True)
-        self.all_layers.setChecked(True)
-        self.safety_hint.setText("\n".join((result.printhead.note, *result.collision_notes[1:2])))
+        self._layer_focus_active = False
+        self.layer_reset.setEnabled(True)
+        self.preview_reset.setEnabled(True)
+        self.colour_reset.setEnabled(True)
+        self.all_travel.setEnabled(True)
+        note = ("Feste Hindernisse und tiefe Originalfahrten werden mit vorsichtigen Druckkopf-Ersatzmaßen geprüft."
+            if result.printhead.estimated and result.placement.head_clearance_required else self._profile_safety_note)
+        self.safety_hint.setText(note)
+        self.safety_hint.setVisible(bool(note))
         self.safety_hint.setToolTip("\n".join(result.collision_notes))
         self.safety_hint.setStyleSheet("color: #8a4b08;" if result.printhead.estimated else "color: #526b7e;")
-        self._update_layer_details(1)
+        self.time_chart.select_layer(self.layer_spin.maximum())
+        self._update_layer_details(self.layer_spin.maximum())
         self._apply_layer_view()
+        self.timing_toggle.setEnabled(True)
+        self.timing_toggle.show()
+        self._toggle_timing(self.timing_toggle.isChecked())
+        self._layout_timer.start(0)
 
     def select_layer(self, layer):
         if self._timing_result is None:
             return
         layer = max(1, min(len(self._timing_result.layer_times_s), int(layer)))
-        for widget in (self.layer_slider, self.layer_spin):
+        for widget in (self.layer_spin,):
             with QSignalBlocker(widget):
                 widget.setValue(layer)
+        self.layer_spin.fit_text()
         self.time_chart.select_layer(layer)
-        self.all_layers.setChecked(False)
+        self._layer_focus_active = True
         self._update_layer_details(layer)
-        self._apply_layer_view()
+        if self.time_chart._dragging:
+            if not self._layer_view_timer.isActive():
+                self._layer_view_timer.start()
+        else:
+            self._apply_layer_view()
 
     def _update_layer_details(self, layer):
         r, i = self._timing_result, layer - 1
-        self.layer_details.setText(f"Schicht {layer} · Z {r.layer_heights_mm[i]:.2f} mm · Original {r.original_layer_times_s[i]:.2f} s · "
-            f"Bewegung zusätzlich {r.added_motion_times_s[i]:.2f} s · Warten {r.layer_waits_s[i]:.2f} s · Gesamt {r.layer_times_s[i]:.2f} s")
+        self.layer_details.setText(f"Layer {layer} · Z {r.layer_heights_mm[i]:.2f} mm · {r.layer_times_s[i]:.2f} s")
+        self.layer_details.setToolTip(f"Original: {r.original_layer_times_s[i]:.2f} s\n"
+            f"Bewegung zusätzlich: {r.added_motion_times_s[i]:.2f} s\nWarten: {r.layer_waits_s[i]:.2f} s")
 
     def _apply_layer_view(self, *_):
+        self._layer_view_timer.stop()
         result = self._timing_result
-        self.canvas.set_layer_height(None if result is None or self.all_layers.isChecked()
+        self.canvas.set_travel_layer_height(None if result is None else result.layer_heights_mm[self.layer_spin.value() - 1])
+        self.canvas.set_layer_height(None if result is None or not self._layer_focus_active
             else result.layer_heights_mm[self.layer_spin.value() - 1])
+
+    def _clear_layer_focus(self):
+        self._layer_view_timer.stop()
+        self._layer_focus_active = False
+
+    def _toggle_timing(self, visible):
+        self.timing_panel.setVisible(visible and self._timing_result is not None)
+        self.timing_toggle.setToolTip("Layerzeiten ausblenden" if visible else "Layerzeiten anzeigen")
+        self._layout_timer.start(0)
+
+    def _toggle_all_travel(self, visible):
+        for name in ("show_wait_travel", "show_tower_travel"):
+            self.view_checkboxes[name].setChecked(visible)
+        self.canvas.set_all_travel_visible(visible)
+
+    def reset_layer(self):
+        if self._timing_result is None:
+            return
+        self.select_layer(self.layer_spin.maximum())
+        self._layer_focus_active = False
+        self._apply_layer_view()
+
+    def reset_preview(self):
+        self._layer_view_timer.stop()
+        self.all_travel.setChecked(False)
+        self.canvas.set_cumulative_travel_visible(False)
+        for name, checkbox in self.view_checkboxes.items():
+            checkbox.setChecked(VIEW_DEFAULTS[name])
+        self.logarithmic_scale.setChecked(True)
+        self.normalized_scale.setChecked(self.time_chart.default_normalization())
+        self.reset_layer()
+        self.canvas.set_navigation_enabled(True)
+        self.three_quarter_view()
 
     def top_view(self):
         self.canvas.apply_camera_state({**self.canvas.camera_state(), "yaw_deg": 0, "pitch_deg": -89})
         self.canvas.fit_objects()
 
     def three_quarter_view(self):
-        self.canvas.apply_camera_state({**self.canvas.camera_state(), "yaw_deg": -38, "pitch_deg": -28})
+        self.canvas.apply_camera_state({**self.canvas.camera_state(), "yaw_deg": self.canvas.separated_yaw(), "pitch_deg": -28})
         self.canvas.fit_objects()
 
     def _sync_automatic(self):
@@ -558,13 +938,11 @@ class PreprocessorPanel(QWidget):
                         self.inputs[name].setValue(value)
                 self.inputs[name].show_automatic_value(automatic, value)
                 self.inputs[name].setEnabled(not automatic)
-        for flag, x, y, title in (("automatic_position", "center_x_mm", "center_y_mm", "Turmposition"),
-                ("automatic_wait_position", "wait_x_mm", "wait_y_mm", "Warteposition")):
-            automatic = self.automatic[flag].isChecked()
-            self.rows[x].label.setText(title if automatic else ("Turmmitte X" if x == "center_x_mm" else "Warteposition X"))
-            self.inputs[x].setVisible(not automatic)
-            self.rows[y].setVisible(not automatic)
-            self.rows[x].range_label.setVisible(not automatic)
+        automatic = all(self.automatic[flag].isChecked() for flag in ("automatic_position", "automatic_wait_position"))
+        with QSignalBlocker(self.positions_automatic):
+            self.positions_automatic.setChecked(automatic)
+        self.positions_button.setEnabled(not automatic)
+        self._layout_timer.start(0)
 
     def show_automatic_values(self, values: dict[str, float | None]):
         self._automatic_values = dict(values)
@@ -597,7 +975,8 @@ class PreprocessorPanel(QWidget):
                 widget.setValue(getattr(defaults, field))
         if flag:
             with QSignalBlocker(self.automatic[flag]):
-                self.automatic[flag].setChecked(True)
+                self.automatic[flag].setChecked(getattr(defaults, flag))
+            self.manual_position_edits.discard(flag)
         self._changed()
 
     def refresh_resets(self, *_):
@@ -608,7 +987,9 @@ class PreprocessorPanel(QWidget):
         for name, button in self.reset_buttons.items():
             flag = next((flag for flag, names in AUTOMATIC_FIELDS.items() if name in names), None)
             if flag:
-                modified = not self.automatic[flag].isChecked()
+                automatic = self.automatic[flag].isChecked()
+                modified = automatic != getattr(defaults, flag) or (not automatic and any(
+                    abs(widgets[field].value()-getattr(defaults, field)) > 1e-8 for field in AUTOMATIC_FIELDS[flag]))
             elif name == "hollow_tower":
                 modified = not self.hollow_checkbox.isChecked()
             elif name in VIEW_DEFAULTS:
@@ -622,6 +1003,7 @@ class PreprocessorPanel(QWidget):
 
     def reset(self):
         defaults = PreprocessorSettings()
+        self.all_travel.setChecked(False)
         widgets = dict(self.inputs, wall_count=self.wall_count_spin, hollow_tower=self.hollow_checkbox, **self.automatic)
         for name, widget in widgets.items():
             with QSignalBlocker(widget):
@@ -632,5 +1014,5 @@ class PreprocessorPanel(QWidget):
         for name, checkbox in self.view_checkboxes.items():
             checkbox.setChecked(VIEW_DEFAULTS[name])
         self.exclusions = ()
-        self.exclusions_button.setText("Eigene Sperrflächen bearbeiten …")
+        self.manual_position_edits.clear()
         self._changed()

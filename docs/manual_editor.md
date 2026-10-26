@@ -124,8 +124,8 @@ Die unterschiedlichen Z-Höhen bleiben erhalten; alle bestehenden Form-,
 Höhenabstands- und Platzierungsgrenzen gelten auch beim Einrasten.
 Beim Laden eines Originalobjekts berechnet die gemeinsame Funktion
 `tower/base_calculator.py` den anfänglichen Fuß-Außendurchmesser aus dessen
-vollständiger analysierter Höhe: 0,21 mm je Millimeter Objekthöhe, begrenzt auf
-25–80 mm. Reicht die tatsächlich freie Druckbettfläche nicht dafür, wird der
+vollständiger analysierter Höhe: 0,2625 mm je Millimeter Objekthöhe, begrenzt auf
+31,25–80 mm. Reicht die tatsächlich freie Druckbettfläche nicht dafür, wird der
 anfängliche Fuß auf die verfügbare Breite begrenzt. Eine niedrigere Maschinen- oder später geänderte Turmhöhe verkleinert
 diesen Referenzwert nicht. Die bestehende Anschlussregel hält den Fuß bei Bedarf
 mindestens 2 mm breiter als den Körperbeginn; die allgemeine 1000-mm-Grenze und

@@ -608,7 +608,7 @@ class Phase18UiTests(unittest.TestCase):
             for label in dialog.findChildren(QLabel)
         }
         self.assertTrue({"Exportordner · Automatisch", "Exportordner · Manuell",
-            "Exportordner · Präprozessor"}.issubset(dialog_labels))
+            "Exportordner · Postprozessor"}.issubset(dialog_labels))
         self.assertNotIn(
             "Hier legen Sie programmweite Ausgabeoptionen fest.",
             dialog_labels,
@@ -2154,6 +2154,7 @@ class Phase18UiTests(unittest.TestCase):
         accepted: list[bool] = []
         event = SimpleNamespace(
             angleDelta=lambda: QPoint(0, 120),
+            position=lambda: QPointF(120, 115),
             ignore=lambda: ignored.append(True),
             accept=lambda: accepted.append(True),
         )

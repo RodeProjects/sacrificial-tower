@@ -314,7 +314,7 @@ def _automatic_base_hint() -> tuple[str, str]:
         f'&#8226; <b>Berechnungsgrundlage:</b> {rate} mm Breite je 1 mm '
         'Original-Objekthöhe.<br>'
         '&#8226; <b>Grenzbereich:</b> Das Ergebnis wird auf mindestens '
-        '25 mm und höchstens 80 mm begrenzt.</p>'
+        '31,25 mm und höchstens 80 mm begrenzt.</p>'
         '<p align="left" style="margin-top:0; margin-bottom:0px;">'
         '<b>Manuelle Standfußbreite</b></p>'
         '<p style="margin-top:0; margin-bottom:10px;">'
@@ -325,7 +325,7 @@ def _automatic_base_hint() -> tuple[str, str]:
     accessible = (
         f"Automatische Standfußbreite. Berechnungsgrundlage: {rate} "
         "Millimeter Breite je 1 Millimeter Original-Objekthöhe. "
-        "Grenzbereich: Das Ergebnis wird auf mindestens 25 Millimeter "
+        "Grenzbereich: Das Ergebnis wird auf mindestens 31,25 Millimeter "
         "und höchstens 80 Millimeter begrenzt. "
         "Manuelle Standfußbreite. Grenzbereich: Manuell einstellbar "
         "zwischen 20 und 80 Millimetern. Ein breiterer Standfuß verbessert "
@@ -3239,10 +3239,10 @@ class MainWindow(QMainWindow):
             self.automatic_generation_card, self.manual_generation_card
         )
         self.preprocessor_generation_card = GenerationModeCard(
-            "Präprozessor",
+            "Postprozessor",
             "Den Pre-Slice um Park- und Wartephasen sowie einen Opferturm zum "
             "Abwischen und Primen ergänzen. Mit rekonstruierter Vorschau und G-Code-Export.",
-            "Präprozessor öffnen →",
+            "Postprozessor öffnen →",
         )
         self.preprocessor_generation_card.setProperty("generationMode", "preprocessor")
         self.preprocessor_generation_card.clicked.connect(
@@ -3258,7 +3258,7 @@ class MainWindow(QMainWindow):
         self.manual_controller = ManualGenerationController(self, self.manual_generation_panel)
         generation_layout.addWidget(self.manual_generation_panel)
         self.preprocessor_panel = PreprocessorPanel()
-        self.preprocessor_panel.layout_changed.connect(self._refresh_settings_content_minimum_height)
+        self.preprocessor_panel.layout_changed.connect(self._refresh_preprocessor_content_height)
         self.preprocessor_controller = PreprocessorController(self, self.preprocessor_panel)
         generation_layout.addWidget(self.preprocessor_panel)
         self.content_layout.addWidget(self.generation_workspace)
@@ -8796,6 +8796,15 @@ class MainWindow(QMainWindow):
         if self.ready_grid.isVisible():
             QTimer.singleShot(0, self, self._refresh_settings_content_minimum_height)
 
+    def _refresh_preprocessor_content_height(self) -> None:
+        # The workspace caches its child's height-for-width. Invalidate that
+        # intermediate layout before measuring the enclosing scroll content.
+        workspace = self.generation_workspace
+        workspace.layout().invalidate()
+        workspace.layout().activate()
+        workspace.updateGeometry()
+        self._refresh_settings_content_minimum_height()
+
     def _refresh_settings_content_minimum_height(self) -> None:
         content = self.settings_scroll.widget()
         if content is None:
@@ -11868,7 +11877,7 @@ class MainWindow(QMainWindow):
             )
             self.export_success_achieved_label.setText(
                 "Kürzeste berechnete Schichtzeit: "
-                f"{self._format_export_number(achieved)} Sekunden · Mindest-Schichtzeit: "
+                f"{self._format_export_number(achieved)} Sekunden · Mindest-Layerzeit: "
                 f"{self._format_export_number(target)} Sekunden"
             )
             self.export_success_deviation_label.setText(
@@ -12745,7 +12754,7 @@ class MainWindow(QMainWindow):
             )
             if object_height is None:
                 self.automatic_base_width_label.setText(
-                    "Automatische Breite: 25,00 bis höchstens 80,00 mm; "
+                    "Automatische Breite: 31,25 bis höchstens 80,00 mm; "
                     "der genaue "
                     "Wert folgt aus der ermittelten Modellhöhe."
                 )

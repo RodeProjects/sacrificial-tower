@@ -58,7 +58,7 @@ class ResizablePreviewColumns(QWidget):
         super().__init__()
         self.left, self.right = left, right
         self._two_column = None
-        self._ratio = 0.5
+        self._ratio = None
         self._laying_out = False
         self.stack = QVBoxLayout(self)
         self.stack.setContentsMargins(0, 0, 0, 0)
@@ -92,16 +92,17 @@ class ResizablePreviewColumns(QWidget):
         if self._two_column:
             self.stack.activate()
             width = max(2, self.splitter.width() - self.splitter.handleWidth())
-            left_width = int(width * self._ratio)
+            left_width = (self.left.minimumSizeHint().width() if self._ratio is None
+                else int(width * self._ratio))
             self.splitter.setSizes([left_width, width - left_width])
 
     def refresh_layout(self):
-        # Keep a centred split feasible, while QSplitter itself stops each
-        # drag at the corresponding pane's unwrapped content minimum.
-        minimum_pair_width = (2 * max(self.left.minimumSizeHint().width(),
-            self.right.minimumSizeHint().width()) + self.splitter.handleWidth())
+        minimum_pair_width = (self.left.minimumSizeHint().width()
+            + self.right.minimumSizeHint().width() + self.splitter.handleWidth())
         two_column = self.width() >= max(METRICS.responsive_breakpoint_px, minimum_pair_width)
         if two_column == self._two_column:
+            if self._ratio is None:
+                self._apply_ratio()
             return
         self._laying_out = True
         self._two_column = two_column

@@ -43,7 +43,7 @@ Die Vorlage enthält unter anderem diese Abnahmen:
 | `orca_unselected_system_filament` | Orca-Maschine, Prozess und Systemfilament |
 | `orca_confirmation_preslice` | Orca-Benutzerprofile und Preslice |
 | `prusa_confirmation_preslice` | Prusa-Benutzerprofile und Preslice |
-| `preprocessor_acceptance` | Vollständiger Präprozessorablauf für alle vier Slicer mit eigenen Profilkombinationen |
+| `preprocessor_acceptance` | Vollständiger Postprozessorablauf für alle vier Slicer mit eigenen Profilkombinationen |
 | `phase14_anycubic_base_slice` | Anycubic-Systemprofile für einen realen STL-Slice |
 | `phase16_sparse_user_profile` | Anycubic-Systemmaschine und Benutzerprofile für die Sparse-Profilprüfung |
 | `phase16_system_profile_slice` | Anycubic-Systemprofile für eine Kalibrierungsprüfung |
@@ -67,7 +67,7 @@ jeweilige Opt-in-Schalter gesetzt sein:
 | Support-Regressionsläufe | `COOLING_TOWER_RUN_SUPPORT_REGRESSION=1` |
 | Orca-Integration | `COOLING_TOWER_RUN_INSTALLED_ORCA_INTEGRATION_TEST=1` |
 | Prusa-Integration | `COOLING_TOWER_RUN_INSTALLED_PRUSA_INTEGRATION_TEST=1` |
-| Reale Bambu-/Anycubic-Abnahmen und Präprozessor-Vier-Slicer-Abnahme | `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` |
+| Reale Bambu-/Anycubic-Abnahmen und Postprozessor-Vier-Slicer-Abnahme | `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` |
 | Benutzer-Slicer-Regressionen | `COOLING_TOWER_RUN_USER_SLICER_REGRESSION=1` |
 | Microsoft-Store-Slicer-Erkennung | `COOLING_TOWER_RUN_INSTALLED_STORE_SLICER_TEST=1` |
 
@@ -76,7 +76,7 @@ Grund übersprungen. Eine fehlerhafte JSON-Konfiguration wird dagegen als
 Konfigurationsfehler gemeldet, damit ungültige lokale Angaben nicht still
 übersehen werden.
 
-Die vollständige Präprozessor-Abnahme wird mit den vier Profilkombinationen
+Die vollständige Postprozessor-Abnahme wird mit den vier Profilkombinationen
 unter `tests.preprocessor_acceptance` gestartet:
 
 ```powershell
@@ -92,7 +92,7 @@ Unverändertheit der ausgewählten Originalprofile. Zusätzlich werden die
 automatische Profilübernahme und ein eigener Durchlauf mit absichtlich
 entfernten Druckkopf-Freihüllen geprüft. Dieser muss Ersatzhülle, Hinweis,
 Sicherheitshub, erreichbare Turm-/Wartepositionen und geprüfte Fahrwege liefern.
-Zusätzliche synthetische Präprozessorfälle untersuchen wechselnde Schichthöhen,
+Zusätzliche synthetische Postprozessorfälle untersuchen wechselnde Schichthöhen,
 lange aufgeteilte Wartebefehle, Erstschichtgeschwindigkeit und Extrusionsvolumen,
 positive/negative Wiederanlaufmengen, Flussfaktoren, vollständige Kreisbögen und
 den Erhalt des Originalzustands. Die räumliche Vorauswahl wird außerdem mit

@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 from PySide6.QtCore import QLineF, QPoint
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -63,6 +64,82 @@ class PreviewLineBatchingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_layer_scrubbing_reuses_fitting_and_exact_layer_index(self):
+        canvas = PreviewCanvas()
+        scene = make_scene(object_count=20_000)
+        canvas.set_scene(scene)
+        canvas.fit_objects()
+        canvas._fit_parameters()
+        with patch.object(canvas, "_projected_bounds", wraps=canvas._projected_bounds) as fitted:
+            for z in (.1, 1.2, 2.5, 4.8, 8.2):
+                canvas.set_layer_height(z)
+                self.assertEqual(canvas._layer_segments(scene.object_segments),
+                    tuple(segment for segment in scene.object_segments if abs(segment.end.z-z) < .001))
+                canvas._fit_parameters()
+            self.assertEqual(fitted.call_count, 0)
+            self.assertEqual(len(canvas._layer_index), 1)
+            canvas.yaw_deg += 10
+            canvas._fit_parameters()
+            self.assertEqual(fitted.call_count, 1)
+        canvas.close()
+
+    def test_brim_has_separate_coloured_blocks_and_participates_in_fit(self):
+        from dataclasses import replace
+        canvas = PreviewCanvas()
+        brim = (LineSegment3D(Point3D(-50, 0, .2), Point3D(-30, 10, .2)),)
+        canvas.set_scene(replace(make_scene(), brim_segments=brim))
+        prepared = canvas._prepare_line_frame()
+        self.assertEqual(sum(map(len, prepared.brim_blocks)), 1)
+        self.assertNotEqual(canvas.BRIM_COLOR, canvas.TOWER_COLOR)
+        canvas.fit_objects()
+        canvas.grab()
+        self.assertTrue(canvas._rendered_frame is not None)
+        canvas.close()
+
+    def test_tower_and_brim_occlude_each_other_from_above_and_below(self):
+        # Place a real brim-height stroke exactly behind a shaft-height
+        # stroke in screen space. Looking from below reverses the occlusion.
+        for yaw in (0, 38, 110, 215):
+            for pitch in (-28, 28):
+                with self.subTest(yaw=yaw, pitch=pitch):
+                    canvas = PreviewCanvas()
+                    canvas.resize(700, 500)
+                    s, c = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
+                    radius = -2+(2.8-.2)/math.tan(math.radians(28))
+                    side = 1 if pitch < 0 else -1
+                    def point(x, depth, z):
+                        return Point3D(c*x+s*depth, -s*x+c*depth, z)
+                    tower = (LineSegment3D(point(-1, -side*2, 2.8), point(1, -side*2, 2.8)),)
+                    brim = (LineSegment3D(point(-1, side*radius, .2), point(1, side*radius, .2)),)
+                    canvas.set_scene(PreviewScene((), tower, BedBounds(-10, 10, -10, 10),
+                        (0, 0), 0, 1, 5, brim_segments=brim))
+                    canvas.yaw_deg, canvas.pitch_deg = yaw, pitch
+                    canvas.fit_scene(emit=False)
+                    image = canvas.grab().toImage()
+                    sample = canvas._project(point(0, side*radius, .2), canvas._fit_parameters())
+                    expected = QColor(canvas.TOWER_COLOR if pitch < 0 else canvas.BRIM_COLOR)
+                    covered = QColor(canvas.BRIM_COLOR if pitch < 0 else canvas.TOWER_COLOR)
+                    def distance(color, other):
+                        return sum(abs(a-b) for a, b in zip(color.getRgb()[:3], other.getRgb()[:3]))
+                    pixels = [image.pixelColor(round(sample.x())+dx, round(sample.y())+dy)
+                        for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+                    best = min(pixels, key=lambda color: distance(color, expected))
+                    self.assertLess(distance(best, expected), 90)
+                    self.assertLess(distance(best, expected), distance(best, covered))
+                    canvas.set_layer_context_enabled(True)
+                    canvas.set_layer_height(1)
+                    canvas.reset_layer_colours()
+                    canvas.grab()
+                    canvas.set_layer_height(3)
+                    canvas.reset_layer_colours()
+                    image = canvas.grab().toImage()
+                    pixels = [image.pixelColor(round(sample.x())+dx, round(sample.y())+dy)
+                        for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+                    best = min(pixels, key=lambda color: distance(color, expected))
+                    self.assertLess(distance(best, expected), 90)
+                    self.assertLess(distance(best, expected), distance(best, covered))
+                    canvas.close()
 
     def test_prepared_blocks_are_bounded_complete_and_reused(self) -> None:
         canvas = PreviewCanvas()

@@ -83,7 +83,7 @@ class ManualGeometryTests(unittest.TestCase):
             self.assertEqual(d.settings.maximum_foot_diameter_mm,max(30,expected))
             self.assertEqual(settings.foot_diameter_mm,30)
             self.assertEqual(d.height_mm,min(height,150))
-        self.assertEqual(initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short").foot_diameter_mm,42)
+        self.assertEqual(initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short").foot_diameter_mm,52.5)
         for value in (False,"42",float("nan"),0,1001):
             with self.assertRaises(GeometryError):
                 initial_draft(ManualSettings(),(SimpleNamespace(z_mm=.2),SimpleNamespace(z_mm=200)),80,"short",foot_diameter_mm=value)
@@ -95,7 +95,7 @@ class ManualGeometryTests(unittest.TestCase):
         self.assertEqual(wide.settings.foot_height_mm,d.settings.foot_height_mm)
         narrow=move_point(wide,"foot",diameter_mm=30)
         self.assertEqual((narrow.foot_diameter_mm,narrow.settings.maximum_foot_diameter_mm),(30,95))
-        self.assertEqual(d.foot_diameter_mm,25)
+        self.assertEqual(d.foot_diameter_mm,31.25)
 
     def test_removing_a_point_resets_only_the_neighbor_controls_facing_it(self):
         original=draft()
@@ -203,6 +203,7 @@ class ManualGeometryTests(unittest.TestCase):
 
     def test_body_connection_expands_foot_and_limit_while_tower_limit_remains_binding(self):
         d = draft(settings=replace(ManualSettings(),maximum_diameter_mm=100,maximum_foot_diameter_mm=30))
+        d = move_point(d, "foot", diameter_mm=25)
         valid = move_point(d,"base",diameter_mm=30)
         self.assertEqual((valid.foot_diameter_mm,valid.settings.maximum_foot_diameter_mm),(32,32))
         wide=move_point(d,"base",diameter_mm=31)

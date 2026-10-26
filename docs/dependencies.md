@@ -109,13 +109,20 @@ oder vor kostenpflichtiger Nutzung eine eigene Entscheidung treffen.
 
 ## Tatsächlicher Qt-Lieferumfang und Quellmaterial
 
-Die Anwendung importiert QtCore, QtGui und QtWidgets; QtNetwork, QtSvg und
-QtOpenGL dürfen als dynamische Abhängigkeiten mitkommen. Die genaue Positivliste
+Die Anwendung importiert QtCore, QtGui, QtWidgets und QtSvgWidgets; QtNetwork,
+QtSvg und QtOpenGL dürfen als dynamische Abhängigkeiten mitkommen. Die genaue Positivliste
 für DLLs und Plattform-/Bild-/TLS-Plugins ist ausschließlich in
 `scripts/distribution_compliance.py` definiert. QtVirtualKeyboard, QtPdf,
 QtQuick/Qml und die nicht benötigte Software-OpenGL-DLL werden entfernt. Damit
 wird auch der zuvor im lokalen Alt-Build enthaltene VirtualKeyboard-Lieferumfang
 nicht weitergeführt. Ein unbekanntes Qt-Modul benötigt eine erneute Prüfung.
+
+QtSvgWidgets gehört zum bereits erfassten Qt-SVG-Modul und zeichnet die
+anwendungseigenen Ladeanimationen nativ. Die Erweiterung wurde am 25.10.2026
+gegen die [offizielle Qt-SVG-Lizenzangabe](https://doc.qt.io/qt-6/qtsvg-index.html#licenses-and-attributions)
+geprüft: weiterhin LGPLv3 ohne Lizenzgebühr oder Umsatzschwelle, mit denselben
+Austausch-, Hinweis- und Quellbereitstellungspflichten. Das bereits fixierte
+Qt-SVG-Quellarchiv umfasst auch den Widget-Teil. Es wird kein QtQuick/Qml ergänzt.
 
 Die Qt-Wheel-Metadaten enthalten allein keinen vollständigen LGPL-Nachweis; die
 vorhandene kommerzielle Referenzdatei im Wheel ist keine erworbene kommerzielle

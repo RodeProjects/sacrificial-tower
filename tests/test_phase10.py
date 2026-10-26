@@ -232,21 +232,21 @@ class Phase10ProfileTests(unittest.TestCase):
         self.assertEqual(GenerationSettings().minimum_outer_radius_mm, 2.5)
         self.assertEqual(GenerationSettings().base_height_mm, 1.0)
 
-    def test_16_automatic_base_width_has_twenty_five_mm_minimum(self) -> None:
+    def test_16_automatic_base_width_includes_wider_first_layer(self) -> None:
         radius = calculate_phase10_base_outer_radius(
             object_height_mm=10.0,
             automatic_base_width=True,
             manual_base_width_mm=20.0,
         )
-        self.assertEqual(radius * 2.0, 25.0)
+        self.assertEqual(radius * 2.0, 31.25)
 
-    def test_17_automatic_base_width_uses_0_21_times_object_height(self) -> None:
+    def test_17_automatic_base_width_uses_widened_height_factor(self) -> None:
         radius = calculate_phase10_base_outer_radius(
             object_height_mm=200.0,
             automatic_base_width=True,
             manual_base_width_mm=20.0,
         )
-        self.assertEqual(radius * 2.0, 42.0)
+        self.assertEqual(radius * 2.0, 52.5)
 
     def test_18_manual_base_width_is_used_as_outer_diameter(self) -> None:
         radius = calculate_phase10_base_outer_radius(
@@ -296,7 +296,7 @@ class Phase10ProfileTests(unittest.TestCase):
             configured,
             object_height_mm=300.0,
         )
-        self.assertEqual(profile.base_outer_radius_mm, 31.5)
+        self.assertEqual(profile.base_outer_radius_mm, 39.375)
         self.assertGreater(
             profile.base_outer_radius_mm,
             configured.maximum_outer_radius_mm,
@@ -310,7 +310,7 @@ class Phase10ProfileTests(unittest.TestCase):
             object_height_mm=200.0,
         )
         self.assertEqual(profile.total_height_mm, 0.4)
-        self.assertEqual(profile.base_outer_radius_mm * 2.0, 42.0)
+        self.assertEqual(profile.base_outer_radius_mm * 2.0, 52.5)
 
     def test_21_outer_and_inner_radius_move_by_same_amount(self) -> None:
         required = calculate_wall_path_length(8.0, 2, 0.42)

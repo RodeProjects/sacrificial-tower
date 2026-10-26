@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -61,6 +62,7 @@ class PreprocessorExportTests(unittest.TestCase):
 
     def test_report_distinguishes_profile_defaults_from_effective_values_and_timing_parts(self):
         request = self.fixture.request()
+        request = replace(request, settings=replace(request.settings, automatic_target_time=True))
         request.profile.effective_values.update({"slow_down_layer_time": 18, "outer_wall_speed": 100,
             "filament_max_volumetric_speed": 1.2})
         result = self.fixture.prepare(request)

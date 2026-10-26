@@ -5,6 +5,9 @@ from dataclasses import dataclass, replace
 import math
 
 
+DEFAULT_TOWER_BRIM_WIDTH_MM = 0.2
+
+
 def profile_number(values, keys, *, allow_zero=False, percent_base=None):
     """Resolve the active extruder only; nil overrides inherit the machine value."""
     for key in keys:
@@ -31,8 +34,20 @@ def profile_number(values, keys, *, allow_zero=False, percent_base=None):
 
 def resolve_profile_settings(settings, values):
     changes, notes = {}, []
+    if settings.automatic_tower_brim_width:
+        changes["tower_brim_width_mm"] = DEFAULT_TOWER_BRIM_WIDTH_MM
+    if settings.automatic_tower_brim_gap:
+        gap, _ = profile_number(values, ("brim_separation", "brim_object_gap"), allow_zero=True)
+        if gap is None:
+            changes["tower_brim_gap_mm"] = 0.2
+            notes.append("Turm-Brim Abstand: kein verwertbarer Profilwert; Ersatzwert 0,2 mm verwendet.")
+        elif gap > 10:
+            raise ValueError("Der Profil-Brimabstand ist ungültig.")
+        else:
+            changes["tower_brim_gap_mm"] = gap
+            notes.append("Turm-Brim Abstand: aus dem bestätigten Profil übernommen.")
     definitions = (
-        ("automatic_target_time", "target_layer_time_s", ("slow_down_layer_time", "slowdown_below_layer_time"), .1, 3600, "Mindest-Schichtzeit"),
+        ("automatic_target_time", "target_layer_time_s", ("slow_down_layer_time", "slowdown_below_layer_time"), .1, 3600, "Mindest-Layerzeit"),
         ("automatic_retraction", "retract_mm", ("filament_retraction_length", "filament_retract_length", "retraction_length", "retract_length"), 0, 10, "Rückzug"),
         ("automatic_retraction", "retract_speed_mm_s", ("filament_retraction_speed", "filament_retract_speed", "retraction_speed", "retract_speed"), 1, 100, "Rückzugstempo"),
         ("automatic_print_speed", "print_speed_mm_s", ("outer_wall_speed", "external_perimeter_speed", "perimeter_speed"), 1, 100, "Turmdrucktempo"),
@@ -174,7 +189,7 @@ class PrintheadEnvelope:
 
     @property
     def limitations(self):
-        return ("Die Freihülle ist eine Profilannahme, keine vermessene Maschinengeometrie. "
+        return ("Der Platzbedarf des Druckkopfs ist eine Profilannahme, keine vermessene Maschinengeometrie. "
             "Firmwareinterne Start-, End- und Referenzabläufe sind nicht vollständig geometrisch prüfbar.")
 
 
@@ -196,10 +211,10 @@ def printhead_envelope(values, geometry):
     if height is None:
         height = 0.0
     lower_radius = lower_radius or radius
-    note = ("Druckkopf-Geometrie im Profil unvollständig. Konservative Ersatzhülle: "
-        if estimated else "Druckkopf-Freihülle aus dem bestätigten Profil: ")
-    note += f"Unterer Radius {lower_radius:g} mm; weitere Hülle bis Radius {radius:g} mm ab {height:g} mm über der Düsenspitze."
+    note = ("Druckkopf-Geometrie im Profil unvollständig. Vorsichtig geschätzter Platzbedarf: "
+        if estimated else "Platzbedarf des Druckkopfs aus dem bestätigten Profil: ")
+    note += f"Unterer Radius {lower_radius:g} mm; zusätzlicher Platzbedarf bis Radius {radius:g} mm ab {height:g} mm über der Düsenspitze."
     if estimated:
-        note += " Turm, Warteplatz und Fahrwege werden mit zusätzlichen Abständen gewählt; die reale Bauform bleibt unbekannt."
+        note += " Ersatzmaße gelten für feste Hindernisse und Originalfahrten unterhalb der bereits aufgebauten Turmhöhe; die reale Bauform bleibt unbekannt."
     note += " Profilabstände ersetzen keine vermessene Maschinengeometrie."
     return PrintheadEnvelope(radius, height, estimated, note, lower_radius)

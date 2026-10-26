@@ -14,7 +14,7 @@ hängt maßgeblich von den im Programm gewählten Profilen und deren Einstellung
 Beide Modi
 exportieren ein **gemeinsames 3MF-Projekt mit Modell und Kühlturm** für deinen
 Slicer; die Turm-STL wird zusätzlich gespeichert.
-Die dritte Methode **Präprozessor** ergänzt den vorhandenen Pre-Slice um
+Die dritte Methode **Postprozessor** ergänzt den vorhandenen Pre-Slice um
 Abkühlpausen und einen standardmäßig hohlen Abstreifturm. Sie berücksichtigt
 Fahr- und Turmzeiten, zeigt Druckbett, Modell und Turm in rekonstruierten
 G-Code-Koordinaten und exportiert direkt geprüften G-Code.
@@ -49,7 +49,7 @@ the bed and toolpaths in their G-code coordinates, and exports verified G-code.
   festem Prüfslice und tatsächlicher Zeitbewertung.
 - Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden
   Modi; zusätzliche STL-Datei des Turms.
-- [Präprozessor](docs/preprocessor.md) mit hohlem Abstreifturm, automatischer
+- [Postprozessor](docs/preprocessor.md) mit hohlem Abstreifturm, automatischer
   sicherer Platzierung, Restwartezeiten und direktem G-Code-Export.
 - Hinweise auf erkannte leere Layer und optionale objektspezifische
   Stützensimulation bei erkanntem, global ausgeschaltetem Stützenprofil.
@@ -59,7 +59,7 @@ the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 Außendurchmesser, Übergangswinkel und Standfuß begrenzen die Turmgeometrie.
 In den Geometriemodi hat der geschlossene Turmkörper keinen modellierten
 inneren Hohlraum; das tatsächliche Infill bestimmt der Slicer. Der
-Präprozessor erzeugt dagegen standardmäßig eine hohle Abstreifwand.
+Postprozessor erzeugt dagegen standardmäßig eine hohle Abstreifwand.
 Wenn die Analyse keinen Turm benötigt,
 ist das ein erfolgreicher Ausgang ohne zusätzliche STL. Die Anwendung ist
 vom Anbieter kostenlos erhältlich und unter der **Apache-2.0-Lizenz** lizenziert;

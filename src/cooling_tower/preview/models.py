@@ -81,11 +81,7 @@ class PreviewScene:
     tower_travel_layer_indices: tuple[int, ...] = ()
     wait_point_layer_indices: tuple[int, ...] = ()
     wait_height_offset_mm: float = 0.0
-    printhead_radius_mm: float = 0.0
-    printhead_lower_radius_mm: float = 0.0
-    printhead_clearance_height_mm: float = 0.0
-    printhead_estimated: bool = False
-    wipe_points: tuple[Point3D, ...] = ()
+    brim_segments: tuple[LineSegment3D, ...] = ()
 
 
 def _json_value(value: Any) -> Any:

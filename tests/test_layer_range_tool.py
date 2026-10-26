@@ -142,7 +142,7 @@ class LayerRangeDomainTests(unittest.TestCase):
             for automatic in (False, True):
                 with self.subTest(full=full, automatic=automatic):
                     settings = GenerationSettings(minimum_outer_diameter_mm=5,
-                        maximum_outer_diameter_mm=40, simulate_full_tower_infill=full,
+                        maximum_outer_diameter_mm=50, simulate_full_tower_infill=full,
                         automatic_base_width=automatic, manual_base_width_mm=37.43,
                         maximum_expansion_angle_deg=50, maximum_contraction_angle_deg=55,
                         excluded_layer_ranges=((1, 951),))
@@ -150,7 +150,7 @@ class LayerRangeDomainTests(unittest.TestCase):
                     reference = build_solid_tower_profile(adequate,
                         replace(settings, excluded_layer_ranges=()))
                     self.assertEqual(actual.points, reference.points)
-                    self.assertAlmostEqual(actual.base_outer_radius_mm, 37.43 / 2,
+                    self.assertAlmostEqual(actual.base_outer_radius_mm, 23.391375 if automatic else 37.43 / 2,
                                            delta=.002)
                     self.assertAlmostEqual(actual.layers[0].outer_radius_mm, actual.base_outer_radius_mm)
                     self.assertTrue(any(point.outer_radius_mm > 2.5

@@ -254,7 +254,7 @@ class GenerationUiTests(unittest.TestCase):
             ),
         )
         self.app.processEvents()
-        self.assertEqual(window.manual_base_width_spin.value(), 25)
+        self.assertEqual(window.manual_base_width_spin.value(), 31.25)
 
     def test_full_infill_follows_layer_time_tolerance_without_checkbox_tooltip(self) -> None:
         self._ready()

@@ -614,14 +614,14 @@ class NumericSettingWidgetTests(GuiCase):
 
         self.window.automatic_base_checkbox.setChecked(True)
         self.assertFalse(self.window.manual_base_width_spin.isEnabled())
-        self.assertEqual(self.window.manual_base_width_spin.value(), 25.0)
+        self.assertEqual(self.window.manual_base_width_spin.value(), 31.25)
         self.assertEqual(self.window.collect_settings().manual_base_width_mm, 35.0)
 
         self.window.automatic_base_checkbox.setChecked(False)
         self.assertTrue(self.window.manual_base_width_spin.isEnabled())
         self.assertEqual(self.window.manual_base_width_spin.value(), 35.0)
         self.window.automatic_base_reset_button.click()
-        self.assertEqual(self.window.manual_base_width_spin.value(), 25.0)
+        self.assertEqual(self.window.manual_base_width_spin.value(), 31.25)
         self.assertFalse(self.window.automatic_base_reset_button.isEnabled())
 
     def test_spin_text_area_does_not_cover_arrow_buttons(self) -> None:
@@ -944,7 +944,7 @@ class LiveValidationTests(GuiCase):
             "200.00 mm ermittelte Modellhöhe",
             self.window.automatic_base_width_label.text(),
         )
-        self.assertIn("42.00 mm", self.window.automatic_base_width_label.text())
+        self.assertIn("52.50 mm", self.window.automatic_base_width_label.text())
 
     def test_feasible_tower_still_waits_for_stl_and_slicer(self) -> None:
         self.window.target_time_spin.setValue(5.0)

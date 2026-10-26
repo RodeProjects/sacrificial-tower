@@ -1,4 +1,4 @@
-"""Complete preprocessor exports with the same folder/report contract as other methods."""
+"""Complete postprocessor exports with the same folder/report contract as other methods."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -41,7 +41,7 @@ def export_preprocessor_run(service: PreprocessorService, result: PreprocessorRe
             directory = root / f"{base}_{suffix}"
             suffix += 1
     try:
-        path = service.export(result, directory / f"{source_name}_preprocessor.gcode").resolve()
+        path = service.export(result, directory / f"{source_name}_postprocessor.gcode").resolve()
         minimum = min(result.layer_times_s)
         target = (result.effective_settings or request.settings).target_layer_time_s
         report_path = directory / "export_report.json"
@@ -58,6 +58,9 @@ def export_preprocessor_run(service: PreprocessorService, result: PreprocessorRe
             "printhead": asdict(result.printhead) if result.printhead is not None else None,
             "profile_notes": result.profile_notes,
             "first_layer": asdict(result.first_layer) if result.first_layer is not None else None,
+            "tower_brim": ({"width_mm": result.placement.brim_width_mm,
+                "gap_mm": result.placement.brim_gap_mm, "line_width_mm": result.placement.brim_line_width_mm}
+                if result.placement is not None else None),
             "collision_notes": result.collision_notes,
             "placement_statistics": result.placement_statistics,
             "wipe_angles_rad": result.wipe_angles_rad,
@@ -73,11 +76,14 @@ def export_preprocessor_run(service: PreprocessorService, result: PreprocessorRe
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         summary_path.write_text(
-            f"G-Code-Präprozessor\n\nDatei: {path.name}\n"
-            f"Mindest-Schichtzeit: {target:.3f} s\nKürzeste berechnete Schichtzeit: {minimum:.3f} s\n"
+            f"G-Code-Postprozessor\n\nDatei: {path.name}\n"
+            f"Mindest-Layerzeit: {target:.3f} s\nKürzeste berechnete Schichtzeit: {minimum:.3f} s\n"
             f"Wartephasen: {result.wait_count}\nRestwartezeit gesamt: {result.total_wait_s:.3f} s\n"
             f"Turmhöhe: {result.height_mm:.2f} mm\nTurmdurchmesser: {result.diameter_mm:.2f} mm\n"
             f"Standfußbreite: {result.base_width_mm:.2f} mm\nSicherheitshub: {result.effective_z_hop_mm:.2f} mm\n\n"
+            + (f"Turm-Brim Breite: {result.placement.brim_width_mm:.2f} mm\n"
+                f"Turm-Brim Abstand: {result.placement.brim_gap_mm:.2f} mm\n"
+                f"Turm-Brim Linienbreite: {result.placement.brim_line_width_mm:.3f} mm\n\n" if result.placement is not None else "")
             + (("Erstschicht: " + f"Wand {result.first_layer.wall_speed_mm_s:g} mm/s, Füllung {result.first_layer.infill_speed_mm_s:g} mm/s, "
                 f"Linienbreite {result.first_layer.line_width_mm:g} mm.\n") if result.first_layer is not None else "")
             + "\n".join(((result.printhead.note,) if result.printhead is not None else ()) + result.collision_notes) + "\n\n"

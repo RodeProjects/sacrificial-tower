@@ -161,19 +161,19 @@ class ManualGuiTests(unittest.TestCase):
         preferences=replace(ManualSettings(),foot_diameter_mm=25,maximum_foot_diameter_mm=30)
         p.initialize(reference,preferences)
         physical_limit=context.maximum_foot_diameter_mm
-        self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,physical_limit))
-        self.assertEqual(p.default_value("foot_diameter_mm"),42)
+        self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(52.5,physical_limit))
+        self.assertEqual(p.default_value("foot_diameter_mm"),52.5)
         self.assertEqual(p.default_value("maximum_foot_diameter_mm"),physical_limit)
         self.assertFalse(preview_row(p,"foot_diameter_mm").reset.isEnabled())
         self.assertFalse(preview_row(p,"maximum_foot_diameter_mm").reset.isEnabled())
         p.move("top",5,40)
-        self.assertEqual(p.default_value("foot_diameter_mm"),42)
+        self.assertEqual(p.default_value("foot_diameter_mm"),52.5)
         enter_preview_value(p,"foot_diameter_mm",30)
         self.assertEqual(p.settings.foot_diameter_mm,30)
         preview_row(p,"foot_diameter_mm").reset.click()
-        self.assertEqual(p.settings.foot_diameter_mm,42)
+        self.assertEqual(p.settings.foot_diameter_mm,52.5)
         for view in ("side","bottom"):
-            p.change_setting("maximum_foot_diameter_mm",42)
+            p.change_setting("maximum_foot_diameter_mm",52.5)
             p.canvas.set_view(view)
             p._move_from_canvas("foot",95,p.draft.first_layer_z_mm)
             self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(95,95))
@@ -187,20 +187,20 @@ class ManualGuiTests(unittest.TestCase):
             preview_row(p,"maximum_foot_diameter_mm").reset.click()
             self.assertEqual(p.settings.maximum_foot_diameter_mm,95)
             p.reset_tower()
-            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,95))
+            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(52.5,95))
             p.move("foot",90,p.draft.first_layer_z_mm);p.reset_all()
-            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(42,95))
+            self.assertEqual((p.settings.foot_diameter_mm,p.settings.maximum_foot_diameter_mm),(52.5,95))
             self.assertFalse(p.can_reset_all())
         context=replace(context,key="height-100",layers=(*context.layers[:-1],replace(context.layers[-1],z_mm=100)))
         p.initialize(replace(reference,context=context),ManualSettings())
-        self.assertEqual((p.default_value("foot_diameter_mm"),p.default_value("maximum_foot_diameter_mm")),(25,context.maximum_foot_diameter_mm))
+        self.assertEqual((p.default_value("foot_diameter_mm"),p.default_value("maximum_foot_diameter_mm")),(31.25,context.maximum_foot_diameter_mm))
         p.initialize(reference,replace(ManualSettings(),minimum_diameter_mm=50,maximum_diameter_mm=60))
-        self.assertEqual((p.settings.foot_diameter_mm,p.default_value("foot_diameter_mm")),(52,52))
+        self.assertEqual((p.settings.foot_diameter_mm,p.default_value("foot_diameter_mm")),(52.5,52.5))
         enter_preview_value(p,"foot_diameter_mm",60)
         preview_row(p,"foot_diameter_mm").reset.click()
-        self.assertEqual(p.settings.foot_diameter_mm,52)
+        self.assertEqual(p.settings.foot_diameter_mm,52.5)
         p.reset_tower()
-        self.assertEqual(p.settings.foot_diameter_mm,52)
+        self.assertEqual(p.settings.foot_diameter_mm,52.5)
         self.assertFalse(p.can_reset_tower())
 
     def test_left_settings_use_two_sections_without_removed_controls(self):
@@ -1244,6 +1244,7 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_minimum_numeric_edit_moves_form_immediately_and_base_cannot_move_minimum(self):
         p=self.panel
+        p.move("foot",25,p.draft.first_layer_z_mm)
         enter_preview_value(p,"minimum_diameter_mm",30)
         self.assertEqual(p.draft.base_diameter_mm,30)
         self.assertEqual(p.draft.foot_diameter_mm,30)
@@ -1260,6 +1261,7 @@ class ManualGuiTests(unittest.TestCase):
         p=self.panel
         for tower,foot in ((20,30),(40,30)):
             p.reset_all()
+            p.move("foot",25,p.draft.first_layer_z_mm)
             p.change_setting("maximum_diameter_mm",tower)
             p.change_setting("maximum_foot_diameter_mm",foot)
             p.move_limit("minimum_diameter_mm",100)
@@ -1569,6 +1571,7 @@ class ManualGuiTests(unittest.TestCase):
 
     def test_limit_grips_stop_at_profile_bounds_and_do_not_edit_when_busy(self):
         p=self.panel
+        p.move("foot",25,p.draft.first_layer_z_mm)
         p.move("base",10.03,8)
         artifact=p.draft.artifact_payload()
         p.move_limit("maximum_diameter_mm",.1)
@@ -2038,7 +2041,7 @@ class ManualGuiTests(unittest.TestCase):
     def test_selected_handle_shows_relevant_diameter_height_or_layer(self):
         p=self.panel;canvas=p.canvas
         for identity,expected in (("top_width","Spitze: Ø 5,00 mm"),("base","Grund: Ø 5,00 mm"),
-                                  ("foot","Fuß: Ø 25,00 mm"),("foot_height","Layer: 40")):
+                                  ("foot","Fuß: Ø 31,25 mm"),("foot_height","Layer: 40")):
             p.select(identity)
             self.assertEqual(canvas.selected_handle_text(),expected)
         p.insert(20);free=p.selected
@@ -2049,7 +2052,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(canvas.selected_handle_text(),"Höhe: 8,00 mm")
         p.select("control:0:1")
         self.assertEqual(canvas.information_identity(),"foot")
-        self.assertIn("25,00 mm",canvas.selected_handle_text())
+        self.assertIn("31,25 mm",canvas.selected_handle_text())
         p.move("base",10.3,8);p.select("base")
         self.assertEqual(canvas.selected_handle_text(),"Grund: Ø 10,30 mm")
 
@@ -2261,6 +2264,7 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.draft.artifact_payload(),before.artifact_payload())
 
     def test_boundary_feedback_survives_without_left_diameter_fields(self):
+        self.panel.move("foot",25,self.panel.draft.first_layer_z_mm)
         self.panel.change_setting("maximum_foot_diameter_mm",30)
         self.panel._begin_interaction()
         for width in (40,45,50):self.panel.move("base",width,8)

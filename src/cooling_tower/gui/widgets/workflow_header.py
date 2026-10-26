@@ -190,7 +190,7 @@ class HeaderMethodSelection(QWidget):
         self.buttons_layout.setSpacing(0)
         self.group = QButtonGroup(self)
         self.buttons: dict[str, QPushButton] = {}
-        for mode, text in (("automatic", "Automatisch"), ("manual", "Manuell"), ("preprocessor", "Präprozessor")):
+        for mode, text in (("automatic", "Automatisch"), ("manual", "Manuell"), ("preprocessor", "Postprozessor")):
             button = QPushButton(text)
             button.setObjectName("headerMethodButton")
             button.setProperty("generationMode", mode)
@@ -199,7 +199,7 @@ class HeaderMethodSelection(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFixedHeight(button_height)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setToolTip("Präprozessor öffnen" if mode == "preprocessor" else f"{text}e Turmerstellung öffnen")
+            button.setToolTip("Postprozessor öffnen" if mode == "preprocessor" else f"{text}e Turmerstellung öffnen")
             button.clicked.connect(button.clearFocus)
             self.group.addButton(button)
             self.buttons[mode] = button

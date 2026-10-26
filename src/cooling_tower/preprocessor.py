@@ -5,6 +5,7 @@ No slicer code or third-party postprocessor implementation is used here.
 from __future__ import annotations
 
 from bisect import bisect_right
+from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -14,47 +15,54 @@ import re
 import shutil
 from pathlib import Path
 import tempfile
-from threading import Event
-from cooling_tower.models import GCodeAnalysisSnapshot, PreparedAnalysisSource
+from threading import Event, Lock
+from cooling_tower.models import BedGeometry, GCodeAnalysisSnapshot, PreparedAnalysisSource
 from cooling_tower.slicers import EffectiveProfile
 from cooling_tower.services.analysis_service import GCodeAnalysisService, AnalysisCancelled
 from cooling_tower.preprocessor_travel import safe_travel_path, original_exclusions_clear
-from cooling_tower.preprocessor_placement import OriginalMotionIndex
+from cooling_tower.preprocessor_placement import OriginalMotionCollector
+from cooling_tower.preprocessor_regions import PlacementRegions
+from cooling_tower.preprocessor_features import FeatureComments
+from cooling_tower.preprocessor_toolpaths import circle_path, tower_paths
+from cooling_tower.preprocessor_routing import model_travel_islands, model_crossings, prefer_model_avoiding_route
 from cooling_tower.preprocessor_state import PreprocessorStateTracker
 from cooling_tower.gcode.slicer_layer_times import LAYER_TIME_MARKER, END_TIME_MARKER
 
 from cooling_tower.calibration.gcode_integration import (
     parse_bed_geometry, _circle_fits_bed,
-    _circle_intersects_bounds,
     _point_in_polygon, _distance_to_polygon_edges,
 )
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.gcode.parser import (
-    MachineState, MachineStateTracker, Movement, iter_parsed_gcode_lines,
+    MachineState, Movement, iter_parsed_gcode_lines,
     normalize_command,
 )
 from cooling_tower.preview.models import LineSegment3D, Point3D, PreviewScene
-from cooling_tower.preview.toolpath import PreviewCancelled, analyze_deposition_toolpaths
+from cooling_tower.preview.toolpath import PreviewCancelled, DepositionToolpathCollector
 from cooling_tower.write_policy import ensure_writable_output
-from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 from cooling_tower.tower.diameter_transitions import full_infill_foot_taper
-from cooling_tower.preprocessor_profiles import resolve_profile_settings, flow_limited_speed, printhead_envelope, profile_flow_limit, first_layer_parameters
+from cooling_tower.preprocessor_profiles import DEFAULT_TOWER_BRIM_WIDTH_MM, resolve_profile_settings, flow_limited_speed, printhead_envelope, profile_flow_limit, first_layer_parameters
+from cooling_tower.tower.base_calculator import widen_automatic_foot_width
 from cooling_tower.preprocessor_safety import ExclusionRect, with_exclusions
 
-BEGIN = "; SACRIFICIAL_TOWER_PREPROCESSOR_BEGIN"
-END = "; SACRIFICIAL_TOWER_PREPROCESSOR_END"
+BEGIN = "; SACRIFICIAL_TOWER_POSTPROCESSOR_BEGIN"
+END = "; SACRIFICIAL_TOWER_POSTPROCESSOR_END"
 SUPPORTED_SLICERS = frozenset({"prusa_slicer", "orca_slicer", "bambu_studio", "anycubic_slicer_next"})
 
 
 @dataclass(frozen=True, slots=True)
 class PreprocessorSettings:
-    target_layer_time_s: float = GENERATION_DEFAULTS["target_layer_time_s"]
+    target_layer_time_s: float = 10.0
     automatic_height: bool = True
     height_mm: float = 50.0
     automatic_diameter: bool = True
     diameter_mm: float = 10.0
     automatic_base: bool = True
     base_width_mm: float = 25.0
+    automatic_tower_brim_width: bool = True
+    tower_brim_width_mm: float = DEFAULT_TOWER_BRIM_WIDTH_MM
+    automatic_tower_brim_gap: bool = True
+    tower_brim_gap_mm: float = 0.2
     automatic_position: bool = True
     center_x_mm: float = 30.0
     center_y_mm: float = 30.0
@@ -72,7 +80,7 @@ class PreprocessorSettings:
     prime_mm: float = 0.3
     hollow_tower: bool = True
     wall_count: int = 2
-    automatic_target_time: bool = True
+    automatic_target_time: bool = False
     automatic_retraction: bool = True
     automatic_print_speed: bool = True
     automatic_travel_speed: bool = True
@@ -84,6 +92,8 @@ class PreprocessorSettings:
         limits = {
             "target_layer_time_s": (0.1, 3600), "height_mm": (0.01, 1000),
             "diameter_mm": (3, 100), "base_width_mm": (3, 150),
+            "tower_brim_width_mm": (0, 20),
+            "tower_brim_gap_mm": (0, 10) if self.automatic_tower_brim_gap else (0.1, 1),
             "center_x_mm": (-2000, 2000), "center_y_mm": (-2000, 2000),
             "wait_x_mm": (-2000, 2000), "wait_y_mm": (-2000, 2000),
             "wait_clearance_mm": (5, 100),
@@ -96,7 +106,7 @@ class PreprocessorSettings:
         for name, (low, high) in limits.items():
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or not low <= value <= high:
-                raise ValueError(f"Ungültiger Präprozessorwert {name}: {low} bis {high} erforderlich.")
+                raise ValueError(f"Ungültiger Postprozessorwert {name}: {low} bis {high} erforderlich.")
         if type(self.wall_count) is not int or not 1 <= self.wall_count <= 3:
             raise ValueError("Für die Turmwand sind 1 bis 3 Wandlinien erforderlich.")
         if self.unretract_speed_mm_s is not None and (isinstance(self.unretract_speed_mm_s, bool)
@@ -105,7 +115,8 @@ class PreprocessorSettings:
         if not isinstance(self.exclusions, tuple) or len(self.exclusions) > 64 or any(not isinstance(zone, ExclusionRect) for zone in self.exclusions):
             raise ValueError("Ungültige eigene Sperrflächen.")
         for name in ("automatic_height", "automatic_diameter", "automatic_base", "automatic_position", "automatic_wait_position", "hollow_tower",
-                "automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed"):
+                "automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed",
+                "automatic_tower_brim_width", "automatic_tower_brim_gap"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} muss ein Wahrheitswert sein.")
 
@@ -124,7 +135,7 @@ class PreprocessorRequest:
                 or not self.snapshot.matches_file(prepared.analysis_gcode_path)):
             raise ValueError("Die Originalquelle oder der Pre-Slice wurde verändert. Bitte erneut vorbereiten.")
         if self.profile.installation.adapter_id not in SUPPORTED_SLICERS:
-            raise ValueError("Dieser Slicer wird vom Präprozessor nicht unterstützt.")
+            raise ValueError("Dieser Slicer wird vom Postprozessor nicht unterstützt.")
 
 
 @dataclass(slots=True)
@@ -153,9 +164,42 @@ class PreprocessorResult:
     first_layer: object = None
     collision_notes: tuple[str, ...] = ()
     placement_statistics: dict | None = None
+    placement: PreprocessorPlacement | None = None
+    placement_solution: tuple | None = None
 
     def dispose(self):
         self.workspace.cleanup()
+
+
+@dataclass(frozen=True, slots=True)
+class PreprocessorPlacement:
+    """Source-bound placement checks shared by generation and the position editor.
+
+    The resolver owns the unsampled original-motion index and route cache.
+    Calls must be sequential; a managed worker supplies its cancellation event.
+    """
+    request: PreprocessorRequest
+    geometry: BedGeometry
+    object_segments: tuple[LineSegment3D, ...]
+    base_width_mm: float
+    height_mm: float
+    settings: PreprocessorSettings
+    resolve: Callable[..., tuple]
+    printhead: object
+    reserved_radius_mm: float
+    position_valid: Callable[..., bool]
+    head_clearance_required: bool
+    brim_width_mm: float = 0.0
+    brim_gap_mm: float = 0.0
+    brim_line_width_mm: float = 0.0
+    regions: PlacementRegions | None = None
+
+
+class PreprocessorPlacementError(ValueError):
+    def __init__(self, reason, note=""):
+        self.reason = reason or "Für die gewählten Turmmaße und Abstände ist auf dem Druckbett kein geeigneter Platz frei."
+        super().__init__("Keine sichere Turm- und Warteposition mit freien Originalbahnen und kollisionsfreien Fahrwegen gefunden. "
+            "Abstände, Turmmaße oder manuelle Turm-/Warteposition prüfen. " + self.reason + (" " + note if note else ""))
 
 
 def _number(values, key, default):
@@ -203,7 +247,7 @@ def _fmt(value):
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
 
 
-def _scan(request, cancellation_event):
+def _scan(request, cancellation_event, *, collector=None, motion_collector=None):
     """Capture the exact modal state immediately after each layer's last deposit."""
     starts = [layer.first_deposition_line for layer in request.snapshot.layers]
     tracker = PreprocessorStateTracker(request.profile.installation.adapter_id)
@@ -218,7 +262,7 @@ def _scan(request, cancellation_event):
         if parsed.number % 2000 == 0:
             _check_cancel(cancellation_event)
         command = normalize_command(parsed.command or "")
-        if BEGIN in parsed.raw_text or "COOLING_TOWER_BEGIN" in parsed.raw_text:
+        if any(marker in parsed.raw_text for marker in (BEGIN, "; SACRIFICIAL_TOWER_PREPROCESSOR_BEGIN", "COOLING_TOWER_BEGIN")):
             raise ValueError("Der Pre-Slice enthält bereits einen bearbeiteten Turm.")
         if "\x00" in parsed.raw_text or parsed.raw_text.lstrip().startswith("N") and "*" in parsed.raw_text:
             raise ValueError("Binärer oder nummerierter G-Code mit Prüfsummen wird nicht bearbeitet.")
@@ -238,6 +282,10 @@ def _scan(request, cancellation_event):
             if command == "G92" and any(axis in parsed.parameters for axis in "XYZ"):
                 raise ValueError("Koordinatenwechsel im Modellbereich werden nicht unterstützt.")
         event = tracker.process_line(parsed)
+        if collector is not None:
+            collector.consume(parsed, event)
+        if motion_collector is not None:
+            motion_collector.consume(parsed, event)
         if command == "G28" and parsed.parameters and set(parsed.parameters).issubset({"X", "Y"}):
             xy_homing.append((parsed.number, copy(tracker.state)))
         if xy_homing and isinstance(event, Movement) and event.endpoint_distance_xyz_mm > 1e-6:
@@ -266,11 +314,11 @@ def _scan(request, cancellation_event):
                 "Spiral- und sequentieller Druck werden nicht unterstützt.")
         endpoints[index] = (parsed.number, copy(state))
     if len(endpoints) != len(starts) or len(tools) != 1 or tools != {0}:
-        raise ValueError("Der Präprozessor benötigt planare Schichten mit einem einzelnen Extruder T0.")
+        raise ValueError("Der Postprozessor benötigt planare Schichten mit einem einzelnen Extruder T0.")
     return endpoints, {line: state for line, state in xy_homing if line > endpoints[len(starts)-1][0]}
 
 
-def _layer_block(state: MachineState, layer, radius, center, settings, line_width, filament, wait_s, *, inner_line_width=None, solid_base=False, travel_routes, start_angle=0.0, maximum_flow=None, infill_speed=None):
+def _layer_block(state: MachineState, layer, radius, center, settings, line_width, filament, wait_s, *, inner_line_width=None, first_layer=False, closed_bottom=False, shaft_radius=0.0, travel_routes, start_angle=0.0, maximum_flow=None, infill_speed=None, brim_width=0.0, brim_gap=0.0, brim_line_width=None, base_radius=0.0, comments=None, cancellation_event=None):
     """Return to the exact original XYZ/E/modes/feed without changing original lines."""
     x, y = center
     start = (x + radius * math.cos(start_angle), y + radius * math.sin(start_angle))
@@ -283,6 +331,8 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
         raise ValueError("Die negative Profil-Wiederanlaufmenge übersteigt die Rückzugslänge.")
     restore_speed = (settings.unretract_speed_mm_s or settings.retract_speed_mm_s) / factor
     lines = [BEGIN, f"; layer_z = {_fmt(layer.z_mm)}", "G90", "M83"]
+    comments = comments or FeatureComments.for_adapter("prusa_slicer")
+    lines.append(comments.wipe(False))
     def emit(code):
         lines.append(code)
     def move(**axes):
@@ -290,46 +340,65 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
     move(E=-retract, F=settings.retract_speed_mm_s / factor * 60)
     move(Z=hop, F=600)
     to_wait, to_tower, to_model = travel_routes
-    emit("; SACRIFICIAL_TOWER_TRAVEL_TO_WAIT")
-    for point in to_wait[1:]:
-        move(X=point[0], Y=point[1], F=travel_speed * 60)
-    # The park point is outside both model and tower, at lifted Z.
-    emit("; SACRIFICIAL_TOWER_WAIT")
-    emit("M400")
-    remaining_ms = math.ceil(wait_s * 1000)
-    if not remaining_ms:
-        emit("G4 P0")  # Preserve the identical planner stop in timing and output.
-    while remaining_ms > 0:
-        duration = min(60_000, remaining_ms)
-        emit(f"G4 P{duration}")
-        remaining_ms -= duration
+    if to_wait:
+        emit("; SACRIFICIAL_TOWER_TRAVEL_TO_WAIT")
+        for point in to_wait[1:]:
+            move(X=point[0], Y=point[1], F=travel_speed * 60)
+        # The park point is outside both model and tower, at lifted Z.
+        emit("; SACRIFICIAL_TOWER_WAIT")
+        emit("M400")
+        remaining_ms = math.ceil(wait_s * 1000)
+        if not remaining_ms:
+            emit("G4 P0")  # Preserve the identical planner stop in timing and output.
+        while remaining_ms > 0:
+            duration = min(60_000, remaining_ms)
+            emit(f"G4 P{duration}")
+            remaining_ms -= duration
     emit("; SACRIFICIAL_TOWER_TRAVEL_TO_WIPE")
     for point in to_tower[1:]:
         move(X=point[0], Y=point[1], F=travel_speed * 60)
+    if brim_width:
+        first_brim_radius = base_radius + brim_gap + brim_width - min(
+            line_width if brim_line_width is None else brim_line_width, brim_width) / 2
+        # Reach the first deposited ring while lifted, including when the
+        # independent brim extends beyond the checked tower approach point.
+        move(X=x + first_brim_radius * math.cos(start_angle),
+            Y=y + first_brim_radius * math.sin(start_angle), F=travel_speed * 60)
     move(Z=layer.z_mm, F=600)
     move(E=restart, F=restore_speed * 60)
-    emit("; sacrificial wipe / prime and " + ("hollow tower" if settings.hollow_tower and not solid_base else "solid base / tower"))
+    emit("; sacrificial wipe / prime and " + ("hollow tower / annular foot" if settings.hollow_tower and not closed_bottom else "solid bottom / tower"))
     area = math.pi * (filament / 2) ** 2
     inner_line_width = line_width if inner_line_width is None else inner_line_width
     overlap = layer.height_mm * (1 - math.pi / 4)
-    ring = radius
-    ring_count = 0
-    current_width = line_width
-    while ring >= current_width * 0.5 and (solid_base or not settings.hollow_tower or ring_count < settings.wall_count):
+    paths = []
+    if brim_width:
+        brim_line_width = min(line_width if brim_line_width is None else brim_line_width, brim_width)
+        # Cover the requested band without crossing its inner gap or outer edge.
+        brim_count = max(1, math.ceil((brim_width-brim_line_width) / (brim_line_width-overlap)) + 1)
+        step = (brim_width-brim_line_width)/(brim_count-1) if brim_count > 1 else 0
+        paths.extend(circle_path(center, base_radius+brim_gap+brim_width-brim_line_width/2-i*step,
+            brim_line_width, "brim", start_angle) for i in range(brim_count))
+    from itertools import chain
+    paths = chain(paths, tower_paths(center, radius+line_width/2, shaft_radius, line_width,
+        inner_line_width, layer.height_mm, settings.wall_count, hollow=settings.hollow_tower,
+        first=first_layer, closed_bottom=closed_bottom, angle=start_angle))
+    brim_active = False
+    for path in paths:
+        _check_cancel(cancellation_event)
+        current_width, is_brim = path.width, path.feature == "brim"
+        if is_brim != brim_active:
+            emit("; SACRIFICIAL_TOWER_BRIM_BEGIN" if is_brim else "; SACRIFICIAL_TOWER_BRIM_END")
+            brim_active = is_brim
+        lines.extend(comments.describe(path.feature, current_width, layer.height_mm))
         extrusion_per_mm = (current_width - overlap) * layer.height_mm / area / state.extrusion_factor
-        segments = max(24, min(180, math.ceil(math.tau * ring / 0.7)))
-        edge_length = 2 * ring * math.sin(math.pi / segments)
-        prime_per_edge = settings.prime_mm / segments / state.extrusion_factor if ring_count == 0 else 0.0
+        points = tuple(tuple(float(_fmt(value)) for value in point) for point in path.points)
+        prime_per_edge = settings.prime_mm / (len(points)-1) / state.extrusion_factor if path.prime else 0.0
         # Prime while moving on the first ring, rather than leaving a stationary
         # lump at its seam. Include this extra volume in the flow cap as well.
-        volume_per_mm = (extrusion_per_mm + prime_per_edge / edge_length) * area * state.extrusion_factor
-        feature_speed = infill_speed if solid_base and ring_count > 0 and infill_speed is not None else settings.print_speed_mm_s
-        print_speed = min(feature_speed, maximum_flow / volume_per_mm if maximum_flow else feature_speed) / factor
-        previous = tuple(float(_fmt(value)) for value in (x + ring * math.cos(start_angle), y + ring * math.sin(start_angle)))
-        move(X=previous[0], Y=previous[1], F=print_speed * 60)
-        for part in range(1, segments + 1):
-            angle = start_angle + math.tau * part / segments
-            point = tuple(float(_fmt(value)) for value in (x + ring * math.cos(angle), y + ring * math.sin(angle)))
+        feature_speed = infill_speed if path.feature == "bottom" and infill_speed is not None else settings.print_speed_mm_s
+        previous = points[0]
+        move(X=previous[0], Y=previous[1], F=feature_speed/factor*60)
+        for point in points[1:]:
             distance = math.dist(previous, point)
             extrusion = float(_fmt(distance * extrusion_per_mm + prime_per_edge))
             actual_volume_per_mm = extrusion * area * state.extrusion_factor / distance if distance else 0.0
@@ -340,9 +409,6 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
             feed = math.floor(actual_speed / factor * 60 * 1e6) / 1e6
             move(X=point[0], Y=point[1], E=extrusion, F=feed)
             previous = point
-        ring -= (current_width + inner_line_width) / 2 - overlap
-        current_width = inner_line_width
-        ring_count += 1
     move(E=-retract, F=settings.retract_speed_mm_s / factor * 60)
     move(Z=hop, F=600)
     emit("; SACRIFICIAL_TOWER_TRAVEL_TO_MODEL")
@@ -356,6 +422,7 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
     emit("G91" if state.xyz_relative else "G90")
     emit("M83" if state.extrusion_relative else "M82")
     move(F=state.feedrate_mm_min)
+    lines.extend(comments.restore())
     emit(END)
     return lines
 
@@ -364,8 +431,12 @@ class PreprocessorService:
     def __init__(self, temporary_root):
         self.temporary_root = Path(temporary_root)
 
-    def prepare(self, request, *, cancellation_event=None, progress_callback=None):
+    def placement_context(self, request, *, cancellation_event=None, progress_callback=None):
+        return self.prepare(request, cancellation_event=cancellation_event, progress_callback=progress_callback, placement_only=True)
+
+    def prepare(self, request, *, cancellation_event=None, progress_callback=None, placement_only=False):
         notify = progress_callback or (lambda _p, _s: None)
+        notify(0, "Originalquelle und Druckprofil prüfen …")
         request.validate_source()
         _check_cancel(cancellation_event)
         source = request.prepared_source.analysis_gcode_path
@@ -403,7 +474,7 @@ class PreprocessorService:
         height = layers[count - 1].z_mm if count else 0.0
         # Bounded slenderness heuristics, independent of cooling-time volume.
         diameter = max(6.0, height * 0.10) if settings.automatic_diameter else settings.diameter_mm
-        base = max(14.0, diameter * 1.8, height * 0.25) if settings.automatic_base else settings.base_width_mm
+        base = widen_automatic_foot_width(max(14.0, diameter * 1.8, height * 0.25), maximum=150.0) if settings.automatic_base else settings.base_width_mm
         if base < diameter:
             raise ValueError("Die Standfußbreite muss mindestens dem Turmdurchmesser entsprechen.")
         geometry = parse_bed_geometry(values)
@@ -412,8 +483,6 @@ class PreprocessorService:
         geometry = with_exclusions(geometry, settings.exclusions)
         head = printhead_envelope(values, geometry)
         profile_notes += (head.note,)
-        if head.estimated:
-            settings = replace(settings, z_hop_mm=max(settings.z_hop_mm, 2.0))
         max_z = _number(values, "printable_height", _number(values, "max_print_height", 0))
         if max_z <= 0:
             raise ValueError("Im bestätigten Druckprofil fehlt die maximale Druckhöhe.")
@@ -453,7 +522,7 @@ class PreprocessorService:
         if settings.automatic_diameter and settings.hollow_tower:
             diameter = max(diameter, minimum_hollow_diameter)
             if settings.automatic_base:
-                base = max(14.0, diameter * 1.8, height * .25)
+                base = widen_automatic_foot_width(max(14.0, diameter * 1.8, height * .25), maximum=150.0)
         if base < diameter:
             raise ValueError("Die Standfußbreite muss mindestens dem Turmdurchmesser entsprechen.")
         if settings.hollow_tower and diameter < minimum_hollow_diameter:
@@ -464,123 +533,277 @@ class PreprocessorService:
         first_layer = replace(first_layer, wall_speed_mm_s=min(first_layer.wall_speed_mm_s, settings.print_speed_mm_s),
             infill_speed_mm_s=min(first_layer.infill_speed_mm_s, settings.print_speed_mm_s))
         notify(10, "Pre-Slice und Druckzustände prüfen …")
-        endpoints, end_homing = _scan(replace(request, snapshot=source_snapshot), cancellation_event)
+        collector = DepositionToolpathCollector()
+        motion_collector = OriginalMotionCollector()
+        try:
+            endpoints, end_homing = _scan(replace(request, snapshot=source_snapshot), cancellation_event,
+                collector=collector, motion_collector=motion_collector)
+            _check_cancel(cancellation_event)
+            paths = collector.finish(expected_layer_count=len(layers))
+        finally:
+            collector.close()
         original_exclusions_clear(source, tuple(zone.polygon for zone in settings.exclusions), head.radius_mm,
             cancellation_event=cancellation_event)
         end_safe_z = max(layer.z_mm for layer in layers) + settings.z_hop_mm
         if count and end_homing and end_safe_z > max_z:
             raise ValueError("Die abschließende XY-Referenzfahrt benötigt einen Sicherheitshub oberhalb der Druckhöhe.")
-        paths = analyze_deposition_toolpaths(source, expected_layer_count=len(layers), cancellation_event=cancellation_event)
+        notify(18, "Modellbahnen rekonstruieren …")
         if paths.occupied_bounds is None:
             raise ValueError("Die Modellfläche konnte nicht rekonstruiert werden.")
         occupied = paths.occupied_bounds
-        model_clearance = max(settings.clearance_mm, head.radius_mm + 2 if head.estimated else settings.clearance_mm)
-        wait_clearance = max(settings.wait_clearance_mm, head.radius_mm + 2 if head.estimated else settings.wait_clearance_mm)
-        reserved = base / 2 + max(width, first_layer.line_width_mm) / 2
+        model_clearance = settings.clearance_mm
+        wait_clearance = settings.wait_clearance_mm
+        # Model brim enablement/width never controls the independently generated tower brim.
+        brim_width, brim_gap = settings.tower_brim_width_mm, settings.tower_brim_gap_mm
+        brim_keys = (("first_layer_extrusion_width", "perimeter_extrusion_width", "extrusion_width") if prusa_widths
+            else ("initial_layer_line_width", "inner_wall_line_width", "line_width"))
+        brim_line_width = _profile_line_width(values, brim_keys, nozzle, nozzle * 1.1,
+            percent_base=layers[0].height_mm if prusa_widths else nozzle) if brim_width else 0.0
+        if brim_width and brim_line_width <= layers[0].height_mm:
+            raise ValueError("Die Brim-Linienbreite muss größer als die erste Turm-Schichthöhe sein.")
+        if brim_width and brim_width <= layers[0].height_mm * (1-math.pi/4):
+            raise ValueError("Die Turm-Brimbreite ist für die erste Schichthöhe zu klein.")
+        brim_line_width = min(brim_line_width, brim_width)
+        reserved = base / 2 + max(max(width, first_layer.line_width_mm) / 2, brim_width+brim_gap if brim_width else 0.0)
         model_line_margin = max(general_width, inner_width, width, first_layer.line_width_mm) / 2
         foot = full_infill_foot_taper(tuple(layer.z_mm for layer in layers[:count]),
             base / 2, diameter / 2, layers[-1].z_mm) if count else None
         radii = [foot.radius(layer.z_mm) - widths[i] / 2 for i, layer in enumerate(layers[:count])]
-        solid_layers = [i < 2 or (base > diameter and layer.z_mm < foot.start_z + foot.duration - 1e-9)
-            for i, layer in enumerate(layers[:count])]
         # The golden angle spreads local prime deposits without periodic seams.
         # Every corresponding approach and departure is checked before output.
         wipe_angles = tuple((i * math.pi * (3 - math.sqrt(5))) % math.tau for i in range(count))
         insertions = {endpoints[i][0]: i for i in range(count)}
         insertion_heights = {line: layers[i].z_mm for line, i in insertions.items()}
-        motion_index = OriginalMotionIndex.capture(source, insertion_heights, cancellation_event=cancellation_event)
+        notify(24, "Originalfahrten und Sicherheitshöhen erfassen …")
+        motion_index = motion_collector.finish(insertion_heights, cancellation_event=cancellation_event)
         candidate_count = 0
-        rejection = None
         collision_notes = (head.limitations,
             "Modellabstände: ungekürzte Ablagebahnen und höhenabhängiger Turmquerschnitt; Originalfahrten einschließlich Endsequenz geprüft.",
             "Eigene Sperrflächen gelten als unbekannt hohe Hindernisse; ihre Höhe wird nicht geschätzt.")
-        def fits(point):
+        def tower_error(point, settings):
             # The printable polygon is the manufacturer's nozzle travel area;
             # the head may overhang it. Physical keepouts are expanded below.
-            head_clear = _circle_fits_bed(point, reserved, settings.edge_clearance_mm, geometry)
-            return (head_clear
-                and all(not _point_in_polygon(point, polygon) and _distance_to_polygon_edges(point, polygon) >= reserved + head.radius_mm + 1
-                    for polygon in geometry.excluded_polygons)
-                and motion_index.model_clear(point, reserved + model_clearance + model_line_margin,
-                    lambda z: foot.radius(max(foot.start_z, z)) + model_clearance + model_line_margin, height=height))
+            if not _circle_fits_bed(point, reserved, settings.edge_clearance_mm, geometry):
+                return "Turm: Der vollständige Standfuß unterschreitet den Abstand zur Druckbettkante oder einer gesperrten Profilfläche."
+            if any(_point_in_polygon(point, polygon) or _distance_to_polygon_edges(point, polygon) < reserved + head.radius_mm + 1
+                    for polygon in geometry.excluded_polygons):
+                return "Turm: Der Druckkopf-Abstand zu einer gesperrten Profilfläche ist zu klein."
+            if not motion_index.model_clear(point, reserved + model_clearance + model_line_margin,
+                    lambda z: (reserved if z <= layers[0].z_mm+.001 else foot.radius(max(foot.start_z, z))) + model_clearance + model_line_margin, height=height):
+                return "Turm: Der Abstand zwischen Standfuß beziehungsweise Turmquerschnitt und Modell ist zu klein."
+            return None
+
+        def park_error(park, point, settings):
+            if not _circle_fits_bed(park, 0, settings.edge_clearance_mm, geometry):
+                return "Warteposition: Der Abstand zur Druckbettkante oder einer gesperrten Profilfläche ist zu klein."
+            if not motion_index.model_clear(park, wait_clearance+model_line_margin, lambda _z: wait_clearance+model_line_margin):
+                return "Warteposition: Der Abstand zum Modell ist zu klein."
+            if math.dist(park, point) < reserved+wait_clearance:
+                return "Warteposition: Der Abstand zum vollständigen Turmfuß ist zu klein."
+            return None
+
+        islands = model_travel_islands(motion_index, occupied, model_line_margin, cancellation_event=cancellation_event) if count else ()
         @lru_cache(maxsize=8192)
-        def checked_route(a, b):
+        def hard_route(a, b):
             return safe_travel_path(a, b, geometry, margin_mm=head.radius_mm+1)
 
+        @lru_cache(maxsize=8192)
+        def preferred_route(a, b):
+            return prefer_model_avoiding_route(a, b, geometry, islands, margin_mm=head.radius_mm+1, direct=hard_route(a, b))
+
         def route(a, b):
-            return checked_route(a, b) if a <= b else tuple(reversed(checked_route(b, a)))
-        routes = []
-        wait_position = None
-        if not count:
-            center = ((occupied.minimum_x_mm + occupied.maximum_x_mm)/2, (occupied.minimum_y_mm + occupied.maximum_y_mm)/2)
-        else:
-            candidates = [(settings.center_x_mm, settings.center_y_mm)]
-            if settings.automatic_position:
-                bed = geometry.bounds
-                inset = reserved + settings.edge_clearance_mm
-                xs = [bed.minimum_x_mm + inset + (bed.maximum_x_mm-bed.minimum_x_mm-2*inset)*i/32 for i in range(33)]
-                ys = [bed.minimum_y_mm + inset + (bed.maximum_y_mm-bed.minimum_y_mm-2*inset)*i/32 for i in range(33)]
-                candidates = [(x, y) for x in xs for y in ys if fits((x, y))]
-                sample = [endpoints[i][1] for i in range(0, count, max(1, count//64))]
-                candidates.sort(key=lambda point: ((-math.hypot(point[0] - (occupied.minimum_x_mm + occupied.maximum_x_mm)/2,
-                    point[1] - (occupied.minimum_y_mm + occupied.maximum_y_mm)/2)) if head.estimated else 0,
-                    sum(math.hypot(state.x-point[0], state.y-point[1]) for state in sample)))
-            center = None
-            for point in candidates:
-                candidate_count += 1
-                _check_cancel(cancellation_event)
-                if not fits(point):
-                    continue
-                rejection = motion_index.tower_rejection(point, reserved,
-                    head_radius=head.radius_mm, head_height=head.clearance_height_mm,
-                    lower_head_radius=head.lower_radius_mm, gantry_height=head.clearance_height_mm)
-                if rejection:
-                    continue
-                parking = [(settings.wait_x_mm, settings.wait_y_mm)]
-                if settings.automatic_wait_position:
-                    parking = [(point[0]+distance*math.cos(angle*math.tau/16),
-                        point[1]+distance*math.sin(angle*math.tau/16))
-                        for distance in (reserved+wait_clearance+.1,
-                            reserved+wait_clearance+10, reserved+wait_clearance+2*head.radius_mm)
-                        for angle in range(16)]
-                    if head.estimated:
-                        bed = geometry.bounds
-                        inset = settings.edge_clearance_mm
-                        parking += [(bed.minimum_x_mm + inset + (bed.maximum_x_mm-bed.minimum_x_mm-2*inset)*ix/8,
-                            bed.minimum_y_mm + inset + (bed.maximum_y_mm-bed.minimum_y_mm-2*inset)*iy/8)
-                            for ix in range(9) for iy in range(9)]
-                    # Prefer a short detour, with deterministic tie-breaking.
-                    parking.sort(key=lambda park: sum(math.hypot(state.x-park[0], state.y-park[1])
-                        for state in sample) if settings.automatic_position else math.dist(park, point))
-                for park in parking:
-                    if (not _circle_fits_bed(park, 0, settings.edge_clearance_mm, geometry)
-                            or not motion_index.model_clear(park, wait_clearance+model_line_margin, lambda _z: wait_clearance+model_line_margin)
-                            or math.dist(park, point) < reserved+wait_clearance):
+            return preferred_route(a, b) if a <= b else tuple(reversed(preferred_route(b, a)))
+
+        original_settings = settings
+        position_fields = ("automatic_position", "center_x_mm", "center_y_mm",
+            "automatic_wait_position", "wait_x_mm", "wait_y_mm", "edge_clearance_mm")
+        def check_position_settings(settings):
+            if replace(settings, **{name: getattr(original_settings, name) for name in position_fields}) != original_settings:
+                raise ValueError("Die Platzierungsgrundlage hat sich geändert. Bitte den Positionseditor erneut öffnen.")
+
+        def _resolve_positions(position_settings=None, *, event=None, progress_callback=None):
+            nonlocal candidate_count, cancellation_event
+            cancellation_event = event
+            motion_index.cancellation_event = event
+            _check_cancel(event)
+            candidate_count = 0
+            settings = position_settings or original_settings
+            report = progress_callback or (lambda _p, _s: None)
+            report(55, "Turm- und Wartepositionen auf freie Abstände prüfen …")
+            check_position_settings(settings)
+            rejection = None
+            def fits(point):
+                return tower_error(point, settings) is None
+            routes = []
+            wait_position = None
+            if not count:
+                center = ((occupied.minimum_x_mm + occupied.maximum_x_mm)/2, (occupied.minimum_y_mm + occupied.maximum_y_mm)/2)
+            else:
+                candidates = [(settings.center_x_mm, settings.center_y_mm)]
+                if settings.automatic_position:
+                    bed = geometry.bounds
+                    inset = reserved + settings.edge_clearance_mm
+                    xs = [bed.minimum_x_mm + inset + (bed.maximum_x_mm-bed.minimum_x_mm-2*inset)*i/32 for i in range(33)]
+                    ys = [bed.minimum_y_mm + inset + (bed.maximum_y_mm-bed.minimum_y_mm-2*inset)*i/32 for i in range(33)]
+                    candidates = [(x, y) for x in xs for y in ys if fits((x, y))]
+                    sample = [endpoints[i][1] for i in range(0, count, max(1, count//64))]
+                    candidates.sort(key=lambda point: sum(math.dist((state.x, state.y), point) for state in sample))
+                center = None
+                for point in candidates:
+                    candidate_count += 1
+                    _check_cancel(cancellation_event)
+                    rejection = tower_error(point, settings)
+                    if rejection:
                         continue
+                    rejection = motion_index.tower_rejection(point, reserved,
+                        head_radius=head.radius_mm, head_height=head.clearance_height_mm,
+                        lower_head_radius=head.lower_radius_mm, gantry_height=head.clearance_height_mm)
+                    if rejection:
+                        continue
+                    parking = [(settings.wait_x_mm, settings.wait_y_mm)]
+                    if settings.automatic_wait_position:
+                        parking = [(point[0]+distance*math.cos(angle*math.tau/16),
+                            point[1]+distance*math.sin(angle*math.tau/16))
+                            for distance in (reserved+wait_clearance+.1,
+                                reserved+wait_clearance+10, reserved+wait_clearance+25)
+                            for angle in range(16)]
+                        # Keep parking and tower on the same free side of the
+                        # model before minimizing the full three-leg detour.
+                        parking.sort(key=lambda park: (model_crossings(park, point, islands),
+                            math.dist(park, point) + sum(math.dist((state.x, state.y), park)
+                                for state in sample) if settings.automatic_position else math.dist(park, point)))
+                    for park in parking:
+                        rejection = park_error(park, point, settings)
+                        if rejection:
+                            continue
+                        try:
+                            routes = []
+                            for i in range(count):
+                                _check_cancel(cancellation_event)
+                                if i % max(1, count//40) == 0:
+                                    report(65+int(33*i/count), f"Fahrwege und Sicherheitsabstände prüfen · Schicht {i+1} von {count}")
+                                origin = (endpoints[i][1].x, endpoints[i][1].y)
+                                wipe = (point[0]+radii[i]*math.cos(wipe_angles[i]), point[1]+radii[i]*math.sin(wipe_angles[i]))
+                                # Original time decides the route once, before
+                                # added tower/travel time reduces the remaining wait.
+                                # An empty first leg denotes a direct tower visit.
+                                if layers[i].total_time_s >= settings.target_layer_time_s:
+                                    routes.append(((), route(origin, wipe), route(wipe, origin)))
+                                else:
+                                    routes.append((route(origin, park), route(park, wipe), route(wipe, origin)))
+                        except ValueError as error:
+                            rejection = "Fahrweg: " + str(error)
+                            continue
+                        center, wait_position = point, park
+                        break
+                    if center is not None:
+                        break
+                if center is None:
+                    raise PreprocessorPlacementError(rejection, head.note if head.estimated else "")
+            return center, wait_position, routes
+
+        placement_lock = Lock()
+        def resolve_positions(position_settings=None, *, event=None, progress_callback=None):
+            while not placement_lock.acquire(timeout=.05):
+                _check_cancel(event)
+            try:
+                return _resolve_positions(position_settings, event=event, progress_callback=progress_callback)
+            finally:
+                placement_lock.release()
+
+        origins_connected = None
+        def reachable(point=None, *, event=None):
+            nonlocal origins_connected
+            while not placement_lock.acquire(timeout=.05):
+                _check_cancel(event)
+            try:
+                _check_cancel(event)
+                if not count:
+                    return False
+                anchor = (endpoints[0][1].x, endpoints[0][1].y)
+                if origins_connected is None:
                     try:
-                        routes = []
-                        for i in range(count):
-                            _check_cancel(cancellation_event)
-                            origin = (endpoints[i][1].x, endpoints[i][1].y)
-                            wipe = (point[0]+radii[i]*math.cos(wipe_angles[i]), point[1]+radii[i]*math.sin(wipe_angles[i]))
-                            routes.append((route(origin, park), route(park, wipe), route(wipe, origin)))
+                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)}:
+                            _check_cancel(event)
+                            hard_route(anchor, origin)
                     except ValueError:
-                        continue
-                    center, wait_position = point, park
-                    break
-                if center is not None:
-                    break
-            if center is None:
-                raise ValueError("Keine sichere Turm- und Warteposition mit freien Originalbahnen und kollisionsfreien Fahrwegen gefunden. "
-                    "Abstände, Turmmaße oder manuelle Turm-/Warteposition prüfen."
-                    + (" " + rejection if rejection else "") + (" " + head.note if head.estimated else ""))
+                        origins_connected = False
+                    else:
+                        origins_connected = True
+                if not origins_connected:
+                    return False
+                if point is None:
+                    return True
+                try:
+                    hard_route(anchor, point)
+                except ValueError:
+                    return False
+                return True
+            finally:
+                placement_lock.release()
+
+        def position_valid(kind, point, position_settings, *, event=None):
+            nonlocal origins_connected
+            if kind not in {"tower", "wait"}:
+                raise ValueError("Unbekanntes Positionsziel.")
+            check_position_settings(position_settings)
+            if not count or any(not math.isfinite(v) or not -2000 <= v <= 2000 for v in point):
+                return False
+            while not placement_lock.acquire(timeout=.05):
+                _check_cancel(event)
+            try:
+                _check_cancel(event)
+                motion_index.cancellation_event = event
+                center = point if kind == "tower" else (position_settings.center_x_mm, position_settings.center_y_mm)
+                park = point if kind == "wait" else (position_settings.wait_x_mm, position_settings.wait_y_mm)
+                if tower_error(center, position_settings) or park_error(park, center, position_settings):
+                    return False
+                if motion_index.tower_rejection(center, reserved, head_radius=head.radius_mm,
+                        head_height=head.clearance_height_mm, lower_head_radius=head.lower_radius_mm,
+                        gantry_height=head.clearance_height_mm):
+                    return False
+                anchor = (endpoints[0][1].x, endpoints[0][1].y)
+                if origins_connected is None:
+                    try:
+                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)}:
+                            _check_cancel(event)
+                            hard_route(anchor, origin)
+                    except ValueError:
+                        origins_connected = False
+                    else:
+                        origins_connected = True
+                if not origins_connected:
+                    return False
+                try:
+                    hard_route(anchor, park)
+                    hard_route(park, center)
+                except ValueError:
+                    return False
+                # The complete tower foot is free of expanded physical
+                # keepouts. All rotating wipe points connect to its centre;
+                # anchor connectivity consequently covers every layer route.
+                return True
+            finally:
+                placement_lock.release()
+
+        notify(28, "Sichere Turm- und Wartepositionen bestimmen …")
+        placement = PreprocessorPlacement(request, geometry, paths.object_segments, base, height, settings, resolve_positions,
+            head, reserved, position_valid, bool(geometry.excluded_polygons) or motion_index.has_lowered_tower_moves, brim_width, brim_gap, brim_line_width,
+            PlacementRegions(geometry, motion_index, reserved_radius=reserved,
+                tower_radius_at_z=lambda z: reserved if z <= layers[0].z_mm+.001 or foot is None else foot.radius(max(foot.start_z, z)),
+                height=height, model_margin=model_clearance+model_line_margin,
+                wait_margin=wait_clearance+model_line_margin, head=head, reachable=reachable))
+        if placement_only:
+            return placement
+        center, wait_position, routes = placement.resolve(event=cancellation_event)
         protected_roots = (request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots)
         ensure_writable_output(self.temporary_root, protected_roots=protected_roots)
         self.temporary_root.mkdir(parents=True, exist_ok=True)
-        workspace = tempfile.TemporaryDirectory(prefix="preprocessor_", dir=self.temporary_root)
+        workspace = tempfile.TemporaryDirectory(prefix="postprocessor_", dir=self.temporary_root)
         try:
-            output = Path(workspace.name) / "preprocessed.gcode"
+            output = Path(workspace.name) / "postprocessed.gcode"
             tower_collector = []
+            brim_collector = []
             travel_collector = []
             wait_points = []
             wait_point_layers = []
@@ -588,8 +811,9 @@ class PreprocessorService:
             from cooling_tower.gcode.parser import GCodeLine, parse_gcode_line
             def render(destination, actual_waits, *, collect=False, final_times=None):
                 with source.open("rb") as original, destination.open("wb") as target:
+                    comments = FeatureComments.for_adapter(request.profile.installation.adapter_id)
                     if count:
-                        target.write(b"; SACRIFICIAL_TOWER_PREPROCESSED\n")
+                        target.write(b"; SACRIFICIAL_TOWER_POSTPROCESSED\n")
                     clocks = [0.0]
                     for seconds in final_times or ():
                         clocks.append(clocks[-1] + seconds)
@@ -597,6 +821,7 @@ class PreprocessorService:
                         if number % 2000 == 0:
                             _check_cancel(cancellation_event)
                         text = raw.decode("utf-8-sig", errors="replace").strip()
+                        comments.observe(text)
                         if count and number in end_homing:
                             state = end_homing[number]
                             lift = max(end_safe_z, state.z)
@@ -626,16 +851,24 @@ class PreprocessorService:
                         layer_settings = replace(settings, print_speed_mm_s=min(settings.print_speed_mm_s,
                             first_layer.wall_speed_mm_s)) if i == 0 else settings
                         block = _layer_block(state, layer, radii[i], center, layer_settings, widths[i], filament,
-                            actual_waits[i], inner_line_width=inner_widths[i], solid_base=solid_layers[i], travel_routes=routes[i],
+                            actual_waits[i], inner_line_width=inner_widths[i], first_layer=i == 0, closed_bottom=i < 2,
+                            shaft_radius=diameter/2, travel_routes=routes[i],
                             start_angle=wipe_angles[i], maximum_flow=profile_flow_limit(values),
-                            infill_speed=min(settings.print_speed_mm_s, first_layer.infill_speed_mm_s) if i == 0 else None)
+                            infill_speed=min(settings.print_speed_mm_s, first_layer.infill_speed_mm_s) if i == 0 else None,
+                            brim_width=brim_width if i == 0 else 0, brim_gap=brim_gap, brim_line_width=brim_line_width, base_radius=base/2,
+                            comments=comments, cancellation_event=cancellation_event)
                         if not raw.endswith(b"\n"):
                             target.write(b"\n")
-                        target.write(("\n".join(block) + "\n").encode("ascii"))
+                        target.write(("\n".join(block) + "\n").encode("utf-8"))
                         # Reconstruct the displayed tower from the emitted instructions.
                         tower_tracker.state = copy(state)
-                        wait_travel = True
+                        wait_travel = bool(routes[i][0])
+                        brim_active = False
                         for instruction in block if collect else ():
+                            if instruction == "; SACRIFICIAL_TOWER_BRIM_BEGIN":
+                                brim_active = True
+                            elif instruction == "; SACRIFICIAL_TOWER_BRIM_END":
+                                brim_active = False
                             if instruction.startswith("; sacrificial wipe / prime and "):
                                 wait_travel = False
                             parsed = parse_gcode_line(GCodeLine(1, instruction))
@@ -647,7 +880,7 @@ class PreprocessorService:
                                     wait_points.append(point)
                                     wait_point_layers.append(i)
                             if isinstance(event, Movement) and event.category == "deposition":
-                                tower_collector.append(LineSegment3D(Point3D(event.start_x, event.start_y, event.start_z),
+                                (brim_collector if brim_active else tower_collector).append(LineSegment3D(Point3D(event.start_x, event.start_y, event.start_z),
                                     Point3D(event.end_x, event.end_y, event.end_z)))
                             elif isinstance(event, Movement) and event.endpoint_distance_xyz_mm > 1e-6:
                                 segment = LineSegment3D(Point3D(event.start_x, event.start_y, event.start_z),
@@ -695,7 +928,8 @@ class PreprocessorService:
             request.validate_source()
             segments = tuple(tower_collector)
             scene = PreviewScene(paths.object_segments, segments, geometry.bounds, center,
-                paths.source_segment_count, len(paths.object_segments) + len(segments), height,
+                paths.source_segment_count, len(paths.object_segments) + len(segments) + len(brim_collector), height,
+                brim_segments=tuple(brim_collector),
                 notes=("Rekonstruierte G-Code-Koordinaten; Schichtzeiten enthalten Fahrwege, Turmdruck, Primen und Restwartezeit.",) + profile_notes,
                 object_height_mm=layers[-1].z_mm, object_layer_count=len(layers), tower_layer_count=count, bed_geometry=geometry,
                 travel_segments=tuple(segment for segment, _wait, _i in travel_collector),
@@ -705,19 +939,15 @@ class PreprocessorService:
                 layer_z_mm=tuple(layer.z_mm for layer in layers),
                 wait_travel_layer_indices=tuple(i for _s, wait, i in travel_collector if wait),
                 tower_travel_layer_indices=tuple(i for _s, wait, i in travel_collector if not wait),
-                wait_point_layer_indices=tuple(wait_point_layers), wait_height_offset_mm=settings.z_hop_mm,
-                printhead_radius_mm=head.radius_mm, printhead_lower_radius_mm=head.lower_radius_mm,
-                printhead_clearance_height_mm=head.clearance_height_mm, printhead_estimated=head.estimated,
-                wipe_points=tuple(Point3D(center[0]+radii[i]*math.cos(wipe_angles[i]),
-                    center[1]+radii[i]*math.sin(wipe_angles[i]), layers[i].z_mm + settings.z_hop_mm) for i in range(count)))
-            notify(100, "Präprozessor-Vorschau bereit.")
+                wait_point_layer_indices=tuple(wait_point_layers), wait_height_offset_mm=settings.z_hop_mm)
+            notify(100, "Postprozessor-Vorschau bereit.")
             return PreprocessorResult(request, workspace, output, sha256_file(output), scene,
                 height, diameter if count else 0, base if count else 0, sum(wait > 0 for wait in waits), sum(waits), waits,
                 final_times, motion_deltas, settings.z_hop_mm,
                 (min(thicknesses), max(thicknesses)) if count and settings.hollow_tower else (0.0, 0.0),
                 settings, profile_notes, tuple(layer.total_time_s for layer in layers), tuple(layer.z_mm for layer in layers), wipe_angles, head,
                 first_layer, collision_notes, {"indexed_moves": motion_index.move_count, "depositions": motion_index.deposition_count,
-                    "candidates": candidate_count, "examined_moves": motion_index.examined_moves})
+                    "candidates": candidate_count, "examined_moves": motion_index.examined_moves}, placement, (center, wait_position, routes))
         except BaseException:
             workspace.cleanup()
             raise
@@ -730,14 +960,14 @@ class PreprocessorService:
             protected_files=(*profile.source_paths, result.request.prepared_source.analysis_gcode_path,
                 result.request.prepared_source.source_artifact.original_path))
         if target.suffix.casefold() != ".gcode":
-            raise ValueError("Der Präprozessor exportiert ausschließlich .gcode-Dateien.")
+            raise ValueError("Der Postprozessor exportiert ausschließlich .gcode-Dateien.")
         if sha256_file(result.gcode_path) != result.sha256:
             raise ValueError("Der erzeugte G-Code wurde nach der Vorschau verändert.")
         target.parent.mkdir(parents=True, exist_ok=True)
         previous_digest = sha256_file(target) if target.is_file() else None
         if previous_digest is not None and not overwrite:
             raise FileExistsError("Die Exportdatei existiert bereits. Bitte einen anderen Namen wählen.")
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".preprocessor_export_", suffix=".tmp", dir=target.parent)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".postprocessor_export_", suffix=".tmp", dir=target.parent)
         temporary_path = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as stream:

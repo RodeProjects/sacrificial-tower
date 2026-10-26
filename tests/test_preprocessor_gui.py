@@ -84,6 +84,9 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertEqual(exported.run_directory.parent, self.window.export_directory(GenerationMode.PREPROCESSOR))
         self.assertTrue(exported.report_path.is_file())
         self.assertTrue(exported.user_report_path.is_file())
+        self.assertTrue(exported.output_path.name.endswith("_postprocessor.gcode"))
+        self.assertIn("G-Code-Postprozessor", exported.user_report_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.window.preprocessor_method_button.text(), "Postprozessor")
         self.assertTrue(panel.export_actions.isVisible())
         self.assertTrue(self.window.export_success_dialog.isVisible())
         self.assertIn("G-Code", self.window.export_success_usage_label.text())
@@ -125,6 +128,29 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertGreater(new.total_wait_s, old.total_wait_s)
         self.assertTrue(self.request.prepared_source.matches_analysis_gcode())
 
+    def test_typing_keeps_preview_current_until_the_numeric_value_is_committed(self):
+        from PySide6.QtCore import Qt
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        panel = self.window.preprocessor_panel
+        panel.automatic["automatic_target_time"].setChecked(False)
+        panel.inputs["target_layer_time_s"].setValue(20)
+        result = self.wait_for_result()
+        editor = panel.inputs["target_layer_time_s"]
+        editor.setFocus()
+        editor.selectAll()
+        QTest.keyClicks(editor, "25.500")
+        QTest.qWait(250)
+        self.assertEqual(editor.lineEdit().text(), "25.500")
+        self.assertEqual(panel.settings().target_layer_time_s, 20)
+        self.assertIs(self.controller.session.preview, result)
+        self.assertTrue(result.gcode_path.is_file())
+        self.assertIsNone(self.controller.job_id)
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        self.assertEqual(panel.settings().target_layer_time_s, 25.5)
+        self.assertIsNone(self.controller.session.preview)
+        self.assertFalse(result.gcode_path.exists())
+        self.assertIsNone(self.controller.job_id)
+
     def test_method_switch_retains_result_but_source_invalidation_discards_it(self):
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
         result = self.wait_for_result()
@@ -150,7 +176,9 @@ class PreprocessorGuiTests(unittest.TestCase):
         panel.hollow_checkbox.setChecked(False)
         panel.reset()
         self.assertTrue(panel.hollow_checkbox.isChecked())
-        self.assertTrue(all(checkbox.isChecked() for checkbox in panel.automatic.values()))
+        from cooling_tower.preprocessor import PreprocessorSettings
+        self.assertTrue(all(checkbox.isChecked() == getattr(PreprocessorSettings(), name)
+            for name, checkbox in panel.automatic.items()))
 
     def test_automatic_controls_precede_editors_and_hollow_label_precedes_checkbox(self):
         panel = self.window.preprocessor_panel
@@ -161,8 +189,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         panel.automatic["automatic_wait_position"].setChecked(False)
         self.app.processEvents()
         for flag, name in (("automatic_height", "height_mm"), ("automatic_diameter", "diameter_mm"),
-                ("automatic_base", "base_width_mm"), ("automatic_position", "center_x_mm"),
-                ("automatic_wait_position", "wait_x_mm")):
+                ("automatic_base", "base_width_mm")):
             row = panel.rows[name]
             grid = row.layout()
             checkbox = panel.automatic[flag]
@@ -171,8 +198,9 @@ class PreprocessorGuiTests(unittest.TestCase):
             self.assertEqual(auto_label.text(), "Automatisch")
             self.assertLess(row.label.geometry().right(), auto_label.x())
             self.assertLess(auto_label.geometry().right(), checkbox.x())
-            self.assertLess(checkbox.geometry().right(), row.editor.x())
-            self.assertLess(row.editor.geometry().right(), row.reset_button.x())
+            editor = row.editor
+            self.assertLess(checkbox.geometry().right(), editor.x())
+            self.assertLess(editor.geometry().right(), row.reset_button.x())
         hollow_row = panel.hollow_checkbox.parentWidget()
         layout = hollow_row.layout()
         label = layout.itemAt(1).widget()
@@ -231,6 +259,79 @@ class PreprocessorGuiTests(unittest.TestCase):
         y = panel.canvas._raw_project(Point3D(0, 10, 0))
         self.assertGreater(x[0], origin[0])
         self.assertLess(y[1], origin[1])
+
+    def test_rotation_drag_matches_postprocessor_camera_orientation_on_both_axes(self):
+        from PySide6.QtCore import QPoint, Qt
+        from cooling_tower.gui.widgets.preview_canvas import PreviewCanvas
+        self.window.resize(2400, 1200)
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        self.wait_for_result()
+        canvas = self.window.preprocessor_panel.canvas
+        automatic = PreviewCanvas()
+        automatic.resize(700, 500)
+        automatic.set_navigation_enabled(True)
+        automatic.show()
+        self.app.processEvents()
+        try:
+            def drag(view, delta, button=Qt.MouseButton.LeftButton):
+                start = view.rect().center()
+                QTest.mousePress(view, button, pos=start)
+                QTest.mouseMove(view, start+delta)
+                QTest.mouseRelease(view, button, pos=start+delta)
+            for delta in (QPoint(30, 0), QPoint(-30, 0), QPoint(0, 20), QPoint(0, -20)):
+                before, reference = canvas.camera_state(), automatic.camera_state()
+                drag(canvas, delta)
+                drag(automatic, delta)
+                self.assertAlmostEqual(canvas.yaw_deg-before["yaw_deg"], delta.x()*.45)
+                self.assertAlmostEqual(canvas.pitch_deg-before["pitch_deg"], -delta.y()*.35)
+                self.assertAlmostEqual(automatic.yaw_deg-reference["yaw_deg"], -delta.x()*.45)
+                self.assertAlmostEqual(automatic.pitch_deg-reference["pitch_deg"], delta.y()*.35)
+            for button in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton):
+                before = canvas.camera_state()
+                drag(canvas, QPoint(15, 10), button)
+                self.assertEqual((canvas.pan_x-before["pan_x"], canvas.pan_y-before["pan_y"]), (15, 10))
+                self.assertEqual((canvas.yaw_deg, canvas.pitch_deg), (before["yaw_deg"], before["pitch_deg"]))
+        finally:
+            automatic.close()
+
+    def test_preprocessor_navigation_starts_enabled_and_can_be_disabled_explicitly(self):
+        from types import SimpleNamespace
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        self.window.resize(2400, 1200)
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        canvas = self.window.preprocessor_panel.canvas
+        self.assertTrue(canvas.navigation_enabled)
+        self.wait_for_result()
+        self.assertTrue(canvas.navigation_enabled)
+        self.assertEqual(canvas.navigation_status_label.text(), "Navigation aktiviert")
+        self.assertTrue(canvas.navigation_toggle.isVisible())
+        ignored, accepted = [], []
+        wheel = SimpleNamespace(angleDelta=lambda: QPoint(0, 120),
+            position=lambda: QPointF(canvas.rect().center()),
+            ignore=lambda: ignored.append(True), accept=lambda: accepted.append(True))
+        before = canvas.camera_state()
+        canvas.wheelEvent(wheel)
+        self.assertTrue(accepted)
+        self.assertGreater(canvas.zoom, before["zoom"])
+        canvas.navigation_toggle.click()
+        disabled_state = canvas.camera_state()
+        canvas.wheelEvent(wheel)
+        self.assertTrue(ignored)
+        self.assertEqual(canvas.camera_state(), disabled_state)
+        canvas.navigation_toggle.click()
+        start = canvas.rect().center()
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(canvas, start+QPoint(30, 15))
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=start+QPoint(30, 15))
+        self.assertNotEqual(canvas.yaw_deg, before["yaw_deg"])
+        canvas.navigation_status_label.click()
+        self.assertFalse(canvas.navigation_enabled)
+        canvas.navigation_status_label.click()
+        self.assertTrue(canvas.navigation_enabled)
+        self.controller.generate()
+        self.assertTrue(canvas.navigation_enabled)
+        self.wait_for_result()
+        self.assertTrue(canvas.navigation_enabled)
 
     def test_preview_travel_toggle_keeps_generated_gcode_and_marks_free_park(self):
         from itertools import product
@@ -293,7 +394,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         for name, value in values.items():
             spin = panel.inputs[name]
             self.assertFalse(spin.isEnabled())
-            self.assertEqual(spin.lineEdit().text(), spin.locale().toString(value, "f", 2))
+            self.assertEqual(spin.cleanText(), spin.locale().toString(value, "f", 2))
         panel.inputs["target_layer_time_s"].setValue(25)
         self.assertIsNone(self.controller.session.preview)
         for name in fields:
@@ -332,7 +433,8 @@ class PreprocessorGuiTests(unittest.TestCase):
             self.assertEqual(info.objectName(), "settingInfoButton")
             self.assertIn("<b>", info.toolTip(), name)
             self.assertIn("&#8226;", info.toolTip(), name)
-            self.assertEqual(panel.reset_buttons[name].objectName(), "settingResetButton")
+            if name != "positions":
+                self.assertEqual(panel.reset_buttons[name].objectName(), "settingResetButton")
         panel.automatic["automatic_base"].setChecked(False)
         panel.inputs["base_width_mm"].setValue(60)
         row = panel.rows["base_width_mm"]
@@ -402,12 +504,12 @@ class PreprocessorGuiTests(unittest.TestCase):
         before_height = panel.canvas.height()
         start = handle.rect().center()
         QTest.mousePress(handle, Qt.MouseButton.LeftButton, pos=start)
-        QTest.mouseMove(handle, start - QPoint(120, 0), delay=20)
-        QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=start - QPoint(120, 0))
+        QTest.mouseMove(handle, start + QPoint(120, 0), delay=20)
+        QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=start + QPoint(120, 0))
         for _ in range(4):
             self.app.processEvents()
-        self.assertGreater(panel.canvas.width(), before + 50)
-        self.assertGreater(panel.canvas.height(), before_height + 30)
+        self.assertLess(panel.canvas.width(), before - 50)
+        self.assertLessEqual(panel.canvas.height(), before_height)
         ratio = splitter.sizes()[0] / sum(splitter.sizes())
         self.window.resize(760, 850)
         for _ in range(4):
@@ -431,6 +533,28 @@ class PreprocessorGuiTests(unittest.TestCase):
             self.assertEqual(handle.x() + handle.rect().center().x(), splitter.rect().center().x())
             self.assertEqual(panel.columns._ratio, .5)
         self.assertIsNone(self.controller.job_id)
+
+    def test_initial_preview_and_resizes_never_overlap_legend_or_view_controls(self):
+        from PySide6.QtCore import QPoint
+        self.window.resize(1384, 1245)
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        panel = self.window.preprocessor_panel
+        for width in (1384, 2000, 850, 1384):
+            self.window.resize(width, 1245)
+            for _ in range(8):
+                self.app.processEvents()
+            body = panel.preview_group.content_widget
+            canvas_bottom = panel.canvas.mapTo(body, QPoint(0, panel.canvas.height())).y()
+            legend_top = panel.legend.mapTo(body, QPoint()).y()
+            self.assertGreaterEqual(legend_top, canvas_bottom)
+            for name, checkbox in panel.view_checkboxes.items():
+                row = checkbox.parentWidget()
+                top = row.mapTo(body, QPoint()).y()
+                self.assertGreaterEqual(top, canvas_bottom, name)
+                self.assertGreaterEqual(panel.reset_buttons[name].mapTo(body, QPoint()).y(), canvas_bottom, name)
+                self.assertLessEqual(top+row.height(), body.height(), name)
+                self.assertFalse(row.rect().translated(row.mapTo(body, QPoint())).intersects(
+                    panel.legend.rect().translated(panel.legend.mapTo(body, QPoint()))), name)
 
     def test_wall_count_defaults_range_and_solid_disables_wall_control(self):
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)

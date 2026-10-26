@@ -98,10 +98,12 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
 
 ### Automatischer Standfuß
 
-Die automatische Außenbreite folgt `0,21 mm je 1 mm Original-Objekthöhe` und ist auf
-25 bis 80 mm begrenzt. Die manuelle Breite darf 20 bis 80 mm betragen.
+Die automatische Außenbreite folgt `0,2625 mm je 1 mm Original-Objekthöhe` und ist auf
+31,25 bis 80 mm begrenzt. Damit ist die erste Fußschicht gegenüber der bisherigen
+Berechnung um 25 % breiter, soweit die Obergrenze es erlaubt. Die manuelle Breite
+darf 20 bis 80 mm betragen und wird unverändert verwendet.
 Die GUI zeigt und prüft diese unterschiedlichen Untergrenzen; ab rund
-381 mm Objekthöhe wird der automatische Wert auf 80 mm begrenzt.
+305 mm Objekthöhe wird der automatische Wert auf 80 mm begrenzt.
 
 Der äußere gerade Fußrand besteht aus genau einem tatsächlichen Layer.
 Es gibt keine manuelle Höhenangabe mehr.
@@ -119,8 +121,11 @@ Ansatz außen und senkrechtem Anschluss am Turmschaft. Seine normierte Höhe
 über dem Fuß beträgt `1 - √(1 - q^p)` für den radialen Fortschritt `q` vom
 Fußrand zum Schaft. Bei 100-%-Turmfüllung gilt `p = 3,2`: Der äußere Bereich
 bleibt länger flach. Ohne diese Option gilt `p = 2,15`, sodass der Anstieg
-früher beginnt. Die ersten 2 % der Übergangshöhe werden dabei linear an die
-Soll-Kurve angeschlossen, damit ihr Anfang eine endliche Neigung hat. Liegt
+früher beginnt. Bis zur dritten tatsächlichen Fußschicht wird die Kontur linear
+an die Soll-Kurve angeschlossen. Dadurch bleibt die zweite Schicht breiter;
+die Verbindung berücksichtigt variable Schichthöhen. Ohne Vollfüllung gilt
+zusätzlich ein Mindestanschluss von 2 % der Übergangshöhe. Das Höhenziel und
+der senkrechte Anschluss an den Schaft bleiben erhalten. Liegt
 die gesamte Kontur innerhalb des eingestellten Verjüngungswinkels, bleibt sie
 erhalten. Andernfalls werden nur zu steile Abschnitte durch eine Linie mit dem
 maximal erlaubten Winkel begrenzt. Ohne 100-%-Füllung und bei mehr als 30 mm

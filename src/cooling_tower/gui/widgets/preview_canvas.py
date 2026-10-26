@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QToolButton, QWidget
 
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene
+from cooling_tower.gui.widgets.preview_busy_overlay import PreviewBusyOverlay
+from cooling_tower.gui.widgets.preview_layer_context import LowerLayerFrames, layer_context_colour
 
 
 _LineBlock = tuple[QLineF, ...]
@@ -51,9 +54,14 @@ class _PreparedLineFrame:
     bed_blocks: _LineBlocks
     object_blocks: _LineBlocks
     tower_blocks: _LineBlocks
+    brim_blocks: _LineBlocks
     wait_travel_blocks: _LineBlocks
     tower_travel_blocks: _LineBlocks
     wait_position: QPointF | None
+    brim_back_blocks: _LineBlocks = ()
+    brim_front_blocks: _LineBlocks = ()
+    lower_layers: QPixmap | None = None
+    lower_brim_front_blocks: _LineBlocks = ()
 
     @property
     def travel_blocks(self) -> _LineBlocks:
@@ -65,12 +73,16 @@ class PreviewCanvas(QWidget):
 
     camera_changed = Signal(object)
     navigation_enabled_changed = Signal(bool)
+    layer_highlight_cleared = Signal()
     BED_COLOR = "#667080"
     OBJECT_COLOR = "#67b7c7"
     TOWER_COLOR = "#ff9e4f"
+    BRIM_COLOR = "#4979b5"
     WAIT_POSITION_COLOR = "#ffe48a"
     WAIT_TRAVEL_COLOR = "#bc98f4"
     TOWER_TRAVEL_COLOR = "#f080ad"
+    X_AXIS_COLOR = "#f07575"
+    Y_AXIS_COLOR = "#75d18c"
     MAXIMUM_OBJECT_DRAW_LINES = 32_000
     LINE_BLOCK_SIZE = 4_096
     # Ein Mausradschritt Abstand: gleicher Faktor wie die interaktive
@@ -92,13 +104,28 @@ class PreviewCanvas(QWidget):
         self._last_mouse: QPoint | None = None
         self._drag_button = Qt.MouseButton.NoButton
         self._navigation_enabled = False
+        self._navigation_default = False
+        self._rotation_drag_inverted = False
+        self._layer_context_enabled = False
+        self._layer_colours_highlight = True
+        self._layer_selection_persistent = False
+        self._cumulative_travel = False
+        self._all_travel_visible = False
+        self._all_travel_blocks = OrderedDict()
+        self._lower_layer_frames = self._lower_layer_key = None
+        self._lower_brim_front_source = ((), ())
+        self._lower_brim_front_range = (math.inf, -math.inf)
+        self._separated_yaw = None
         self._fit_whole_bed = False
         self._wait_position_visible = True
         self._wait_travel_visible = False
         self._tower_travel_visible = False
         self._layer_z = None
-        self._clearance_visible = False
+        self._travel_layer_z = None
+        self._fit_cache_key = self._fit_cache_value = None
+        self._layer_index = OrderedDict()
         self._prepared_frame: _PreparedLineFrame | None = None
+        self._normal_prepared: _PreparedLineFrame | None = None
         self._rendered_frame: QPixmap | None = None
         self._rendered_frame_key: tuple[object, ...] | None = None
         self._resize_render_timer = QTimer(self)
@@ -130,6 +157,10 @@ class PreviewCanvas(QWidget):
         self._navigation_overlay_parent: QWidget = self
         self._navigation_upward_offset = 0
         self.set_navigation_enabled(False)
+        self.busy_overlay = PreviewBusyOverlay(self)
+
+    def set_busy(self, active, *, percent=0, step=""):
+        self.busy_overlay.set_busy(active, percent=percent, step=step, title="G-Code und Vorschau werden erzeugt")
 
     def set_navigation_overlay_parent(
         self, parent: QWidget, *, upward_offset: int = 0
@@ -150,12 +181,19 @@ class PreviewCanvas(QWidget):
         *,
         preserve_view: bool = False,
     ) -> None:
-        # Every newly rendered preview starts protected against accidental
-        # scrolling, panning or rotation in the surrounding page.
-        self.set_navigation_enabled(False)
+        # Each host mode chooses whether newly generated previews start with
+        # navigation enabled; existing automatic previews retain their default.
+        self.set_navigation_enabled(self._navigation_default)
         self.scene = scene
+        self._lower_layer_frames = self._lower_layer_key = None
+        self._separated_yaw = None
+        self._fit_cache_key = None
+        self._layer_index.clear()
+        self._all_travel_blocks.clear()
         self._layer_z = None
+        self._travel_layer_z = None
         self._prepared_frame = None
+        self._normal_prepared = None
         self._invalidate_rendered_frame()
         if not preserve_view:
             self.fit_objects(emit=False)
@@ -171,9 +209,36 @@ class PreviewCanvas(QWidget):
     def navigation_enabled(self) -> bool:
         return self._navigation_enabled
 
+    def set_navigation_default(self, enabled):
+        self._navigation_default = bool(enabled)
+        self.set_navigation_enabled(enabled)
+
+    def set_rotation_drag_inverted(self, inverted):
+        """Choose the drag sense for a preview's camera orientation."""
+        self._rotation_drag_inverted = bool(inverted)
+
+    def set_layer_context_enabled(self, enabled):
+        self._layer_context_enabled = bool(enabled)
+        self._lower_layer_frames = self._lower_layer_key = None
+        self._prepared_frame = None
+        self._normal_prepared = None
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def set_layer_selection_persistent(self, enabled):
+        self._layer_selection_persistent = bool(enabled)
+
+    def clear_layer_highlight(self, *, force=False):
+        if self._layer_selection_persistent and not force:
+            return
+        if self._layer_context_enabled and self._layer_z is not None:
+            self.set_layer_height(None)
+            self.layer_highlight_cleared.emit()
+
     def set_navigation_enabled(self, enabled: bool) -> None:
         """Enable deliberate mouse navigation while keeping page scrolling safe."""
 
+        self.clear_layer_highlight()
         enabled = bool(enabled)
         changed = enabled != self._navigation_enabled
         self._navigation_enabled = enabled
@@ -368,7 +433,7 @@ class PreviewCanvas(QWidget):
         if scene is None:
             return 90.0
         object_bounds = self._xy_bounds(scene.object_segments)
-        tower_bounds = self._xy_bounds(scene.tower_segments)
+        tower_bounds = self._xy_bounds(chain(scene.tower_segments, scene.brim_segments))
         if object_bounds is None or tower_bounds is None:
             return 90.0
 
@@ -431,7 +496,7 @@ class PreviewCanvas(QWidget):
                 yaw_deg,
             )
             tower_minimum, tower_maximum = projected_interval(
-                scene.tower_segments,
+                chain(scene.tower_segments, scene.brim_segments),
                 yaw_deg,
             )
             gap = self._interval_gap(
@@ -471,7 +536,7 @@ class PreviewCanvas(QWidget):
             selected_yaw,
         )
         tower_interval = projected_interval(
-            scene.tower_segments,
+            chain(scene.tower_segments, scene.brim_segments),
             selected_yaw,
         )
         object_center = sum(object_interval) / 2.0
@@ -479,6 +544,48 @@ class PreviewCanvas(QWidget):
         if object_center > tower_center:
             selected_yaw += 180.0
         return (selected_yaw + 180.0) % 360.0 - 180.0
+
+    def separated_yaw(self):
+        """Maximize the horizontal gap using exact projected footprint extrema."""
+        if self._separated_yaw is not None:
+            return self._separated_yaw
+        scene = self.scene
+        if scene is None or not scene.object_segments or not scene.tower_segments:
+            return -38.0
+
+        def hull(segments):
+            points = sorted({(p.x, p.y) for s in segments for p in (s.start, s.end)})
+            if len(points) <= 2:
+                return points
+            def cross(a, b, c):
+                return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+            halves = []
+            for ordered in (points, reversed(points)):
+                half = []
+                for point in ordered:
+                    while len(half) >= 2 and cross(half[-2], half[-1], point) <= 0:
+                        half.pop()
+                    half.append(point)
+                halves.extend(half[:-1])
+            return halves
+
+        model = hull(scene.object_segments)
+        tower = hull(chain(scene.tower_segments, scene.brim_segments))
+        def interval(points, angle):
+            cosine, sine = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+            values = [cosine*x-sine*y for x, y in points]
+            return min(values), max(values)
+        def score(angle):
+            a, b = interval(model, angle), interval(tower, angle)
+            gap = max(b[0]-a[1], a[0]-b[1])
+            span = max(a[1], b[1])-min(a[0], b[0])
+            return gap/max(1e-9, span)
+        coarse = max(range(0, 180, 3), key=score)
+        best = max((coarse-3+i*.25 for i in range(25)), key=score)
+        if sum(interval(model, best)) > sum(interval(tower, best)):
+            best += 180
+        self._separated_yaw = (best+180) % 360-180
+        return self._separated_yaw
 
     def top_view(self) -> None:
         """Look vertically down onto the print bed and fitted objects."""
@@ -492,6 +599,7 @@ class PreviewCanvas(QWidget):
         self._emit_camera()
 
     def _emit_camera(self) -> None:
+        self.clear_layer_highlight()
         self._invalidate_rendered_frame()
         self.update()
         self.camera_changed.emit(self.camera_state())
@@ -558,6 +666,10 @@ class PreviewCanvas(QWidget):
         if scene is None:
             return 1.0, self.width() / 2.0, self.height() / 2.0
         context = context or self._projection_context()
+        cache_key = (id(scene), self.width(), self.height(), context, self._fit_whole_bed,
+            self.zoom, self.pan_x, self.pan_y)
+        if cache_key == self._fit_cache_key:
+            return self._fit_cache_value
         if self._fit_whole_bed:
             bed = scene.bed_bounds
             z_max = max(1.0, scene.tower_height_mm,
@@ -574,14 +686,16 @@ class PreviewCanvas(QWidget):
                 for segment in chain(
                     scene.object_segments,
                     scene.tower_segments,
+                    scene.brim_segments,
                     scene.travel_segments or chain(scene.wait_travel_segments, scene.tower_travel_segments),
                 )
                 for point in (segment.start, segment.end)
             )
             # Visibility changes must not move the objects or the camera. Keep
             # the independent wait marker in the same fixed projection bounds.
-            wait_position = self._wait_marker_position()
-            fit_points = chain(segment_points, (wait_position,) if wait_position is not None else ())
+            wait_points = scene.wait_points or ((Point3D(*scene.wait_position_xy_mm,
+                scene.tower_height_mm+scene.wait_height_offset_mm),) if scene.wait_position_xy_mm is not None else ())
+            fit_points = chain(segment_points, wait_points)
         bounds = self._projected_bounds(fit_points, context)
         if bounds is None:
             bed = scene.bed_bounds
@@ -605,7 +719,9 @@ class PreviewCanvas(QWidget):
         center_y = (minimum_y + maximum_y) / 2.0
         offset_x = self.width() / 2.0 - center_x * scale + self.pan_x
         offset_y = self.height() / 2.0 - center_y * scale + self.pan_y
-        return scale, offset_x, offset_y
+        self._fit_cache_key = cache_key
+        self._fit_cache_value = scale, offset_x, offset_y
+        return self._fit_cache_value
 
     def _project(
         self,
@@ -633,22 +749,81 @@ class PreviewCanvas(QWidget):
             self._wait_travel_visible,
             self._tower_travel_visible,
             self._layer_z,
-            self._clearance_visible,
+            self._cumulative_travel,
+            self._all_travel_visible,
+            self._travel_layer_z,
+            self._layer_colours_highlight,
         )
 
     def set_layer_height(self, z):
         """Filter one planar deposition layer without changing camera or fitting."""
         self._layer_z = z
+        self._layer_colours_highlight = True
         self._invalidate_rendered_frame()
         self.update()
 
-    def _layer_segments(self, segments, indices=()):
-        if self._layer_z is None:
+    def reset_layer_colours(self):
+        """Restore visible layer colours without moving the camera or cutoff."""
+        if self._layer_z is not None and self._layer_colours_highlight:
+            self._layer_colours_highlight = False
+            self._invalidate_rendered_frame()
+            self.update()
+
+    def set_travel_layer_height(self, z):
+        """Keep the chosen route layer even when the model has normal colours."""
+        self._travel_layer_z = z
+        self._invalidate_rendered_frame()
+        self.update()
+
+    def _layer_segments(self, segments, indices=(), *, height=None, through=False):
+        height = self._layer_z if height is None else height
+        if height is None:
             return segments
-        if indices and self.scene is not None and len(indices) == len(segments):
-            return tuple(segment for segment, index in zip(segments, indices)
-                if index < len(self.scene.layer_z_mm) and abs(self.scene.layer_z_mm[index] - self._layer_z) < .001)
-        return tuple(segment for segment in segments if abs(segment.end.z - self._layer_z) < .001)
+        key = id(segments), id(indices)
+        entry = self._layer_index.get(key)
+        if entry is None:
+            buckets = {}
+            use_indices = bool(indices) and self.scene is not None and len(indices) == len(segments)
+            for number, segment in enumerate(segments):
+                if use_indices:
+                    index = indices[number]
+                    if index >= len(self.scene.layer_z_mm):
+                        continue
+                    z = self.scene.layer_z_mm[index]
+                else:
+                    z = segment.end.z
+                buckets.setdefault(math.floor(z*1000), []).append((number, segment, z))
+            entry = segments, indices, buckets
+            self._layer_index[key] = entry
+            while len(self._layer_index) > 8:
+                self._layer_index.popitem(last=False)
+        self._layer_index.move_to_end(key)
+        bucket = math.floor(height*1000)
+        if through:
+            return tuple(segment for value in sorted(entry[2]) if value <= bucket+1
+                for _number, segment, z in entry[2][value] if z <= height+.001)
+        nearby = chain.from_iterable(entry[2].get(value, ()) for value in (bucket-1, bucket, bucket+1))
+        return tuple(segment for _number, segment, z in sorted(nearby) if abs(z-height) < .001)
+
+    def _travel_segments(self, segments, indices):
+        if self._all_travel_visible:
+            return segments
+        return self._layer_segments(segments, indices, height=self._travel_layer_z,
+            through=self._cumulative_travel and self._layer_z is None)
+
+    def _travel_line_blocks(self, segments, indices, parameters, context):
+        if not self._all_travel_visible:
+            return self._line_blocks(self._travel_segments(segments, indices), parameters, context,
+                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES)
+        # Scrubbing the selected layer does not change complete route geometry.
+        key = (id(self.scene), id(segments), parameters, context)
+        if key not in self._all_travel_blocks:
+            self._all_travel_blocks[key] = self._line_blocks(segments, parameters, context,
+                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES)
+        self._all_travel_blocks.move_to_end(key)
+        while len(self._all_travel_blocks) > 2:
+            self._all_travel_blocks.popitem(last=False)
+        return self._all_travel_blocks[key]
 
     def set_travel_visible(self, visible: bool) -> None:
         """Toggle both route groups while preserving the independent marker."""
@@ -671,38 +846,16 @@ class PreviewCanvas(QWidget):
         self._invalidate_rendered_frame()
         self.update()
 
-    def set_clearance_visible(self, visible: bool) -> None:
-        self._clearance_visible = bool(visible)
+    def set_cumulative_travel_visible(self, visible: bool) -> None:
+        self._cumulative_travel = bool(visible)
         self._invalidate_rendered_frame()
         self.update()
 
-    def _clearance_segments(self):
-        scene = self.scene
-        if scene is None or scene.printhead_radius_mm <= 0 or not scene.wipe_points:
-            return ()
-        index = len(scene.wipe_points) - 1
-        if self._layer_z is not None:
-            index = next((i for i, z in enumerate(scene.layer_z_mm) if abs(z-self._layer_z) < .001), -1)
-            if not 0 <= index < len(scene.wipe_points):
-                return ()
-        wipe = scene.wipe_points[index]
-        centers = [wipe]
-        if scene.wait_position_xy_mm is not None:
-            centers.append(Point3D(*scene.wait_position_xy_mm, wipe.z))
-        segments = []
-        for center in centers:
-            for radius, height in ((scene.printhead_lower_radius_mm, center.z),
-                    (scene.printhead_radius_mm, center.z + scene.printhead_clearance_height_mm)):
-                points = [Point3D(center.x + radius*math.cos(i*math.tau/64),
-                    center.y + radius*math.sin(i*math.tau/64), height) for i in range(64)]
-                segments.extend(LineSegment3D(point, points[(i+1) % 64]) for i, point in enumerate(points))
-            for angle in range(0, 64, 16):
-                direction = angle*math.tau/64
-                segments.append(LineSegment3D(Point3D(center.x + scene.printhead_lower_radius_mm*math.cos(direction),
-                    center.y + scene.printhead_lower_radius_mm*math.sin(direction), center.z),
-                    Point3D(center.x + scene.printhead_radius_mm*math.cos(direction),
-                        center.y + scene.printhead_radius_mm*math.sin(direction), center.z+scene.printhead_clearance_height_mm)))
-        return tuple(segments)
+    def set_all_travel_visible(self, visible: bool) -> None:
+        """Show enabled travel groups across every layer, independently of selection."""
+        self._all_travel_visible = bool(visible)
+        self._invalidate_rendered_frame()
+        self.update()
 
     def _wait_marker_position(self) -> Point3D | None:
         scene = self.scene
@@ -759,6 +912,9 @@ class PreviewCanvas(QWidget):
         prepared = self._prepared_frame
         if prepared is not None and prepared.key == key:
             return prepared
+        if self._layer_context_enabled and self._layer_z is None and self._normal_prepared is not None and self._normal_prepared.key == key:
+            self._prepared_frame = self._normal_prepared
+            return self._prepared_frame
 
         context = self._projection_context()
         parameters = self._fit_parameters(context)
@@ -781,6 +937,9 @@ class PreviewCanvas(QWidget):
         wait_position = self._wait_marker_position() if self._wait_position_visible else None
         # Older scenes may contain a single unclassified route list.
         tower_travel = scene.tower_travel_segments if (scene.wait_travel_segments or scene.tower_travel_segments) else scene.travel_segments
+        brim = self._layer_segments(scene.brim_segments)
+        brim_blocks = self._line_blocks(brim, parameters, context)
+        back_brim, front_brim = self._brim_depth_groups(brim, brim_blocks, context)
         prepared = _PreparedLineFrame(
             key=key,
             bed_blocks=self._line_blocks(bed_segments, parameters, context),
@@ -795,18 +954,105 @@ class PreviewCanvas(QWidget):
                 parameters,
                 context,
             ),
-            wait_travel_blocks=self._line_blocks(
-                self._layer_segments(scene.wait_travel_segments, scene.wait_travel_layer_indices) if self._wait_travel_visible else (), parameters, context,
-                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
-            ),
-            tower_travel_blocks=self._line_blocks(
-                self._layer_segments(tower_travel, scene.tower_travel_layer_indices) if self._tower_travel_visible else (), parameters, context,
-                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES,
-            ),
+            brim_blocks=brim_blocks,
+            brim_back_blocks=back_brim[1],
+            brim_front_blocks=front_brim[1],
+            wait_travel_blocks=(self._travel_line_blocks(scene.wait_travel_segments,
+                scene.wait_travel_layer_indices, parameters, context) if self._wait_travel_visible else ()),
+            tower_travel_blocks=(self._travel_line_blocks(tower_travel,
+                scene.tower_travel_layer_indices, parameters, context) if self._tower_travel_visible else ()),
             wait_position=self._project(wait_position, parameters, context) if wait_position is not None else None,
         )
+        if self._layer_context_enabled:
+            layer_key = (id(scene), self.width(), self.height(), self.devicePixelRatioF(), context, parameters,
+                self._cumulative_travel, self._all_travel_visible, self._wait_travel_visible,
+                self._tower_travel_visible, self._layer_colours_highlight)
+            if layer_key != self._lower_layer_key:
+                full = self._layer_z is None
+                sources = []
+                for segments, blocks, color, width, maximum in (
+                    (scene.object_segments, prepared.object_blocks, self.OBJECT_COLOR, 1.0, self.MAXIMUM_OBJECT_DRAW_LINES),
+                    (scene.tower_segments, prepared.tower_blocks, self.TOWER_COLOR, 1.5, None)):
+                    if not full:
+                        blocks = self._line_blocks(segments, parameters, context, maximum_lines=maximum)
+                    sources.append((segments, blocks, color, width, maximum))
+                if not full:
+                    back_brim, front_brim = self._brim_depth_groups(scene.brim_segments,
+                        self._line_blocks(scene.brim_segments, parameters, context), context)
+                # The first-layer brim lies outside the tower's footprint.
+                # Its far half belongs behind the tower, its near half in front.
+                # The near brim must be drawn after all tower layers, including
+                # layers added to an earlier raster checkpoint while scrubbing.
+                sources.insert(1, (back_brim[0], back_brim[1], self.BRIM_COLOR, 1.3, None))
+                self._lower_brim_front_source = front_brim
+                heights = tuple(segment.end.z for segment in front_brim[0])
+                self._lower_brim_front_range = (min(heights, default=math.inf), max(heights, default=-math.inf))
+                if self._cumulative_travel and not self._all_travel_visible:
+                    for segments, indices, visible, color, full_blocks in (
+                            (scene.wait_travel_segments, scene.wait_travel_layer_indices, self._wait_travel_visible,
+                                self.WAIT_TRAVEL_COLOR, prepared.wait_travel_blocks),
+                            (tower_travel, scene.tower_travel_layer_indices, self._tower_travel_visible,
+                                self.TOWER_TRAVEL_COLOR, prepared.tower_travel_blocks)):
+                        if visible:
+                            complete = full and (self._travel_layer_z is None or not scene.layer_z_mm
+                                or self._travel_layer_z >= scene.layer_z_mm[-1])
+                            blocks = full_blocks if complete else self._line_blocks(segments, parameters, context,
+                                maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES)
+                            # Route heights include Z-hops. Their owning print
+                            # layer, rather than endpoint Z, defines the cutoff.
+                            heights = tuple(scene.layer_z_mm[i] if 0 <= i < len(scene.layer_z_mm) else math.inf
+                                for i in indices) if len(indices) == len(segments) else ()
+                            sources.append((segments, blocks, color, 1.0, self.MAXIMUM_OBJECT_DRAW_LINES, heights))
+                self._lower_layer_frames = LowerLayerFrames(self.width(), self.height(), self.devicePixelRatioF(), sources,
+                    subdued=self._layer_colours_highlight)
+                self._lower_layer_key = layer_key
+            if self._layer_z is not None:
+                first, last = self._lower_brim_front_range
+                front_segments, front_blocks = self._lower_brim_front_source
+                cutoff = self._layer_z-.001
+                if first >= cutoff:
+                    front_blocks = ()
+                elif last >= cutoff:
+                    lines = tuple(line for segment, line in zip(front_segments, chain.from_iterable(front_blocks))
+                        if segment.end.z < cutoff)
+                    front_blocks = tuple(lines[i:i+self.LINE_BLOCK_SIZE] for i in range(0, len(lines), self.LINE_BLOCK_SIZE))
+                prepared = replace(prepared, lower_layers=self._lower_layer_frames.before(self._layer_z),
+                    lower_brim_front_blocks=front_blocks)
         self._prepared_frame = prepared
+        if self._layer_context_enabled and self._layer_z is None:
+            self._normal_prepared = prepared
         return prepared
+
+    def _brim_depth_groups(self, segments, blocks, context):
+        """Split at the camera's depth plane through the circular tower axis.
+
+        The generated foot contracts above the brim. A brim outside that foot
+        can overlap its silhouette only on the corresponding near/far side.
+        This keeps occlusion correct with four batched draws, without sorting
+        all tower strokes or issuing thousands of per-line painter calls.
+        """
+        cx, cy = self.scene.tower_center_xy_mm
+        groups = (([], []), ([], []))  # far, near: world segments and projected lines
+        for segment, line in zip(segments, chain.from_iterable(blocks)):
+            a, b = segment.start, segment.end
+            da = context.sine_yaw*(a.x-cx)+context.cosine_yaw*(a.y-cy)
+            db = context.sine_yaw*(b.x-cx)+context.cosine_yaw*(b.y-cy)
+            if da >= -1e-10 and db >= -1e-10:
+                parts = ((0, segment, line),)
+            elif da <= 1e-10 and db <= 1e-10:
+                parts = ((1, segment, line),)
+            else:
+                t = da/(da-db)
+                middle = Point3D(a.x+(b.x-a.x)*t, a.y+(b.y-a.y)*t, a.z+(b.z-a.z)*t)
+                projected = line.pointAt(t)
+                first = int(da < 0)
+                parts = ((first, LineSegment3D(a, middle), QLineF(line.p1(), projected)),
+                    (1-first, LineSegment3D(middle, b), QLineF(projected, line.p2())))
+            for index, world, projected in parts:
+                groups[index][0].append(world)
+                groups[index][1].append(projected)
+        return tuple((tuple(world), tuple(tuple(lines[i:i+self.LINE_BLOCK_SIZE])
+            for i in range(0, len(lines), self.LINE_BLOCK_SIZE))) for world, lines in groups)
 
     @staticmethod
     def _draw_line_blocks(painter: QPainter, blocks: _LineBlocks) -> None:
@@ -858,21 +1104,29 @@ class PreviewCanvas(QWidget):
         frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         frame_painter.setPen(QPen(QColor(self.BED_COLOR), 1.3))
         self._draw_line_blocks(frame_painter, prepared.bed_blocks)
+        if prepared.lower_layers is not None:
+            frame_painter.save()
+            frame_painter.setOpacity(.65 if self._layer_colours_highlight else 1.)
+            frame_painter.drawPixmap(0, 0, prepared.lower_layers)
+            frame_painter.restore()
 
         frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         frame_painter.setPen(QPen(QColor(self.OBJECT_COLOR), 1.0))
         self._draw_line_blocks(frame_painter, prepared.object_blocks)
 
         frame_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        frame_painter.setPen(QPen(QColor(self.BRIM_COLOR), 1.3))
+        self._draw_line_blocks(frame_painter, prepared.brim_back_blocks)
         frame_painter.setPen(QPen(QColor(self.TOWER_COLOR), 1.5))
         self._draw_line_blocks(frame_painter, prepared.tower_blocks)
-        if self._clearance_visible:
-            context = self._projection_context()
-            parameters = self._fit_parameters(context)
-            pen = QPen(QColor("#f2bd64" if scene.printhead_estimated else "#8baadc"), 1)
-            pen.setStyle(Qt.PenStyle.DashLine)
-            frame_painter.setPen(pen)
-            self._draw_line_blocks(frame_painter, self._line_blocks(self._clearance_segments(), parameters, context))
+        frame_painter.setPen(QPen(QColor(self.BRIM_COLOR), 1.3))
+        self._draw_line_blocks(frame_painter, prepared.brim_front_blocks)
+        if prepared.lower_brim_front_blocks:
+            frame_painter.save()
+            frame_painter.setOpacity(.65 if self._layer_colours_highlight else 1.)
+            frame_painter.setPen(QPen(layer_context_colour(self.BRIM_COLOR, subdued=self._layer_colours_highlight), 1.3))
+            self._draw_line_blocks(frame_painter, prepared.lower_brim_front_blocks)
+            frame_painter.restore()
         for blocks, color in ((prepared.wait_travel_blocks, self.WAIT_TRAVEL_COLOR),
                 (prepared.tower_travel_blocks, self.TOWER_TRAVEL_COLOR)):
             frame_painter.setPen(QPen(QColor(color), 1.0, Qt.PenStyle.DashLine))
@@ -887,8 +1141,8 @@ class PreviewCanvas(QWidget):
             parameters = self._fit_parameters(context)
             origin = self._project(Point3D(0, 0, 0), parameters, context)
             length = min(30.0, (scene.bed_bounds.maximum_x_mm-scene.bed_bounds.minimum_x_mm) / 8)
-            for label, color, endpoint in (("X+", "#f07575", Point3D(length, 0, 0)),
-                    ("Y+", "#75d18c", Point3D(0, length, 0))):
+            for label, color, endpoint in (("X+", self.X_AXIS_COLOR, Point3D(length, 0, 0)),
+                    ("Y+", self.Y_AXIS_COLOR, Point3D(0, length, 0))):
                 point = self._project(endpoint, parameters, context)
                 frame_painter.setPen(QPen(QColor(color), 1.5))
                 frame_painter.drawLine(QLineF(origin, point))
@@ -900,6 +1154,7 @@ class PreviewCanvas(QWidget):
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._normal_prepared = None
         self._position_navigation_toggle()
         self.navigation_toggle.raise_()
         self.navigation_status_label.raise_()
@@ -911,6 +1166,7 @@ class PreviewCanvas(QWidget):
         self._position_navigation_toggle()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self.clear_layer_highlight()
         if not self._navigation_enabled:
             event.ignore()
             return
@@ -929,10 +1185,11 @@ class PreviewCanvas(QWidget):
         delta = current - self._last_mouse
         self._last_mouse = current
         if self._drag_button == Qt.MouseButton.LeftButton:
-            self.yaw_deg -= delta.x() * 0.45
+            direction = -1 if self._rotation_drag_inverted else 1
+            self.yaw_deg -= delta.x() * 0.45 * direction
             self.pitch_deg = max(
                 -89.0,
-                min(89.0, self.pitch_deg + delta.y() * 0.35),
+                min(89.0, self.pitch_deg + delta.y() * 0.35 * direction),
             )
         else:
             self.pan_x += delta.x()
@@ -949,10 +1206,22 @@ class PreviewCanvas(QWidget):
         event.accept()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        self.clear_layer_highlight()
         if not self._navigation_enabled:
             event.ignore()
             return
-        factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
-        self.zoom = max(0.05, min(50.0, self.zoom * factor))
+        delta = event.angleDelta().y()
+        if not delta:
+            event.accept()
+            return
+        old_zoom = self.zoom
+        factor = 1.15 if delta > 0 else 1.0 / 1.15
+        self.zoom = max(0.05, min(50.0, old_zoom * factor))
+        ratio = self.zoom / old_zoom
+        anchor = event.position()
+        # Zoom about the current cursor position, including an existing pan.
+        # Use the clamped ratio so reaching a zoom limit cannot shift the view.
+        self.pan_x += (self.width() / 2.0 + self.pan_x - anchor.x()) * (ratio - 1.0)
+        self.pan_y += (self.height() / 2.0 + self.pan_y - anchor.y()) * (ratio - 1.0)
         self._emit_camera()
         event.accept()

@@ -43,6 +43,19 @@ def variable_gcode(heights):
 
 
 class PreprocessorRefinementTests(unittest.TestCase):
+    def test_bambu_special_commands_keep_real_tool_but_real_tool_changes_stay_rejected(self):
+        text = make_gcode().replace("M83", "M83\nT0\nT1000\nT1100\nT255", 1)
+        request = self.fixture.request(text, adapter="bambu_studio")
+        result = self.fixture.prepare(request)
+        self.assertTrue(result.scene.tower_segments)
+        source = request.prepared_source.analysis_gcode_path.read_bytes()
+        self.assertIn(b"T1000", source)
+        self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), source)
+        for adapter in ("bambu_studio", "prusa_slicer", "orca_slicer", "anycubic_slicer_next"):
+            bad = self.fixture.request(make_gcode().replace("M83", "M83\nT1", 1), adapter=adapter)
+            with self.subTest(adapter=adapter), self.assertRaisesRegex(ValueError, "Extruder T0"):
+                self.fixture.service.prepare(bad)
+
     def test_plain_flow_and_tool_qualified_bambu_commands_are_distinct(self):
         for adapter in ("prusa_slicer", "bambu_studio", "orca_slicer", "anycubic_slicer_next"):
             tracker = PreprocessorStateTracker(adapter)
@@ -170,13 +183,25 @@ class PreprocessorRefinementTests(unittest.TestCase):
         expected = tuple(2*h + (2.5*h-overlap*h) for h in heights)
         self.assertAlmostEqual(result.wall_thickness_range_mm[0], min(expected))
         self.assertAlmostEqual(result.wall_thickness_range_mm[1], max(expected))
-        last_by_layer = {}
-        for layer, _, event, _, factor in inserted_movements(result.gcode_path):
-            if event.category == "deposition" and event.endpoint_distance_xy_mm > 0:
-                last_by_layer[layer] = event.delta_e * factor * math.pi * .875**2 / event.endpoint_distance_xy_mm
+        # Nominal widths still determine the shaft and the outer wall at each
+        # actual height. Annular foot beads may adapt to close residual strips.
+        tracker, active, layer, outer, totals = MachineStateTracker(), False, -1, False, {}
+        for line in iter_parsed_gcode_lines(result.gcode_path):
+            if line.raw_text == BEGIN:
+                active, layer = True, layer+1
+            if active and line.raw_text.startswith(";TYPE:"):
+                outer = line.raw_text == ";TYPE:External perimeter"
+            event = tracker.process_line(line)
+            if active and outer and isinstance(event, Movement) and event.category == "deposition":
+                e, distance = totals.get(layer, (0., 0.))
+                totals[layer] = e+event.delta_e*tracker.state.extrusion_factor, distance+event.endpoint_distance_xy_mm
+            if line.raw_text == END:
+                active = False
         for i, h in enumerate(heights):
-            width = .5 if i == 0 else 2.5*h
-            self.assertAlmostEqual(last_by_layer[i], width*h - overlap*h*h, delta=1e-5)
+            width = .5 if i == 0 else 2*h
+            e, distance = totals[i]
+            actual = (e-result.effective_settings.prime_mm)*math.pi*.875**2/distance
+            self.assertAlmostEqual(actual, width*h-overlap*h*h, delta=1e-5)
 
     def test_index_preserves_chronology_arc_enclosures_and_cancellation(self):
         path = self.fixture.root / "index.gcode"

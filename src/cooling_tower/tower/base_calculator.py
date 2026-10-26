@@ -4,9 +4,15 @@ import math
 
 
 MINIMUM_BASE_WIDTH_MM = 20.0
-MINIMUM_AUTOMATIC_BASE_WIDTH_MM = 25.0
+AUTOMATIC_FOOT_WIDTH_FACTOR = 1.25
+MINIMUM_AUTOMATIC_BASE_WIDTH_MM = 25.0 * AUTOMATIC_FOOT_WIDTH_FACTOR
 MAXIMUM_BASE_WIDTH_MM = 80.0
-BASE_WIDTH_PER_OBJECT_HEIGHT = 0.21
+BASE_WIDTH_PER_OBJECT_HEIGHT = 0.21 * AUTOMATIC_FOOT_WIDTH_FACTOR
+
+
+def widen_automatic_foot_width(width: float, *, maximum: float) -> float:
+    """Broader first foot layer, with the existing absolute width limit."""
+    return min(maximum, AUTOMATIC_FOOT_WIDTH_FACTOR * width)
 
 
 def calculate_phase10_base_outer_radius(
@@ -17,8 +23,8 @@ def calculate_phase10_base_outer_radius(
 ) -> float:
     """Return the Phase-10 stand width as an outer radius.
 
-    In automatic mode the diameter follows 0.21 mm per millimetre of the
-    analyzed G-code object's full height, bounded to 25–80 mm. A manual
+    In automatic mode the diameter follows 0.2625 mm per millimetre of the
+    analyzed G-code object's full height, bounded to 31.25–80 mm. A manual
     diameter must remain within 20–80 mm. The base is deliberately allowed
     to be wider than the regular maximum outer radius.
     """

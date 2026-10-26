@@ -15,6 +15,51 @@ from test_preprocessor import make_gcode
 
 
 class PreprocessorUpgradeTests(unittest.TestCase):
+    def test_tower_brim_is_real_first_layer_gcode_and_separately_coloured_scene(self):
+        for adapter in SUPPORTED_SLICERS:
+            with self.subTest(adapter=adapter):
+                request = self.fixture.request(adapter=adapter)
+                request.profile.effective_values.update({"brim_type": "outer_only", "brim_width": 4,
+                    "brim_separation": .15, "filament_max_volumetric_speed": .8})
+                source_bytes = request.prepared_source.analysis_gcode_path.read_bytes()
+                result = self.fixture.prepare(request)
+                self.assertTrue(result.scene.brim_segments)
+                self.assertEqual(result.placement.brim_width_mm, .2)
+                self.assertEqual(result.placement.brim_gap_mm, .15)
+                center = result.scene.tower_center_xy_mm
+                maximum = max(math.hypot(p.x-center[0], p.y-center[1])
+                    for segment in result.scene.brim_segments for p in (segment.start, segment.end))
+                self.assertAlmostEqual(maximum + result.placement.brim_line_width_mm/2,
+                    result.base_width_mm/2+.35, places=5)
+                self.assertEqual({round(s.end.z, 5) for s in result.scene.brim_segments}, {.2})
+                self.assertGreaterEqual(result.placement.reserved_radius_mm, maximum)
+                tracker, in_brim, deposits = MachineStateTracker(), False, []
+                for parsed in iter_parsed_gcode_lines(result.gcode_path):
+                    if parsed.raw_text == "; SACRIFICIAL_TOWER_BRIM_BEGIN":
+                        in_brim = True
+                    elif parsed.raw_text == "; SACRIFICIAL_TOWER_BRIM_END":
+                        in_brim = False
+                    event = tracker.process_line(parsed)
+                    if in_brim and isinstance(event, Movement) and event.category == "deposition":
+                        deposits.append(event)
+                self.assertEqual(len(deposits), len(result.scene.brim_segments))
+                self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), source_bytes)
+                original = self.fixture.original_movements(request.prepared_source.analysis_gcode_path)
+                retained = self.fixture.original_movements(result.gcode_path)
+                self.assertEqual(len(original), len(retained))
+                for a, b in zip(original, retained):
+                    self.assertEqual((a[0], a[-1]), (b[0], b[-1]))
+                    for before, after in zip(a[1:-1], b[1:-1]):
+                        self.assertAlmostEqual(before, after, places=5)
+
+    def test_disabled_and_inner_only_model_brim_do_not_disable_tower_brim(self):
+        for brim_type in ("none", "no_brim", "inner_only", "inner_only_brim"):
+            request = self.fixture.request()
+            request.profile.effective_values.update({"brim_type": brim_type, "brim_width": 5})
+            result = self.fixture.prepare(request)
+            self.assertTrue(result.scene.brim_segments)
+            self.assertEqual(result.placement.brim_width_mm, .2)
+
     def setUp(self):
         self.fixture = fixture_module.PreprocessorTests()
         self.fixture.setUp()
@@ -22,7 +67,7 @@ class PreprocessorUpgradeTests(unittest.TestCase):
     def tearDown(self):
         self.fixture.tearDown()
 
-    def test_fallback_for_each_slicer_has_visible_warning_larger_hop_and_clear_routes(self):
+    def test_missing_head_geometry_does_not_inflate_layerwise_distances_or_z_hop(self):
         for adapter in SUPPORTED_SLICERS:
             with self.subTest(adapter=adapter):
                 request = self.fixture.request(adapter=adapter)
@@ -31,15 +76,18 @@ class PreprocessorUpgradeTests(unittest.TestCase):
                 result = self.fixture.prepare(request)
                 self.assertTrue(result.printhead.estimated)
                 self.assertIn(result.printhead.note, result.scene.notes)
-                self.assertGreaterEqual(result.effective_z_hop_mm, 2)
+                self.assertEqual(result.effective_z_hop_mm, request.settings.z_hop_mm)
                 self.assertGreaterEqual(math.dist(result.scene.wait_position_xy_mm, result.scene.tower_center_xy_mm),
-                    result.base_width_mm / 2 + result.printhead.radius_mm)
+                    result.base_width_mm / 2 + request.settings.wait_clearance_mm)
+                self.assertLess(math.dist(result.scene.wait_position_xy_mm, result.scene.tower_center_xy_mm), 50)
+                self.assertFalse(result.placement.head_clearance_required)
                 self.assertTrue(result.scene.wait_travel_segments)
                 self.assertTrue(result.scene.tower_travel_segments)
                 self.assertTrue(all(t >= result.effective_settings.target_layer_time_s - .01 for t in result.layer_times_s))
 
     def test_profile_values_and_flow_limit_are_used_in_actual_gcode_with_speed_override(self):
         request = self.fixture.request(make_gcode(layers=5).replace("M201 X", "M220 S200\nM221 S150\nM201 X"))
+        request = replace(request, settings=replace(request.settings, automatic_target_time=True))
         request.profile.effective_values.update({"slow_down_layer_time": [20], "outer_wall_speed": 100,
             "filament_max_volumetric_speed": [.7], "retraction_length": [1.1], "retraction_speed": 40,
             "travel_speed": 200, "machine_max_speed_x": [90], "machine_max_speed_y": [100]})
@@ -56,7 +104,7 @@ class PreprocessorUpgradeTests(unittest.TestCase):
                 physical_e = event.delta_e * tracker.state.extrusion_factor
                 seconds = event.endpoint_distance_xy_mm / (event.feedrate_mm_min / 60 * tracker.state.speed_factor_percent / 100)
                 peak_flow = max(peak_flow, physical_e * math.pi * (.875 ** 2) / seconds)
-            if parsed.raw_text.endswith("PREPROCESSOR_END"):
+            if parsed.raw_text.endswith("POSTPROCESSOR_END"):
                 inserted = False
         self.assertGreater(peak_flow, .5)
         self.assertLessEqual(peak_flow, .7001)
@@ -95,6 +143,36 @@ class PreprocessorUpgradeTests(unittest.TestCase):
         self.assertFalse(original_paths_clear(path, (50, 25), 3, {3: 30}, head_radius=25, head_height=40, lower_head_radius=25))
         self.assertTrue(original_paths_clear(path, (200, 25), 3, {3: 30}, head_radius=25, head_height=10))
         self.assertFalse(original_paths_clear(path, (200, 25), 3, {3: 30}, head_radius=25, head_height=10, gantry_height=10))
+
+    def test_layerwise_head_radius_does_not_impose_sequential_object_spacing(self):
+        path = self.fixture.root / "same-layer.gcode"
+        path.write_text("G90\nM83\nG1 X0 Y0 Z1 F600\nG1 X100 Y0 F1200\n")
+        self.assertTrue(original_paths_clear(path, (50, 25), 3, {3: 1},
+            head_radius=65, lower_head_radius=65, head_height=20, gantry_height=20))
+        path.write_text("G90\nM83\nG1 X0 Y0 Z1 F600\nG1 X100 Y0 Z.8 F1200\n")
+        self.assertFalse(original_paths_clear(path, (50, 25), 3, {3: 1},
+            head_radius=65, lower_head_radius=65, head_height=20, gantry_height=20))
+
+    def test_head_sizes_do_not_move_automatic_layerwise_positions_without_obstacles(self):
+        request = self.fixture.request()
+        first = self.fixture.prepare(request)
+        request.profile.effective_values["extruder_clearance_radius"] = 250
+        second = self.fixture.prepare(request)
+        self.assertEqual(first.scene.tower_center_xy_mm, second.scene.tower_center_xy_mm)
+        self.assertEqual(first.scene.wait_position_xy_mm, second.scene.wait_position_xy_mm)
+        self.assertEqual(first.effective_z_hop_mm, second.effective_z_hop_mm)
+
+    def test_parking_to_tower_avoids_model_even_when_manual_points_face_each_other(self):
+        from cooling_tower.preprocessor_travel import segments_cross
+        request = self.fixture.request()
+        request = replace(request, settings=replace(request.settings, automatic_position=False, automatic_wait_position=False,
+            center_x_mm=30, center_y_mm=105, wait_x_mm=180, wait_y_mm=105))
+        result = self.fixture.prepare(request)
+        polygon = ((100, 100), (110, 100), (110, 110), (100, 110))
+        for _outward, park_to_tower, _back in result.placement_solution[2]:
+            self.assertGreater(len(park_to_tower), 2)
+            for a, b in zip(park_to_tower, park_to_tower[1:]):
+                self.assertFalse(any(segments_cross(a, b, p, polygon[i-1]) for i, p in enumerate(polygon)))
 
     def test_rotated_seams_match_checked_paths_and_distribute_prime_while_moving(self):
         request = self.fixture.request(make_gcode(layers=12))

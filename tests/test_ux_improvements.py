@@ -296,10 +296,10 @@ class UxImprovementTests(unittest.TestCase):
         document = QTextDocument()
         document.setHtml(hint)
         text = document.toPlainText()
-        self.assertIn("0,21 mm Breite je 1 mm Original-Objekthöhe", text)
+        self.assertIn("0,2625 mm Breite je 1 mm Original-Objekthöhe", text)
         self.assertIn("Automatische Standfußbreite", text)
         self.assertIn("Manuelle Standfußbreite", text)
-        self.assertIn("mindestens 25 mm und höchstens 80 mm", text)
+        self.assertIn("mindestens 31,25 mm und höchstens 80 mm", text)
         self.assertIn("Grenzbereich: Manuell einstellbar zwischen 20 und 80mm.", text)
         self.assertIn(
             "Ein breiterer Standfuß verbessert Druckbett-Haftung und Turmstabilität",

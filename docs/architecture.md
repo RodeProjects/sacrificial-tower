@@ -383,7 +383,7 @@ steht als Badge direkt neben „3D-Vorschau“.
 
 Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt der Inhaltsbereich
 zunächst drei responsive Methodenkarten für „Automatisch“, „Manuell“ und
-„Präprozessor“. Die bestehenden Geometriemodi behalten ihren dezenten Lilaton
+„Postprozessor“. Die bestehenden Geometriemodi behalten ihren dezenten Lilaton
 beziehungsweise dunkleren Blauton. Die hellen Aktionsflächen
 innerhalb der Karten zeigen dauerhaft ihren bisherigen violetten bzw. blauen
 Hover-Verlauf. Beim Hover werden ausschließlich diese inneren Flächen zusätzlich
@@ -396,7 +396,7 @@ deren Analysequelle werden von allen drei Methoden gemeinsam genutzt.
 `preparation_workspace`. Der Header bleibt sichtbar. Solange „Datei und Slicer
 vorbereiten“ geöffnet ist, bleibt der gesamte Footer ausgeblendet. Nach Rückkehr
 zur Methodenwahl oder zu einem Geometriemodus erscheint er wieder.
-Der Präprozessor verwendet eigene Fortschritts-, Fehler- und Exportaktionen
+Der Postprozessor verwendet eigene Fortschritts-, Fehler- und Exportaktionen
 in einem ebenfalls geteilten Footer außerhalb des scrollbaren Arbeitsbereichs;
 der gemeinsame Geometrie-Footer bleibt dort verborgen.
 Nach der ersten abgeschlossenen Vorbereitung liegt dieselbe
@@ -505,9 +505,9 @@ manuelles Ergebnis überschreiben, auch wenn die automatische Ansicht verborgen 
 Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen aller Methoden;
 beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
 Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
-Der Präprozessor besitzt eine eigene Sitzung, einen verwalteten Vorschaujob und
+Der Postprozessor besitzt eine eigene Sitzung, einen verwalteten Vorschaujob und
 einen unmittelbaren G-Code-Export. Sein Datenfluss und seine Sicherheits-/
-Zeitinvarianten stehen unter [Präprozessor](preprocessor.md).
+Zeitinvarianten stehen unter [Postprozessor](preprocessor.md).
 Die Einstellungen und Fortschrittssteuerung der Automatik bleiben in ihrem
 bestehenden Arbeitsbereich. Manuelle Eingaben verwenden ausschließlich die
 manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.

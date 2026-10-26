@@ -126,7 +126,7 @@
       }
     },
     "preprocessor_acceptance": {
-      "_comment": "Vollständiger STL-/Präprozessor-/G-Code-Exporttest. Vorhandene kompatible Profile mit sicherer Endsequenz auswählen; kein Z-Homing nach dem Druck. Die Profile bleiben unverändert.",
+      "_comment": "Vollständiger STL-/Postprozessor-/G-Code-Exporttest. Vorhandene kompatible Profile mit sicherer Endsequenz auswählen; kein Z-Homing nach dem Druck. Die Profile bleiben unverändert.",
       "anycubic_slicer_next": {"profiles": {"machine": "", "process": "", "filament": ""}},
       "bambu_studio": {"profiles": {"machine": "", "process": "", "filament": ""}},
       "orca_slicer": {"profiles": {"machine": "", "process": "", "filament": ""}},

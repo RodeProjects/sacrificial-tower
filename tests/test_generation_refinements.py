@@ -138,19 +138,19 @@ class GenerationRefinementTests(unittest.TestCase):
             (True, 0.06, 0.28), (False, 0.13, 0.36),
         ):
             _, unreachable, segments = plan_diameter_transitions(
-                (0.0, 5.0, 10.0), (10.0, 2.0, 2.0),
+                (0.0, .01, .02, 5.0, 10.0), (10.0, 2.0, 2.0, 2.0, 2.0),
                 base_index=0, base_radius=10.0, minimum_radius=2.0,
                 expansion_slope=10.0, contraction_slope=100.0,
                 allow_steps=full, base_taper_height=5.0,
             )
             self.assertFalse(unreachable)
-            segment = segments[0]
-            self.assertAlmostEqual(segment.radius(half_height), 6.0, delta=0.3)
-            self.assertAlmostEqual(segment.radius(eighty_height), 3.6, delta=0.3)
-            self.assertAlmostEqual(segment.radius(0.0), 10.0)
-            self.assertAlmostEqual(segment.radius(1.0), 2.0)
-            curves.append(segment)
-        self.assertLess(curves[0].radius(0.13), curves[1].radius(0.13))
+            curve = segments[0].taper
+            self.assertAlmostEqual(curve.radius(5 * half_height), 6.0, delta=0.3)
+            self.assertAlmostEqual(curve.radius(5 * eighty_height), 3.6, delta=0.3)
+            self.assertAlmostEqual(curve.radius(0.0), 10.0)
+            self.assertAlmostEqual(curve.radius(5.0), 2.0)
+            curves.append(curve)
+        self.assertLess(curves[0].radius(5 * 0.13), curves[1].radius(5 * 0.13))
 
     def test_normal_foot_curve_respects_contraction_limit(self):
         _, unreachable, segments = plan_diameter_transitions(

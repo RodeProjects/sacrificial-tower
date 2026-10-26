@@ -48,6 +48,7 @@ dist/
 # Lokale Codex-/Agent-Metadaten
 .agents/
 .codex/
+.codex-tmp/
 
 # Betriebssystem- und temporäre Dateien
 .DS_Store

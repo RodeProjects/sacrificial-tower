@@ -89,7 +89,7 @@ class PreprocessorRealSlicerTests(unittest.TestCase):
                 self.assertTrue(result.first_layer)
                 self.assertTrue(result.collision_notes)
                 self.assertTrue(result.placement_statistics["indexed_moves"])
-                self.assertTrue(result.scene.wipe_points)
+                self.assertTrue(result.wipe_angles_rad)
                 self.assertLessEqual(result.first_layer.wall_speed_mm_s, result.effective_settings.print_speed_mm_s)
                 for point in result.scene.wait_points:
                     self.assertGreaterEqual(math.dist((point.x, point.y), result.scene.tower_center_xy_mm),
@@ -126,18 +126,14 @@ class PreprocessorRealSlicerTests(unittest.TestCase):
                 try:
                     fallback = service.prepare(fallback_request)
                 except ValueError as error:
-                    # Multiple model islands can leave no room for the very
-                    # broad unknown-geometry envelope. Explicitly rejecting
-                    # that case is the required result, never smaller margins.
-                    if scenario == "cube":
-                        raise
-                    self.assertTrue(str(error).startswith("Keine sichere Turm- und Warteposition"))
-                    self.assertIn("Druckkopf-Geometrie im Profil unvollständig", str(error))
-                    self.assertIn("Freihülle", str(error))
+                    # These fixtures print strictly by layer without low
+                    # end moves or fixed obstacles: missing head metadata
+                    # must not turn their ordinary layerwise travel unsafe.
+                    raise AssertionError("Schichtweise Platzierung benötigt keine Rundum-Freihülle") from error
                 else:
                     self.assertTrue(fallback.printhead.estimated)
                     self.assertGreaterEqual(fallback.printhead.radius_mm, 70)
-                    self.assertGreaterEqual(fallback.effective_z_hop_mm, 2)
+                    self.assertEqual(fallback.effective_z_hop_mm, result.effective_z_hop_mm)
                     self.assertIn(fallback.printhead.note, fallback.scene.notes)
                     self.assertGreaterEqual(min(fallback.layer_times_s), 59.9)
                     self.assertTrue(fallback.scene.wait_travel_segments)
