@@ -1,6 +1,7 @@
 from pathlib import Path
 from dataclasses import replace
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -84,7 +85,14 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         canvas = self.panel.canvas
         self.assertIsNotNone(canvas.scene.bed_geometry)
         canvas.fit_scene(emit=False)
-        canvas.grab()
+        deadline = time.monotonic() + 2.0
+        while True:
+            canvas.grab()
+            if canvas._rendered_frame_key == canvas._frame_key(canvas.scene):
+                break
+            self.assertLess(time.monotonic(), deadline,
+                "Vorschau-Frame wurde nach der Größenänderung nicht aktualisiert")
+            QTest.qWait(20)
         frame = canvas._rendered_frame
         image = frame.toImage()
         from cooling_tower.preview import Point3D
