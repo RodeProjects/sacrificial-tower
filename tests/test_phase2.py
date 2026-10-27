@@ -8,6 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from layer_analyzer import LayerRecord
 from main import write_layer_csv
 from tower_generator import (
@@ -15,9 +19,6 @@ from tower_generator import (
     TowerProfileConfig,
     build_tower_radius_profile,
 )
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_layer(
