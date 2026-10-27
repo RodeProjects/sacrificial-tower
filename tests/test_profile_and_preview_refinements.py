@@ -138,6 +138,8 @@ class RefinedPreviewServiceTests(unittest.TestCase):
             self.addCleanup(result.dispose)
             self.assertEqual(analyze.call_count, 1)
         self.assertEqual(len(scenes), 2)
+        self.assertTrue(all(not scene.seam_points for scene in scenes))
+        self.assertEqual(result.scene.seam_points, ())
         self.assertEqual(result.scene.object_segments, scenes[-1].object_segments)
         self.assertTrue(all(s.end.x == 6 for s in result.scene.object_segments))
         self.assertEqual(result.scene.source_segment_count, 4)
@@ -284,7 +286,7 @@ class RefinedEditorTests(unittest.TestCase):
         self.assertIn("Stil „Organisch“", SOURCE_SUPPORT_HINT_HTML)
         self.assertIn("übrigen Stützparameter des gewählten Prozessprofils bleiben unverändert erhalten", SOURCE_SUPPORT_HINT_HTML)
         self.assertIn("Stützen anpassen</b>", SOURCE_SUPPORT_HINT_HTML)
-        self.assertIn("Speichere das Profil und lies die Profile im Kühlturm-Generator erneut ein", SOURCE_SUPPORT_HINT_HTML)
+        self.assertIn("Speichere das Profil und lies die Profile in Sacrificial Tower erneut ein", SOURCE_SUPPORT_HINT_HTML)
         self.assertIn("angepassten Stützparameter werden dann für die Simulation übernommen", SOURCE_SUPPORT_HINT_HTML)
         self.assertIn("Originalprofile bleiben unverändert", SOURCE_SUPPORT_HINT_HTML)
 

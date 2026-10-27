@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from cooling_tower.gcode.parser import MachineStateTracker, Movement, iter_parsed_gcode_lines
 from cooling_tower.models import SourceArtifact, PreparedAnalysisSource, PreSliceProvenance, GCodeOrigin
 from cooling_tower.preprocessor import (
-    BEGIN, END, SUPPORTED_SLICERS, PreprocessorRequest, PreprocessorService, PreprocessorSettings,
+    BEGIN, END, FINAL_PARK, PARKED, SUPPORTED_SLICERS, PreprocessorRequest, PreprocessorService, PreprocessorSettings,
 )
 from cooling_tower.preview.toolpath import PreviewCancelled
 from cooling_tower.services.analysis_service import GCodeAnalysisService
@@ -92,7 +92,10 @@ class PreprocessorTests(unittest.TestCase):
                     event.end_x, event.end_y, event.end_z, event.end_e, event.feedrate_mm_min, event.category))
             if line.raw_text == END:
                 inserted = False
-        return result
+        # The printed model stays exact. The shutdown now runs at the wait
+        # position, so its non-printing movements are checked separately.
+        last_deposit = max(i for i, move in enumerate(result) if move[-1] == "deposition")
+        return result[:last_deposit+1]
 
     def test_four_slicers_preserve_original_bytes_and_machine_movements(self):
         for adapter in SUPPORTED_SLICERS:
@@ -150,6 +153,33 @@ class PreprocessorTests(unittest.TestCase):
         self.assertAlmostEqual(waiting, result.total_wait_s, delta=.006)
         self.assertIn("hollow tower", result.gcode_path.read_text())
 
+    def test_wait_blocks_never_command_extrusion_in_any_slicer_or_e_mode(self):
+        for adapter in SUPPORTED_SLICERS:
+            for relative_e in (False, True):
+                with self.subTest(adapter=adapter, relative_e=relative_e):
+                    result = self.prepare(self.request(make_gcode(relative=relative_e), adapter=adapter,
+                        settings=replace(PreprocessorSettings(), target_layer_time_s=30)))
+                    tracker = MachineStateTracker()
+                    waiting = synchronized = False
+                    positive_waits = 0
+                    for line in iter_parsed_gcode_lines(result.gcode_path):
+                        if line.raw_text == "; SACRIFICIAL_TOWER_WAIT":
+                            waiting, synchronized = True, False
+                        elif line.raw_text == "; SACRIFICIAL_TOWER_TRAVEL_TO_WIPE":
+                            waiting = False
+                        event = tracker.process_line(line)
+                        if not waiting:
+                            continue
+                        if isinstance(event, Movement):
+                            self.assertEqual(event.delta_e, 0)
+                        if line.command == "M400":
+                            synchronized = True
+                        if line.command == "G4":
+                            self.assertTrue(synchronized)
+                            self.assertTrue(tracker.state.extrusion_relative)
+                            positive_waits += line.parameters.get("P", 0) > 0
+                    self.assertGreater(positive_waits, 0)
+
     def test_park_dwell_then_lifted_transfer_to_wipe_and_lifted_return(self):
         request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=40))
         result = self.prepare(request)
@@ -171,6 +201,9 @@ class PreprocessorTests(unittest.TestCase):
                 layer_z = float(line.raw_text.split("=")[1])
             if "SACRIFICIAL_TOWER_TRAVEL_TO_WAIT" in line.raw_text:
                 phase = "to_wait"
+            elif line.raw_text == FINAL_PARK:
+                phase = "to_wait"
+                wait_travel = True
             elif "SACRIFICIAL_TOWER_WAIT" == line.raw_text.strip("; "):
                 self.assertEqual(phase, "to_wait")
                 phase = "wait"
@@ -181,9 +214,11 @@ class PreprocessorTests(unittest.TestCase):
                 self.assertEqual(phase, "wipe")
                 phase = "return"
             event = tracker.process_line(line)
-            if line.command == "G4" and line.parameters.get("P", 0) > 0:
-                self.assertEqual(phase, "wait")
-                waiting_points.append((tracker.state.x, tracker.state.y, tracker.state.z))
+            if line.raw_text == PARKED or line.command == "G4" and line.parameters.get("P", 0) > 0:
+                self.assertEqual(phase, "to_wait" if line.raw_text == PARKED else "wait")
+                point = tracker.state.x, tracker.state.y, tracker.state.z
+                if not waiting_points or waiting_points[-1] != point:
+                    waiting_points.append(point)
             if isinstance(event, Movement) and phase is not None:
                 if event.category == "deposition":
                     self.assertEqual(phase, "wipe")
@@ -217,7 +252,7 @@ class PreprocessorTests(unittest.TestCase):
             with self.subTest(position=(x, y)), self.assertRaisesRegex(ValueError, "Warteposition"):
                 self.prepare(self.request(settings=replace(settings, wait_x_mm=x, wait_y_mm=y)))
 
-    def test_profile_z_hop_is_minimum_and_original_hops_remain_unchanged(self):
+    def test_automatic_profile_z_hop_and_original_hops_remain_unchanged(self):
         text = make_gcode().replace(";LAYER_CHANGE", "G1 Z3 F600\nG1 Z0.2 F600\n;LAYER_CHANGE", 1)
         request = self.request(text, settings=replace(PreprocessorSettings(), target_layer_time_s=30))
         request.profile.effective_values["z_hop"] = ["2"]
@@ -246,7 +281,8 @@ class PreprocessorTests(unittest.TestCase):
         result = self.prepare(request)
         self.assertAlmostEqual(result.height_mm, layers[3].z_mm)
         self.assertEqual(result.scene.tower_layer_count, 4)
-        self.assertEqual(result.gcode_path.read_text().count(BEGIN), 4)
+        self.assertEqual(result.scene.tower_layer_count, 4)
+        self.assertEqual(result.gcode_path.read_text().count(FINAL_PARK), 1)
         self.assertGreater(result.wait_count, 0)
 
     def test_every_manual_dimension_and_position_are_used(self):
@@ -417,18 +453,104 @@ class PreprocessorTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "bereits einen bearbeiteten Turm"):
                     self.prepare(request)
 
-    def test_no_deficit_exports_unchanged_original(self):
+    def test_declared_scarf_ramps_preserve_original_movements_and_use_nominal_tower_layers(self):
+        from test_slicer_layer_times import scarf_gcode
+        for adapter, producer, setting in (
+            ("anycubic_slicer_next", "AnycubicSlicerNext 2.0.0.3", "seam_slope_type"),
+            ("orca_slicer", "OrcaSlicer 2.4.2", "seam_slope_type"),
+            ("prusa_slicer", "PrusaSlicer 2.9.6", "scarf_seam_placement"),
+            ("bambu_studio", "BambuStudio 2.4.0", "filament_scarf_seam_type"),
+        ):
+            with self.subTest(adapter=adapter):
+                text = scarf_gcode(producer).replace("G1 X200 F600", "")
+                text = text.replace("G1 Z0.2 F600", "G1 X100 Y100 Z0.2 F600", 1)
+                request = self.request(text, adapter=adapter,
+                    settings=replace(PreprocessorSettings(), target_layer_time_s=120))
+                request.profile.effective_values[setting] = "external"
+                original = request.prepared_source.analysis_gcode_path.read_bytes()
+                result = self.prepare(request)
+                self.assertEqual(result.layer_heights_mm, (.2, .4, .6))
+                self.assertTrue(result.scene.tower_segments)
+                self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), original)
+                for a, b in zip(self.original_movements(request.prepared_source.analysis_gcode_path),
+                        self.original_movements(result.gcode_path)):
+                    self.assertEqual((a[0], a[-1]), (b[0], b[-1]))
+                    for x, y in zip(a[1:-1], b[1:-1]):
+                        self.assertAlmostEqual(x, y, places=5)
+
+    def test_scarf_cannot_leave_its_layer_end_below_it_or_enable_spiral_mode(self):
+        from test_slicer_layer_times import scarf_gcode
+        base = scarf_gcode().replace("G1 Z0.2 F600", "G1 X100 Y100 Z0.2 F600", 1)
+        for text, enabled, spiral in (
+            (base, False, False),
+            (base.replace("Z0.32 E0.2", "Z0.52 E0.2"), True, False),
+            (base.replace("Z0.4 E0.6", "Z0.39 E0.6"), True, False),
+            (base, True, True),
+        ):
+            with self.subTest(enabled=enabled, spiral=spiral, text=text):
+                request = self.request(text, adapter="anycubic_slicer_next")
+                request.profile.effective_values.update(seam_slope_type="external" if enabled else "none", spiral_mode=int(spiral))
+                with self.assertRaises(ValueError):
+                    self.prepare(request)
+
+    def test_scarf_gap_and_start_height_matrix_preserves_source_movements(self):
+        from test_slicer_layer_times import scarf_gcode
+        for gap in (0, .05, .2):
+            for height in (0, .25, .5, 1):
+                with self.subTest(gap=gap, height=height):
+                    text = scarf_gcode(gap_mm=gap, start_fraction=height)
+                    text = text.replace("G1 Z0.2 F600", "G1 X100 Y100 Z0.2 F600", 1)
+                    request = self.request(text, adapter="anycubic_slicer_next",
+                        settings=replace(PreprocessorSettings(), target_layer_time_s=120))
+                    request.profile.effective_values["seam_slope_type"] = "external"
+                    result = self.prepare(request)
+                    self.assertEqual(result.layer_heights_mm, (.2, .4, .6))
+                    expected = self.original_movements(request.prepared_source.analysis_gcode_path)
+                    actual = self.original_movements(result.gcode_path)
+                    self.assertEqual(len(actual), len(expected))
+                    for a, b in zip(actual, expected):
+                        self.assertEqual((a[0], a[-1]), (b[0], b[-1]))
+                        for x, y in zip(a[1:-1], b[1:-1]):
+                            self.assertAlmostEqual(x, y, places=5)
+
+    def test_no_deficit_only_adds_final_parking_without_a_tower(self):
         request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=.1))
         result = self.prepare(request)
         self.assertEqual(result.height_mm, 0)
         self.assertEqual(result.wait_count, 0)
-        self.assertEqual(result.gcode_path.read_bytes(), request.prepared_source.analysis_gcode_path.read_bytes())
+        self.assertFalse(result.scene.tower_segments)
+        self.assertIn(FINAL_PARK, result.gcode_path.read_text())
+        self.assertEqual(self.original_movements(result.gcode_path),
+            self.original_movements(request.prepared_source.analysis_gcode_path))
+        self.assertIsNotNone(result.scene.wait_position_xy_mm)
 
     def test_ranges_reject_nonfinite_and_wrong_types(self):
         for changes in (dict(target_layer_time_s=float("nan")), dict(retract_mm=-1),
-                dict(automatic_base=1), dict(wall_count=2.5), dict(z_hop_mm=0)):
+                dict(automatic_base=1), dict(wall_count=2.5), dict(z_hop_mm=-.01), dict(automatic_z_hop=1)):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(PreprocessorSettings(), **changes)
+
+    def test_manual_zero_hop_omits_added_z_moves_and_preserves_source(self):
+        for hop in (0, .1):
+            with self.subTest(hop=hop):
+                request = self.request(settings=replace(PreprocessorSettings(), automatic_z_hop=False, z_hop_mm=hop))
+                request.profile.effective_values["z_hop"] = ["2"]
+                original = request.prepared_source.analysis_gcode_path.read_bytes()
+                result = self.prepare(request)
+                self.assertEqual(result.effective_z_hop_mm, hop)
+                self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), original)
+                self.assertTrue(result.scene.wait_points)
+                for index, point in zip(result.scene.wait_point_layer_indices, result.scene.wait_points):
+                    self.assertAlmostEqual(point.z, result.layer_heights_mm[index]+hop)
+                if hop == 0:
+                    inserted = False
+                    for line in result.gcode_path.read_text().splitlines():
+                        if line == BEGIN:
+                            inserted = True
+                        elif line == END:
+                            inserted = False
+                        elif inserted:
+                            self.assertFalse(line.startswith("G1 Z"), line)
 
     def test_motion_wipe_prime_and_travel_reduce_wait_to_remaining_deficit(self):
         request = self.request()
@@ -466,12 +588,11 @@ class PreprocessorTests(unittest.TestCase):
             self.assertTrue(100 <= segment.start.y <= 110)
         self.assertNotEqual(result.scene.tower_center_xy_mm, (0, 0))
 
-    def test_no_cooling_needed_does_not_require_space_for_a_tower(self):
+    def test_even_without_cooling_a_safe_final_wait_position_is_required(self):
         request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=.1))
         request.profile.effective_values["bed_shape"] = ["99x99", "111x99", "111x111", "99x111"]
-        result = self.prepare(request)
-        self.assertFalse(result.scene.tower_segments)
-        self.assertEqual((result.diameter_mm, result.base_width_mm), (0, 0))
+        with self.assertRaisesRegex(ValueError, "Warteposition"):
+            self.prepare(request)
 
     def test_atomic_export_preserves_previous_file_on_failure_and_allows_explicit_replace(self):
         result = self.prepare(self.request())
@@ -486,19 +607,98 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), result.gcode_path.read_bytes())
 
     def test_post_print_homing_is_blocked_before_position_search(self):
-        request = self.request(make_gcode() + "G28\n")
-        with self.assertRaisesRegex(ValueError, "Referenzfahrt"):
-            self.prepare(request)
+        for target in (.1, 10):
+            request = self.request(make_gcode() + "G28\n", settings=replace(PreprocessorSettings(), target_layer_time_s=target))
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "Referenzfahrt"):
+                self.prepare(request)
 
-    def test_terminal_xy_homing_gets_a_collision_clearance_lift(self):
+    def test_terminal_xy_homing_is_replaced_to_keep_the_head_at_the_wait_position(self):
         request = self.request(make_gcode() + "G28 X0 Y0\nM18\n")
         result = self.prepare(request)
-        self.assertIn("SACRIFICIAL_TOWER_SAFE_END_HOMING", result.gcode_path.read_text())
+        self.assertIn("SACRIFICIAL_TOWER_REPLACED_END_MOVE: G28 X0 Y0", result.gcode_path.read_text())
         tracker = MachineStateTracker()
         for line in iter_parsed_gcode_lines(result.gcode_path):
-            if line.command == "G28":
-                self.assertGreater(tracker.state.z, request.snapshot.layers[-1].z_mm)
+            self.assertNotEqual(line.command, "G28")
             tracker.process_line(line)
+        self.assertAlmostEqual(tracker.state.x, result.scene.wait_position_xy_mm[0], places=5)
+        self.assertAlmostEqual(tracker.state.y, result.scene.wait_position_xy_mm[1], places=5)
+
+    def test_final_parking_precedes_shutdown_and_replaces_later_model_visits(self):
+        for adapter in SUPPORTED_SLICERS:
+            for relative_e, relative_xyz, hop in ((False, False, .2), (True, True, .7), (True, False, 0)):
+                with self.subTest(adapter=adapter, relative_e=relative_e, relative_xyz=relative_xyz, hop=hop):
+                    text = make_gcode(relative=relative_e, relative_xyz=relative_xyz)
+                    text += "M400\nG90\nG1 X105 Y105 Z0.5 F600\nG2 X100 Y100 I-5 J0 F900\n"
+                    text += "G91\nG1 X5 Y5 Z-0.1 E-0.2 F1200\nG1 Z2 F600\nG90\nG28 X0 Y0\nM107\nM84\n"
+                    settings = replace(PreprocessorSettings(), automatic_z_hop=False, z_hop_mm=hop)
+                    request = self.request(text, settings=settings, adapter=adapter)
+                    original = request.prepared_source.analysis_gcode_path.read_bytes()
+                    result = self.prepare(request)
+                    tracker = MachineStateTracker()
+                    parked = False
+                    seen_xy = False
+                    previous_z = request.snapshot.layers[-1].z_mm
+                    code = result.gcode_path.read_text()
+                    self.assertEqual(code.count(FINAL_PARK), 1)
+                    for line in iter_parsed_gcode_lines(result.gcode_path):
+                        if line.raw_text == FINAL_PARK:
+                            parked = True
+                        if parked and line.command in {"M104", "M140", "M400", "M84"}:
+                            self.assertAlmostEqual(tracker.state.x, result.scene.wait_position_xy_mm[0], places=5)
+                            self.assertAlmostEqual(tracker.state.y, result.scene.wait_position_xy_mm[1], places=5)
+                        event = tracker.process_line(line)
+                        if parked and isinstance(event, Movement):
+                            self.assertLessEqual(event.delta_e, 0)
+                            self.assertGreaterEqual(event.end_z, previous_z-1e-6)
+                            previous_z = event.end_z
+                            if event.endpoint_distance_xy_mm > 1e-6:
+                                seen_xy = True
+                                self.assertAlmostEqual(event.start_z, request.snapshot.layers[-1].z_mm+hop, places=5)
+                                self.assertEqual(event.start_z, event.end_z)
+                        if line.raw_text == PARKED:
+                            self.assertTrue(seen_xy)
+                    self.assertAlmostEqual(tracker.state.x, result.scene.wait_position_xy_mm[0], places=5)
+                    self.assertAlmostEqual(tracker.state.y, result.scene.wait_position_xy_mm[1], places=5)
+                    self.assertIn("M104 S0", code)
+                    self.assertIn("M140 S0", code)
+                    self.assertIn("M107", code)
+                    self.assertIn("M84", code)
+                    self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), original)
+                    destination = self.root / "final-parking-export.gcode"
+                    self.service.export(result, destination, overwrite=destination.exists())
+                    self.assertEqual(destination.read_bytes(), result.gcode_path.read_bytes())
+
+    def test_final_parking_uses_last_model_height_when_tower_ends_earlier(self):
+        blocks = make_gcode().split(";LAYER_CHANGE")
+        for i in (4, 5, 6):
+            blocks[i] = blocks[i].replace(" F1200", " F20")
+        result = self.prepare(self.request(";LAYER_CHANGE".join(blocks)))
+        self.assertLess(result.height_mm, result.layer_heights_mm[-1])
+        final = result.scene.wait_points[-1]
+        self.assertAlmostEqual(final.z, result.layer_heights_mm[-1]+result.effective_z_hop_mm)
+        self.assertEqual(result.scene.wait_point_layer_indices[-1], len(result.layer_heights_mm)-1)
+
+    def test_final_hop_checks_model_height_even_without_a_full_height_tower(self):
+        for target in (.1, 10):
+            with self.subTest(target=target):
+                request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=target))
+                request.profile.effective_values["max_print_height"] = request.snapshot.layers[-1].z_mm
+                with self.assertRaisesRegex(ValueError, "Druckhöhe"):
+                    self.prepare(request)
+
+    def test_replaced_end_path_does_not_block_a_safe_final_route_around_exclusions(self):
+        from cooling_tower.preprocessor_safety import ExclusionRect
+        request = self.request(make_gcode()+"G1 X190 Y10 F6000\nM84\n",
+            settings=replace(PreprocessorSettings(), exclusions=(ExclusionRect(170, 20, 180, 30),)))
+        result = self.prepare(request)
+        self.assertIn("SACRIFICIAL_TOWER_REPLACED_END_MOVE: G1 X190 Y10", result.gcode_path.read_text())
+        self.assertTrue(result.scene.wait_travel_segments)
+
+    def test_original_end_lift_cannot_exceed_height_after_final_hop(self):
+        request = self.request(make_gcode()+"G91\nG1 Z1 F600\n")
+        request.profile.effective_values["max_print_height"] = 2.3
+        with self.assertRaisesRegex(ValueError, "Endsequenz.*Druckhöhe"):
+            self.prepare(request)
 
     def test_long_waits_are_split_and_intermediate_cancel_cleans_workspace(self):
         request = self.request(settings=replace(PreprocessorSettings(), target_layer_time_s=150))

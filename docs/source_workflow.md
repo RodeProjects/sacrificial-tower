@@ -29,6 +29,19 @@ abgebrochenen Hintergrundjobs eine inzwischen neu gewählte Quelle übernimmt.
 
 ## Quellen- und Analysekontext
 
+Die gemeinsame Analyse für Postprozessor, iterative und manuelle Erstellung
+unterstützt klassische Nähte und Scarf-Nähte. Bei Anycubic Slicer Next,
+OrcaSlicer und PrusaSlicer legen die zusammengehörigen Kommentare
+`LAYER_CHANGE`, `Z` und `HEIGHT` die nominellen Druckschichten fest; Bambu Studio
+verwendet `CHANGE_LAYER`, `Z_HEIGHT` und `LAYER_HEIGHT`. Material ablegende
+Z-Rampen innerhalb einer Scarf-Naht erzeugen dadurch keine zusätzlichen Layer.
+Die tatsächlichen Bewegungen bleiben in der Vorschau und Bewegungszeitberechnung
+erhalten. Anycubics native Zeitmarken müssen weiterhin zur Anzahl und Höhe der
+Druckschichten passen. Unbekannte Anfahrzeiten vor dem ersten Materialauftrag
+werden als Startbewegungen erfasst; unvollständig berechnete Bewegungen innerhalb
+gedruckter Schichten bleiben erkennbar. Dateien ohne passende Slicer-Markierungen
+verwenden weiterhin die geometrische Layererkennung.
+
 ### Profilauswahl bei erneuter Erkennung
 
 „Slicer und Profile erneut erkennen“ erhält die aktuelle Auswahl des Slicers
@@ -50,7 +63,7 @@ Die Vorbereitung erklärt oberhalb der Profilfelder, dass dieselben gespeicherte
 globalen Profileinstellungen wie beim tatsächlichen Objektdruck gewählt werden
 sollen. Vor „Slicer“ listet ein Hover-Info-Icon die aktiven Integrationen aus
 dem Modulregister auf. Der Fußhinweis erklärt die Einzelentwicklung und verweist
-bei Slicer-/Druckerproblemen auf „Support Diagnose …“ im Burgermenü.
+bei Slicer-/Druckerproblemen auf „Hilfe & Feedback“ im Burgermenü.
 Der Profilfilter besitzt einen eigenen Hover-Hinweis; „Filter deaktivieren
 / alle Profile anzeigen“ lädt die vollständige erkannte Auswahl. Nur das
 Kontrollkästchen reagiert auf Mausklick und Hover; der Funktionstext bleibt

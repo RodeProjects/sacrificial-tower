@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -107,6 +108,7 @@ struct Result {
     std::int64_t pre_layer_untimed_event_count = 0;
     std::vector<MetadataEvent> metadata_events;
     std::vector<PreviewSegment> preview_segments;
+    std::vector<std::array<double, 3>> seam_points;
     std::uint64_t preview_source_segment_count = 0;
     bool has_occupied_bounds = false;
     double minimum_x = 0.0;

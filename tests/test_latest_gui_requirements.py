@@ -380,10 +380,10 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertEqual(
             [action.text() for action in window.options_menu.actions()],
             [
-                "Allgemeine Einstellungen …",
-                "Support Diagnose …",
-                "Buy me a coffee …",
-                "Über Kühlturm-Generator",
+                "Allgemeine Einstellungen",
+                "Hilfe && Feedback",
+                "Buy me a coffee",
+                "Über Sacrificial Tower",
             ],
         )
         self.assertTrue(
@@ -432,7 +432,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
 
         dialog = window.about_dialog
         self.assertTrue(dialog.isVisible())
-        self.assertEqual(dialog.windowTitle(), "Über Kühlturm-Generator")
+        self.assertEqual(dialog.windowTitle(), "Über Sacrificial Tower")
         self.assertEqual(window.about_product_title.text(), APP_NAME)
         self.assertEqual(
             window.about_product_description.text(),
@@ -460,7 +460,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             label.text() for label in dialog.findChildren(QLabel)
         )
         for expected in (
-            "Kühlturm-Generator",
+            "Sacrificial Tower",
             "Wolfgang Florian Rode",
             "Entwicklungsversion",
             "Apache-2.0",

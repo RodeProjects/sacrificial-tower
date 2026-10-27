@@ -273,6 +273,7 @@ class PreviewService:
             object_segments=object_segments,
             source_segment_count=source_segment_count,
             occupied_bounds=occupied_bounds,
+            seam_points=source_analysis.seam_points,
         )
         self.source_data_cache.put(value)
         record_diagnostic(

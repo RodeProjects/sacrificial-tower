@@ -17,6 +17,7 @@ from cooling_tower.gcode.parser import (
 )
 from cooling_tower.models import OccupiedBounds
 from cooling_tower.preview.models import LineSegment3D, Point3D
+from cooling_tower.preview.seams import SeamCollector
 
 
 ProgressCallback = Callable[[int, str], None]
@@ -33,6 +34,7 @@ class DepositionToolpathAnalysis:
     object_segments: tuple[LineSegment3D, ...]
     source_segment_count: int
     occupied_bounds: OccupiedBounds | None
+    seam_points: tuple[Point3D, ...] = ()
 
 
 _SEGMENT_RECORD = struct.Struct("<7dq")
@@ -75,6 +77,7 @@ class DepositionToolpathCollector:
         self._prusa_startup = False
         self._prusa_layer_started = False
         self._native_analysis: DepositionToolpathAnalysis | None = None
+        self._seams = SeamCollector()
 
     def consume_native(self, product: object) -> None:
         """Accept the compact preview product emitted by the C++ core."""
@@ -102,6 +105,7 @@ class DepositionToolpathCollector:
                 getattr(product, "source_segment_count")
             ),
             occupied_bounds=occupied_bounds,
+            seam_points=tuple(Point3D(*point) for point in getattr(product, "seam_points", ())),
         )
         if not self._records.closed:
             self._records.close()
@@ -117,6 +121,7 @@ class DepositionToolpathCollector:
             # Startup purge is not part of the model's fit or placement bounds.
             if not self._prusa_layer_started:
                 return
+        self._seams.consume(parsed, event)
         if not isinstance(event, Movement) or event.category != "deposition":
             return
         self._minimum_x = min(self._minimum_x, event.start_x, event.end_x)
@@ -247,6 +252,7 @@ class DepositionToolpathCollector:
             object_segments=tuple(values),
             source_segment_count=self._total,
             occupied_bounds=occupied_bounds,
+            seam_points=self._seams.points,
         )
 
     def close(self) -> None:

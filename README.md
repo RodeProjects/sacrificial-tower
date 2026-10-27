@@ -1,4 +1,4 @@
-# Sacrificial Tower / Kühlturm-Generator - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit
+# Sacrificial Tower - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit
 
 Bei kurzen Layerzeiten kann beim FDM-/FFF-3D-Druck zu wenig Zeit zum Abkühlen bleiben.
 **Sacrificial Tower** erstellt dafür einen zusätzlichen **Kühlturm (bzw. ein

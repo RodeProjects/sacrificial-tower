@@ -11,6 +11,27 @@ from cooling_tower.calibration.gcode_integration import parse_bed_geometry
 
 
 class PreprocessorProfileTests(unittest.TestCase):
+    def test_z_hop_auto_uses_active_extruder_override_or_fallback(self):
+        for values, expected in (
+            ({}, .2), ({"z_hop": ["0"]}, .2), ({"retract_lift": ["0.35", "4"]}, .35),
+            ({"z_hop": ["0.456"]}, .46), ({"z_hop": ["0.455"]}, .46),
+            ({"z_hop": ["2"], "filament_z_hop": ["0.1"]}, .1),
+            ({"retract_lift": ["2"], "filament_retract_lift": ["0"]}, .2),
+            ({"retract_lift": ["0.5"], "filament_retract_lift": ["nil"]}, .5),
+            ({"z_hop": float("nan")}, .2), ({"z_hop": True}, .2),
+        ):
+            with self.subTest(values=values):
+                before = repr(values)
+                effective, _ = resolve_profile_settings(PreprocessorSettings(), values)
+                self.assertEqual(effective.z_hop_mm, expected)
+                self.assertEqual(repr(values), before)
+        with self.assertRaisesRegex(ValueError, "Profil-Z-Hop"):
+            resolve_profile_settings(PreprocessorSettings(), {"z_hop": 11})
+        for hop in (0, .1, .125):
+            manual = PreprocessorSettings(automatic_z_hop=False, z_hop_mm=hop)
+            effective, _ = resolve_profile_settings(manual, {"z_hop": 2})
+            self.assertEqual(effective, manual)
+
     def test_native_keys_percentages_and_filament_overrides(self):
         for values in (
             {"slow_down_layer_time": ["12"], "retraction_length": ["1.5"], "filament_retraction_length": ["0"],

@@ -8,6 +8,7 @@ from bisect import bisect_right
 from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass, replace
+from decimal import Decimal, ROUND_HALF_UP
 from functools import lru_cache
 import math
 import os
@@ -39,14 +40,17 @@ from cooling_tower.gcode.parser import (
 )
 from cooling_tower.preview.models import LineSegment3D, Point3D, PreviewScene
 from cooling_tower.preview.toolpath import PreviewCancelled, DepositionToolpathCollector
+from cooling_tower.preview.seams import read_seam_points
 from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.tower.diameter_transitions import full_infill_foot_taper
-from cooling_tower.preprocessor_profiles import DEFAULT_TOWER_BRIM_WIDTH_MM, resolve_profile_settings, flow_limited_speed, printhead_envelope, profile_flow_limit, first_layer_parameters
+from cooling_tower.preprocessor_profiles import DEFAULT_TOWER_BRIM_WIDTH_MM, resolve_profile_settings, flow_limited_speed, printhead_envelope, profile_flow_limit, first_layer_parameters, profile_flag
 from cooling_tower.tower.base_calculator import widen_automatic_foot_width
 from cooling_tower.preprocessor_safety import ExclusionRect, with_exclusions
 
 BEGIN = "; SACRIFICIAL_TOWER_POSTPROCESSOR_BEGIN"
 END = "; SACRIFICIAL_TOWER_POSTPROCESSOR_END"
+FINAL_PARK = "; SACRIFICIAL_TOWER_FINAL_PARK"
+PARKED = "; SACRIFICIAL_TOWER_PARKED"
 SUPPORTED_SLICERS = frozenset({"prusa_slicer", "orca_slicer", "bambu_studio", "anycubic_slicer_next"})
 
 
@@ -76,7 +80,8 @@ class PreprocessorSettings:
     print_speed_mm_s: float = 25.0
     retract_mm: float = 0.8
     retract_speed_mm_s: float = 30.0
-    z_hop_mm: float = 0.6
+    z_hop_mm: float = 0.2
+    automatic_z_hop: bool = True
     prime_mm: float = 0.3
     hollow_tower: bool = True
     wall_count: int = 2
@@ -100,7 +105,7 @@ class PreprocessorSettings:
             "clearance_mm": (5, 100), "edge_clearance_mm": (5, 100),
             "travel_speed_mm_s": (1, 300), "print_speed_mm_s": (1, 100),
             "retract_mm": (0, 10), "retract_speed_mm_s": (1, 100),
-            "z_hop_mm": (0.2, 10), "prime_mm": (0, 5),
+            "z_hop_mm": (0, 10), "prime_mm": (0, 5),
             "restart_extra_mm": (-10, 10),
         }
         for name, (low, high) in limits.items():
@@ -116,9 +121,11 @@ class PreprocessorSettings:
             raise ValueError("Ungültige eigene Sperrflächen.")
         for name in ("automatic_height", "automatic_diameter", "automatic_base", "automatic_position", "automatic_wait_position", "hollow_tower",
                 "automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed",
-                "automatic_tower_brim_width", "automatic_tower_brim_gap"):
+                "automatic_tower_brim_width", "automatic_tower_brim_gap", "automatic_z_hop"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} muss ein Wahrheitswert sein.")
+        object.__setattr__(self, "z_hop_mm", float(Decimal(str(self.z_hop_mm)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,8 +254,50 @@ def _fmt(value):
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
 
 
+def _final_park_block(state, settings, route):
+    """Leave the finished model immediately, before any slicer shutdown waits."""
+    lines = [BEGIN, FINAL_PARK, f"; layer_z = {_fmt(state.z)}", "G90"]
+    if settings.z_hop_mm:
+        lines.append(f"G1 Z{_fmt(state.z + settings.z_hop_mm)} F600")
+    for x, y in route[1:]:
+        lines.append(f"G1 X{_fmt(x)} Y{_fmt(y)} F{_fmt(settings.travel_speed_mm_s * 6000 / state.speed_factor_percent)}")
+    lines += [PARKED, "G91" if state.xyz_relative else "G90",
+        "M83" if state.extrusion_relative else "M82", f"G1 F{_fmt(state.feedrate_mm_min)}", END]
+    return lines
+
+
+def _parked_end_instruction(parsed, state, max_z):
+    """Keep shutdown and E commands, replacing the slicer's spatial parking."""
+    if parsed.command == "G28" and parsed.parameters and set(parsed.parameters).issubset({"X", "Y"}):
+        return "; SACRIFICIAL_TOWER_REPLACED_END_MOVE: " + parsed.raw_text
+    if parsed.command not in {"G0", "G1", "G2", "G3"} or not any(axis in parsed.parameters for axis in "XYZIJKR"):
+        return parsed.raw_text
+    axes = {key: value for key, value in parsed.parameters.items() if key in {"E", "F"}}
+    if "Z" in parsed.parameters:
+        z = parsed.parameters["Z"]
+        height = state.z + max(0.0, z) if state.xyz_relative else max(state.z, z)
+        if height > max_z + 1e-6:
+            raise ValueError("Die Endsequenz überschreitet mit dem abschließenden Sicherheitshub die maximale Druckhöhe.")
+        if height > state.z + 1e-6:
+            axes["Z"] = height-state.z if state.xyz_relative else height
+    return ("G1 " + " ".join(key + _fmt(value) for key, value in axes.items()) + "\n" if axes else "") + (
+        "; SACRIFICIAL_TOWER_REPLACED_END_MOVE: " + parsed.raw_text)
+
+
 def _scan(request, cancellation_event, *, collector=None, motion_collector=None):
     """Capture the exact modal state immediately after each layer's last deposit."""
+    def source_setting(name):
+        setting = request.snapshot.metadata.config_for(name)
+        return setting.value if setting is not None and setting.valid else request.profile.effective_values.get(name)
+
+    if any(profile_flag(source_setting(name)) is True for name in ("spiral_mode", "spiral_vase")):
+        raise ValueError("Spiraldruck wird vom Postprozessor nicht unterstützt.")
+    scarf = profile_flag(source_setting("has_scarf_joint_seam")) is True
+    for name in ("seam_slope_type", "scarf_seam_placement", "filament_scarf_seam_type"):
+        value = source_setting(name)
+        while isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        scarf |= value is not None and str(value).strip().lower() not in {"", "none", "nowhere", "off", "0", "nil"}
     starts = [layer.first_deposition_line for layer in request.snapshot.layers]
     tracker = PreprocessorStateTracker(request.profile.installation.adapter_id)
     endpoints = {}
@@ -256,7 +305,6 @@ def _scan(request, cancellation_event, *, collector=None, motion_collector=None)
     extrusion_declared = False
     pending_error = None
     conditional_depth = 0
-    xy_homing = []
     first, last = starts[0], request.snapshot.layers[-1].end_line
     for parsed in iter_parsed_gcode_lines(request.prepared_source.analysis_gcode_path):
         if parsed.number % 2000 == 0:
@@ -286,12 +334,6 @@ def _scan(request, cancellation_event, *, collector=None, motion_collector=None)
             collector.consume(parsed, event)
         if motion_collector is not None:
             motion_collector.consume(parsed, event)
-        if command == "G28" and parsed.parameters and set(parsed.parameters).issubset({"X", "Y"}):
-            xy_homing.append((parsed.number, copy(tracker.state)))
-        if xy_homing and isinstance(event, Movement) and event.endpoint_distance_xyz_mm > 1e-6:
-            if xy_homing[-1][0] > starts[-1]:
-                raise ValueError("Auf die abschließende XY-Referenzfahrt folgen weitere räumliche Bewegungen. "
-                    "Ein sicherer Endablauf kann dafür nicht rekonstruiert werden.")
         if not isinstance(event, Movement) or event.category != "deposition" or parsed.number < first:
             continue
         index = bisect_right(starts, parsed.number) - 1
@@ -308,18 +350,23 @@ def _scan(request, cancellation_event, *, collector=None, motion_collector=None)
                 or state.feedrate_mm_min is None or state.feedrate_mm_min <= 0
                 or state.speed_factor_percent <= 0 or state.extrusion_factor <= 0):
             raise ValueError("Der Pre-Slice benötigt Millimeter, M82/M83 und eindeutige Vorschübe.")
-        if abs(event.end_z - layer.z_mm) > 0.001 or abs(event.delta_z) > 0.001:
+        planar = abs(event.end_z - layer.z_mm) <= 0.001 and abs(event.delta_z) <= 0.001
+        in_layer_scarf = (scarf and min(event.start_z, event.end_z) >= layer.z_mm-layer.height_mm-0.001
+            and max(event.start_z, event.end_z) <= layer.z_mm+0.001)
+        if not planar and not in_layer_scarf:
             raise ValueError(f"Nichtplanare Extrusion in Zeile {parsed.number}: Z={event.start_z:.4f} → "
                 f"{event.end_z:.4f} mm, erwartete Schichthöhe Z={layer.z_mm:.4f} mm. "
                 "Spiral- und sequentieller Druck werden nicht unterstützt.")
         endpoints[index] = (parsed.number, copy(state))
     if len(endpoints) != len(starts) or len(tools) != 1 or tools != {0}:
         raise ValueError("Der Postprozessor benötigt planare Schichten mit einem einzelnen Extruder T0.")
-    return endpoints, {line: state for line, state in xy_homing if line > endpoints[len(starts)-1][0]}
+    if any(abs(state.z-request.snapshot.layers[index].z_mm) > .001 for index, (_, state) in endpoints.items()):
+        raise ValueError("Eine Scarf-Naht endet nicht auf ihrer nominellen Schichthöhe; eine sichere Turmfahrt ist nicht möglich.")
+    return endpoints
 
 
-def _layer_block(state: MachineState, layer, radius, center, settings, line_width, filament, wait_s, *, inner_line_width=None, first_layer=False, closed_bottom=False, shaft_radius=0.0, travel_routes, start_angle=0.0, maximum_flow=None, infill_speed=None, brim_width=0.0, brim_gap=0.0, brim_line_width=None, base_radius=0.0, comments=None, cancellation_event=None):
-    """Return to the exact original XYZ/E/modes/feed without changing original lines."""
+def _layer_block(state: MachineState, layer, radius, center, settings, line_width, filament, wait_s, *, inner_line_width=None, first_layer=False, closed_bottom=False, shaft_radius=0.0, travel_routes, start_angle=0.0, maximum_flow=None, infill_speed=None, brim_width=0.0, brim_gap=0.0, brim_line_width=None, base_radius=0.0, comments=None, cancellation_event=None, final_park_route=None):
+    """Restore the original print state, or park directly after the final tower."""
     x, y = center
     start = (x + radius * math.cos(start_angle), y + radius * math.sin(start_angle))
     hop = max(state.z, layer.z_mm) + settings.z_hop_mm
@@ -338,7 +385,8 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
     def move(**axes):
         emit("G1 " + " ".join(key + _fmt(value) for key, value in axes.items()))
     move(E=-retract, F=settings.retract_speed_mm_s / factor * 60)
-    move(Z=hop, F=600)
+    if hop != state.z:
+        move(Z=hop, F=600)
     to_wait, to_tower, to_model = travel_routes
     if to_wait:
         emit("; SACRIFICIAL_TOWER_TRAVEL_TO_WAIT")
@@ -364,7 +412,8 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
         # independent brim extends beyond the checked tower approach point.
         move(X=x + first_brim_radius * math.cos(start_angle),
             Y=y + first_brim_radius * math.sin(start_angle), F=travel_speed * 60)
-    move(Z=layer.z_mm, F=600)
+    if hop != layer.z_mm:
+        move(Z=layer.z_mm, F=600)
     move(E=restart, F=restore_speed * 60)
     emit("; sacrificial wipe / prime and " + ("hollow tower / annular foot" if settings.hollow_tower and not closed_bottom else "solid bottom / tower"))
     area = math.pi * (filament / 2) ** 2
@@ -409,15 +458,22 @@ def _layer_block(state: MachineState, layer, radius, center, settings, line_widt
             feed = math.floor(actual_speed / factor * 60 * 1e6) / 1e6
             move(X=point[0], Y=point[1], E=extrusion, F=feed)
             previous = point
+    if final_park_route is not None:
+        emit(FINAL_PARK)
     move(E=-retract, F=settings.retract_speed_mm_s / factor * 60)
-    move(Z=hop, F=600)
-    emit("; SACRIFICIAL_TOWER_TRAVEL_TO_MODEL")
+    if hop != layer.z_mm:
+        move(Z=hop, F=600)
+    emit("; SACRIFICIAL_TOWER_TRAVEL_TO_MODEL" if final_park_route is None else "; SACRIFICIAL_TOWER_TRAVEL_TO_WAIT")
     # Printing ends on an inner ring: join the exact checked route at its start.
     move(X=start[0], Y=start[1], F=travel_speed * 60)
-    for point in to_model[1:]:
+    for point in (to_model if final_park_route is None else final_park_route)[1:]:
         move(X=point[0], Y=point[1], F=travel_speed * 60)
-    move(Z=state.z, F=600)
-    move(E=restart, F=restore_speed * 60)
+    if final_park_route is None:
+        if hop != state.z:
+            move(Z=state.z, F=600)
+        move(E=restart, F=restore_speed * 60)
+    else:
+        emit(PARKED)
     emit("G92 E" + _fmt(state.e))
     emit("G91" if state.xyz_relative else "G90")
     emit("M83" if state.extrusion_relative else "M82")
@@ -457,11 +513,7 @@ class PreprocessorService:
         if any(b.z_mm <= a.z_mm for a, b in zip(layers, layers[1:])):
             raise ValueError("Sequentieller Druck oder absteigende Schichten werden nicht unterstützt.")
         values = request.profile.effective_values
-        profile_hop = max(_number(values, key, 0) for key in
-            ("retract_lift", "z_hop", "filament_retract_lift", "filament_z_hop"))
-        # A manual additional hop may increase, never weaken the profile lift.
         settings, profile_notes = resolve_profile_settings(request.settings, values)
-        settings = replace(settings, z_hop_mm=max(settings.z_hop_mm, profile_hop))
         waits = tuple(max(0.0, settings.target_layer_time_s - layer.total_time_s) for layer in layers)
         needed = [i for i, wait in enumerate(waits) if wait > 0.001]
         count = needed[-1] + 1 if needed else 0
@@ -486,7 +538,7 @@ class PreprocessorService:
         max_z = _number(values, "printable_height", _number(values, "max_print_height", 0))
         if max_z <= 0:
             raise ValueError("Im bestätigten Druckprofil fehlt die maximale Druckhöhe.")
-        if count and height + settings.z_hop_mm > max_z:
+        if layers[-1].z_mm + settings.z_hop_mm > max_z:
             raise ValueError("Der Sicherheitshub würde die maximale Druckhöhe überschreiten.")
         nozzle = _number(values, "nozzle_diameter", 0.4)
         filament = _number(values, "filament_diameter", 1.75)
@@ -536,17 +588,15 @@ class PreprocessorService:
         collector = DepositionToolpathCollector()
         motion_collector = OriginalMotionCollector()
         try:
-            endpoints, end_homing = _scan(replace(request, snapshot=source_snapshot), cancellation_event,
+            endpoints = _scan(replace(request, snapshot=source_snapshot), cancellation_event,
                 collector=collector, motion_collector=motion_collector)
             _check_cancel(cancellation_event)
             paths = collector.finish(expected_layer_count=len(layers))
         finally:
             collector.close()
+        final_line, final_state = endpoints[len(layers)-1]
         original_exclusions_clear(source, tuple(zone.polygon for zone in settings.exclusions), head.radius_mm,
-            cancellation_event=cancellation_event)
-        end_safe_z = max(layer.z_mm for layer in layers) + settings.z_hop_mm
-        if count and end_homing and end_safe_z > max_z:
-            raise ValueError("Die abschließende XY-Referenzfahrt benötigt einen Sicherheitshub oberhalb der Druckhöhe.")
+            cancellation_event=cancellation_event, end_line=final_line)
         notify(18, "Modellbahnen rekonstruieren …")
         if paths.occupied_bounds is None:
             raise ValueError("Die Modellfläche konnte nicht rekonstruiert werden.")
@@ -575,10 +625,10 @@ class PreprocessorService:
         insertions = {endpoints[i][0]: i for i in range(count)}
         insertion_heights = {line: layers[i].z_mm for line, i in insertions.items()}
         notify(24, "Originalfahrten und Sicherheitshöhen erfassen …")
-        motion_index = motion_collector.finish(insertion_heights, cancellation_event=cancellation_event)
+        motion_index = motion_collector.finish(insertion_heights, cancellation_event=cancellation_event, end_line=final_line)
         candidate_count = 0
         collision_notes = (head.limitations,
-            "Modellabstände: ungekürzte Ablagebahnen und höhenabhängiger Turmquerschnitt; Originalfahrten einschließlich Endsequenz geprüft.",
+            "Modellabstände: ungekürzte Ablagebahnen und höhenabhängiger Turmquerschnitt; Druckfahrten und Abschlussfahrt geprüft. Slicer-Endparkfahrten ersetzt.",
             "Eigene Sperrflächen gelten als unbekannt hohe Hindernisse; ihre Höhe wird nicht geschätzt.")
         def tower_error(point, settings):
             # The printable polygon is the manufacturer's nozzle travel area;
@@ -598,11 +648,11 @@ class PreprocessorService:
                 return "Warteposition: Der Abstand zur Druckbettkante oder einer gesperrten Profilfläche ist zu klein."
             if not motion_index.model_clear(park, wait_clearance+model_line_margin, lambda _z: wait_clearance+model_line_margin):
                 return "Warteposition: Der Abstand zum Modell ist zu klein."
-            if math.dist(park, point) < reserved+wait_clearance:
+            if count and math.dist(park, point) < reserved+wait_clearance:
                 return "Warteposition: Der Abstand zum vollständigen Turmfuß ist zu klein."
             return None
 
-        islands = model_travel_islands(motion_index, occupied, model_line_margin, cancellation_event=cancellation_event) if count else ()
+        islands = model_travel_islands(motion_index, occupied, model_line_margin, cancellation_event=cancellation_event)
         @lru_cache(maxsize=8192)
         def hard_route(a, b):
             return safe_travel_path(a, b, geometry, margin_mm=head.radius_mm+1)
@@ -638,6 +688,28 @@ class PreprocessorService:
             wait_position = None
             if not count:
                 center = ((occupied.minimum_x_mm + occupied.maximum_x_mm)/2, (occupied.minimum_y_mm + occupied.maximum_y_mm)/2)
+                parking = [(settings.wait_x_mm, settings.wait_y_mm)]
+                if settings.automatic_wait_position:
+                    bed = geometry.bounds
+                    inset = settings.edge_clearance_mm
+                    parking = [(bed.minimum_x_mm+inset+(bed.maximum_x_mm-bed.minimum_x_mm-2*inset)*x/32,
+                        bed.minimum_y_mm+inset+(bed.maximum_y_mm-bed.minimum_y_mm-2*inset)*y/32)
+                        for x in range(33) for y in range(33)]
+                    parking.sort(key=lambda park: math.dist((final_state.x, final_state.y), park))
+                for park in parking:
+                    _check_cancel(cancellation_event)
+                    rejection = park_error(park, center, settings)
+                    if rejection:
+                        continue
+                    try:
+                        route((final_state.x, final_state.y), park)
+                    except ValueError as error:
+                        rejection = "Abschlussfahrt: " + str(error)
+                        continue
+                    wait_position = park
+                    break
+                if wait_position is None:
+                    raise PreprocessorPlacementError(rejection)
             else:
                 candidates = [(settings.center_x_mm, settings.center_y_mm)]
                 if settings.automatic_position:
@@ -678,6 +750,7 @@ class PreprocessorService:
                             continue
                         try:
                             routes = []
+                            route((final_state.x, final_state.y), park)
                             for i in range(count):
                                 _check_cancel(cancellation_event)
                                 if i % max(1, count//40) == 0:
@@ -691,6 +764,8 @@ class PreprocessorService:
                                     routes.append(((), route(origin, wipe), route(wipe, origin)))
                                 else:
                                     routes.append((route(origin, park), route(park, wipe), route(wipe, origin)))
+                                if i == len(layers)-1:
+                                    route(wipe, park)
                         except ValueError as error:
                             rejection = "Fahrweg: " + str(error)
                             continue
@@ -723,7 +798,7 @@ class PreprocessorService:
                 anchor = (endpoints[0][1].x, endpoints[0][1].y)
                 if origins_connected is None:
                     try:
-                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)}:
+                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)} | {(final_state.x, final_state.y)}:
                             _check_cancel(event)
                             hard_route(anchor, origin)
                     except ValueError:
@@ -765,7 +840,7 @@ class PreprocessorService:
                 anchor = (endpoints[0][1].x, endpoints[0][1].y)
                 if origins_connected is None:
                     try:
-                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)}:
+                        for origin in {(endpoints[i][1].x, endpoints[i][1].y) for i in range(count)} | {(final_state.x, final_state.y)}:
                             _check_cancel(event)
                             hard_route(anchor, origin)
                     except ValueError:
@@ -796,6 +871,9 @@ class PreprocessorService:
         if placement_only:
             return placement
         center, wait_position, routes = placement.resolve(event=cancellation_event)
+        final_route = route((final_state.x, final_state.y), wait_position)
+        final_tower_route = (route((center[0]+radii[-1]*math.cos(wipe_angles[-1]),
+            center[1]+radii[-1]*math.sin(wipe_angles[-1])), wait_position) if count == len(layers) else None)
         protected_roots = (request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots)
         ensure_writable_output(self.temporary_root, protected_roots=protected_roots)
         self.temporary_root.mkdir(parents=True, exist_ok=True)
@@ -812,8 +890,8 @@ class PreprocessorService:
             def render(destination, actual_waits, *, collect=False, final_times=None):
                 with source.open("rb") as original, destination.open("wb") as target:
                     comments = FeatureComments.for_adapter(request.profile.installation.adapter_id)
-                    if count:
-                        target.write(b"; SACRIFICIAL_TOWER_POSTPROCESSED\n")
+                    end_tracker = None
+                    target.write(b"; SACRIFICIAL_TOWER_POSTPROCESSED\n")
                     clocks = [0.0]
                     for seconds in final_times or ():
                         clocks.append(clocks[-1] + seconds)
@@ -821,31 +899,28 @@ class PreprocessorService:
                         if number % 2000 == 0:
                             _check_cancel(cancellation_event)
                         text = raw.decode("utf-8-sig", errors="replace").strip()
+                        if end_tracker is not None:
+                            parsed = parse_gcode_line(GCodeLine(number, text))
+                            rewritten = _parked_end_instruction(parsed, end_tracker.state, max_z)
+                            if rewritten != parsed.raw_text:
+                                raw = (rewritten + "\n").encode("utf-8")
+                            for instruction in rewritten.splitlines():
+                                end_tracker.process_line(parse_gcode_line(GCodeLine(number, instruction)))
                         comments.observe(text)
-                        if count and number in end_homing:
-                            state = end_homing[number]
-                            lift = max(end_safe_z, state.z)
-                            if lift > max_z:
-                                raise ValueError("Die abschließende Referenzfahrt überschreitet die sichere Druckhöhe.")
-                            target.write(("; SACRIFICIAL_TOWER_SAFE_END_HOMING\nG90\n"
-                                f"G1 Z{_fmt(lift)} F600\n" + ("G91\n" if state.xyz_relative else "G90\n")
-                                + ("M83\n" if state.extrusion_relative else "M82\n")
-                                + (f"G1 F{_fmt(state.feedrate_mm_min)}\n" if state.feedrate_mm_min else "")).encode("ascii"))
                         # Anycubic's original cumulative clock becomes stale after
                         # processing. Replace only these advisory comments in the
-                        # output, retaining the calibrated original times plus the
-                        # measured motion delta. No printer instruction is changed.
-                        if count and final_times is not None and re.fullmatch(r"; estimated printing time \(normal mode\) = .* = [\d.eE+-]+", text):
+                        # output, retaining calibrated times plus the motion delta.
+                        if final_times is not None and re.fullmatch(r"; estimated printing time \(normal mode\) = .* = [\d.eE+-]+", text):
                             continue
                         target.write(raw)
-                        if count and final_times is not None and (text.startswith(LAYER_TIME_MARKER + " ") or text == END_TIME_MARKER):
+                        if final_times is not None and (text.startswith(LAYER_TIME_MARKER + " ") or text == END_TIME_MARKER):
                             index = len(final_times) if text == END_TIME_MARKER else int(text.split()[2])
                             if not 0 <= index < len(clocks):
                                 raise ValueError("Ungültige native Zeitmarkierung im Pre-Slice.")
                             target.write(f"; estimated printing time (normal mode) = Sacrificial Tower = {clocks[index]:.6f}\n".encode("ascii"))
-                        if number not in insertions:
+                        if number not in insertions and number != final_line:
                             continue
-                        i = insertions[number]
+                        i = insertions.get(number, len(layers)-1)
                         layer = layers[i]
                         state = endpoints[i][1]
                         layer_settings = replace(settings, print_speed_mm_s=min(settings.print_speed_mm_s,
@@ -856,13 +931,22 @@ class PreprocessorService:
                             start_angle=wipe_angles[i], maximum_flow=profile_flow_limit(values),
                             infill_speed=min(settings.print_speed_mm_s, first_layer.infill_speed_mm_s) if i == 0 else None,
                             brim_width=brim_width if i == 0 else 0, brim_gap=brim_gap, brim_line_width=brim_line_width, base_radius=base/2,
-                            comments=comments, cancellation_event=cancellation_event)
+                            comments=comments, cancellation_event=cancellation_event,
+                            final_park_route=final_tower_route if number == final_line else None) if number in insertions else []
+                        if number == final_line:
+                            if final_tower_route is None:
+                                park_block = _final_park_block(state, settings, final_route)
+                                block = block[:-1] + park_block[1:] if block else park_block
+                            end_tracker = PreprocessorStateTracker(request.profile.installation.adapter_id)
+                            end_tracker.state = copy(state)
+                            for instruction in block:
+                                end_tracker.process_line(parse_gcode_line(GCodeLine(number, instruction)))
                         if not raw.endswith(b"\n"):
                             target.write(b"\n")
                         target.write(("\n".join(block) + "\n").encode("utf-8"))
                         # Reconstruct the displayed tower from the emitted instructions.
                         tower_tracker.state = copy(state)
-                        wait_travel = bool(routes[i][0])
+                        wait_travel = bool(routes[i][0]) if i < count else True
                         brim_active = False
                         for instruction in block if collect else ():
                             if instruction == "; SACRIFICIAL_TOWER_BRIM_BEGIN":
@@ -871,9 +955,11 @@ class PreprocessorService:
                                 brim_active = False
                             if instruction.startswith("; sacrificial wipe / prime and "):
                                 wait_travel = False
+                            elif instruction == FINAL_PARK:
+                                wait_travel = True
                             parsed = parse_gcode_line(GCodeLine(1, instruction))
                             event = tower_tracker.process_line(parsed)
-                            if parsed.command == "G4" and parsed.parameters.get("P", 0) > 0:
+                            if instruction == PARKED or parsed.command == "G4" and parsed.parameters.get("P", 0) > 0:
                                 current = tower_tracker.state
                                 point = Point3D(current.x, current.y, current.z)
                                 if not wait_points or wait_points[-1] != point:
@@ -890,6 +976,8 @@ class PreprocessorService:
                             tower_collector[:] = tower_collector[::2]
                         if len(travel_collector) > 60_000:
                             travel_collector[:] = travel_collector[::2]
+                    if end_tracker is None or math.dist((end_tracker.state.x, end_tracker.state.y), wait_position) > 1e-5:
+                        raise ValueError("Die Endsequenz verlässt die geprüfte Warteposition. Export gesperrt.")
             notify(35, "Sichere Fahrwege und hohle Turmbahnen berechnen …")
             timing_path = Path(workspace.name) / "timing.gcode"
             render(timing_path, tuple(0.0 for _ in layers))
@@ -911,25 +999,26 @@ class PreprocessorService:
             notify(80, "Nur verbleibende Wartezeiten einfügen und Vorschau rekonstruieren …")
             render(output, waits, collect=True, final_times=final_times)
             timing_path.unlink()
-            if count:
-                notify(95, "Fertigen G-Code und alle Schichtzeiten abschließend prüfen …")
-                try:
-                    verified = GCodeAnalysisService().analyze(output,
-                        cancellation_callback=lambda: cancellation_event is not None and cancellation_event.is_set())
-                except AnalysisCancelled as error:
-                    raise PreviewCancelled() from error
-                if (verified.layer_count != len(layers)
-                        or any(layer.untimed_event_count or abs(layer.z_mm-original.z_mm) > .001
-                            or layer.total_time_s < settings.target_layer_time_s - .005
-                            or abs(layer.total_time_s-planned) > .02
-                            for layer, original, planned in zip(verified.layers, layers, final_times))):
-                    raise ValueError("Die abschließende G-Code-Prüfung bestätigt die geplanten Schichtzeiten nicht. Export gesperrt.")
+            notify(95, "Fertigen G-Code und alle Schichtzeiten abschließend prüfen …")
+            try:
+                verified = GCodeAnalysisService().analyze(output,
+                    cancellation_callback=lambda: cancellation_event is not None and cancellation_event.is_set())
+            except AnalysisCancelled as error:
+                raise PreviewCancelled() from error
+            if (verified.layer_count != len(layers)
+                    or any(layer.untimed_event_count or abs(layer.z_mm-original.z_mm) > .001
+                        or layer.total_time_s < settings.target_layer_time_s - .005
+                        or abs(layer.total_time_s-planned) > .02
+                        for layer, original, planned in zip(verified.layers, layers, final_times))):
+                raise ValueError("Die abschließende G-Code-Prüfung bestätigt die geplanten Schichtzeiten nicht. Export gesperrt.")
             _check_cancel(cancellation_event)
             request.validate_source()
             segments = tuple(tower_collector)
+            seams = read_seam_points(output, cancellation_event=cancellation_event)
             scene = PreviewScene(paths.object_segments, segments, geometry.bounds, center,
                 paths.source_segment_count, len(paths.object_segments) + len(segments) + len(brim_collector), height,
                 brim_segments=tuple(brim_collector),
+                seam_points=seams,
                 notes=("Rekonstruierte G-Code-Koordinaten; Schichtzeiten enthalten Fahrwege, Turmdruck, Primen und Restwartezeit.",) + profile_notes,
                 object_height_mm=layers[-1].z_mm, object_layer_count=len(layers), tower_layer_count=count, bed_geometry=geometry,
                 travel_segments=tuple(segment for segment, _wait, _i in travel_collector),

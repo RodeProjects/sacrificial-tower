@@ -222,7 +222,12 @@ class LayerDetector:
                 end_line=marker.start_line,
             )
 
-        if self._current_layer is None:
+        # A marker can precede the machine's first explicit feedrate. Keep
+        # unresolved non-printing startup motion outside the printed layers.
+        startup_untimed = (self._current_layer is not None and self._current_layer.index == 1
+            and self._current_layer.first_deposition_line == 0 and isinstance(event, Movement)
+            and event.category != "deposition" and event.duration_s is None)
+        if self._current_layer is None or startup_untimed:
             self._pre_layer_event_count += 1
             if event.duration_s is None:
                 self._pre_layer_untimed_event_count += 1

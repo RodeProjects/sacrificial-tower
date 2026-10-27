@@ -30,6 +30,11 @@ Bei einem Quellen-/Referenzwechsel wird dieser Ansichtscache geleert.
 Beim Prozessende gibt das Betriebssystem den gesamten Arbeitsspeicher frei.
 Diese Ansichten belegen keine zunehmend wachsende Dateisammlung auf der Platte.
 
+Nahtmarkierungen werden vor der Reduktion der Druckbahnen erfasst. Je
+Quellprodukt bleiben höchstens 20.000 Punkte im Arbeitsspeicher; bei größeren
+Mengen werden sie gleichmäßig ausgedünnt, sodass auch spätere Schichten erhalten
+bleiben. Die Markierungen gehören zum jeweiligen Geometrie-Cacheeintrag.
+
 `PreviewSourceDataCache` hält maximal zwei versionierte Quellgeometrieeinträge
 ebenfalls nur im Arbeitsspeicher. `PreviewCanvas` hält für die Linienprojektion
 höchstens acht Koordinatenfelder mit zusammen maximal 8 MiB Nutzdaten in einem

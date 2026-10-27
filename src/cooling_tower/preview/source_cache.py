@@ -6,10 +6,10 @@ from pathlib import Path
 from threading import RLock
 
 from cooling_tower.models import OccupiedBounds
-from cooling_tower.preview.models import LineSegment3D
+from cooling_tower.preview.models import LineSegment3D, Point3D
 
 
-PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 1
+PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 3
 DEFAULT_PREVIEW_SOURCE_CACHE_ENTRIES = 2
 
 
@@ -83,6 +83,7 @@ class PreviewSourceData:
     object_segments: tuple[LineSegment3D, ...]
     source_segment_count: int
     occupied_bounds: OccupiedBounds
+    seam_points: tuple[Point3D, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.object_segments, tuple):

@@ -94,13 +94,15 @@ def original_paths_clear(source, center, base_radius, insertion_lines, *, cancel
         head_height=head_height, lower_head_radius=lower_head_radius, gantry_height=gantry_height) is None
 
 
-def original_exclusions_clear(source, polygons, head_radius, *, cancellation_event=None):
+def original_exclusions_clear(source, polygons, head_radius, *, cancellation_event=None, end_line=None):
     """Custom unknown-height obstacles cannot be crossed by retained moves."""
     if not polygons:
         return
     tracker = MachineStateTracker()
     printed = False
     for parsed in iter_parsed_gcode_lines(source):
+        if end_line is not None and parsed.number > end_line:
+            break
         if parsed.number % 2000 == 0 and cancellation_event is not None and cancellation_event.is_set():
             raise PreviewCancelled()
         event = tracker.process_line(parsed)

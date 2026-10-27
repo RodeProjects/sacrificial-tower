@@ -34,6 +34,17 @@ def profile_number(values, keys, *, allow_zero=False, percent_base=None):
 
 def resolve_profile_settings(settings, values):
     changes, notes = {}, []
+    if settings.automatic_z_hop:
+        hop, _ = profile_number(values,
+            ("filament_z_hop", "filament_retract_lift", "z_hop", "retract_lift"), allow_zero=True)
+        if hop is None or hop == 0:
+            changes["z_hop_mm"] = 0.2
+            notes.append("Z-Hop: im Profil nicht aktiviert oder nicht verfügbar; Ersatzwert 0,2 mm verwendet.")
+        elif hop > 10:
+            raise ValueError("Der Profil-Z-Hop ist ungültig.")
+        else:
+            changes["z_hop_mm"] = hop
+            notes.append("Z-Hop: aus dem bestätigten Profil übernommen.")
     if settings.automatic_tower_brim_width:
         changes["tower_brim_width_mm"] = DEFAULT_TOWER_BRIM_WIDTH_MM
     if settings.automatic_tower_brim_gap:

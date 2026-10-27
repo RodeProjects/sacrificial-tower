@@ -82,6 +82,7 @@ class PreviewScene:
     wait_point_layer_indices: tuple[int, ...] = ()
     wait_height_offset_mm: float = 0.0
     brim_segments: tuple[LineSegment3D, ...] = ()
+    seam_points: tuple[Point3D, ...] = ()
 
 
 def _json_value(value: Any) -> Any:

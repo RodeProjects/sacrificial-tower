@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -15,6 +18,8 @@ from cooling_tower.gcode.slicer_layer_times import (
     read_slicer_layer_times,
 )
 from cooling_tower.services.analysis_service import GCodeAnalysisService
+import cooling_tower.gcode.native_analysis as native_analysis
+from cooling_tower.preview.toolpath import DepositionToolpathCollector
 from cooling_tower.slicers import (
     EffectiveProfile, ProfileKind, ProfileRecord, SliceRequest, SliceResult,
     SlicerDiscoverySource, SlicerInstallation,
@@ -45,6 +50,25 @@ G1 X200 F600
 """
 
 
+def scarf_gcode(producer="AnycubicSlicerNext 2.0.0.3", *, gap_mm=0, start_fraction=None) -> str:
+    text = native_gcode()
+    for index, z in enumerate((0.2, 0.4, 0.6)):
+        marker = f"; COOLING_TOWER_NATIVE_LAYER {index} Z {z}"
+        text = text.replace(marker, f";LAYER_CHANGE\n;Z:{z}\n;HEIGHT:0.2\n"+marker)
+    text = text.replace("G1 X20 Y10 E1 F600", "G1 Z0.3 F600\n"
+        "G1 X18 Y10 Z0.32 E0.2 F600\nG1 X19 Y10 Z0.36 E0.2\nG1 X20 Y10 Z0.4 E0.6")
+    if start_fraction is not None:
+        start = .2+.2*start_fraction
+        rise = (.4-start)/3
+        text = text.replace("G1 Z0.3 F600\nG1 X18 Y10 Z0.32 E0.2 F600\nG1 X19 Y10 Z0.36 E0.2\nG1 X20 Y10 Z0.4 E0.6",
+            f"G1 Z{start:.6f} F600\nG1 X18 Y10 Z{start+rise:.6f} E0.2 F600\n"
+            f"G1 X19 Y10 Z{start+2*rise:.6f} E0.2\nG1 X{20-gap_mm:.6f} Y10 Z0.4 E0.6")
+    text = text.replace("AnycubicSlicerNext 2.0.0.3", producer)
+    if producer.startswith("BambuStudio"):
+        text = text.replace(";LAYER_CHANGE", "; CHANGE_LAYER").replace(";Z:", "; Z_HEIGHT:").replace(";HEIGHT:", "; LAYER_HEIGHT:")
+    return text
+
+
 class SlicerLayerTimesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -59,6 +83,101 @@ class SlicerLayerTimesTests(unittest.TestCase):
         self.assertEqual(times.z_values_mm, (0.2, 0.4, 0.6))
         for actual, expected in zip(times.times_s, (100.0, 13.76, 14.02)):
             self.assertAlmostEqual(actual, expected)
+
+    def test_scarf_ramp_stays_in_its_nominal_layer_with_native_times_and_preview(self):
+        self.source.write_text(scarf_gcode(), encoding="utf-8")
+        original = self.source.read_bytes()
+        for force_python in ("1", "0"):
+            with self.subTest(force_python=force_python), patch.dict(os.environ,
+                    {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": force_python}):
+                collector = DepositionToolpathCollector()
+                self.addCleanup(collector.close)
+                snapshot = GCodeAnalysisService().analyze(self.source, event_observers=(collector.consume,))
+                self.assertEqual(tuple(layer.z_mm for layer in snapshot.layers), (.2, .4, .6))
+                self.assertEqual(tuple(layer.height_mm for layer in snapshot.layers), (.2, .2, .2))
+                self.assertEqual(snapshot.layers[1].deposition_count, 3)
+                self.assertAlmostEqual(snapshot.layers[1].total_time_s, 13.76)
+                self.assertTrue(collector.finish(expected_layer_count=3).object_segments)
+                raw = GCodeAnalysisService(preprocessor_mode=True).analyze(self.source)
+                self.assertEqual(tuple(layer.z_mm for layer in raw.layers), (.2, .4, .6))
+        self.assertEqual(self.source.read_bytes(), original)
+
+    def test_scarf_still_rejects_native_clock_height_mismatch(self):
+        self.source.write_text(scarf_gcode().replace("LAYER 1 Z 0.4", "LAYER 1 Z 0.5"), encoding="utf-8")
+        for force_python in ("1", "0"):
+            with self.subTest(force_python=force_python), patch.dict(os.environ,
+                    {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": force_python}):
+                with self.assertRaisesRegex(ValueError, "G-Code-Layern"):
+                    GCodeAnalysisService().analyze(self.source)
+
+    def test_old_native_engine_falls_back_for_anycubic_markers(self):
+        self.source.write_text(scarf_gcode(), encoding="utf-8")
+        legacy = SimpleNamespace(ENGINE_VERSION=3, analyze_file=lambda *args: self.fail("Old engine used"))
+        with patch.object(native_analysis, "_native_timing", legacy), patch.dict(os.environ,
+                {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": "0"}):
+            service = GCodeAnalysisService()
+            self.assertEqual(service.analyze(self.source).layer_count, 3)
+            self.assertFalse(service.native_full_analysis_info["used"])
+
+    def test_all_supported_slicers_group_scarf_and_planar_layers_identically(self):
+        ramp = "G1 Z0.3 F600\nG1 X18 Y10 Z0.32 E0.2 F600\nG1 X19 Y10 Z0.36 E0.2\nG1 X20 Y10 Z0.4 E0.6"
+        for producer in ("AnycubicSlicerNext 2.0.0.3", "OrcaSlicer 2.4.2", "PrusaSlicer 2.9.6", "BambuStudio 2.4.0"):
+            for scarf in (False, True):
+                text = scarf_gcode(producer)
+                if not scarf:
+                    text = text.replace(ramp, "G1 X20 Y10 E1 F600")
+                self.source.write_text(text, encoding="utf-8")
+                for force_python in ("1", "0"):
+                    with self.subTest(producer=producer, scarf=scarf, force_python=force_python), patch.dict(os.environ,
+                            {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": force_python}):
+                        service = GCodeAnalysisService()
+                        snapshot = service.analyze(self.source)
+                        if force_python == "0" and native_analysis.native_full_analysis_available():
+                            self.assertTrue(service.native_full_analysis_info["used"])
+                        self.assertEqual(tuple(layer.z_mm for layer in snapshot.layers), (.2, .4, .6))
+                        self.assertEqual(snapshot.layers[1].deposition_count, 3 if scarf else 1)
+
+    def test_unresolved_startup_feed_is_separate_but_printing_errors_stay_in_layer(self):
+        text = scarf_gcode().replace("G1 Z0.2 F600", "G1 Z0.2", 1)
+        for interior_error in (False, True):
+            self.source.write_text(text.replace("G1 X10 Y10 E1 F600", "G1 X10 Y10 E1 F600\nG1 X15 F0")
+                if interior_error else text, encoding="utf-8")
+            for force_python in ("1", "0"):
+                with self.subTest(interior_error=interior_error, force_python=force_python), patch.dict(os.environ,
+                        {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": force_python}):
+                    snapshot = GCodeAnalysisService().analyze(self.source)
+                    self.assertEqual(snapshot.analysis.pre_layer_untimed_event_count, 1)
+                    self.assertEqual(bool(snapshot.layers[0].untimed_event_count), interior_error)
+
+    def test_seam_gap_and_scarf_start_height_matrix_keeps_nominal_layers(self):
+        for producer in ("AnycubicSlicerNext 2.0.0.3", "OrcaSlicer 2.4.2", "PrusaSlicer 2.9.6", "BambuStudio 2.4.0"):
+            for gap in (0, .05, .2):
+                for height in (0, .25, .5, 1):
+                    self.source.write_text(scarf_gcode(producer, gap_mm=gap, start_fraction=height), encoding="utf-8")
+                    original = self.source.read_bytes()
+                    for force_python in ("0", "1"):
+                        with self.subTest(producer=producer, gap=gap, height=height, python=force_python), patch.dict(os.environ,
+                                {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": force_python}):
+                            snapshot = GCodeAnalysisService().analyze(self.source)
+                            self.assertEqual(tuple(layer.z_mm for layer in snapshot.layers), (.2, .4, .6))
+                            self.assertEqual(snapshot.layers[1].deposition_count, 3)
+                    self.assertEqual(self.source.read_bytes(), original)
+
+    @unittest.skipUnless(native_analysis.native_full_analysis_available(), "Native engine unavailable")
+    def test_scarf_native_python_layer_records_match(self):
+        self.source.write_text(scarf_gcode(), encoding="utf-8")
+        with patch.dict(os.environ, {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": "0"}):
+            service = GCodeAnalysisService()
+            actual = service.analyze(self.source)
+            self.assertTrue(service.native_full_analysis_info["used"])
+        with patch.dict(os.environ, {"COOLING_TOWER_FORCE_PYTHON_ANALYSIS": "1"}):
+            expected = GCodeAnalysisService().analyze(self.source)
+        for a, b in zip(actual.layers, expected.layers):
+            for name in a.__dataclass_fields__:
+                if isinstance(getattr(a, name), float):
+                    self.assertAlmostEqual(getattr(a, name), getattr(b, name), delta=1e-9, msg=name)
+                else:
+                    self.assertEqual(getattr(a, name), getattr(b, name), name)
 
     def test_native_totals_drive_snapshot_and_evaluator(self) -> None:
         snapshot = GCodeAnalysisService().analyze(self.source, force=True)

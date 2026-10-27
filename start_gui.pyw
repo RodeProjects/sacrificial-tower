@@ -42,7 +42,7 @@ def _fallback_startup_error(details: str) -> None:
             0,
             "Die Anwendung konnte nicht vollständig gestartet werden.\n\n"
             f"Fehlerdetails: {location}",
-            "Kühlturm-Generator – Startfehler",
+            "Sacrificial Tower – Startfehler",
             0x10,
         )
     except Exception:

@@ -73,10 +73,23 @@ und 64 verbleibenden Lookahead-Bewegungen. Die gemeinsame numerische Mechanik
 liegt in `window_planner.py`, die fachlichen Übergangsregeln bleiben in den
 eigenen Modulen. Bambu und die allgemeine Zeitplanung verwenden weiterhin ihre
 bisherigen Durchläufe. Die C++-Entsprechungen liegen in `orca_timing.hpp` und
-`prusa_timing.hpp`; die native Engine trägt Version 3. Eine ältere Erweiterung
+`prusa_timing.hpp`; die native Engine trägt Version 6. Eine ältere Erweiterung
 darf für diese geänderten Semantiken keinen vermeintlich erfolgreichen
-Prusa-Pfad liefern. Der Analyseparserstand 18 verwirft bisherige Analyse- und
+Prusa-Pfad liefern. Der Analyseparserstand 20 verwirft bisherige Analyse- und
 Vorslice-Caches; das Schema persistierter Benutzereinstellungen ändert sich nicht.
+
+Die expliziten Schichtmarkierungen der unterstützten Slicer halten auch
+Scarf-Z-Rampen in ihrer nominellen Druckschicht. Engine 4 verarbeitet beide
+Markierungsformate; ältere Erweiterungen fallen für das Prusa-/Orca-/Anycubic-
+Format auf Python zurück. Die gemeinsame Zuordnung und die Abgrenzung von
+Startbewegungen sind im [Quellenworkflow](source_workflow.md#quellen--und-analysekontext)
+beschrieben. Native Zeitmarken werden weiterhin unabhängig auf passende
+Schichtanzahl und Z-Höhen geprüft. Engine 5 ergänzt begrenzte Seams-Punktdaten
+im Vorschauprodukt. Ältere Erweiterungen fallen bei angefordertem
+Vorschauprodukt auf Python zurück, damit Nahtmarkierungen erhalten bleiben.
+Engine 6 beschränkt die Seams-Punkte auf explizit als äußere Wand bezeichnete
+Pfade. Die Vorschau verwendet dafür mindestens diese Engine; ältere
+Erweiterungen liefern die Punkte über den Python-Fallback.
 
 Die Schichtzeiten bleiben Bewegungsprognosen. Rundung, Firmwareabläufe und
 die native Diskretisierung von Kreisbögen können geringe Unterschiede zum

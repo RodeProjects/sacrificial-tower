@@ -8,6 +8,7 @@ from threading import Event
 from cooling_tower.gcode.parser import MachineStateTracker, iter_parsed_gcode_lines
 from cooling_tower.gcode.object_labels import FirmwareObjectLabels
 from cooling_tower.models import OccupiedBounds
+from cooling_tower.preview.seams import SeamCollector
 from cooling_tower.preview.toolpath import (
     DepositionToolpathAnalysis, DepositionToolpathCollector, PreviewCancelled,
 )
@@ -34,6 +35,7 @@ def analyze_joint_source_toolpaths(
     firmware_labels = FirmwareObjectLabels()
     prusa = False
     prusa_layer_started = False
+    seams = SeamCollector()
     try:
         for parsed in iter_parsed_gcode_lines(gcode_path):
             if parsed.number % 2_000 == 0 and cancellation_event is not None and cancellation_event.is_set():
@@ -55,6 +57,8 @@ def analyze_joint_source_toolpaths(
                 label = comment.partition(":")[2].strip()
                 active = int(label) if label.isdigit() else None
             event = tracker.process_line(parsed)
+            if not prusa or prusa_layer_started:
+                seams.consume(parsed, event)
             if active is not None and (not prusa or prusa_layer_started):
                 if active not in collectors:
                     collectors[active] = DepositionToolpathCollector(maximum_segments=maximum_segments)
@@ -85,6 +89,7 @@ def analyze_joint_source_toolpaths(
             segments, sum(data.source_segment_count for data in sources),
             OccupiedBounds(min(b.minimum_x_mm for b in bounds), max(b.maximum_x_mm for b in bounds),
                            min(b.minimum_y_mm for b in bounds), max(b.maximum_y_mm for b in bounds)),
+            seam_points=seams.points,
         )
     finally:
         for collector in collectors.values():

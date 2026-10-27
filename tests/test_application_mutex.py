@@ -143,14 +143,14 @@ class ApplicationMutexTests(unittest.TestCase):
             ),
         ):
             activated = activate_running_application_window(
-                "Kühlturm-Generator",
+                "Sacrificial Tower",
                 timeout_ms=0,
             )
 
         self.assertTrue(activated)
         self.assertEqual(
             user32.FindWindowW.calls,
-            [(None, "Kühlturm-Generator")],
+            [(None, "Sacrificial Tower")],
         )
         self.assertEqual(user32.ShowWindow.calls, [(321, SW_RESTORE)])
         self.assertEqual(user32.BringWindowToTop.calls, [(321,)])
@@ -171,7 +171,7 @@ class ApplicationMutexTests(unittest.TestCase):
             result = run_application(window_factory=window_factory)
 
         self.assertEqual(result, 0)
-        activate.assert_called_once_with("Kühlturm-Generator")
+        activate.assert_called_once_with("Sacrificial Tower")
         window_factory.assert_not_called()
 
 

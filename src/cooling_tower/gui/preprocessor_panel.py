@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal, Slot, QSignalBlocker
 
 from cooling_tower.gui.background_jobs import JobKind
 from cooling_tower.gui.generation_session import GenerationMode
+from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.worker_contract import CancelableWorker
 from cooling_tower.preprocessor import PreprocessorRequest, PreprocessorService
 from cooling_tower.preprocessor_export import export_preprocessor_run
@@ -232,7 +233,7 @@ class PreprocessorController(QObject):
         self.panel.show_automatic_values({
             **{name: getattr(result.effective_settings, name) for name in (
                 "target_layer_time_s", "print_speed_mm_s", "travel_speed_mm_s", "retract_mm", "retract_speed_mm_s",
-                "tower_brim_width_mm", "tower_brim_gap_mm")},
+                "tower_brim_width_mm", "tower_brim_gap_mm", "z_hop_mm")},
             "height_mm": result.height_mm, "diameter_mm": result.diameter_mm,
             "base_width_mm": result.base_width_mm,
             **dict(zip(("center_x_mm", "center_y_mm"), result.scene.tower_center_xy_mm if result.height_mm else (None, None))),
@@ -241,7 +242,7 @@ class PreprocessorController(QObject):
         self.panel.refresh_resets()
         self.panel.show_timing(result)
         self.panel.status.setText("G-Code und rekonstruierte Vorschau sind bereit." if result.height_mm else
-            "Alle Schichten erreichen die Zielzeit. Der G-Code bleibt unverändert; kein Turm erforderlich.")
+            "Alle Schichten erreichen die Zielzeit. Kein Turm erforderlich; Abschlussfahrt zur Warteposition ergänzt.")
         self.panel.refresh_layout()
         self.refresh()
 
@@ -298,11 +299,19 @@ class PreprocessorController(QObject):
         self.panel.export_button.setVisible(can_export)
         self.panel.progress.setVisible(busy)
         exported = self.session.last_export_report
-        self.panel.export_actions.setVisible(exported is not None)
         self.panel.open_output_button.setEnabled(not busy)
+        root = str(self.window.export_directory(GenerationMode.PREPROCESSOR))
         directory = self.session.latest_export_directory
+        if self.session.latest_export_root != root or (directory is not None and not directory.is_dir()):
+            resolution = resolve_latest_export_directory(root, preferred_directory=directory)
+            directory = self.session.latest_export_directory = resolution.directory
+            self.session.latest_export_root = root
+            self.session.latest_export_unavailable_reason = resolution.unavailable_reason or ""
+        self.panel.open_last_button.setVisible(directory is not None and directory.is_dir())
         self.panel.open_last_button.setEnabled(not busy and directory is not None and directory.is_dir())
+        self.panel.open_report_button.setVisible(exported is not None)
         self.panel.open_report_button.setEnabled(not busy and exported is not None)
+        self.panel.footer_widget._fit_timer.start(0)
 
     def export(self):
         result = self.session.preview

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ORIGINAL_OBJECT_BLUE = "#74b5cc"
+PREVIEW_SEAM_COLOR = "#e9e9e9"
+PREVIEW_SEAM_BORDER_COLOR = "#b8b8b8"
 ORIGINAL_OBJECT_TOPOLOGY_DARKENING = (110, 120)
 
 

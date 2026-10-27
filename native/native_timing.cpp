@@ -24,7 +24,7 @@ namespace {
 constexpr double MOVEMENT_EPSILON = 1e-9;
 constexpr double ARC_EPSILON = 1e-7;
 constexpr std::size_t ROW_WIDTH = 33;
-constexpr std::uint64_t ENGINE_VERSION = 3;
+constexpr std::uint64_t ENGINE_VERSION = 6;
 constexpr std::size_t DEFAULT_CACHE_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 enum RowIndex : std::size_t {
@@ -1416,6 +1416,17 @@ PyObject* native_preview_to_tuple(
     return result;
 }
 
+PyObject* native_seams_to_tuple(const std::vector<std::array<double, 3>>& points) {
+    PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(points.size()));
+    if (result == nullptr) return nullptr;
+    for (std::size_t i=0;i<points.size();++i) {
+        PyObject* row=Py_BuildValue("(ddd)",points[i][0],points[i][1],points[i][2]);
+        if (row==nullptr) { Py_DECREF(result); return nullptr; }
+        PyTuple_SET_ITEM(result,static_cast<Py_ssize_t>(i),row);
+    }
+    return result;
+}
+
 PyObject* native_infill_to_dict(
     const cooling_tower::native_analysis::InfillEvidence& infill
 ) {
@@ -1538,17 +1549,19 @@ PyObject* native_result_to_dict(
         : Py_NewRef(Py_None);
     PyObject* metadata = native_metadata_to_tuple(source.metadata_events);
     PyObject* preview = native_preview_to_tuple(source.preview_segments);
+    PyObject* seams = native_seams_to_tuple(source.seam_points);
     PyObject* infill = native_infill_to_dict(source.infill);
     PyObject* diagnostics = native_diagnostics_to_dict(source.diagnostics);
     if (
         bounds == nullptr || metadata == nullptr || preview == nullptr
-        || infill == nullptr || diagnostics == nullptr
+        || infill == nullptr || diagnostics == nullptr || seams == nullptr
     ) {
         Py_DECREF(result);
         Py_DECREF(layers);
         Py_XDECREF(bounds);
         Py_XDECREF(metadata);
         Py_XDECREF(preview);
+        Py_XDECREF(seams);
         Py_XDECREF(infill);
         Py_XDECREF(diagnostics);
         return nullptr;
@@ -1598,6 +1611,7 @@ PyObject* native_result_to_dict(
         )
         && PyDict_SetItemString(result, "metadata_events", metadata) == 0
         && PyDict_SetItemString(result, "preview_segments", preview) == 0
+        && PyDict_SetItemString(result, "seam_points", seams) == 0
         && dict_set_owned(
             result,
             "preview_source_segment_count",
@@ -1610,6 +1624,7 @@ PyObject* native_result_to_dict(
     Py_DECREF(bounds);
     Py_DECREF(metadata);
     Py_DECREF(preview);
+    Py_DECREF(seams);
     Py_DECREF(infill);
     Py_DECREF(diagnostics);
     if (!ok) {

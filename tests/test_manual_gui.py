@@ -1637,9 +1637,11 @@ class ManualGuiTests(unittest.TestCase):
         info.resize(needed*2+89,300);info.show();self.app.processEvents()
         info.heightForWidth(info.width())
         self.assertEqual(info.legend_columns,2)
+        self.assertEqual(len(info.legend_rows),8)
         for i,row in enumerate(info.legend_rows):
             index=info.legend_grid.indexOf(row)
-            self.assertEqual(info.legend_grid.getItemPosition(index)[:2],(i%4,i//4))
+            expected = (i%4,i//4)
+            self.assertEqual(info.legend_grid.getItemPosition(index)[:2],expected)
         info.resize(max(100,needed*2-60),300);self.app.processEvents()
         info.heightForWidth(info.width())
         self.assertEqual(info.legend_columns,1)
@@ -2462,6 +2464,21 @@ class ManualGuiTests(unittest.TestCase):
         self.assertEqual(canvas._spatial_key(),key)
         canvas.set_rotation(37);canvas.grab()
         self.assertNotEqual(canvas._spatial_key(),key)
+
+    def test_seam_data_does_not_change_manual_preview_or_legend(self):
+        from cooling_tower.preview import Point3D
+        canvas = self.panel.canvas
+        clean = replace(self.reference, source_data=replace(self.reference.source_data, seam_points=()))
+        marked = replace(clean, source_data=replace(clean.source_data,
+            seam_points=(Point3D(5, 5, .2), Point3D(5, 5, 20))))
+        for view in ("side", "front", "free", "top", "bottom"):
+            with self.subTest(view=view):
+                canvas.set_view(view)
+                canvas.set_reference(clean)
+                expected = canvas.grab().toImage()
+                canvas.set_reference(marked)
+                self.assertEqual(canvas.grab().toImage(), expected)
+        self.assertNotIn("Seams", [label.text() for label in self.panel.preview_information.legend_labels])
 
     def test_gcode_only_reference_keeps_static_views_and_layer_scales(self):
         canvas=self.panel.canvas

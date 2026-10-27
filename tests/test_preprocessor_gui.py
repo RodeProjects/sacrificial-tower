@@ -134,6 +134,66 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertGreater(new.total_wait_s, old.total_wait_s)
         self.assertTrue(self.request.prepared_source.matches_analysis_gcode())
 
+    def test_export_actions_distinguish_existing_export_and_session_report(self):
+        from cooling_tower.preprocessor_export import export_preprocessor_run
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        panel = self.window.preprocessor_panel
+        self.assertTrue(panel.open_last_button.isHidden())
+        self.assertTrue(panel.open_report_button.isHidden())
+        result = self.wait_for_result()
+        exported = export_preprocessor_run(self.controller.service, result,
+            self.window.export_directory(GenerationMode.PREPROCESSOR))
+        # Discover a previous session's export without creating a session report.
+        self.controller.session.latest_export_root = None
+        self.controller.refresh()
+        self.assertFalse(panel.open_last_button.isHidden())
+        self.assertTrue(panel.open_report_button.isHidden())
+        with patch.object(self.window, "_show_export_success_dialog"):
+            self.controller.export()
+        self.assertFalse(panel.open_report_button.isHidden())
+        self.assertFalse(panel.open_last_button.isHidden())
+        # A different export root has no folder, but the session report remains.
+        self.window.export_roots["preprocessor"] = str(self.fixture.root / "empty-exports")
+        self.controller.refresh()
+        self.assertTrue(panel.open_last_button.isHidden())
+        self.assertFalse(panel.open_report_button.isHidden())
+        self.assertTrue(exported.output_path.is_file())
+
+    def test_footer_actions_align_wrap_and_leave_equal_divider_gaps(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QFrame
+        self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
+        self.wait_for_result()
+        panel = self.window.preprocessor_panel
+        with patch.object(self.window, "_show_export_success_dialog"):
+            self.controller.export()
+        for width in (2200, 1600, 1200, 1000, 760, 1000, 2200):
+            self.window.resize(width, 1000)
+            QTest.qWait(60)
+            visible = [button for button in (panel.open_output_button, panel.open_last_button,
+                panel.open_report_button, panel.generate_button, panel.cancel_button, panel.export_button)
+                if not button.isHidden()]
+            rects = [button.geometry().translated(button.parentWidget().mapTo(panel.footer_widget, QPoint()))
+                for button in visible]
+            reset_rect = panel.reset_button.geometry().translated(
+                panel.reset_button.parentWidget().mapTo(panel.footer_message_area, QPoint()))
+            self.assertTrue(panel.footer_message_area.rect().contains(reset_rect), (width, reset_rect))
+            for index, rect in enumerate(rects):
+                self.assertTrue(panel.footer_widget.rect().contains(rect), (width, rect))
+                for other in rects[index+1:]:
+                    self.assertFalse(rect.intersects(other), (width, rect, other))
+            if panel._footer_actions_layout_mode == "single":
+                self.assertEqual(len({rect.bottom() for rect in rects}), 1)
+                self.assertEqual([rect.left() for rect in rects], sorted(rect.left() for rect in rects))
+        panel.progress.show()
+        QTest.qWait(60)
+        self.assertTrue(panel.footer_columns.is_two_column())
+        divider = panel.footer_columns.findChild(QFrame, "footerVerticalDivider")
+        left_edge = panel.progress.mapTo(panel.footer_columns, QPoint(panel.progress.width(), 0)).x()
+        right_edge = panel.open_output_button.mapTo(panel.footer_columns, QPoint()).x()
+        self.assertEqual(divider.x()-left_edge, 12)
+        self.assertEqual(right_edge-(divider.x()+divider.width()), 12)
+
     def test_typing_keeps_preview_current_until_the_numeric_value_is_committed(self):
         from PySide6.QtCore import Qt
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
@@ -398,7 +458,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertTrue(panel.inputs["diameter_mm"].isEnabled())
         self.assertNotEqual(panel.inputs["diameter_mm"].lineEdit().text(), "—")
 
-    def test_no_tower_displays_zero_dimensions_and_no_invented_wait_position(self):
+    def test_no_tower_displays_zero_dimensions_and_the_final_wait_position(self):
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
         panel = self.window.preprocessor_panel
         panel.automatic["automatic_target_time"].setChecked(False)
@@ -408,8 +468,12 @@ class PreprocessorGuiTests(unittest.TestCase):
         for name in ("height_mm", "diameter_mm", "base_width_mm"):
             self.assertEqual(panel.inputs[name].lineEdit().text(), "0,00")
             self.assertFalse(panel.inputs[name].isEnabled())
-        for name in ("center_x_mm", "center_y_mm", "wait_x_mm", "wait_y_mm"):
+        for name in ("center_x_mm", "center_y_mm"):
             self.assertEqual(panel.inputs[name].lineEdit().text(), "—")
+        for name in ("wait_x_mm", "wait_y_mm"):
+            self.assertNotEqual(panel.inputs[name].lineEdit().text(), "—")
+        self.assertIsNotNone(result.scene.wait_position_xy_mm)
+        self.assertIn("Abschlussfahrt", panel.status.text())
 
     def test_footer_actions_and_reset_hints_follow_requested_states(self):
         panel = self.window.preprocessor_panel
@@ -459,11 +523,16 @@ class PreprocessorGuiTests(unittest.TestCase):
         panel = self.window.preprocessor_panel
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
         panel.advanced_group.setChecked(True)
-        self.app.processEvents()
-        self.app.processEvents()
+        visible_rows = [panel.rows[name] for name in ("tower_brim_width_mm", "tower_brim_gap_mm", "edge_clearance_mm", "print_speed_mm_s")]
+        # Expansion and width-dependent sizing settle in queued layout passes.
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if all(second.y() >= first.y()+first.height() for first, second in zip(visible_rows, visible_rows[1:])):
+                break
+            QTest.qWait(10)
         for row in panel.rows.values():
             self.assertGreaterEqual(row.height(), row.editor.height())
-        visible_rows = [panel.rows[name] for name in ("tower_brim_width_mm", "tower_brim_gap_mm", "edge_clearance_mm", "print_speed_mm_s")]
         for first, second in zip(visible_rows, visible_rows[1:]):
             self.assertGreaterEqual(second.y(), first.y()+first.height())
         panel.hollow_checkbox.setChecked(False)
@@ -472,13 +541,20 @@ class PreprocessorGuiTests(unittest.TestCase):
         panel.wall_count_spin.setValue(3)
         panel.reset_buttons["wall_count"].click()
         self.assertEqual(panel.wall_count_spin.value(), 2)
+        panel.automatic["automatic_z_hop"].setChecked(False)
         panel.inputs["z_hop_mm"].setValue(2)
         panel.reset_buttons["z_hop_mm"].click()
-        self.assertEqual(panel.inputs["z_hop_mm"].value(), .6)
+        self.assertEqual(panel.inputs["z_hop_mm"].value(), .2)
+        self.assertTrue(panel.automatic["automatic_z_hop"].isChecked())
         self.assertFalse(hasattr(panel, 'view_checkboxes'))
         self.assertIsNone(self.controller.job_id)
         self.window.resize(760, 850)
-        self.app.processEvents()
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if not panel.columns.is_two_column() and not panel.footer_columns.is_two_column():
+                break
+            QTest.qWait(10)
         self.assertFalse(panel.columns.is_two_column())
         self.assertFalse(panel.footer_columns.is_two_column())
 

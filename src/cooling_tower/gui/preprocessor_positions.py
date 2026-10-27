@@ -894,7 +894,10 @@ class PreprocessorPositionDialog(QDialog):
         self.canvas.segments, self.canvas.base_width_mm = context.object_segments, context.base_width_mm
         self.canvas.brim_width_mm, self.canvas.brim_gap_mm = context.brim_width_mm, context.brim_gap_mm
         if not context.height_mm:
-            self.status.setText("Alle Schichten erreichen die Zielzeit. Es sind kein Turm und keine Warteposition erforderlich.")
+            if solution is not None:
+                self._display_positions({"tower": solution[0], "wait": solution[1]})
+                self.canvas.fit()
+            self.status.setText(error or "Es ist kein Turm erforderlich. Die Warteposition wird für die abschließende Fahrt verwendet.")
             self._set_controls_enabled(False)
             return
         self._set_controls_enabled(True)

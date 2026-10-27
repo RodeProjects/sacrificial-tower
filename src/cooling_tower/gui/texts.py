@@ -3,7 +3,7 @@ from __future__ import annotations
 from html import escape
 
 
-SUPPORT_DIAGNOSE_MENU_LABEL = "Support Diagnose …"
+SUPPORT_DIAGNOSE_MENU_LABEL = "Hilfe & Feedback"
 
 
 def slicer_support_hint_html() -> str:
@@ -25,7 +25,7 @@ def slicer_support_hint_html() -> str:
         "stets mein Bestes.<br><br>"
         "Bei Problemen mit einem Slicer oder Drucker kannst du gerne ein "
         "GitHub-Issue eröffnen. Nutze dazu den Menüpunkt "
-        f"„{SUPPORT_DIAGNOSE_MENU_LABEL}“ im Burgermenü.</p>"
+        f"„{escape(SUPPORT_DIAGNOSE_MENU_LABEL)}“ im Burgermenü.</p>"
     )
 
 
@@ -155,7 +155,7 @@ SOURCE_SUPPORT_HINT_HTML = """
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Stützen simulieren</b></p>
 <p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn verfügbar, werden für die Simulation Baumstützen aktiviert (OrcaSlicer: „Baum (automatisch)“; PrusaSlicer ab Version 2.6: Stil „Organisch“). Die übrigen Stützparameter des gewählten Prozessprofils bleiben unverändert erhalten.</p>
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Stützen anpassen</b></p>
-<p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn die Stützen deinen Anforderungen nicht entsprechen, passe sie im Slicer direkt im gewählten Prozessprofil an. Speichere das Profil und lies die Profile im Kühlturm-Generator erneut ein. Die angepassten Stützparameter werden dann für die Simulation übernommen; soweit verfügbar, bleibt der Baumstützenstil aktiv.</p>
+<p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn die Stützen deinen Anforderungen nicht entsprechen, passe sie im Slicer direkt im gewählten Prozessprofil an. Speichere das Profil und lies die Profile in Sacrificial Tower erneut ein. Die angepassten Stützparameter werden dann für die Simulation übernommen; soweit verfügbar, bleibt der Baumstützenstil aktiv.</p>
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Vorschau und Export</b></p>
 <p style="margin-top:0; margin-bottom:0;">&#8226; Die Stützen werden bei der Turmgenerierung und beim gemeinsamen Prüfslice berücksichtigt und im exportierten 3MF für das Originalobjekt aktiviert. Die Originalprofile bleiben unverändert. Nur die gemeinsam geslicte Vorschau der iterativen Methode zeigt die simulierten Stützen.</p>
 """.strip()

@@ -541,7 +541,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(window._calibration_config().maximum_iterations, 25)
         self.assertEqual(
             window.joint_slice_settings_action.text(),
-            "Allgemeine Einstellungen …",
+            "Allgemeine Einstellungen",
         )
         window.close()
 

@@ -115,6 +115,7 @@ from cooling_tower.gui.generation_progress_dialog import (
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
 )
 from cooling_tower.gui.export_history import resolve_latest_export_directory
+from cooling_tower.gui.widgets.footer_actions import fit_footer_actions
 from cooling_tower.export_paths import default_export_roots, normalize_export_roots
 from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.gui.export_worker import ExportWorker
@@ -1171,21 +1172,21 @@ class MainWindow(QMainWindow):
         self.options_menu.setObjectName("mainOptionsMenu")
         self.joint_slice_settings_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "settings_gear.svg")),
-            "Allgemeine Einstellungen …",
+            "Allgemeine Einstellungen",
         )
         self.joint_slice_settings_action.triggered.connect(
             self.show_joint_slice_settings
         )
         self.support_report_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "document.svg")),
-            SUPPORT_DIAGNOSE_MENU_LABEL,
+            SUPPORT_DIAGNOSE_MENU_LABEL.replace("&", "&&"),
         )
         self.support_report_action.triggered.connect(
             self.show_support_report_dialog
         )
         self.voluntary_support_action = self.options_menu.addAction(
             QIcon(str(GUI_ASSET_ROOT / "coffee.svg")),
-            "Buy me a coffee …",
+            "Buy me a coffee",
         )
         self.voluntary_support_action.triggered.connect(self.show_voluntary_support_dialog)
         self.about_action = self.options_menu.addAction(
@@ -3209,7 +3210,7 @@ class MainWindow(QMainWindow):
         picker_layout = QVBoxLayout(self.generation_method_picker)
         picker_layout.setContentsMargins(0, 0, 0, 0)
         picker_layout.setSpacing(MAIN_CONTENT_EDGE_PADDING_PX)
-        self.generation_method_heading = QLabel("Wie soll der Kühlturm erstellt werden?")
+        self.generation_method_heading = QLabel("Wähle eine Erstellungsmethode")
         self.generation_method_heading.setObjectName("generationMethodHeading")
         self.generation_method_heading.setWordWrap(True)
         self.generation_method_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -3939,13 +3940,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0,self, self.manual_controller.fit_editor_to_window)
 
     def _refresh_footer_visibility(self) -> None:
-        """Keep the entire footer out of the file and slicer preparation view."""
+        """Show footers only in the selected method's working view."""
         if not hasattr(self,"footer"):
             return
         preparation_open = (
             self._preparation_in_workspace
             and self.window_pages.currentWidget() is self.preparation_workspace
-            and self._preparation_workspace_view == "preparation"
         )
         ready = self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged
         self.footer.setVisible(ready and not preparation_open and self.generation_mode is not GenerationMode.PREPROCESSOR)
@@ -11773,6 +11773,9 @@ class MainWindow(QMainWindow):
         result: PreviewExportResult,
     ) -> None:
         dialog = self.export_success_dialog
+        self.export_success_check_hint.setVisible(
+            getattr(result, "generation_method", None) != "preprocessor"
+        )
         self.export_success_title_label.setText(
             "✓ G-Code erfolgreich exportiert"
             if getattr(result, "generation_method", None) == "preprocessor"
@@ -14426,20 +14429,12 @@ class MainWindow(QMainWindow):
         else:
             self.preview_button.setText("Kühlturm generieren")
         footer_inner_width = max(0, self.width() - 44)
-        wide_action_width = max(0, (footer_inner_width - 13) // 2)
         folder_buttons = (
             self.open_output_button,
             self.open_stl_button,
             self.open_run_button,
         )
-        report_visible = not self.open_run_button.isHidden()
         action_buttons = (self.preview_action_control, self.export_button)
-        spacing = self.main_actions_layout.horizontalSpacing()
-
-        def action_width(button: QWidget) -> int:
-            # Explicitly sized footer controls can be wider than their
-            # content-based sizeHint because their padding is fixed.
-            return max(button.sizeHint().width(), button.minimumWidth())
 
         def set_labels(
             shorten_folders: bool, report_label_level: int,
@@ -14472,123 +14467,14 @@ class MainWindow(QMainWindow):
             ))
             self._fit_export_button_width()
 
-        def required_action_width() -> int:
-            visible = [
-                button for button in (*folder_buttons, *action_buttons)
-                if not button.isHidden()
-            ]
-            return (
-                sum(action_width(button) for button in visible)
-                + spacing * max(0, len(visible) - 1)
-                # Columns 2 and 3 may still reserve grid gaps between the
-                # folder buttons and the right-aligned action group.
-                + (2 * spacing if any(
-                    not button.isHidden() for button in action_buttons
-                ) and any(
-                    not button.isHidden() for button in folder_buttons
-                ) else 0)
-                + (spacing + 2 if visible else 0)
-            )
-
-        for narrow, action_area_width in (
-            (False, wide_action_width), (True, footer_inner_width)
-        ):
-            label_stages = [(False, 0, False)]
-            if report_visible:
-                label_stages.extend(((False, 1, False), (False, 2, False)))
-            label_stages.append((True, 2 if report_visible else 0, False))
-            label_stages.append((True, 2 if report_visible else 0, True))
-            for shorten_folders, report_label_level, shorten_actions in label_stages:
-                set_labels(shorten_folders, report_label_level, shorten_actions)
-                if required_action_width() <= action_area_width:
-                    break
-            if required_action_width() <= action_area_width:
-                break
+        narrow, mode = fit_footer_actions(
+            self.main_actions_layout, folder_buttons, action_buttons,
+            footer_inner_width, set_labels,
+        )
         self._footer_layout_narrow_required = narrow
+        self._footer_actions_layout_mode = mode
+        self._footer_actions_wrapped = mode != "single"
         self._refresh_footer_responsive_layout()
-
-        required_width = required_action_width()
-        primary_width = sum(
-            action_width(button)
-            for button in action_buttons if not button.isHidden()
-        ) + spacing * max(0, sum(
-            not button.isHidden() for button in action_buttons
-        ) - 1)
-        folder_pair_width = sum(
-            action_width(button)
-            for button in (self.open_output_button, self.open_stl_button)
-            if not button.isHidden()
-        )
-        paired_width = (
-            folder_pair_width + primary_width
-            + spacing * 5 + 2
-        )
-        mode = (
-            "single"
-            if required_width <= action_area_width
-            else "report_above"
-            if report_visible and paired_width <= action_area_width
-            else "report_and_action_above"
-            if report_visible
-            else "action_below"
-        )
-        if mode != getattr(self, "_footer_actions_layout_mode", None):
-            self._footer_actions_layout_mode = mode
-            self._footer_actions_wrapped = mode != "single"
-            actions = self.main_actions_layout
-            action_widgets = (
-                self.open_output_button, self.open_stl_button,
-                self.open_run_button, self.preview_action_control,
-                self.export_button,
-            )
-            hidden_widgets = {
-                widget: widget.isHidden() for widget in action_widgets
-            }
-            for widget in action_widgets:
-                actions.removeWidget(widget)
-            report_above = mode in {"report_above", "report_and_action_above"}
-            folder_row = 1 if report_above else 0
-            actions.setVerticalSpacing(8 if mode != "single" else 0)
-            actions.addWidget(
-                self.open_output_button, folder_row, 0,
-                Qt.AlignmentFlag.AlignBottom,
-            )
-            actions.addWidget(
-                self.open_stl_button, folder_row, 1,
-                Qt.AlignmentFlag.AlignBottom,
-            )
-            if report_above:
-                actions.addWidget(
-                    self.open_run_button, 0, 0, 1, 2,
-                    Qt.AlignmentFlag.AlignLeft,
-                )
-            else:
-                actions.addWidget(
-                    self.open_run_button, 0, 2,
-                    Qt.AlignmentFlag.AlignBottom,
-                )
-            if mode in {"action_below", "report_and_action_above"}:
-                action_row = folder_row + 1
-                actions.addWidget(
-                    self.preview_action_control, action_row, 0, 1, 5,
-                    Qt.AlignmentFlag.AlignRight,
-                )
-                actions.addWidget(
-                    self.export_button, action_row, 5,
-                    Qt.AlignmentFlag.AlignRight,
-                )
-            else:
-                actions.addWidget(
-                    self.preview_action_control,
-                    folder_row, 4, Qt.AlignmentFlag.AlignBottom,
-                )
-                actions.addWidget(
-                    self.export_button,
-                    folder_row, 5, Qt.AlignmentFlag.AlignBottom,
-                )
-            actions.invalidate()
-            for widget, hidden in hidden_widgets.items():
-                widget.setVisible(not hidden)
 
     def _fit_export_button_width(self) -> None:
         """Keep exactly 25 px of horizontal text padding on each side."""
@@ -14626,6 +14512,7 @@ class MainWindow(QMainWindow):
             )
             self._latest_export_root_text = output_root_text
         latest_export_available = self._latest_export_directory is not None
+        self.open_stl_button.setVisible(latest_export_available)
         self.open_stl_button.setEnabled(latest_export_available)
         self.open_stl_button.setToolTip(
             "Den Ordner des zuletzt erstellten Exports öffnen"

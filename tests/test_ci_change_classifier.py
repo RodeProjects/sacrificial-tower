@@ -10,7 +10,7 @@ from scripts.classify_ci_changes import classify_range
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APP_NAME = "Kühlturm-Generator"
+APP_NAME = "Sacrificial Tower"
 APP_SUBTITLE = "Erzeugt Opferobjekte passend zur gewünschten Layerzeit"
 
 

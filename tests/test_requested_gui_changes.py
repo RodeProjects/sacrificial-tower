@@ -553,11 +553,11 @@ class RequestedGuiChangesTests(unittest.TestCase):
             self.assertIn(product, popover.label.text())
         for placeholder in ("Cura", "Creality Print", "Simplify3D"):
             self.assertNotIn(placeholder, popover.label.text())
-        for phrase in ("1-Personen-Entwicklung", "Verständnis", "GitHub-Issue", "Support Diagnose …", "Burgermenü"):
+        for phrase in ("1-Personen-Entwicklung", "Verständnis", "GitHub-Issue", "Hilfe &amp; Feedback", "Burgermenü"):
             self.assertIn(phrase, popover.label.text())
         self.app.sendEvent(icon, QEvent(QEvent.Type.Leave))
         self.assertTrue(popover.isHidden())
-        self.assertEqual(window.support_report_action.text(), "Support Diagnose …")
+        self.assertEqual(window.support_report_action.text(), "Hilfe && Feedback")
         window.support_report_action.trigger()
         self.assertTrue(window.support_report_dialog.isVisible())
         window.close()
@@ -1141,7 +1141,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertTrue(all(action.isHidden() for action in actions))
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
-        self.assertTrue(all(action.isVisible() for action in actions[:-1]))
+        self.assertTrue(all(action.isVisible() for action in (actions[0], *actions[2:-1])))
+        self.assertTrue(window.open_stl_button.isHidden())
         self.assertTrue(window.export_button.isHidden())
         window.close()
 
@@ -1579,6 +1580,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def test_footer_shortens_actions_in_order_and_restores_full_labels_after_split(self) -> None:
         window = self.window()
+        window.export_roots["automatic"] = str(self.root / "exports")
+        self.write_export_folder(window.export_directory(), "20260730_100000_referenz", "2026-07-30T10:00:00+02:00")
+        window._refresh_folder_action_states(rescan=True)
         window.workflow.set_slicer_step_visible(True)
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -1651,6 +1655,9 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
     def test_footer_shortens_export_report_before_right_actions_in_both_layouts(self) -> None:
         window = self.window()
+        window.export_roots["automatic"] = str(self.root / "exports")
+        self.write_export_folder(window.export_directory(), "20260730_100000_referenz", "2026-07-30T10:00:00+02:00")
+        window._refresh_folder_action_states(rescan=True)
         window.workflow.set_slicer_step_visible(True)
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -1729,6 +1736,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window.output_root_edit.setText(str(output_root))
 
         self.assertFalse(window.open_stl_button.isEnabled())
+        self.assertTrue(window.open_stl_button.isHidden())
         self.assertEqual(
             window.open_stl_button.toolTip(),
             "Kein Exportordner gefunden.",
@@ -1746,6 +1754,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         )
         window._refresh_folder_action_states(rescan=True)
         self.assertTrue(window.open_stl_button.isEnabled())
+        self.assertFalse(window.open_stl_button.isHidden())
         self.assertEqual(
             window.open_stl_button.toolTip(),
             "Den Ordner des zuletzt erstellten Exports öffnen",
@@ -1764,6 +1773,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             window.open_stl_directory()
             open_directory_mock.assert_not_called()
         self.assertFalse(window.open_stl_button.isEnabled())
+        self.assertTrue(window.open_stl_button.isHidden())
         self.assertEqual(
             window.open_stl_button.toolTip(),
             "Kein gültiger Exportordner gefunden.",

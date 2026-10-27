@@ -24,6 +24,7 @@ class LowerLayerFrames:
         for source in sources:
             segments, blocks, color, line_width, maximum, *extra = source
             heights = extra[0] if extra else ()
+            as_points = bool(extra[1]) if len(extra)>1 else False
             stride = max(1, math.ceil(len(segments)/maximum)) if maximum else 1
             by_height = {}
             line_heights = (islice(heights, 0, None, stride) if heights else
@@ -33,7 +34,7 @@ class LowerLayerFrames:
             # Validate and merge each distinct height once, not every stroke.
             by_height = {z: lines for z, lines in by_height.items() if math.isfinite(z)}
             levels.update(by_height)
-            self.sources.append((by_height, layer_context_colour(color, subdued=subdued), line_width))
+            self.sources.append((by_height, layer_context_colour(color, subdued=subdued), line_width, as_points))
         self.levels = sorted(levels)
         image_bytes = max(1, round(width*ratio)*round(height*ratio)*4)
         self.maximum_frames = max(0, min(6, self.BUDGET_BYTES//image_bytes-2))
@@ -50,18 +51,25 @@ class LowerLayerFrames:
     def _draw(self, frame, first, last):
         painter = QPainter(frame)
         try:
-            for by_height, color, width in self.sources:
-                painter.setPen(QPen(color, width))
+            for by_height, color, width, as_points in self.sources:
+                painter.setPen(QPen(color, width, Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap if as_points else Qt.PenCapStyle.SquareCap))
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, width > 1)
                 block = []
                 for z in self.levels[first:last]:
                     for line in by_height.get(z, ()):
                         block.append(line)
                         if len(block) == 4096:
-                            painter.drawLines(tuple(block))
+                            if as_points:
+                                painter.drawPoints(tuple(line.p1() for line in block))
+                            else:
+                                painter.drawLines(tuple(block))
                             block.clear()
                 if block:
-                    painter.drawLines(tuple(block))
+                    if as_points:
+                        painter.drawPoints(tuple(line.p1() for line in block))
+                    else:
+                        painter.drawLines(tuple(block))
         finally:
             painter.end()
 

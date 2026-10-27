@@ -31,6 +31,7 @@ class PreprocessorExportTests(unittest.TestCase):
         self.assertEqual(report["generation_method"], "preprocessor")
         self.assertEqual(report["output"]["sha256"], self.result.sha256)
         self.assertIn("rechnerische Prognosen", result.user_report_path.read_text(encoding="utf-8"))
+        self.assertIn("Druckabschluss:", result.user_report_path.read_text(encoding="utf-8"))
         self.assertEqual(resolve_latest_export_directory(self.root).directory, result.run_directory)
         again = export_preprocessor_run(self.fixture.service, self.result, self.root)
         self.assertNotEqual(again.run_directory, result.run_directory)

@@ -6,7 +6,7 @@ Buy Me a Coffee, kein SDK, kein Zahlungsbackend und kein Abonnement.
 
 ## Bedienung und Datenfluss
 
-Der Dialog ist außerdem über „Support Diagnose …“ → „Entwickler unterstützen“
+Der Dialog ist außerdem über „Hilfe & Feedback“ → „Entwickler unterstützen“
 erreichbar. Diese Auswahl öffnet direkt denselben lokalen „Buy me a coffee“-
 Betragsdialog wie der Menüpunkt, ohne Zwischenseite oder Schiebeanimation.
 Das Fenster „Support & Diagnose“ wird davor geschlossen.

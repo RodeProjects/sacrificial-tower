@@ -103,7 +103,13 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertTrue(window.preparation_open_button.isVisible())
                 self.assertIs(window.window_pages.currentWidget(), window.main_surface)
                 self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
+                self.assertEqual(window.preprocessor_panel.footer_widget.isVisible(), mode is GenerationMode.PREPROCESSOR)
                 window.show_generation_method_selection()
+                self.assertTrue(window.footer.isHidden())
+                self.assertTrue(window.preprocessor_panel.footer_widget.isHidden())
+                window._on_workflow_stage_changed(window.workflow.stage.value)
+                self.assertTrue(window.footer.isHidden())
+                self.assertTrue(window.preprocessor_panel.footer_widget.isHidden())
 
     def test_startup_divider_and_overlay_shadow_preserve_brand_top_and_bottom_insets(self) -> None:
         window=self.window
@@ -176,7 +182,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.header_workflow_actions.isHidden())
         self.assertTrue(window.ready_grid.isHidden())
         self.assertTrue(window.manual_generation_panel.isHidden())
-        self.assertTrue(window.footer.isVisible())
+        self.assertTrue(window.footer.isHidden())
         self.assertTrue(window.generation_method_navigation.isHidden())
         window.automatic_generation_card.click()
         self.app.processEvents()
@@ -341,7 +347,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertTrue(window.generation_method_picker.isVisible())
         self.assertTrue(window.header_method_selection.isHidden())
         self.assertTrue(window.main_header.isVisible())
-        self.assertTrue(window.footer.isVisible())
+        self.assertTrue(window.footer.isHidden())
         self.assertIs(window.generation_mode, GenerationMode.AUTOMATIC)
         window.preparation_view_button.click()
         self.assertTrue(window.workflow_group.isVisible())
@@ -635,7 +641,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                                 window._update_preparation_requirements()
                                 self.app.processEvents()
                                 self.assertTrue(window.main_header.isVisible())
-                                self.assertEqual(window.footer.isHidden(),action == window.show_preparation_workspace)
+                                self.assertEqual(window.footer.isHidden(), action != window.close_preparation_workspace)
                                 self.assertEqual(dict(window.workflow_header.facts), facts)
                                 self.assertTrue(all(label.isVisible() for label in window.workflow_header.fact_labels.values()))
 
@@ -780,7 +786,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertIs(window.window_pages.currentWidget(), window.preparation_workspace)
         self.assertTrue(window.generation_method_picker.isVisible())
         self.assertTrue(window.main_header.isVisible())
-        self.assertTrue(window.footer.isVisible())
+        self.assertTrue(window.footer.isHidden())
         self.assertIsNone(transition._overlay)
         self.assertEqual(window.preparation_workspace.graphicsEffect().opacity(), 0.0)
         animation = transition._animation
@@ -965,7 +971,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         window = self.window
         self.finish_preparation()
         heading = window.generation_method_heading
-        self.assertEqual(heading.text(), "Wie soll der Kühlturm erstellt werden?")
+        self.assertEqual(heading.text(), "Wähle eine Erstellungsmethode")
         self.assertTrue(heading.alignment() & Qt.AlignmentFlag.AlignHCenter)
         for card in (window.automatic_generation_card, window.manual_generation_card):
             self.assertTrue(card.title_label.alignment() & Qt.AlignmentFlag.AlignHCenter)

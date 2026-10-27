@@ -192,7 +192,7 @@ try {
     Assert-NativeSuccess "Die kryptografische Prüfung des Update-Manifests"
 
     $releaseSummaryDe = @'
-**Sacrificial Tower / Kühlturm-Generator - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit**
+**Sacrificial Tower - Erstellung dynamischer Opferobjekte passend zur gewünschten Layerzeit**
 
 Bei kurzen Layerzeiten kann beim FDM-/FFF-3D-Druck zu wenig Zeit zum Abkühlen bleiben. Sacrificial Tower erstellt dafür einen zusätzlichen Kühlturm (bzw. ein Opferobjekt): Er wird neben deinem Modell mitgedruckt und erzeugt durch seine dynamische Form an den nötigen Stellen zusätzliche Layerzeit.
 

@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import test_preprocessor_gui as fixture_module
 from test_preprocessor import make_gcode
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QStyle, QStyleOptionFrame
@@ -17,6 +17,25 @@ from cooling_tower.preprocessor_safety import ExclusionRect
 
 
 class PreprocessorUpgradeGuiTests(unittest.TestCase):
+    def test_preview_buttons_keep_pressed_colours_without_latching_focus_background(self):
+        self.harness.wait_for_result()
+        panel = self.panel
+        for button in (panel.preview_reset, panel.transparency_toggle, panel.travel_visibility_button):
+            for checked in ((False, True) if button.isCheckable() else (False,)):
+                with self.subTest(button=button.text(), checked=checked):
+                    if button.isCheckable():
+                        button.setChecked(checked)
+                    QTest.mousePress(button, Qt.MouseButton.LeftButton)
+                    self.assertEqual(button.grab().toImage().pixelColor(3,3),
+                        QColor("#1d4c35" if checked else "#1c4561"))
+                    QTest.mouseRelease(button, Qt.MouseButton.LeftButton)
+                    QTest.mouseMove(panel.canvas, QPoint(100,100))
+                    self.app.sendEvent(button, QEvent(QEvent.Type.Leave))
+                    button.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, False)
+                    self.assertTrue(button.hasFocus())
+                    self.assertEqual(button.grab().toImage().pixelColor(3,3),
+                        QColor("#244436" if button.isChecked() else "#243344"))
+
     def test_reorganized_settings_use_auto_and_two_millimetre_brim(self):
         panel = self.panel
         self.assertEqual(panel.settings().tower_brim_width_mm, 2)
@@ -137,9 +156,9 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
                 self.assertEqual(row[0].x(), 0)
                 for first, second in zip(row, row[1:]):
                     self.assertEqual(second.x()-first.geometry().right()-1, gap)
-        self.assertIn((6,), distributions)
-        self.assertIn((5, 1), distributions)
-        self.assertIn((1, 1, 1, 1, 1, 1), distributions)
+        self.assertIn((7,), distributions)
+        self.assertIn((6, 1), distributions)
+        self.assertIn((1, 1, 1, 1, 1, 1, 1), distributions)
         self.assertTrue(any(len(rows) >= 3 for rows in distributions))
         self.assertFalse(hasattr(self.panel, 'view_controls'))
         self.assertFalse(hasattr(self.panel, 'view_checkboxes'))
@@ -588,7 +607,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertEqual(canvas._travel_layer_z, result.layer_heights_mm[2])
         canvas._prepare_line_frame()
         self.assertEqual([source[1].name() for source in canvas._lower_layer_frames.sources],
-            [canvas.OBJECT_COLOR, canvas.BRIM_COLOR, canvas.TOWER_COLOR])
+            [canvas.OBJECT_COLOR, canvas.BRIM_COLOR, canvas.TOWER_COLOR, canvas.SEAM_COLOR])
         # A narrow window starts with scrolling enabled instead of camera
         # navigation. Opt in before testing a deliberate camera gesture.
         canvas.set_navigation_enabled(True)
@@ -646,7 +665,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         result = self.harness.wait_for_result()
         panel, canvas = self.panel, self.panel.canvas
         panel.select_layer(2)
-        self.assertEqual(panel.travel_visibility_button.text(), 'Fahrwege anzeigen')
+        self.assertEqual(panel.travel_visibility_button.text(), 'Fahrwege ausblenden')
         self.assertTrue(panel.travel_visibility_button.isChecked())
         self.assertFalse(panel.travel_mode_toggle.isChecked())
         self.assertTrue(canvas._wait_position_visible)
@@ -654,6 +673,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertTrue(canvas._all_travel_visible)
         for visible in (False, True, False):
             panel.travel_visibility_button.click()
+            self.assertEqual(panel.travel_visibility_button.text(), 'Fahrwege ausblenden' if visible else 'Fahrwege anzeigen')
             self.assertEqual(panel.travel_visibility_button.isChecked(), visible)
             self.assertEqual(canvas._wait_travel_visible, visible)
             self.assertEqual(canvas._tower_travel_visible, visible)
@@ -684,7 +704,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
             self.assertTrue(canvas._tower_travel_visible)
             frame = canvas._prepare_line_frame()
             self.assertTrue(frame.tower_travel_blocks)
-            self.assertEqual(len(canvas._lower_layer_frames.sources), 5 if all_layers else 3)
+            self.assertEqual(len(canvas._lower_layer_frames.sources), 6 if all_layers else 4)
             self.assertEqual(canvas.camera_state(), camera)
             self.assertEqual(canvas._layer_z, result.layer_heights_mm[2])
         self.assertEqual(result.gcode_path.read_bytes(), gcode)
@@ -791,7 +811,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertEqual(canvas.camera_state(), camera)
         self.assertEqual(result.gcode_path.read_bytes(), gcode)
 
-    def test_layer_above_tower_does_not_invent_wait_position_or_tower_paths(self):
+    def test_layers_above_tower_only_show_waiting_for_the_final_parking(self):
         lines, z = [], 0
         for line in make_gcode(layers=6).splitlines():
             if line.startswith(";Z:"):
@@ -803,10 +823,14 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.harness.request = self.harness.fixture.request(text)
         result = self.harness.wait_for_result()
         self.assertLess(result.scene.tower_layer_count, len(result.layer_times_s))
-        self.panel.select_layer(6)
+        self.panel.select_layer(5)
         self.assertIsNone(self.panel.canvas._wait_marker_position())
         self.assertFalse(self.panel.canvas._layer_segments(result.scene.tower_segments))
         self.assertFalse(self.panel.canvas._layer_segments(result.scene.wait_travel_segments, result.scene.wait_travel_layer_indices))
+        self.panel.select_layer(6)
+        self.assertEqual(self.panel.canvas._wait_marker_position(), result.scene.wait_points[-1])
+        self.assertTrue(self.panel.canvas._layer_segments(result.scene.wait_travel_segments, result.scene.wait_travel_layer_indices))
+        self.assertFalse(self.panel.canvas._layer_segments(result.scene.tower_segments))
 
 if __name__ == "__main__":
     unittest.main()

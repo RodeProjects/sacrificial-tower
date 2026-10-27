@@ -766,7 +766,7 @@ class PositionEditorGuiTests(unittest.TestCase):
             self.assertEqual(row.reset_button.x()-editor.geometry().right()-1, 6)
         self.assertEqual([swatch.color for swatch in self.panel.legend.swatches], [PreviewCanvas.OBJECT_COLOR,
             PreviewCanvas.TOWER_COLOR, PreviewCanvas.WAIT_POSITION_COLOR, PreviewCanvas.WAIT_TRAVEL_COLOR,
-            PreviewCanvas.TOWER_TRAVEL_COLOR, PreviewCanvas.BRIM_COLOR])
+            PreviewCanvas.TOWER_TRAVEL_COLOR, PreviewCanvas.BRIM_COLOR, PreviewCanvas.SEAM_COLOR])
         self.assertTrue(self.panel.timing_toggle.isChecked())
         self.assertFalse(self.panel.time_chart.isVisible())
         self.assertFalse(hasattr(self.panel, "summary"))

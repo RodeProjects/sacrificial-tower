@@ -109,13 +109,15 @@ class DirectTowerTravelTests(unittest.TestCase):
         self.assertIn("M400", first)
         self.assertIn("G4 P0", first)
 
-    def test_manual_tower_with_no_original_deficits_contains_no_parking_travel(self):
+    def test_manual_tower_with_no_original_deficits_only_parks_at_the_end(self):
         request = self.fixture.request(settings=PreprocessorSettings(target_layer_time_s=.1,
             automatic_height=False, height_mm=1.2))
         result = self.fixture.prepare(request)
         self.assertEqual(result.scene.tower_layer_count, 6)
-        self.assertFalse(result.scene.wait_travel_segments)
-        self.assertFalse(result.scene.wait_points)
+        self.assertTrue(result.scene.wait_travel_segments)
+        self.assertEqual(set(result.scene.wait_travel_layer_indices), {len(result.layer_times_s)-1})
+        self.assertEqual(result.wait_count, 0)
+        self.assertEqual(len(result.scene.wait_points), 1)
         self.assertTrue(result.scene.tower_travel_segments)
         self.assertNotIn("SACRIFICIAL_TOWER_WAIT", result.gcode_path.read_text())
 

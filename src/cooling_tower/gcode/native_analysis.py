@@ -30,6 +30,7 @@ class NativePreviewProduct:
     segments: tuple[tuple[float, float, float, float, float, float], ...]
     source_segment_count: int
     occupied_bounds: tuple[float, float, float, float] | None
+    seam_points: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +101,11 @@ def analyze_native_gcode(
             message="The native full-analysis extension is unavailable.",
         )
     try:
+        if collect_preview and getattr(_native_timing, "ENGINE_VERSION", 0) < 6:
+            raise TypeError("Outer-wall seam preview data requires native engine version 6.")
+        if (not bambu_compatible and use_explicit_layer_markers
+                and getattr(_native_timing, "ENGINE_VERSION", 0) < 4):
+            raise TypeError("Prusa-style layer markers require native engine version 4.")
         arguments = (
             str(source),
             bool(bambu_compatible),
@@ -358,7 +364,15 @@ def _build_preview(payload: Mapping[str, object]) -> NativePreviewProduct:
             payload, "preview_source_segment_count"
         ),
         occupied_bounds=bounds,
+        seam_points=tuple(tuple(_finite(value, "seam coordinate") for value in point)
+            for point in payload["seam_points"] if _valid_seam_shape(point)),
     )
+
+
+def _valid_seam_shape(point):
+    if not isinstance(point, (tuple, list)) or len(point) != 3:
+        raise TypeError("seam point shape is invalid")
+    return True
 
 
 def _required_payload_int(

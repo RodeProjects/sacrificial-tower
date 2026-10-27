@@ -246,8 +246,9 @@ class PreprocessorFooter(QWidget):
         self._fit_timer.setSingleShot(True)
         self._fit_timer.timeout.connect(self.fit_content)
 
-    def watch_content(self, columns, action_area, widgets):
+    def watch_content(self, columns, action_area, widgets, *, fit_actions=None):
         self.columns, self.action_area = columns, action_area
+        self._fit_actions = fit_actions
         self._breakpoint = None
         for widget in (self, columns, *widgets):
             widget.installEventFilter(self)
@@ -263,13 +264,18 @@ class PreprocessorFooter(QWidget):
             return
         layout = self.layout()
         margins = layout.contentsMargins()
-        breakpoint = max(METRICS.responsive_breakpoint_px, 2*self.action_area.minimumSizeHint().width()+12)
+        if self._fit_actions is not None:
+            narrow = self._fit_actions(max(0, self.width()-margins.left()-margins.right()))
+            breakpoint = self.width()+1 if narrow else 1
+        else:
+            breakpoint = max(METRICS.responsive_breakpoint_px, 2*self.action_area.minimumSizeHint().width()+12)
         if breakpoint != self._breakpoint:
             self._breakpoint = breakpoint
             self.columns.set_breakpoint(breakpoint)
         layout.activate()
         self.columns.layout().activate()
-        height = self.columns.content_height_hint()
+        # Stacking adds a divider and a second layout gap between the areas.
+        height = max(self.columns.content_height_hint(), self.columns.layout().minimumSize().height())
         if self.columns.height() != height:
             self.columns.setFixedHeight(height)
         required = height + margins.top() + margins.bottom()

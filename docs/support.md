@@ -27,7 +27,7 @@ zwingende gesetzliche Pflichten bleiben unberührt.
 
 ## Passenden Supportweg auswählen
 
-„Support Diagnose …“ startet mit sechs direkt sichtbaren Auswahlkarten unter
+„Hilfe & Feedback“ startet mit sechs direkt sichtbaren Auswahlkarten unter
 „Was möchten Sie tun?“. Links stehen „Fehler melden“, „Frage stellen“ und
 „Funktion vorschlagen“, rechts „Bewertung abgeben“, „Entwickler unterstützen“
 und „Etwas anderes“. Beide Spalten sind gleich breit. Ein Klick öffnet
@@ -77,7 +77,7 @@ fünf kleine Sterne ohne Bewertungsfunktion. Details zum Zahlungsweg stehen unte
 
 ## Ein Diagnosepaket prüfen und freiwillig anhängen
 
-1. Im Burgermenü der Anwendung „Support Diagnose …“ öffnen.
+1. Im Burgermenü der Anwendung „Hilfe & Feedback“ öffnen.
 2. Auf „Fehler melden“ klicken. In Schritt 1 ein freiwilliges
    technisches Diagnosepaket erstellen. Eine
    Zusammenfassung oder Problembeschreibung wird hier nicht abgefragt.

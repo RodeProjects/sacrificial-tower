@@ -134,7 +134,9 @@ class PreprocessorRefinementTests(unittest.TestCase):
                     result = self.fixture.prepare(request)
                     restarts = [event for _, _, event, _, _ in inserted_movements(result.gcode_path)
                         if event.endpoint_distance_xyz_mm < 1e-8 and event.delta_e > 0]
-                    self.assertEqual(len(restarts), len(result.wipe_angles_rad) * 2)
+                    # The final tower departs directly to parking, without
+                    # priming again on the already finished model.
+                    self.assertEqual(len(restarts), len(result.wipe_angles_rad) * 2 - 1)
                     for event in restarts:
                         self.assertAlmostEqual(event.delta_e*1.5, 1+extra, places=5)
                         self.assertAlmostEqual(event.feedrate_mm_min/60*2, 18)

@@ -322,12 +322,12 @@ class PreviewLineBatchingTests(unittest.TestCase):
             canvas.render(painter, QPoint())
             painter.end()
             data = bytes(image.constBits())
-            yellow = purple = pink = 0
+            yellow = purple = travel_blue = 0
             for red, green, blue in zip(data[0::4], data[1::4], data[2::4]):
                 yellow += red > 130 and green > 110 and red - green < 45 and green - blue > 40
                 purple += blue > 80 and blue - red > 20 and red - green > 15
-                pink += red > 80 and red - blue > 30 and blue - green > 20
-            return bool(yellow), bool(purple), bool(pink)
+                travel_blue += blue > 80 and green - red > 5 and blue - green > 35
+            return bool(yellow), bool(purple), bool(travel_blue)
 
         try:
             self.assertEqual(rendered_colours(), (True, False, False))

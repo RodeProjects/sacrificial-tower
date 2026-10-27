@@ -2,13 +2,14 @@
 from PySide6.QtCore import QEvent,QPointF,QSize,Qt
 from PySide6.QtGui import QColor,QPainter,QPolygonF
 from PySide6.QtWidgets import QWidget,QLabel,QVBoxLayout,QHBoxLayout,QGridLayout,QSizePolicy,QFrame
-from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE
+from cooling_tower.gui.design_tokens import ORIGINAL_OBJECT_BLUE, PREVIEW_SEAM_COLOR, PREVIEW_SEAM_BORDER_COLOR
 
 
 class LegendSwatch(QWidget):
     def __init__(self,color,parent=None):
         super().__init__(parent)
         self.color = color
+        self.border_color = PREVIEW_SEAM_BORDER_COLOR if color == PREVIEW_SEAM_COLOR else None
         self.split = False
         self._fit_font()
 
@@ -31,6 +32,10 @@ class LegendSwatch(QWidget):
             painter.drawPolygon(QPolygonF([QPointF(0,0),QPointF(width,0),QPointF(0,height)]))
         else:
             painter.fillRect(self.rect(),QColor(self.color))
+        if self.border_color:
+            painter.setPen(QColor(self.border_color))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(self.rect().adjusted(0,0,-1,-1))
         painter.end()
 
 

@@ -7,12 +7,13 @@ from pathlib import Path
 from PySide6.QtCore import QEasingCurve, QEvent, QSignalBlocker, QSize, QTimer, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QBoxLayout, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle,
+    QBoxLayout, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle,
     QStyleOptionSpinBox, QVBoxLayout, QWidget,
 )
 
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
+from cooling_tower.gui.widgets.footer_actions import fit_footer_actions
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
 from cooling_tower.gui.widgets.numeric_setting import NumericSettingWidget
 from cooling_tower.gui.widgets.preview_canvas import PreviewCanvas
@@ -31,6 +32,7 @@ from cooling_tower.gui.widgets.travel_mode_toggle import TravelModeToggle
 AUTOMATIC_FIELDS = {
     "automatic_target_time": ("target_layer_time_s",),
     "automatic_retraction": ("retract_mm", "retract_speed_mm_s"),
+    "automatic_z_hop": ("z_hop_mm",),
     "automatic_print_speed": ("print_speed_mm_s",),
     "automatic_travel_speed": ("travel_speed_mm_s",),
     "automatic_height": ("height_mm",),
@@ -41,7 +43,7 @@ AUTOMATIC_FIELDS = {
     "automatic_position": ("center_x_mm", "center_y_mm"),
     "automatic_wait_position": ("wait_x_mm", "wait_y_mm"),
 }
-PROFILE_FIELDS = {name for flag in ("automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed",
+PROFILE_FIELDS = {name for flag in ("automatic_target_time", "automatic_retraction", "automatic_print_speed", "automatic_travel_speed", "automatic_z_hop",
     "automatic_tower_brim_width", "automatic_tower_brim_gap")
     for name in AUTOMATIC_FIELDS[flag]}
 
@@ -87,8 +89,8 @@ HINTS = {
         "Automatisch werden Länge und Tempo des aktiven Extruders aus dem bestätigten Profil übernommen, einschließlich gültiger Filamentüberschreibungen."),
     "retract_speed_mm_s": ("Geschwindigkeit für zusätzlichen Rückzug und dessen Ausgleich.",
         "Die Automatik ist mit der Rückzugslänge gekoppelt. Ohne deren Automatik sind beide Werte manuell einstellbar."),
-    "z_hop_mm": ("Vor zusätzlichen Fahrten hebt die Düse senkrecht an und senkt erst am Ziel wieder ab.",
-        "Es gilt mindestens der Z-Hop des gewählten Profils. Originale Z-Bewegungen bleiben erhalten; die maximale Druckhöhe darf nicht überschritten werden."),
+    "z_hop_mm": ("Vor zusätzlichen Fahrten hebt die Düse um den eingestellten Z-Hop an und senkt erst am Ziel wieder ab.",
+        "Auto übernimmt den aktivierten Z-Hop des bestätigten Profils, ersatzweise 0,20 mm. Ohne Auto ist der Wert manuell einstellbar; 0,00 mm deaktiviert den zusätzlichen Hub. Der Hub gilt auch für die Abschlussfahrt zur Warteposition; die maximale Druckhöhe darf nicht überschritten werden."),
     "prime_mm": ("Zusätzlich gefördertes Filament am Turm nach dem Warten.",
         "Diese Menge wird während der ersten Wandumrundung verteilt. Der Startpunkt wandert mit jeder Schicht; bekannte Volumenstromgrenzen bleiben eingehalten."),
     "wall_count": ("Anzahl der gedruckten Wandlinien des hohlen Turms.",
@@ -108,8 +110,11 @@ class PreprocessorValueSpinBox(CommittedDoubleSpinBox):
     """Show calculated values without changing the valid manual input range."""
 
     _automatic_text: str | None = None
+    fixed_decimals = False
 
     def textFromValue(self, value):  # noqa: N802
+        if self._automatic_text is None and self.fixed_decimals:
+            return self.locale().toString(float(value), "f", self.decimals())
         return self._automatic_text if self._automatic_text is not None else super().textFromValue(value)
 
     def show_automatic_value(self, enabled: bool, value: float | None = None):
@@ -200,11 +205,11 @@ class PreprocessorPanel(QWidget):
             ("travel_speed_mm_s", "Fahrgeschwindigkeit", "mm/s", 1, 300),
             ("retract_mm", "Zusätzlicher Rückzug", "mm", 0, 10),
             ("retract_speed_mm_s", "Rückzugsgeschwindigkeit", "mm/s", 1, 100),
-            ("z_hop_mm", "Z-Hop", "mm", .2, 10),
+            ("z_hop_mm", "Z-Hop", "mm", 0, 10),
             ("prime_mm", "Zusätzliches Primen", "mm", 0, 5),
         ):
             automatic = {"print_speed_mm_s": "automatic_print_speed", "travel_speed_mm_s": "automatic_travel_speed",
-                "retract_mm": "automatic_retraction"}.get(name)
+                "retract_mm": "automatic_retraction", "z_hop_mm": "automatic_z_hop"}.get(name)
             self._numeric(self.advanced_group.content_layout, name, label, unit, low, high, automatic)
         self.preview_group = SectionCard("G-Code-Vorschau")
         self.preview_group.content_layout.setAlignment(Qt.AlignmentFlag(0))
@@ -272,17 +277,17 @@ class PreprocessorPanel(QWidget):
         preview_layout.addWidget(self.canvas)
         for name, title, action in (("preview_reset", "Vorschau zurücksetzen", self.reset_preview),
                 ("transparency_toggle", "Transparenz aktiv", None),
-                ("travel_visibility_button", "Fahrwege anzeigen", None)):
+                ("travel_visibility_button", "Fahrwege ausblenden", None)):
             button = QPushButton(title, self.canvas)
             button.setAutoDefault(False)
             button.setFixedHeight(32)
             button.setStyleSheet("QPushButton { min-height: 32px; max-height: 32px; border: 0; border-radius: 0; "
                 "padding: 0 12px; background: #243344; color: #dbe8f2; }"
                 "QPushButton:hover { background: #355269; }"
-                "QPushButton:focus { border: 0; background: #355269; }"
+                "QPushButton:focus { border: 0; }"
                 "QPushButton:pressed { background: #1c4561; }"
                 "QPushButton:checked { background: #244436; }"
-                "QPushButton:checked:hover, QPushButton:checked:focus { background: #355c49; }"
+                "QPushButton:checked:hover { background: #355c49; }"
                 "QPushButton:checked:pressed { background: #1d4c35; }"
                 "QPushButton:disabled { background: #20272e; color: #7b8b98; }")
             if name == "travel_visibility_button":
@@ -314,7 +319,8 @@ class PreprocessorPanel(QWidget):
         self.canvas.installEventFilter(self)
         self.legend = FlowColourLegend((("Modell", PreviewCanvas.OBJECT_COLOR), ("Turm", PreviewCanvas.TOWER_COLOR),
             ("Warteposition", PreviewCanvas.WAIT_POSITION_COLOR), ("Warteplatzfahrten", PreviewCanvas.WAIT_TRAVEL_COLOR),
-            ("Modell-/Turmfahrten", PreviewCanvas.TOWER_TRAVEL_COLOR), ("Brim", PreviewCanvas.BRIM_COLOR)))
+            ("Modell-/Turmfahrten", PreviewCanvas.TOWER_TRAVEL_COLOR), ("Brim", PreviewCanvas.BRIM_COLOR),
+            ("Seams", PreviewCanvas.SEAM_COLOR)))
         preview_layout.addWidget(self.legend)
         self.safety_hint = QLabel()
         self.safety_hint.setWordWrap(True)
@@ -614,8 +620,10 @@ class PreprocessorPanel(QWidget):
         spin.setRange(low, high)
         if not integer:
             spin.setDecimals(2)
-        if name == "tower_brim_gap_mm":
+        if name in {"tower_brim_gap_mm", "z_hop_mm"}:
             spin.setSingleStep(.1)
+        if name == "z_hop_mm":
+            spin.fixed_decimals = True
         spin.setValue(getattr(defaults, name))
         self.inputs[name] = spin
         row = NumericSettingWidget(setting_name=name, label=label, editor=spin,
@@ -780,7 +788,7 @@ class PreprocessorPanel(QWidget):
         layout.addWidget(self.footer_columns)
         self.footer_message_area = QWidget()
         messages = QVBoxLayout(self.footer_message_area)
-        messages.setContentsMargins(0, 0, 0, 0)
+        messages.setContentsMargins(0, 0, 12, 0)
         messages.setSpacing(8)
         self.status = QLabel("Einstellungen wählen und die Erzeugung starten.")
         self.status.setWordWrap(True)
@@ -800,36 +808,37 @@ class PreprocessorPanel(QWidget):
         self.footer_action_area = QWidget()
         self.footer_action_area.setObjectName("footerActionArea")
         actions_column = QVBoxLayout(self.footer_action_area)
-        actions_column.setContentsMargins(0, 0, 0, 0)
+        actions_column.setContentsMargins(12, 0, 0, 0)
         actions_column.addStretch(1)
         self.export_actions = QWidget()
-        export_actions = QHBoxLayout(self.export_actions)
-        export_actions.setContentsMargins(0, 0, 0, 0)
-        export_actions.setSpacing(8)
-        export_actions.addStretch(1)
+        actions = QGridLayout(self.export_actions)
+        self.footer_actions_layout = actions
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setHorizontalSpacing(8)
+        actions.setVerticalSpacing(0)
+        actions.setColumnStretch(3, 1)
         self.open_output_button = QPushButton("Alle Exporte öffnen")
         self.open_output_button.setObjectName("openBaseOutputFolderButton")
         self.open_last_button = QPushButton("Letzten Export öffnen")
         self.open_last_button.setObjectName("openOutputFolderButton")
         self.open_report_button = QPushButton("Letzten Exportbericht öffnen")
         self.open_report_button.setObjectName("openExportReportButton")
-        for button in (self.open_output_button, self.open_last_button, self.open_report_button):
-            button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            export_actions.addWidget(button)
-        actions_column.addWidget(self.export_actions)
-        self.export_actions.hide()
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        actions.addStretch(1)
+        self.open_last_button.hide()
+        self.open_report_button.hide()
         self.generate_button = QPushButton("G-Code und Vorschau erzeugen")
         self.generate_button.setObjectName("previewButton")
         self.export_button = QPushButton("G-Code exportieren")
         self.export_button.setObjectName("exportButton")
         self.cancel_button = QPushButton("Abbrechen")
         self.cancel_button.setObjectName("preprocessorCancelButton")
-        for button in (self.generate_button, self.cancel_button, self.export_button):
-            actions.addWidget(button)
-        actions_column.addLayout(actions)
+        self.cancel_button.hide()
+        self.export_button.hide()
+        for column, button in enumerate((self.open_output_button, self.open_last_button,
+                self.open_report_button, self.generate_button, self.cancel_button, self.export_button)):
+            button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            actions.addWidget(button, 0, column if column < 3 else column+1,
+                Qt.AlignmentFlag.AlignBottom)
+        actions_column.addWidget(self.export_actions)
         vertical, horizontal = QFrame(), QFrame()
         vertical.setObjectName("footerVerticalDivider")
         vertical.setFixedWidth(1)
@@ -839,8 +848,21 @@ class PreprocessorPanel(QWidget):
         self.footer_columns.set_stacked_separator(horizontal)
         self.footer_columns.add_pair(self.footer_message_area, self.footer_action_area)
         self.footer_widget.watch_content(self.footer_columns, self.footer_action_area, (self.footer_message_area, self.footer_action_area,
-            self.status, self.progress, self.export_actions, self.cancel_button, self.export_button))
+            self.status, self.progress, self.export_actions, self.open_last_button, self.open_report_button,
+            self.generate_button, self.cancel_button, self.export_button), fit_actions=self._fit_footer_actions)
         self.footer_widget.hide()
+
+    def _fit_footer_actions(self, width):
+        def set_labels(shorten_folders, report_level, shorten_actions):
+            self.open_output_button.setText("Alle Exporte" if shorten_folders else "Alle Exporte öffnen")
+            self.open_last_button.setText("Letzter Export" if shorten_folders else "Letzten Export öffnen")
+            self.open_report_button.setText(("Letzten Exportbericht öffnen", "Exportbericht öffnen", "Exportbericht")[report_level])
+            self.generate_button.setText("Erzeugen" if shorten_actions else "G-Code und Vorschau erzeugen")
+            self.export_button.setText("Exportieren" if shorten_actions else "G-Code exportieren")
+        narrow, self._footer_actions_layout_mode = fit_footer_actions(self.footer_actions_layout,
+            (self.open_output_button, self.open_last_button, self.open_report_button),
+            (self.generate_button, self.cancel_button, self.export_button), max(0, width-24), set_labels)
+        return narrow
 
     def settings(self):
         values = {name: spin.value() for name, spin in self.inputs.items()}
@@ -985,6 +1007,7 @@ class PreprocessorPanel(QWidget):
         self._layout_timer.start(0)
 
     def _toggle_travel_visibility(self, visible):
+        self.travel_visibility_button.setText("Fahrwege ausblenden" if visible else "Fahrwege anzeigen")
         self.canvas.set_wait_travel_visible(visible)
         self.canvas.set_tower_travel_visible(visible)
         self._show_travel_modes(visible and self.travel_visibility_button.isEnabled())

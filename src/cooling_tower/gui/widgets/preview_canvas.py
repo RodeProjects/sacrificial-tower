@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QToolButton, QWidget
 
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene
+from cooling_tower.gui.design_tokens import PREVIEW_SEAM_COLOR
 from cooling_tower.gui.widgets.preview_busy_overlay import PreviewBusyOverlay
 from cooling_tower.gui.widgets.preview_layer_context import LowerLayerFrames, layer_context_colour
 from cooling_tower.gui.widgets.preview_projection import LineProjectionCache
@@ -63,6 +64,7 @@ class _PreparedLineFrame:
     brim_front_blocks: _LineBlocks = ()
     lower_layers: QPixmap | None = None
     lower_brim_front_blocks: _LineBlocks = ()
+    seam_blocks: _LineBlocks = ()
 
     @property
     def travel_blocks(self) -> _LineBlocks:
@@ -81,7 +83,8 @@ class PreviewCanvas(QWidget):
     BRIM_COLOR = "#4979b5"
     WAIT_POSITION_COLOR = "#ffe48a"
     WAIT_TRAVEL_COLOR = "#bc98f4"
-    TOWER_TRAVEL_COLOR = "#f080ad"
+    TOWER_TRAVEL_COLOR = "#38489b"
+    SEAM_COLOR = PREVIEW_SEAM_COLOR
     X_AXIS_COLOR = "#f07575"
     Y_AXIS_COLOR = "#75d18c"
     Z_AXIS_COLOR = "#75a9f0"
@@ -98,6 +101,7 @@ class PreviewCanvas(QWidget):
         self.setMinimumSize(520, 420)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.scene: PreviewScene | None = None
+        self._seam_segments = ()
         self.yaw_deg = -38.0
         self.pitch_deg = 28.0
         self.zoom = 1.0
@@ -189,6 +193,7 @@ class PreviewCanvas(QWidget):
         # navigation enabled; existing automatic previews retain their default.
         self.set_navigation_enabled(self._navigation_default)
         self.scene = scene
+        self._seam_segments = tuple(LineSegment3D(point, point) for point in scene.seam_points) if scene else ()
         self._lower_layer_frames = self._lower_layer_key = None
         self._separated_yaw = None
         self._fit_cache_key = None
@@ -887,11 +892,11 @@ class PreviewCanvas(QWidget):
         if scene is None or scene.wait_position_xy_mm is None:
             return None
         if self._layer_z is not None:
-            if self._layer_z > scene.tower_height_mm + .001:
-                return None
             for point, index in zip(scene.wait_points, scene.wait_point_layer_indices):
                 if index < len(scene.layer_z_mm) and abs(scene.layer_z_mm[index] - self._layer_z) < .001:
                     return point
+            if self._layer_z > scene.tower_height_mm + .001:
+                return None
             return Point3D(*scene.wait_position_xy_mm, self._layer_z + scene.wait_height_offset_mm)
         return scene.wait_points[-1] if scene.wait_points else Point3D(*scene.wait_position_xy_mm, 0)
 
@@ -982,6 +987,7 @@ class PreviewCanvas(QWidget):
         back_brim, front_brim = self._brim_depth_groups(brim, brim_blocks, context)
         prepared = _PreparedLineFrame(
             key=key,
+            seam_blocks=self._line_blocks(self._layer_segments(self._seam_segments), parameters, context),
             bed_blocks=self._line_blocks(bed_segments, parameters, context),
             object_blocks=self._line_blocks(
                 self._layer_segments(scene.object_segments),
@@ -1016,6 +1022,10 @@ class PreviewCanvas(QWidget):
                     if not full:
                         blocks = self._line_blocks(segments, parameters, context, maximum_lines=maximum)
                     sources.append((segments, blocks, color, width, maximum))
+                if self._seam_segments:
+                    seam_blocks = prepared.seam_blocks if full else self._line_blocks(self._seam_segments, parameters, context)
+                    sources.append((self._seam_segments, seam_blocks, self.SEAM_COLOR, 3, None,
+                        (), True))
                 if not full:
                     back_brim, front_brim = self._brim_depth_groups(scene.brim_segments,
                         self._line_blocks(scene.brim_segments, parameters, context), context)
@@ -1161,6 +1171,9 @@ class PreviewCanvas(QWidget):
         self._draw_line_blocks(frame_painter, prepared.tower_blocks)
         frame_painter.setPen(QPen(QColor(self.BRIM_COLOR), 1.3))
         self._draw_line_blocks(frame_painter, prepared.brim_front_blocks)
+        frame_painter.setPen(QPen(QColor(self.SEAM_COLOR), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        for block in prepared.seam_blocks:
+            frame_painter.drawPoints(tuple(line.p1() for line in block))
         if prepared.lower_brim_front_blocks:
             frame_painter.save()
             frame_painter.setOpacity(.65 if self._layer_colours_highlight else 1.)

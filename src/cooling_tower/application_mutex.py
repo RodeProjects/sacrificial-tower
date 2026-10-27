@@ -7,6 +7,7 @@ import os
 import time
 from ctypes import wintypes
 from typing import Any
+from cooling_tower.version import APP_NAME
 
 
 APPLICATION_MUTEX_NAME = (
@@ -55,7 +56,7 @@ def acquire_application_mutex(
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         _close_windows_handle(handle)
         raise ApplicationAlreadyRunningError(
-            "Der Kühlturm-Generator wird bereits ausgeführt."
+            f"{APP_NAME} wird bereits ausgeführt."
         )
     return handle
 

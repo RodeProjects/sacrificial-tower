@@ -41,6 +41,40 @@ class PostprocessorNumericInputTests(unittest.TestCase):
         QTest.keyClicks(editor, text)
         self.app.processEvents()
 
+    def test_z_hop_auto_profile_manual_precision_steps_and_reset(self):
+        auto = self.panel.automatic["automatic_z_hop"]
+        editor = self.panel.inputs["z_hop_mm"]
+        self.assertTrue(auto.isChecked())
+        self.assertFalse(editor.isEnabled())
+        self.assertEqual(editor.lineEdit().text(), "0,20")
+        self.panel.set_profile_values({"z_hop": ["0.455"]})
+        self.assertEqual(editor.value(), .46)
+        self.assertEqual(editor.lineEdit().text(), "0,46")
+        auto.setChecked(False)
+        self.assertTrue(editor.isEnabled())
+        self.assertEqual(editor.value(), .46)
+        self.panel.advanced_group.set_expanded(True)
+        self.app.processEvents()
+        self.draft(editor, "0.125")
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        self.assertEqual(editor.value(), .13)
+        self.assertEqual(editor.lineEdit().text(), "0,13")
+        editor.stepUp()
+        self.assertEqual(editor.value(), .23)
+        editor.stepDown()
+        self.assertEqual(editor.value(), .13)
+        self.draft(editor, "0")
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        self.assertEqual(editor.lineEdit().text(), "0,00")
+        self.assertEqual(self.panel.settings().z_hop_mm, 0)
+        self.panel.set_profile_values({"z_hop": ["2"]})
+        self.assertEqual(editor.value(), 0)
+        self.panel.reset_buttons["z_hop_mm"].click()
+        self.assertTrue(auto.isChecked())
+        self.assertEqual(editor.lineEdit().text(), "2,00")
+        self.panel.set_profile_values({"z_hop": ["0"]})
+        self.assertEqual(editor.lineEdit().text(), "0,20")
+
     def test_each_digit_preserves_draft_cursor_and_previous_setting(self):
         changed = QSignalSpy(self.panel.changed)
         editor = self.spin

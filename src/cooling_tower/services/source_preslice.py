@@ -439,6 +439,7 @@ class SourcePreSliceService:
             object_segments=preview.object_segments,
             source_segment_count=preview.source_segment_count,
             occupied_bounds=preview.occupied_bounds,
+            seam_points=preview.seam_points,
         )
 
     def _validate_request(

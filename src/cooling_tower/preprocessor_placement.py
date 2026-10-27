@@ -204,11 +204,12 @@ class OriginalMotionCollector:
         if isinstance(event, Movement) and (event.endpoint_distance_xyz_mm > 1e-9 or event.is_arc):
             self.moves.extend(motion_envelopes(event))
 
-    def finish(self, insertion_lines, *, cancellation_event=None):
+    def finish(self, insertion_lines, *, cancellation_event=None, end_line=None):
         _cancel(cancellation_event)
         insertions = iter(sorted(insertion_lines.items()))
         next_insertion = next(insertions, None)
-        if next_insertion and any(line > next_insertion[0] for line in self.reference_lines):
+        reference_limit = next_insertion[0] if next_insertion else end_line
+        if reference_limit is not None and any(line > reference_limit for line in self.reference_lines):
             raise ValueError("Der Original-G-Code enthält nach dem Turmaufbau eine Referenzfahrt oder einen "
                 "Koordinatenwechsel. Dafür kann kein kollisionsfreier Weg nachgewiesen werden. "
                 "Bitte ein Profil mit einer sicheren Endsequenz ohne erneutes Homing wählen.")
@@ -216,6 +217,11 @@ class OriginalMotionCollector:
         for i, move in enumerate(self.moves):
             if i % 2000 == 0:
                 _cancel(cancellation_event)
+            # End parking is replaced by the postprocessor. Its original XY
+            # paths no longer constrain tower placement; unknown references
+            # above still fail closed, including when no tower is needed.
+            if end_line is not None and move.line > end_line:
+                continue
             while next_insertion and next_insertion[0] < move.line:
                 tower_z = next_insertion[1]
                 next_insertion = next(insertions, None)

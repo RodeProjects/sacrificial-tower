@@ -7,7 +7,7 @@
 ## Projektinterne Symbole
 
 Die SVG-Symbole in diesem Ordner wurden eigens für den
-Kühlturm-Generator als einfache geometrische Liniengrafiken erstellt. Sie
+Sacrificial Tower als einfache geometrische Liniengrafiken erstellt. Sie
 stammen aus keinem externen Iconpaket.
 
 Für Verwendung, Vervielfältigung, Veränderung und Weitergabe eigener Assets,

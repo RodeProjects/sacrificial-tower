@@ -81,6 +81,7 @@ def export_preprocessor_run(service: PreprocessorService, result: PreprocessorRe
             f"Wartephasen: {result.wait_count}\nRestwartezeit gesamt: {result.total_wait_s:.3f} s\n"
             f"Turmhöhe: {result.height_mm:.2f} mm\nTurmdurchmesser: {result.diameter_mm:.2f} mm\n"
             f"Standfußbreite: {result.base_width_mm:.2f} mm\nSicherheitshub: {result.effective_z_hop_mm:.2f} mm\n\n"
+            "Druckabschluss: Fahrt mit dem eingestellten Z-Hop zur Warteposition; der Kopf bleibt außerhalb des Modells.\n\n"
             + (f"Turm-Brim Breite: {result.placement.brim_width_mm:.2f} mm\n"
                 f"Turm-Brim Abstand: {result.placement.brim_gap_mm:.2f} mm\n"
                 f"Turm-Brim Linienbreite: {result.placement.brim_line_width_mm:.3f} mm\n\n" if result.placement is not None else "")

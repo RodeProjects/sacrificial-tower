@@ -7,6 +7,10 @@ Nach STL-Auswahl, Slicer-/Profilbestätigung und Pre-Slice steht neben
 Unterstützt werden Anycubic Slicer Next, Bambu Studio, OrcaSlicer und PrusaSlicer.
 Dieser Modus bearbeitet den bereits vorhandenen Pre-Slice; eine Änderung der
 Turmeinstellungen startet keinen weiteren Slicerlauf.
+Klassische Nähte und im Profil beziehungsweise G-Code ausgewiesene Scarf-Nähte
+werden unterstützt. Scarf-Rampen müssen innerhalb ihrer nominellen Druckschicht
+bleiben und vor der Turmfahrt wieder deren vollständige Höhe erreichen.
+Die ursprünglichen Nahtbewegungen werden unverändert übernommen.
 
 **G-Code und Vorschau erzeugen** startet die Berechnung ausdrücklich.
 Sobald ein gültiger G-Code zum Export bereitsteht, ersetzt **G-Code exportieren**
@@ -52,12 +56,19 @@ Automatisch berechnete Eingabefelder sind deaktiviert und grau dargestellt.
 Nach der Erzeugung zeigen sie den verwendeten Wert. Ohne aktuelles Ergebnis
 steht dort ein Gedankenstrich; nach Einstellungsänderungen werden alte Werte
 nicht weiter als aktuell angezeigt. Wird kein Turm benötigt, zeigen seine
-automatischen Maße 0,00 und nicht verwendete Positionen einen Gedankenstrich.
+automatischen Maße 0,00 und die Turmposition einen Gedankenstrich. Die
+Warteposition bleibt für die Abschlussfahrt vorhanden.
 Die Einstellungen bleiben während der Sitzung erhalten;
 sie werden derzeit nicht als globale Benutzervorgaben gespeichert.
 
 **Wandlinien** und **Warteabstand** stehen in den Postprozessor-Einstellungen.
 **Z-Hop** bezeichnet den Sicherheitshub in den erweiterten Einstellungen.
+Die standardmäßig aktivierte Option **Auto** übernimmt den Z-Hop des aktiven
+Extruders aus dem bestätigten Profil einschließlich Filamentüberschreibungen.
+Ist dort kein Z-Hop aktiviert oder verfügbar, gelten 0,20 mm. Ohne Auto ist der
+Wert von 0 bis 10 mm manuell einstellbar; 0,00 mm deaktiviert den zusätzlichen
+Hub. Werte werden auf zwei Nachkommastellen gerundet und mit zwei
+Nachkommastellen angezeigt. Die Pfeiltasten verändern den Wert um 0,1 mm.
 **Turm-Brim Breite** und **Turm-Brim Abstand** stehen ebenfalls in den erweiterten
 Einstellungen und steuern einen eigenen Brim nur
 für den Turm. Brim-Art und Brimbreite des Modellprofils werden dafür nicht
@@ -179,13 +190,18 @@ verschiebt den Erzeugen-Button nach links. **Abbrechen** erscheint nur bei
 laufender Erzeugung. Seine Höhe folgt Fortschrittsanzeige, mehrzeiligen
 Status-/Fehlertexten und Exportaktionen, sodass auch **Standardwerte** sichtbar
 bleibt. In schmalen Fenstern werden die Footerbereiche gestapelt.
+Beide Seiten halten denselben Abstand zur Trennlinie ein. Exportordner- und
+Aktionsbuttons verwenden dieselbe Anordnung, stufenweise Beschriftungskürzung
+und Umbruchlogik wie die iterative Methode.
 
 **G-Code exportieren** speichert die geprüfte Vorschau als `.gcode`. Dieser
 Modus benötigt keinen erneuten Slice und exportiert kein gemeinsames 3MF/STL.
 Wie die anderen Methoden legt er im konfigurierten Methodenordner einen neuen
 Zeitstempel-Unterordner mit G-Code, Kurzbericht und technischem Bericht an.
-Danach stehen **Alle Exporte öffnen**, **Letzten Export öffnen** und
-**Letzten Exportbericht öffnen** zur Verfügung. Der Exportdialog beschreibt
+**Alle Exporte öffnen** öffnet den Methodenordner. **Letzten Export öffnen**
+erscheint nur bei einem vorhandenen Exportordner, auch aus früheren Sitzungen.
+**Letzten Exportbericht öffnen** erscheint erst nach einem erfolgreichen
+G-Code-Export in der aktuellen Sitzung. Der Exportdialog beschreibt
 die direkte Verwendung des fertigen G-Codes und dessen berechnete Schichtzeiten.
 Kritische Fehler erscheinen sichtbar als **Export gesperrt** und entfernen die
 Exportberechtigung. Auch veränderte oder fehlende Original-/Ergebnisdateien
@@ -286,8 +302,9 @@ und [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer/blob/main/src/libslic3r
   Ablagebahnen einschließlich Linienbreitenreserve und der Turmquerschnitt
   auf der jeweiligen Höhe. Freie Zwischenräume zwischen Modellbereichen
   werden dadurch nicht pauschal durch eine gemeinsame Umgrenzung gesperrt.
-  Spätere Originalfahrten werden weiterhin konservativ gegen den gesamten
-  Fußdurchmesser geprüft. Auch manuelle Positionen müssen diese Prüfungen bestehen.
+  Spätere Originalfahrten im Druckabschnitt werden weiterhin konservativ gegen
+  den gesamten Fußdurchmesser geprüft. Die ersetzten Endparkfahrten zählen
+  nicht zu diesen Kollisionswegen. Auch manuelle Positionen müssen diese Prüfungen bestehen.
   Ein räumlicher Bewegungsindex bewahrt die Chronologie und wird pro Erzeugung
   einmal aufgebaut. Seine Begrenzungsrechtecke dienen nur zur Vorauswahl;
   entscheidend bleiben Linienabstände, Höhen und konservative Bogenhüllen.
@@ -484,18 +501,19 @@ Einstellungsänderungen schließen den Editor. Wenn kein Turm benötigt wird,
 weist der Editor darauf hin und bietet keine Positionsübernahme an.
 Es werden keine Slicer-Dateien oder -Profile verändert.
 
-Ohne Originaldefizit entsteht standardmäßig kein Turm und die exportierten
-G-Code-Bytes bleiben unverändert. Ein Platz für einen unnötigen Turm muss in
-diesem Fall nicht gefunden werden.
+Ohne Originaldefizit entsteht standardmäßig kein Turm. Eine sichere Warteposition
+und die abschließende Fahrt dorthin bleiben erforderlich; für einen Turm muss
+in diesem Fall kein Platz reserviert werden.
 
 ## Druckablauf, Fahrwege und Zeitberechnung
 
 Nach der letzten Ablagebewegung einer betroffenen Schicht:
 
-1. Filament zurückziehen und senkrecht über die bereits gedruckte Höhe anheben.
-   Der zusätzliche Hub ist mindestens so hoch wie die Profilwerte
-   `retract_lift`, `z_hop`, `filament_retract_lift` und `filament_z_hop`.
-   Ein höherer manueller Sicherheitshub wird übernommen. Profil- und
+1. Filament zurückziehen und bei aktivem Z-Hop senkrecht über die bereits
+   gedruckte Höhe anheben. Auto liest `z_hop` beziehungsweise `retract_lift`;
+   gültige Filamentüberschreibungen `filament_z_hop` beziehungsweise
+   `filament_retract_lift` haben Vorrang. Ein deaktivierter Profilhub verwendet
+   den Ersatzwert 0,20 mm. Ohne Auto gilt der manuelle Wert, auch 0,00 mm.
    Original-G-Code-Hübe bleiben erhalten; alle neuen Hübe müssen innerhalb
    der bestätigten maximalen Druckhöhe liegen.
 2. Nur bei einem Zeitdefizit der Originalschicht die außerhalb von Modell und
@@ -518,6 +536,40 @@ Nach der letzten Ablagebewegung einer betroffenen Schicht:
 5. Wieder zurückziehen, anheben, den sicheren Weg zurückfahren und am
    ursprünglichen Modellpunkt absenken. XYZ-Modus, Extrusionsmodus,
    E-Koordinate und Vorschub werden wiederhergestellt.
+
+Während der Wartephase werden keine E-Bewegungen erzeugt. `M400` wartet die
+vorherigen Bewegungen ab; `G4` pausiert den Ablauf. Der vor der Anfahrt
+ausgeführte Rückzug bleibt bis zur Ankunft am Turm erhalten. Rückzugsausgleich
+und zusätzliches Primen erfolgen erst dort. Diese Befehle verhindern keinen
+passiven Materialaustritt aus der heißen Düse: Restdruck und flüssiges Material
+können trotz stehendem Filamentantrieb zu Oozing führen. Die E-Menge zusätzlicher
+Prime-Bewegungen ist von diesem passiven Austritt zu unterscheiden.
+Die Befehlssemantik beschreiben [M400](https://marlinfw.org/docs/gcode/M400.html)
+und [G4](https://marlinfw.org/docs/gcode/G004.html); zu Rückzug und Oozing siehe
+die [Prusa-Dokumentation](https://help.prusa3d.com/article/stringing-and-oozing_1805).
+
+Nach dem letzten Druckabschnitt fährt die Düse zur geprüften Warteposition.
+Zuerst wird der wirksame Z-Hop über der letzten Modellschicht ausgeführt,
+anschließend der sichere XY-Weg ohne Extrusion. Wird auf der letzten
+Modellschicht noch der Turm gedruckt, führt die Abschlussfahrt direkt vom
+Turm zur Warteposition. Die sonstige Rückfahrt und der Rückzugsausgleich
+am bereits fertigen Modell entfallen.
+Die Düse bleibt dort angehoben; eine Rückfahrt zum Modell und eine zusätzliche
+Wartepause werden nicht erzeugt. Bei manuell deaktiviertem Z-Hop (0,00 mm)
+entfällt der Hub. Der Abschluss gilt auch dann, wenn der Turm niedriger als das
+Modell ist oder kein Turm benötigt wird. Er vermeidet, dass die heiße Düse
+während des Endablaufs über der letzten Modellschicht stehen bleibt.
+
+Die Abschlussfahrt liegt vor den abschließenden Warte- und Abschaltbefehlen
+des Slicers. Dessen spätere XY-Fahrten und reines XY-Homing werden in der
+Exportkopie durch Kommentare ersetzt, damit die Warteposition erhalten bleibt.
+Enthalten solche Fahrbefehle auch E- oder Vorschubwerte, bleiben diese als
+lineare Befehle erhalten. Z-Anhebungen bleiben zulässig; spätere Absenkungen
+werden unterdrückt. Heizungs-, Lüfter- und Motorabschaltung bleiben erhalten.
+Die maximale Druckhöhe wird einschließlich des abschließenden Hubs und
+späterer Z-Anhebungen geprüft. Ohne erreichbare Warteposition oder ausreichende
+Druckhöhe wird der Export gesperrt. Slicer-Originaldateien bleiben unverändert.
+Vorschau, Layerzuordnung und Zeitberechnung enthalten die Abschlussfahrt.
 
 Der erste Berechnungsschritt erzeugt die vollständigen Fahr-, Prime- und
 Turmbahnen ohne zusätzliche Wartezeit. Der bestehende Beschleunigungs-/Slicer-
@@ -546,10 +598,9 @@ Prusa-Start-Purgelinien werden für diese Methode anhand der expliziten
 Modellschichtmarker von den Druckschichten getrennt. Der normale Analysecache
 wird nicht für die abweichende Bewegungszeitbasis verwendet.
 
-Abschließendes reines XY-Homing ohne weitere räumliche Folgebewegungen erhält
-vorher einen geprüften Z-Sicherheitshub über Modell und Turm. Unbekannte
+Abschließendes reines XY-Homing wird durch die Abschlussfahrt ersetzt. Unbekannte
 Referenzfahrten einschließlich Z-Homing, Koordinatenwechsel, Mehrwerkzeugdruck,
-volumetrische Extrusion, nichtplanarer/Spiraldruck, Prüfsummenzeilen und
+volumetrische Extrusion, sonstiger nichtplanarer Druck, Spiraldruck, Prüfsummenzeilen und
 bereits bearbeitete Quellen werden gesperrt. Diese Einschränkungen werden
 konkret gemeldet; Originalprofile werden dafür nicht verändert.
 
@@ -563,14 +614,21 @@ und Sperrflächen stammt aus dem bestätigten Druckprofil. Wissenschaftliche
 Schreibweise wie `7e-15` bleibt beim Einlesen erhalten.
 
 Direkt unter der Vorschau steht ausschließlich die Farblegende mit Modell,
-Turm, Warteposition, Warteplatzfahrten, Modell-/Turmfahrten und Brim. Zwischen
+Turm, Warteposition, Warteplatzfahrten, Modell-/Turmfahrten, Brim und Seams. Zwischen
 benachbarten Einträgen liegen 15 Pixel; bei minimaler Breite stehen die Einträge
 einspaltig untereinander. Die Fahrwege werden innerhalb der Vorschau bedient.
 
 - Die **Warteposition** bleibt als gelbe Markierung sichtbar.
+- **Seams**: sehr hellgraue Punkte (`#E9E9E9`) an den tatsächlichen Startpunkten von
+  Druckpfaden der äußersten Wand. Dies schließt klassische Nähte und Scarf-Nähte ein.
+  Scarf-Markierungen gehören zur nominellen Druckschicht und folgen der
+  Layerauswahl sowie der Transparenzdarstellung.
+  Das Farbfeld in der Legende erhält einen dünnen grauen Rahmen, damit es
+  auf weißem Hintergrund sichtbar bleibt.
 - **Warteplatzfahrten**: violette gestrichelte Wege vom
   Modell zum Warteplatz und weiter zum Turm.
-- **Modell-/Turmfahrten**: rosa gestrichelte direkte Anfahrt in
+- **Modell-/Turmfahrten**: blau gestrichelte direkte Anfahrt in der Travel-Farbe
+  von Anycubic Slicer Next (`#38489B`) in
   Schichten ohne Originaldefizit und Rückfahrt vom Turm zum Modell samt
   zugehöriger lokaler Turmfahrten. Dieselbe
   Zuordnung gilt in der Draufsicht des Positionseditors.
@@ -672,7 +730,8 @@ Auch bei vollständiger Modelldarstellung bleibt dabei die gewählte
 Fahrwegschicht wirksam. Die Zuordnung verwendet auch bei Z-Hops den Drucklayer.
 Der Auswahlhintergrund gleitet beim Umschalten horizontal zur anderen Seite.
 Der Modus lässt sich auch mit Leertaste und Links-/Rechtstasten bedienen.
-Die beiden Fahrweggruppen werden gemeinsam über **Fahrwege anzeigen** geschaltet;
+Die beiden Fahrweggruppen werden gemeinsam über **Fahrwege anzeigen**
+beziehungsweise **Fahrwege ausblenden** geschaltet;
 ein Moduswechsel verändert weder Kamera, Layerauswahl noch G-Code.
 
 **Vorschau zurücksetzen** links unten innerhalb der Vorschau stellt die
@@ -692,11 +751,12 @@ ausgeschaltet dunkelblau. Beide linken Schaltflächen sind gleich breit und
 schließen bündig und ohne Rundungen mit dem Vorschaurand ab. Diese Funktionen
 ändern keine Druckeinstellungen und starten keine G-Code-Erzeugung.
 
-Direkt über dem Umschalter **Alle / Einzeln** schaltet **Fahrwege anzeigen** beide
+Direkt über dem Umschalter **Alle / Einzeln** schaltet die Fahrweg-Schaltfläche beide
 Fahrweggruppen gemeinsam ein oder aus. Der gewählte
 Anzeigemodus **Alle** oder **Einzeln** bleibt dabei erhalten.
-Der Schalter ist standardmäßig eingeschaltet und dunkelgrün; ausgeschaltet
-erscheint er dunkelblau. Beim Ausschalten gleitet der Modusumschalter nach unten
+Der Schalter ist standardmäßig eingeschaltet, dunkelgrün und mit
+**Fahrwege ausblenden** beschriftet; ausgeschaltet erscheint er dunkelblau mit
+**Fahrwege anzeigen**. Beim Ausschalten gleitet der Modusumschalter nach unten
 aus der Vorschau, während **Fahrwege anzeigen** zur rechten unteren Ecke wandert.
 Beim Einschalten läuft die Bewegung umgekehrt. Die 240-ms-Animation beginnt bei
 einem schnellen Richtungswechsel an der aktuellen Position; die Vorschau

@@ -427,7 +427,9 @@ wird bei einer Überlappung mit der Gruppe ausgeblendet. Der Drehungs-Reset
 verwendet dieselbe 36-Pixel-Größe und dieselben Standard-/Änderungs-/Hoverzustände
 wie die numerischen Reset-Buttons. Unter der Vorschau stehen **Legende** links und
 **Bedienung** rechts, getrennt durch eine graue vertikale Linie. Die acht
-Legendeneinträge stehen bei genügend Platz in zwei Spalten mit je vier Einträgen.
+Bearbeitungs-Legendeneinträge stehen bei genügend Platz in zwei Spalten mit je vier Einträgen.
+Die manuelle und die iterative Vorschau zeigen keine Nahtmarkierungen (Seams).
+Diese werden ausschließlich in der Postprozessor-Vorschau angezeigt.
 Umgebrochene Legendeneinträge bleiben oben an ihrem Farbquadrat ausgerichtet;
 der danebenliegende Eintrag wird nicht vertikal verschoben. Die
 Bedienungsstichpunkte beginnen bündig unter ihrer Überschrift, ohne Satzendpunkt;
