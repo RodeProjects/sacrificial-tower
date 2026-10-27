@@ -79,9 +79,14 @@ unter `build/` ausführen. Scanner bleiben aktiv. Ein eventuelles virtuelles
 Startsignal ohne sichtbare Statusdatei wird ausdrücklich als nicht freigegebene
 Übergabe geprüft und nicht als erfolgreiche Installation gewertet.
 
-GitHub Actions führt die vollständige Testauswahl mit
-`python scripts/run_isolated_tests.py` pro Testdateimuster in einem eigenen
-Python-Prozess aus. Vor dem Start zählt eine isolierte Discovery die einzelnen
+Die offizielle private CI verwendet den gemeinsamen Teststarter ihrer
+Infrastruktur. Dieser priorisiert neue und zuletzt geänderte Tests anhand der
+Git-Historie und bricht beim ersten Fehler ab. Der Projektadapter richtet die
+Importpfade zum Projektstamm und zu `src` ein; die Anwendung und ihre Testdateien
+benötigen keine Abhängigkeit vom privaten Starter. Der lokale Helfer
+`python scripts/run_isolated_tests.py` bleibt für lokale Aufrufe verfügbar.
+Beide führen die Testauswahl pro Testdateimuster in einem eigenen Python-Prozess
+aus. Vor dem Start zählt eine isolierte Discovery die einzelnen
 `unittest`-Testfälle je Muster. Die Fortschrittsanzeige zählt diese Testfälle
 kumulativ über die gesamte Suite und rundet den Prozentwert auf volle Prozent;
 ein Testfall entspricht dabei einem `TestCase`-Aufruf, nicht einem einzelnen

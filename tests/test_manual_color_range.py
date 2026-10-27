@@ -1,12 +1,7 @@
 """Real pointer/keyboard behavior, collisions and scale-only updates."""
 import unittest
-import sys
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import patch
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from PySide6.QtCore import QPoint,QEvent,Qt
 from PySide6.QtTest import QTest,QSignalSpy

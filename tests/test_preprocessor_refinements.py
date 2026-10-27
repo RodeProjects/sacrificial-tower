@@ -1,13 +1,8 @@
 """Independent numerical checks and larger placement/restart regressions."""
 from dataclasses import replace
 import math
-import sys
 from threading import Event
 import unittest
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import test_preprocessor as fixture_module
 from test_preprocessor import make_gcode

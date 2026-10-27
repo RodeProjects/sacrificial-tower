@@ -2078,6 +2078,13 @@ class Phase18UiTests(unittest.TestCase):
         self.assertLessEqual(window.warning_text.height(), 120)
         self.assertLess(window.notice_panel.height(), 160)
 
+        self.assertTrue(window.open_stl_button.isHidden())
+        with patch(
+            "cooling_tower.gui.main_window.resolve_latest_export_directory",
+            return_value=SimpleNamespace(directory=self.root, unavailable_reason=None),
+        ):
+            window._refresh_folder_action_states(rescan=True)
+
         long_message = "Ausführlicher prüfbarer Hinweis. " * 80
         window.validation_label.setText(long_message)
         window._static_error_causes = ["Fehler"] * 4

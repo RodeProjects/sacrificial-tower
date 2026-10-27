@@ -1321,6 +1321,13 @@ class Phase17Tests(unittest.TestCase):
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
         self.app.processEvents()
+        self.assertTrue(window.open_stl_button.isHidden())
+        with patch(
+            "cooling_tower.gui.main_window.resolve_latest_export_directory",
+            return_value=SimpleNamespace(directory=self.root, unavailable_reason=None),
+        ):
+            window._refresh_folder_action_states(rescan=True)
+        self.app.processEvents()
         for button in (
             window.open_stl_button,
             window.reset_button,
@@ -1380,6 +1387,11 @@ class Phase17Tests(unittest.TestCase):
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
+        with patch(
+            "cooling_tower.gui.main_window.resolve_latest_export_directory",
+            return_value=SimpleNamespace(directory=self.root, unavailable_reason=None),
+        ):
+            window._refresh_folder_action_states(rescan=True)
         window.show()
         window.resize(1000, 700)
         self.app.processEvents()

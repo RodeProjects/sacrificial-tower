@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import math
 import tempfile
-import sys
 import unittest
 from dataclasses import replace
 from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(PROJECT_ROOT), str(PROJECT_ROOT / "src")]
 
 from gcode_parser import (
     GCodeLine,
