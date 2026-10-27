@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import faulthandler
 import os
 import sys
 import tempfile
@@ -38,6 +39,7 @@ from cooling_tower.slicers import (
     SlicerInstallation,
     SlicerSupportLevel,
 )
+from gui_lifecycle import dispose_test_widget
 
 
 class StartupSlicerService:
@@ -118,6 +120,8 @@ class StartupPreparationProgressTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
+        faulthandler.dump_traceback_later(30, repeat=True)
+        self.addCleanup(faulthandler.cancel_dump_traceback_later)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         executable = self.root / "Slicer.exe"
@@ -279,9 +283,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 original_profile_bytes,
             )
         finally:
-            window.close()
-            window.deleteLater()
-            self.app.processEvents()
+            dispose_test_widget(window)
 
     def test_startup_restores_selected_slicer_and_its_profiles_ahead_of_usage(self) -> None:
         last_used = replace(
@@ -350,9 +352,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
             self.assertIsNone(window.profile_catalog_confirmation)
             self.assertEqual(profile_service.prefer_active_presets, [False])
         finally:
-            window.close()
-            window.deleteLater()
-            self.app.processEvents()
+            dispose_test_widget(window)
 
     def test_explicit_rediscovery_retains_unchanged_current_profile_choice(self) -> None:
         discovery = SlicerDiscoveryResult(
@@ -409,9 +409,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 self.records["filament_alt"].profile_id,
             )
         finally:
-            window.close()
-            window.deleteLater()
-            self.app.processEvents()
+            dispose_test_widget(window)
 
     def test_first_incomplete_step_two_entry_retries_detection_only_once(self) -> None:
         discovery = SlicerDiscoveryResult(
@@ -459,9 +457,7 @@ class StartupPreparationProgressTests(unittest.TestCase):
                 window.preparation_tabs.setCurrentIndex(1)
                 discovery_retry.assert_called_once_with(force=True)
         finally:
-            window.close()
-            window.deleteLater()
-            self.app.processEvents()
+            dispose_test_widget(window)
 
     def test_catalog_confirmation_rejects_path_outside_inventory(self) -> None:
         with self.assertRaises(ValueError):
