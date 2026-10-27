@@ -756,6 +756,7 @@ class PreviewCanvas(QWidget):
             id(scene),
             self.width(),
             self.height(),
+            self.devicePixelRatioF(),
             self.yaw_deg,
             self.pitch_deg,
             self.zoom,

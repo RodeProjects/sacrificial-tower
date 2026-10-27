@@ -37,6 +37,8 @@ LRU-Puffer. Ein Szenenwechsel leert ihn. Größere einzelne Felder werden nur
 vorübergehend berechnet. Hinzu kommen die referenzierten Quellsegmente,
 projizierte Linien sowie temporäre Rechen- und Bildpuffer; das Budget begrenzt
 deshalb nicht den gesamten Speicherverbrauch der Vorschau.
+Der fertige Vorschau-Frame wird nach Szene, Ansicht, Größe und Pixeldichte
+zwischengespeichert; ein Wechsel der Pixeldichte erzeugt den Frame neu.
 Die iterative und manuelle Methode
 besitzen jeweils ihren aktuellen Sitzungsstand. Ihre temporären STL-, 3MF-
 und Prüfdaten werden beim Verwerfen des Ergebnisses und beim regulären

@@ -85,16 +85,26 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertIsNotNone(canvas.scene.bed_geometry)
         canvas.fit_scene(emit=False)
         canvas.grab()
-        image = canvas._rendered_frame.toImage()
+        frame = canvas._rendered_frame
+        image = frame.toImage()
         from cooling_tower.preview import Point3D
         length = min(30, (canvas.scene.bed_bounds.maximum_x_mm-canvas.scene.bed_bounds.minimum_x_mm)/8)
         point = canvas._project(Point3D(0, 0, length*.6), canvas._fit_parameters())
-        ratio = max(1.0, canvas.devicePixelRatioF())
+        ratio = frame.devicePixelRatioF()
         expected = QColor(canvas.Z_AXIS_COLOR)
         pixels = [image.pixelColor(round(point.x()*ratio)+dx, round(point.y()*ratio)+dy)
             for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
         self.assertLess(min(abs(p.red()-expected.red())+abs(p.green()-expected.green())+
             abs(p.blue()-expected.blue()) for p in pixels), 150)
+
+    def test_preview_frame_cache_tracks_device_pixel_ratio(self):
+        self.harness.wait_for_result()
+        canvas = self.panel.canvas
+        with patch.object(canvas, "devicePixelRatioF", return_value=1.0):
+            low_dpi_key = canvas._frame_key(canvas.scene)
+        with patch.object(canvas, "devicePixelRatioF", return_value=2.0):
+            high_dpi_key = canvas._frame_key(canvas.scene)
+        self.assertNotEqual(low_dpi_key, high_dpi_key)
 
     def test_preview_legend_wraps_entries_in_reading_order_and_uses_full_width(self):
         legend = self.panel.legend
