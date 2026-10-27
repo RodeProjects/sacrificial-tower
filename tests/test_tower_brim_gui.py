@@ -26,10 +26,10 @@ class TowerBrimGuiTests(unittest.TestCase):
     def tearDown(self):
         dispose_test_widget(self.panel)
 
-    def test_default_width_is_point_two_mm_independent_of_model_brim(self):
+    def test_default_width_is_two_mm_independent_of_model_brim(self):
         panel = self.panel
         panel.set_profile_values({"brim_type": "none", "brim_width": 19, "brim_object_gap": .35})
-        for field, expected in (("tower_brim_width_mm", .2), ("tower_brim_gap_mm", .35)):
+        for field, expected in (("tower_brim_width_mm", 2.0), ("tower_brim_gap_mm", .35)):
             self.assertFalse(panel.inputs[field].isEnabled())
             self.assertAlmostEqual(panel.inputs[field].value(), expected)
         self.assertEqual(panel.rows["tower_brim_width_mm"].label.text(), "Turm-Brim Breite")
@@ -39,7 +39,7 @@ class TowerBrimGuiTests(unittest.TestCase):
         self.assertEqual(panel.settings().tower_brim_width_mm, 0)
         self.assertTrue(panel.automatic["automatic_tower_brim_gap"].isChecked())
         panel.automatic["automatic_tower_brim_width"].setChecked(True)
-        self.assertEqual(panel.inputs["tower_brim_width_mm"].value(), .2)
+        self.assertEqual(panel.inputs["tower_brim_width_mm"].value(), 2.0)
 
     def test_manual_ranges_and_independent_resets(self):
         panel = self.panel
@@ -59,7 +59,7 @@ class TowerBrimGuiTests(unittest.TestCase):
         self.assertEqual(panel.settings().tower_brim_gap_mm, 1)
         panel.reset()
         self.assertTrue(panel.settings().automatic_tower_brim_gap)
-        self.assertEqual(panel.settings().tower_brim_width_mm, .2)
+        self.assertEqual(panel.settings().tower_brim_width_mm, 2.0)
 
     def test_profile_zero_and_large_gap_are_visible_but_manual_values_stay_valid(self):
         panel = self.panel
@@ -73,10 +73,10 @@ class TowerBrimGuiTests(unittest.TestCase):
     def test_width_and_gap_stay_visible_when_calculated_geometry_is_cleared(self):
         panel = self.panel
         panel.set_profile_values({"brim_object_gap": .25})
-        panel.show_automatic_values({"base_width_mm": 30, "tower_brim_width_mm": .2, "tower_brim_gap_mm": .25})
+        panel.show_automatic_values({"base_width_mm": 30, "tower_brim_width_mm": 2.0, "tower_brim_gap_mm": .25})
         panel.clear_automatic_values()
         self.assertEqual(panel.inputs["base_width_mm"].lineEdit().text(), "—")
-        self.assertEqual(panel.inputs["tower_brim_width_mm"].lineEdit().text(), "0,20")
+        self.assertEqual(panel.inputs["tower_brim_width_mm"].lineEdit().text(), "2,00")
         self.assertEqual(panel.inputs["tower_brim_gap_mm"].lineEdit().text(), "0,25")
 
 

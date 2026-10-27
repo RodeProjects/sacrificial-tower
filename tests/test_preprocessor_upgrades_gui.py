@@ -89,7 +89,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         from cooling_tower.preview import Point3D
         length = min(30, (canvas.scene.bed_bounds.maximum_x_mm-canvas.scene.bed_bounds.minimum_x_mm)/8)
         point = canvas._project(Point3D(0, 0, length*.6), canvas._fit_parameters())
-        ratio = canvas.devicePixelRatioF()
+        ratio = max(1.0, canvas.devicePixelRatioF())
         expected = QColor(canvas.Z_AXIS_COLOR)
         pixels = [image.pixelColor(round(point.x()*ratio)+dx, round(point.y()*ratio)+dy)
             for dx in (-1, 0, 1) for dy in (-1, 0, 1)]

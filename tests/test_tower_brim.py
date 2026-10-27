@@ -34,7 +34,7 @@ class TowerBrimTests(unittest.TestCase):
                     before = deepcopy(request.profile.effective_values)
                     source = request.prepared_source.analysis_gcode_path.read_bytes()
                     result = self.fixture.prepare(request)
-                    self.assertEqual(result.placement.brim_width_mm, .2)
+                    self.assertEqual(result.placement.brim_width_mm, 2.0)
                     self.assertEqual(result.placement.brim_gap_mm, .15)
                     self.assertTrue(result.scene.brim_segments)
                     self.assertEqual(request.profile.effective_values, before)
@@ -100,7 +100,7 @@ class TowerBrimTests(unittest.TestCase):
         for profile, expected in (({}, .2), ({"brim_separation": 0}, 0),
                 ({"brim_object_gap": [.35]}, .35), ({"brim_separation": "bad"}, .2)):
             effective, _ = resolve_profile_settings(PreprocessorSettings(tower_brim_width_mm=19), profile)
-            self.assertEqual(effective.tower_brim_width_mm, .2)
+            self.assertEqual(effective.tower_brim_width_mm, 2.0)
             self.assertEqual(effective.tower_brim_gap_mm, expected)
         manual = PreprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=7,
             automatic_tower_brim_gap=False, tower_brim_gap_mm=1)
@@ -123,10 +123,10 @@ class TowerBrimTests(unittest.TestCase):
         result = self.fixture.prepare(request)
         exported = export_preprocessor_run(self.fixture.service, result, self.fixture.root / "exports")
         report = json.loads(exported.report_path.read_text(encoding="utf-8"))
-        self.assertEqual(report["tower_brim"]["width_mm"], .2)
+        self.assertEqual(report["tower_brim"]["width_mm"], 2.0)
         self.assertEqual(report["tower_brim"]["gap_mm"], .15)
-        self.assertAlmostEqual(report["tower_brim"]["line_width_mm"], .2)
-        self.assertIn("Turm-Brim Breite: 0.20 mm", exported.user_report_path.read_text(encoding="utf-8"))
+        self.assertAlmostEqual(report["tower_brim"]["line_width_mm"], result.placement.brim_line_width_mm)
+        self.assertIn("Turm-Brim Breite: 2.00 mm", exported.user_report_path.read_text(encoding="utf-8"))
 
     def test_second_foot_layer_is_broader_for_real_and_variable_layer_heights(self):
         for z in (tuple(.2*i for i in range(1, 61)), (.3, .4, .7) + tuple(.7+.2*i for i in range(1, 50))):
