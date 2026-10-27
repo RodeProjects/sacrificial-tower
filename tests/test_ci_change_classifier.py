@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.classify_ci_changes import classify_range
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Sacrificial Tower"
 APP_SUBTITLE = "Erzeugt Opferobjekte passend zur gewünschten Layerzeit"
 

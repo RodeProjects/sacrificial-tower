@@ -2,5 +2,5 @@
 
 APP_NAME = "Sacrificial Tower"
 APP_SUBTITLE = "Erzeugt Opferobjekte passend zur gewünschten Layerzeit"
-APP_VERSION = "0.11.12"
+APP_VERSION = "0.11.13"
 APP_VERSION_LABEL = f"Version {APP_VERSION}"
