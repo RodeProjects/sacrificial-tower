@@ -16,8 +16,8 @@ die folgenden durch reale lokale Slices/Exporte belegten Referenzstände:
 |---|---|---|
 | Anycubic Slicer Next | 2.0.0.3 | Gemeinsamer manueller Prüfslice und Export mit Stützensimulation am 15.10.2026 |
 | Bambu Studio | 02.08.02.61 | Gemeinsamer manueller Prüfslice und Export mit Stützensimulation am 15.10.2026 |
-| PrusaSlicer | 2.9.6 | Automatischer/manueller Export und Wieder-Slice am 19.10.2026; zusätzlicher Leerlagen-Kontrollslice am 20.10.2026 |
-| OrcaSlicer | 2.4.2 (Microsoft-Store-Paket 2.4.3.0) | Automatischer/manueller Export und Wieder-Slice am 19.10.2026 |
+| PrusaSlicer | 2.9.6 | Export mit iterativer/manueller Methode und Wieder-Slice am 19.10.2026; zusätzlicher Leerlagen-Kontrollslice am 20.10.2026 |
+| OrcaSlicer | 2.4.2 (Microsoft-Store-Paket 2.4.3.0) | Export mit iterativer/manueller Methode und Wieder-Slice am 19.10.2026 |
 
 Orcas Paketversion und die vom CLI/G-Code gemeldete Version unterscheiden sich;
 beide Werte beschreiben dieselbe geprüfte Installation. Bambu meldet die
@@ -82,7 +82,7 @@ explizit textuellen G-Code an, auch wenn das gewählte Maschinenprofil oder eine
 globale PrusaSlicer-Einstellung binären G-Code bevorzugt. Ein trotzdem mit der
 Signatur `GCDE` geliefertes Ergebnis wird vor der Analyse mit verständlicher
 Fehlermeldung abgewiesen. Laufbezogene Überschreibungen werden nach den
-aufgelösten Profilwerten angewendet. Die in automatischer und manueller
+aufgelösten Profilwerten angewendet. Die in iterativer und manueller
 Kalibrierung optionale 100-%-Füllung kombiniert bei PrusaSlicer
 `fill_density = 100%` mit `fill_pattern = rectilinear`, weil PrusaSlicer das
 häufig verwendete Muster `grid` bei dieser Dichte ablehnt. Sämtliche Werte
@@ -208,7 +208,7 @@ installierten PrusaSlicer wird mit
 `COOLING_TOWER_RUN_INSTALLED_PRUSA_INTEGRATION_TEST=1` aktiviert. Sie lädt die
 realen Profile, slicet ein kleines Modell mit der bestätigten Konfiguration und
 erneut mit den Kalibrierungsüberschreibungen, durchläuft außerdem den
-automatischen Kalibrierungsdienst und den manuellen Generierungsdienst,
+Kalibrierungsdienst der iterativen Methode und den manuellen Generierungsdienst,
 analysiert deren textuelle G-Code-Ergebnisse und vergleicht danach Inhalt,
 Größe und Änderungszeit aller Quelldateien.
 

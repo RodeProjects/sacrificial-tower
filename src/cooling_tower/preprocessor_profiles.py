@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 import math
 
 
-DEFAULT_TOWER_BRIM_WIDTH_MM = 0.2
+DEFAULT_TOWER_BRIM_WIDTH_MM = 2.0
 
 
 def profile_number(values, keys, *, allow_zero=False, percent_base=None):

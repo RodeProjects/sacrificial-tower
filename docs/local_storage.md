@@ -31,7 +31,13 @@ Beim Prozessende gibt das Betriebssystem den gesamten Arbeitsspeicher frei.
 Diese Ansichten belegen keine zunehmend wachsende Dateisammlung auf der Platte.
 
 `PreviewSourceDataCache` hält maximal zwei versionierte Quellgeometrieeinträge
-ebenfalls nur im Arbeitsspeicher. Die automatische und manuelle Methode
+ebenfalls nur im Arbeitsspeicher. `PreviewCanvas` hält für die Linienprojektion
+höchstens acht Koordinatenfelder mit zusammen maximal 8 MiB Nutzdaten in einem
+LRU-Puffer. Ein Szenenwechsel leert ihn. Größere einzelne Felder werden nur
+vorübergehend berechnet. Hinzu kommen die referenzierten Quellsegmente,
+projizierte Linien sowie temporäre Rechen- und Bildpuffer; das Budget begrenzt
+deshalb nicht den gesamten Speicherverbrauch der Vorschau.
+Die iterative und manuelle Methode
 besitzen jeweils ihren aktuellen Sitzungsstand. Ihre temporären STL-, 3MF-
 und Prüfdaten werden beim Verwerfen des Ergebnisses und beim regulären
 Schließen freigegeben. Der Postprozessor hält seinen abgeleiteten G-Code und

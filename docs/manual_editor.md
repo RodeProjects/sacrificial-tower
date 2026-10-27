@@ -2,7 +2,7 @@
 
 Die Methode **Manuelle Generierung** gestaltet einen rotationssymmetrischen
 Kühlturm direkt in der eingebetteten Vorschau. Sie verwendet die vorhandene
-bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und automatische
+bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und iterative
 Formberechnung bleiben eigenständige bestehende Abläufe. Ein Methodenwechsel
 erhält die Entwürfe und ihre getrennten Ergebnis- und Exportstände.
 
@@ -29,7 +29,7 @@ Maschinenhöhe. Generieren prüft die gezeichnete Form mit einem Slicer; Export
 übernimmt ausschließlich den vollständig geprüften Stand einschließlich seiner
 Zeitbewertung. Eine quellen- und slicerunabhängige Turmerstellung wird nicht angeboten.
 
-Automatische und manuelle Erstellung besitzen getrennte `GenerationSession`-Stände.
+Iterative und manuelle Erstellung besitzen getrennte `GenerationSession`-Stände.
 Ein Wechsel erhält Entwurf, Einstellungen, Kamera sowie Ergebnis und Exportstatus
 der jeweiligen Methode. Beim Wechsel zur manuellen Methode ist kein Punkt ausgewählt.
 Beide Methoden verwenden die Hauptfenster-Fußleiste; manuelle Resetaktionen betreffen
@@ -54,7 +54,7 @@ vollständig neben die Ansichtsbuttons passt.
 ### Objektspezifische Simulationen
 
 Unter „Turmform und Bearbeitung“ steht **100% Turmfüllung simulieren** mit derselben
-Erklärung wie im automatischen Modus. Die Form bleibt unverändert; der gemeinsame
+Erklärung wie im iterativen Modus. Die Form bleibt unverändert; der gemeinsame
 Prüfslice und das exportierte 3MF verwenden nur für den Turm 100% Füllung und
 das passende Füllmuster. Die Übernahme wird zusätzlich im erzeugten G-Code
 geprüft. **Stützen für STL-Objekt simulieren** ist bei erkannten deaktivierten
@@ -84,7 +84,7 @@ Stands und den zugehörigen Hinweis, bis ein neuer Lauf erfolgreich abschließt.
 ## Bedienung und eigene Einstellungen
 
 Die festen Einstellungsgruppen verwenden denselben grauen Überschriftenverlauf
-und dieselbe Schriftgröße wie „Erweiterte Turmeinstellungen“ im automatischen
+und dieselbe Schriftgröße wie „Erweiterte Turmeinstellungen“ im iterativen
 Modus. Sie bleiben ohne Dropdown und Chevron. Die Gruppen schließen ohne
 vertikalen Zwischenraum aneinander an; ihre Ecken
 sind rechtwinklig. Sie reichen horizontal vom linken Fensterrand bis an die
@@ -278,7 +278,7 @@ haben keinen Positionsstandard und keine Positions-Resetbuttons in der
 Vorschau. Ihre Kurven lassen sich weiterhin zurücksetzen.
 Feste Punkt-/Kontrollpunktresets verwenden den Ausgangswert des jeweiligen
 stabil identifizierten Greifers. Die
-Automatikeinstellungen werden dabei nicht verändert.
+Einstellungen der iterativen Methode werden dabei nicht verändert.
 
 Der ausgewählte Greifer besitzt zusätzlich einen kompakten Werteeditor in einer
 gemeinsamen, abgerundeten Box mit leicht transparentem Hintergrund. Er steht
@@ -362,11 +362,11 @@ können Einstellungen korrigiert und die Initialisierung erneut versucht werden.
 Die **Draufsicht** erlaubt die Spitzenbreite und die Turm-Durchmessergrenze,
 die **Untersicht** die Fußbreite und die Fuß-Durchmessergrenze. Die **Freie 3D-Ansicht** beginnt in der 3/4-Ansicht
 und besitzt keine Greiferaktionen. Ihre Navigation entspricht der aktivierten
-Navigation der automatischen 3D-Vorschau: linke Maustaste dreht, rechte oder
+Navigation der 3D-Vorschau der iterativen Methode: linke Maustaste dreht, rechte oder
 mittlere Maustaste verschiebt. Drehgeschwindigkeit,
 Neigungsgrenzen und Zoomschritte/-grenzen stimmen ebenfalls überein. Das Mausrad
-zoomt in der freien manuellen Ansicht zur Ansichtsmitte; die automatische
-Vorschau hält dabei den Punkt unter dem Mauszeiger fest. In den
+zoomt in der freien manuellen Ansicht zur Ansichtsmitte; die Vorschau der
+iterativen Methode hält dabei den Punkt unter dem Mauszeiger fest. In den
 übrigen Ansichten zoomt das Mausrad weiterhin um die Mausposition und die
 mittlere Maustaste verschiebt.
 „Einpassen“ stellt beide
@@ -706,7 +706,7 @@ Generieren/Aktualisieren, Exportieren, Abbrechen, „Alles zurücksetzen“ und
 „Turmform zurücksetzen“ liegen im **Hauptfenster-Footer**. Die beiden Resetaktionen
 stehen linksbündig unten im linken Footer-Bereich. Derselbe Footer verwaltet
 die Ordner-/Berichtsaktionen, Kürzungsreihenfolge und Umbrüche wie bei der
-automatischen Methode. Die Aktionen richten sich nach der aktiven Methode;
+iterativen Methode. Die Aktionen richten sich nach der aktiven Methode;
 der Reset bestätigt ausdrücklich den manuellen Umfang. Status, Fortschritt
 und Hinweise zum bisherigen geprüften Stand stehen ebenfalls im Footer.
 Leere Textfelder und die zugehörige leere Scrollfläche werden ausgeblendet;
@@ -784,7 +784,7 @@ Einbuchtungen innerhalb dieses Rechtecks werden nicht als Stellfläche angenomme
 Der wirksame Turm-Brim wird vom Radius abgezogen. Die zweistellige maximale
 Fußbreite wird nach unten gerundet und ist ebenso wie das **gesamte** Profil
 bei jeder Änderung verbindlich. Vorschau und Slice verwenden denselben
-sicheren Kreismittelpunkt; die automatische Methode behält ihre vorhandene
+sicheren Kreismittelpunkt; die iterative Methode behält ihre vorhandene
 Platzierung mit größeren Sicherheitsabständen.
 
 Für rechteckige Betten ohne Sperrflächen wird die maximale Kreisbreite über
@@ -950,8 +950,8 @@ Der Profilstandard bleibt über Reset verfügbar. Die bisherigen zusätzlichen
 Profilwert- und Farbvergleichstexte entfallen aus der linken Leiste.
 
 Die Profilbegrenzung unter dem maximalen Aufweitungswinkel übernimmt denselben
-Schwellenwinkel wie im automatischen Modus. Die kompakte Beschriftung lautet
-„Auf Threshold-angle begrenzen“. Freie Eingaben sind wie im automatischen
+Schwellenwinkel wie im iterativen Modus. Die kompakte Beschriftung lautet
+„Auf Threshold-angle begrenzen“. Freie Eingaben sind wie im iterativen
 Modus auf 20° bis 89° begrenzt. Kleinere positive Profilwinkel sind nur bei
 aktiver Profilbindung zulässig; ausgelesene Werte ≤ 0° verwenden mit einem
 Hinweis im Hovertext 30°. Die Profilbegrenzung ist für neue Einstellungen und
@@ -1101,7 +1101,7 @@ Wiedergabe der begrenzten Worker-Rasterbilder und der Originalkonturen.
 ## Ein unveränderter Prüfslice
 
 `ManualGenerationService` friert Entwurf, Zeitprüfung und bestätigten Kontext ein.
-Er ruft **keine** automatische Kalibrierung, Radiuskorrektur oder Bedarfsverkürzung
+Er ruft **keine** iterative Kalibrierung, Radiuskorrektur oder Bedarfsverkürzung
 auf. Auch bei bereits ausreichender Original-Layerzeit ist die manuelle Methode
 nutzbar. Der normale Lauf benötigt genau einen Slice der festen Form.
 
@@ -1165,11 +1165,11 @@ freien Ansicht nutzbar und während eines laufenden Auftrags gesperrt.
 Originaldrehung, Transparenz und Kamerazustände auf Standards zurück und passt
 die aktuelle Ansicht ein. Beide Resets sind in allen Ansichten verfügbar. Der
 Gesamtreset reagiert auch auf reine Drehungs-/Auflösungsänderungen und lässt die
-aktive Ansicht sowie Automatik-/Vorbereitungswerte erhalten.
+aktive Ansicht sowie die Werte der iterativen Methode und der Vorbereitung erhalten.
 
 `ManualController` führt drei getrennte Stände: bearbeitbaren Entwurf,
 laufenden unveränderlichen Auftrag und letztes vollständiges Ergebnis mitsamt
-seinem erfolgreichen Auftrag. Die bestehenden automatischen Sitzungsübergänge
+seinem erfolgreichen Auftrag. Die bestehenden Sitzungsübergänge der iterativen Methode
 werden nicht verändert.
 
 | Zustand | Aktionen und Verhalten |
@@ -1214,7 +1214,7 @@ aufrufbar und behält die zutreffende Art seiner Zeitprüfung.
 
 Generierung und Export verwenden die bestehenden verwalteten Jobarten
 `PREVIEW`/`EXPORT`, sodass vorhandene Sperren diese Jobs erkennen. Eigene
-negative Request-IDs trennen die manuellen Callbacks von der Automatik.
+negative Request-IDs trennen die manuellen Callbacks von der iterativen Methode.
 Das gemeinsame Cancellation-Event erreicht Geometrie, STL-Prüfung, Analyse,
 Adapter und bestehendes Prozessbackend. Abbruch wird erst nach vollständiger
 Job-/Threadfreigabe als beendet behandelt. Wiederholte Anforderungen und

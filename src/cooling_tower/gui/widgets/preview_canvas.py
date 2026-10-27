@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QToolButton, QWidget
 from cooling_tower.preview import LineSegment3D, Point3D, PreviewScene
 from cooling_tower.gui.widgets.preview_busy_overlay import PreviewBusyOverlay
 from cooling_tower.gui.widgets.preview_layer_context import LowerLayerFrames, layer_context_colour
+from cooling_tower.gui.widgets.preview_projection import LineProjectionCache
 
 
 _LineBlock = tuple[QLineF, ...]
@@ -83,6 +84,7 @@ class PreviewCanvas(QWidget):
     TOWER_TRAVEL_COLOR = "#f080ad"
     X_AXIS_COLOR = "#f07575"
     Y_AXIS_COLOR = "#75d18c"
+    Z_AXIS_COLOR = "#75a9f0"
     MAXIMUM_OBJECT_DRAW_LINES = 32_000
     LINE_BLOCK_SIZE = 4_096
     # Ein Mausradschritt Abstand: gleicher Faktor wie die interaktive
@@ -123,7 +125,9 @@ class PreviewCanvas(QWidget):
         self._layer_z = None
         self._travel_layer_z = None
         self._fit_cache_key = self._fit_cache_value = None
+        self._fit_bounds_key = self._fit_bounds = None
         self._layer_index = OrderedDict()
+        self._line_projection = LineProjectionCache()
         self._prepared_frame: _PreparedLineFrame | None = None
         self._normal_prepared: _PreparedLineFrame | None = None
         self._rendered_frame: QPixmap | None = None
@@ -188,7 +192,9 @@ class PreviewCanvas(QWidget):
         self._lower_layer_frames = self._lower_layer_key = None
         self._separated_yaw = None
         self._fit_cache_key = None
+        self._fit_bounds_key = self._fit_bounds = None
         self._layer_index.clear()
+        self._line_projection.clear()
         self._all_travel_blocks.clear()
         self._layer_z = None
         self._travel_layer_z = None
@@ -670,6 +676,31 @@ class PreviewCanvas(QWidget):
             self.zoom, self.pan_x, self.pan_y)
         if cache_key == self._fit_cache_key:
             return self._fit_cache_value
+        bounds_key = (id(scene), context, self._fit_whole_bed)
+        if bounds_key == self._fit_bounds_key:
+            bounds = self._fit_bounds
+        else:
+            bounds = self._projection_bounds(scene, context)
+            self._fit_bounds_key, self._fit_bounds = bounds_key, bounds
+        minimum_x, maximum_x, minimum_y, maximum_y = bounds
+        span_x = max(1.0, maximum_x - minimum_x)
+        span_y = max(1.0, maximum_y - minimum_y)
+        scale = min(
+            max(1.0, self.width() - 40.0) / span_x,
+            max(1.0, self.height() - 40.0) / span_y,
+        ) * self.zoom
+        center_x = (minimum_x + maximum_x) / 2.0
+        center_y = (minimum_y + maximum_y) / 2.0
+        offset_x = self.width() / 2.0 - center_x * scale + self.pan_x
+        offset_y = self.height() / 2.0 - center_y * scale + self.pan_y
+        self._fit_cache_key = cache_key
+        self._fit_cache_value = scale, offset_x, offset_y
+        return self._fit_cache_value
+
+    def _projection_bounds(
+        self, scene: PreviewScene, context: _ProjectionContext,
+    ) -> tuple[float, float, float, float]:
+        """Exact camera-space bounds, independent of viewport, zoom and pan."""
         if self._fit_whole_bed:
             bed = scene.bed_bounds
             z_max = max(1.0, scene.tower_height_mm,
@@ -706,22 +737,8 @@ class PreviewCanvas(QWidget):
                 ),
                 context,
             )
-        if bounds is None:  # Defensive: the fallback above always has points.
-            return 1.0, self.width() / 2.0, self.height() / 2.0
-        minimum_x, maximum_x, minimum_y, maximum_y = bounds
-        span_x = max(1.0, maximum_x - minimum_x)
-        span_y = max(1.0, maximum_y - minimum_y)
-        scale = min(
-            max(1.0, self.width() - 40.0) / span_x,
-            max(1.0, self.height() - 40.0) / span_y,
-        ) * self.zoom
-        center_x = (minimum_x + maximum_x) / 2.0
-        center_y = (minimum_y + maximum_y) / 2.0
-        offset_x = self.width() / 2.0 - center_x * scale + self.pan_x
-        offset_y = self.height() / 2.0 - center_y * scale + self.pan_y
-        self._fit_cache_key = cache_key
-        self._fit_cache_value = scale, offset_x, offset_y
-        return self._fit_cache_value
+        assert bounds is not None  # The fallback above always has points.
+        return bounds
 
     def _project(
         self,
@@ -765,7 +782,12 @@ class PreviewCanvas(QWidget):
     def reset_layer_colours(self):
         """Restore visible layer colours without moving the camera or cutoff."""
         if self._layer_z is not None and self._layer_colours_highlight:
-            self._layer_colours_highlight = False
+            self.set_layer_transparency_enabled(False)
+
+    def set_layer_transparency_enabled(self, enabled):
+        """Toggle the existing subdued lower-layer colours and opacity."""
+        if self._layer_colours_highlight != bool(enabled):
+            self._layer_colours_highlight = bool(enabled)
             self._invalidate_rendered_frame()
             self.update()
 
@@ -807,15 +829,17 @@ class PreviewCanvas(QWidget):
 
     def _travel_segments(self, segments, indices):
         if self._all_travel_visible:
-            return segments
+            # The context frame already contains routes below the selection.
+            return self._layer_segments(segments, indices,
+                through=not self._layer_context_enabled)
         return self._layer_segments(segments, indices, height=self._travel_layer_z,
             through=self._cumulative_travel and self._layer_z is None)
 
     def _travel_line_blocks(self, segments, indices, parameters, context):
-        if not self._all_travel_visible:
+        if not self._all_travel_visible or self._layer_z is not None:
             return self._line_blocks(self._travel_segments(segments, indices), parameters, context,
                 maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES)
-        # Scrubbing the selected layer does not change complete route geometry.
+        # Complete route geometry is reusable when no layer cutoff is active.
         key = (id(self.scene), id(segments), parameters, context)
         if key not in self._all_travel_blocks:
             self._all_travel_blocks[key] = self._line_blocks(segments, parameters, context,
@@ -852,7 +876,7 @@ class PreviewCanvas(QWidget):
         self.update()
 
     def set_all_travel_visible(self, visible: bool) -> None:
-        """Show enabled travel groups across every layer, independently of selection."""
+        """Show enabled travel groups up to the selected layer, or all without a cutoff."""
         self._all_travel_visible = bool(visible)
         self._invalidate_rendered_frame()
         self.update()
@@ -887,16 +911,31 @@ class PreviewCanvas(QWidget):
             if maximum_lines < 1:
                 raise ValueError("maximum_lines must be at least one.")
             stride = max(1, math.ceil(len(segments) / maximum_lines))
+        if len(range(0, len(segments), stride)) >= self._line_projection.MINIMUM_LINES:
+            coordinates = self._line_projection.project(segments, stride, parameters, context)
+            size = self.LINE_BLOCK_SIZE
+            return tuple(
+                tuple(QLineF(*row) for row in coordinates[start:start+size].tolist())
+                for start in range(0, len(coordinates), size)
+            )
         blocks: list[_LineBlock] = []
         current: list[QLineF] = []
+        scale, offset_x, offset_y = parameters
+        cx, cy = context.center_x, context.center_y
+        cosine, sine = context.cosine_yaw, context.sine_yaw
+        pitch_cosine, pitch_sine = context.cosine_pitch, context.sine_pitch
         for index in range(0, len(segments), stride):
             segment = segments[index]
-            current.append(
-                QLineF(
-                    self._project(segment.start, parameters, context),
-                    self._project(segment.end, parameters, context),
-                )
-            )
+            a, b = segment.start, segment.end
+            ax, ay, bx, by = a.x-cx, a.y-cy, b.x-cx, b.y-cy
+            # Preserve the projection's arithmetic and line order while
+            # avoiding two temporary QPointF wrappers per displayed stroke.
+            current.append(QLineF(
+                (cosine*ax-sine*ay)*scale+offset_x,
+                -(pitch_cosine*a.z-pitch_sine*(sine*ax+cosine*ay))*scale+offset_y,
+                (cosine*bx-sine*by)*scale+offset_x,
+                -(pitch_cosine*b.z-pitch_sine*(sine*bx+cosine*by))*scale+offset_y,
+            ))
             if len(current) == self.LINE_BLOCK_SIZE:
                 blocks.append(tuple(current))
                 current = []
@@ -987,14 +1026,14 @@ class PreviewCanvas(QWidget):
                 self._lower_brim_front_source = front_brim
                 heights = tuple(segment.end.z for segment in front_brim[0])
                 self._lower_brim_front_range = (min(heights, default=math.inf), max(heights, default=-math.inf))
-                if self._cumulative_travel and not self._all_travel_visible:
+                if self._cumulative_travel or self._all_travel_visible:
                     for segments, indices, visible, color, full_blocks in (
                             (scene.wait_travel_segments, scene.wait_travel_layer_indices, self._wait_travel_visible,
                                 self.WAIT_TRAVEL_COLOR, prepared.wait_travel_blocks),
                             (tower_travel, scene.tower_travel_layer_indices, self._tower_travel_visible,
                                 self.TOWER_TRAVEL_COLOR, prepared.tower_travel_blocks)):
                         if visible:
-                            complete = full and (self._travel_layer_z is None or not scene.layer_z_mm
+                            complete = full and (self._all_travel_visible or self._travel_layer_z is None or not scene.layer_z_mm
                                 or self._travel_layer_z >= scene.layer_z_mm[-1])
                             blocks = full_blocks if complete else self._line_blocks(segments, parameters, context,
                                 maximum_lines=self.MAXIMUM_OBJECT_DRAW_LINES)
@@ -1142,7 +1181,8 @@ class PreviewCanvas(QWidget):
             origin = self._project(Point3D(0, 0, 0), parameters, context)
             length = min(30.0, (scene.bed_bounds.maximum_x_mm-scene.bed_bounds.minimum_x_mm) / 8)
             for label, color, endpoint in (("X+", self.X_AXIS_COLOR, Point3D(length, 0, 0)),
-                    ("Y+", self.Y_AXIS_COLOR, Point3D(0, length, 0))):
+                    ("Y+", self.Y_AXIS_COLOR, Point3D(0, length, 0)),
+                    ("Z+", self.Z_AXIS_COLOR, Point3D(0, 0, length))):
                 point = self._project(endpoint, parameters, context)
                 frame_painter.setPen(QPen(QColor(color), 1.5))
                 frame_painter.drawLine(QLineF(origin, point))

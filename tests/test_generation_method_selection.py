@@ -450,6 +450,8 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         preparation = window.preparation_open_button
         selection = window.header_method_selection
         heading = selection.heading
+        self.assertEqual([selection.buttons_layout.itemAt(i).widget().text() for i in range(3)],
+            ["Postprozessor", "Iterativ", "Manuell"])
         automatic = window.automatic_method_button
         manual = window.manual_method_button
         menu = window.options_button
@@ -483,7 +485,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertEqual(automatic.height(), menu.height())
         self.assertEqual(manual.height(), menu.height())
         self.assertLessEqual(abs(automatic.width() - manual.width()), 1)
-        self.assertEqual(automatic.text(), "Automatisch")
+        self.assertEqual(automatic.text(), "Iterativ")
         self.assertEqual(manual.text(), "Manuell")
         self.assertTrue(automatic.isChecked())
         self.assertFalse(manual.isChecked())
@@ -924,19 +926,29 @@ class GenerationMethodSelectionTests(unittest.TestCase):
     def test_cards_stack_and_whole_card_supports_mouse_and_keyboard(self) -> None:
         window = self.window
         self.finish_preparation()
-        for width, two_column in ((1400, True), (760, False), (1400, True)):
+        for width, columns in ((1400, 3), (1000, 2), (760, 1), (1400, 3)):
             window.resize(width, 850)
             self.app.processEvents()
             grid = window.generation_method_grid
-            self.assertEqual(grid.is_two_column(), two_column)
+            self.assertEqual(grid.column_count, columns)
             automatic_rect = window.automatic_generation_card.geometry()
             manual_rect = window.manual_generation_card.geometry()
-            if two_column:
+            preprocessor_rect = window.preprocessor_generation_card.geometry()
+            if columns >= 2:
                 self.assertEqual(automatic_rect.top(), manual_rect.top())
                 self.assertLess(automatic_rect.right(), manual_rect.left())
+                if columns == 3:
+                    self.assertEqual(preprocessor_rect.top(), automatic_rect.top())
+                    self.assertLess(preprocessor_rect.right(), automatic_rect.left())
+                else:
+                    self.assertLess(preprocessor_rect.bottom(), automatic_rect.top())
+                    self.assertEqual(preprocessor_rect.left(), automatic_rect.left())
+                    self.assertEqual(preprocessor_rect.right(), manual_rect.right())
             else:
+                self.assertLess(preprocessor_rect.bottom(), automatic_rect.top())
                 self.assertLess(automatic_rect.bottom(), manual_rect.top())
-            for card in (window.automatic_generation_card, window.manual_generation_card):
+            for card in (window.preprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
+                self.assertTrue(card.isVisible())
                 self.assertLessEqual(card.geometry().right(), grid.width())
                 self.assertLessEqual(card.geometry().bottom(), grid.height() - 1)
                 self.assertLessEqual(card.action_label.geometry().bottom(), card.height())
@@ -964,16 +976,16 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                     self.app.processEvents()
                 grid = window.generation_method_grid
                 picker = window.generation_method_picker
-                self.assertEqual(grid.width(), min(980, picker.width()))
+                self.assertEqual(grid.width(), min(grid.maximumWidth(), picker.width()))
                 left_space = grid.x()
                 right_space = picker.width() - grid.geometry().right() - 1
                 self.assertLessEqual(abs(left_space - right_space), 1)
-                self.assertEqual(grid.is_two_column(), picker.width() >= 800)
-                if picker.width() <= 980:
+                self.assertEqual(grid.column_count, grid.columns_for_width(picker.width()))
+                if picker.width() <= grid.maximumWidth():
                     self.assertEqual(left_space, 0)
                 else:
                     self.assertGreater(left_space, 0)
-                for card in (window.automatic_generation_card, window.manual_generation_card):
+                for card in (window.preprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
                     self.assertTrue(grid.rect().contains(card.geometry()))
 
     def test_hovering_a_method_card_also_highlights_its_action_text(self) -> None:

@@ -663,6 +663,32 @@ QLabel#generationModeCardDescription {
     color: #44576c;
     font-size: 10.5pt;
 }
+QLabel#generationModeExportHeading {
+    color: #526274;
+    font-size: 9pt;
+    font-weight: 600;
+}
+QLabel#generationModeExportTag {
+    color: #153b60;
+    background: rgba(255, 255, 255, 165);
+    border: 1px solid #cbd7e3;
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 9pt;
+    font-weight: 600;
+}
+QPushButton[generationMode="automatic"] QLabel#generationModeExportTag {
+    color: #563284;
+    border-color: #bdabda;
+}
+QPushButton[generationMode="manual"] QLabel#generationModeExportTag {
+    color: #22486f;
+    border-color: #91aecb;
+}
+QPushButton[generationMode="preprocessor"] QLabel#generationModeExportTag {
+    color: #245b3b;
+    border-color: #91b69e;
+}
 QLabel#generationModeCardAction {
     color: #1769aa;
     background: rgba(255, 255, 255, 185);
@@ -2832,6 +2858,7 @@ QPushButton#headerMethodButton {
 }
 QPushButton#headerMethodButton[generationMode="automatic"] {
     color: #563284;
+    border-left-color: #91aecb;
     border-right: 0;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #fcfaff, stop:0.45 #f0e8fb, stop:1 #d7c5ed);
@@ -2839,7 +2866,7 @@ QPushButton#headerMethodButton[generationMode="automatic"] {
 QPushButton#headerMethodButton[generationMode="manual"] {
     color: #22486f;
     border-color: #91aecb;
-    border-right: 0;
+    border-right: 1px solid #91b69e;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f4f9fe, stop:0.45 #e0eaf5, stop:1 #bad0e7);
 }
@@ -2890,6 +2917,7 @@ QPushButton#headerMethodButton[generationMode="manual"]:focus {
 QPushButton#headerMethodButton[generationMode="preprocessor"] {
     color: #245b3b;
     border-color: #91b69e;
+    border-right: 0;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
 }

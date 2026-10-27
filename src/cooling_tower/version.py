@@ -2,5 +2,5 @@
 
 APP_NAME = "Kühlturm-Generator"
 APP_SUBTITLE = "Erzeugt Opferobjekte passend zur gewünschten Layerzeit"
-APP_VERSION = "0.11.7"
+APP_VERSION = "0.11.8"
 APP_VERSION_LABEL = f"Version {APP_VERSION}"

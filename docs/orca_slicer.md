@@ -2,7 +2,7 @@
 
 OrcaSlicer verwendet dieselbe Oberfläche für Auswahl, System-/User-Gruppen,
 Kompatibilitätsfilter und Bestätigung wie die übrigen unterstützten Slicer.
-Bestätigte Profile werden im Vorslice, in automatischer und manueller Erstellung,
+Bestätigte Profile werden im Vorslice, in iterativer und manueller Erstellung,
 Vorschau und Export weiterverwendet. Die gemeinsamen Grenzen für Zeitlimits,
 Abbruch, Prozessisolation und Programmende gelten unverändert; siehe
 [Erkennungsmodule](slicer_detection_modules.md).
@@ -98,8 +98,8 @@ Drucker bleibt fachlich erhalten; eine nötige Kompatibilitätskennung wird nur 
 den temporären Kopien harmonisiert. Laufbezogene Prozessüberschreibungen werden
 erst nach der Vererbung angewandt. Originale bleiben ausschließlich lesend.
 Auch direkte Aufrufe des Orca-Commandbuilders weisen Arbeits- und Ausgabeorte
-innerhalb geschützter Slicerverzeichnisse ab. Der endgültige automatische und
-manuelle Export ruft dieselbe Orca-eigene Prüfung auf. Sie schützt vollständige
+innerhalb geschützter Slicerverzeichnisse ab. Der endgültige Export der iterativen
+und der manuellen Methode ruft dieselbe Orca-eigene Prüfung auf. Sie schützt vollständige
 Datenwurzeln, auch etwaige Log-/Cache-Geschwister neben `user` und `system` in
 virtualisierten Store-Ablagen, ohne sie als Profilkatalog durchsuchen zu müssen.
 
@@ -164,7 +164,7 @@ $env:COOLING_TOWER_RUN_INSTALLED_ORCA_INTEGRATION_TEST = '1'
 
 Die lokale Abnahme verwendet das Store-Paket 2.4.3.0, dessen CLI sich als 2.4.2
 meldet, und die eingerichteten Anker-M5-Profile einschließlich eigener Maschinen-,
-Filament- und Prozessprofile. Sie prüft Bestätigung, Vorslice, automatische
+Filament- und Prozessprofile. Sie prüft Bestätigung, Vorslice, iterative
 Kalibrierung/Vorschau, STL-/G-Code-/3MF-Export, manuelle Erstellung/Export,
 angebotene Stützensimulationen, Legacy-/QProcess-Parität und erneutes Slicen des
 exportierten 3MF mit identischer minimaler Schichtzeit. Inhalt, Größe,

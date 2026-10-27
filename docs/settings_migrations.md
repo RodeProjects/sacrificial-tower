@@ -32,7 +32,7 @@ einfacheres Format behalten.
 - [Schema 20: Simulation ohne Turmstützen](#schema-20-simulation-ohne-turmstützen)
 - [Schema 21: maximale Standfußbreite](#schema-21-maximale-standfußbreite)
 - [Schema 22: Profilbindung des Aufweitungswinkels](#schema-22-profilbindung-des-aufweitungswinkels)
-- [Schema 23: Segmentwahl für automatisch erzeugte Türme](#schema-23-segmentwahl-für-automatisch-erzeugte-türme)
+- [Schema 23: Segmentwahl für iterativ erzeugte Türme](#schema-23-segmentwahl-für-iterativ-erzeugte-türme)
 - [Schema 24: getrennte Exportordner](#schema-24-getrennte-exportordner)
 - [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
@@ -391,7 +391,7 @@ neue Option besitzt eine eigene stabile Kompatibilitätskennung. Unbekannte
 neuere Dateien, externe Änderungen und beschädigte Dateien behalten die
 bisherigen Schutzregeln einschließlich Sicherung und atomarem Schreiben.
 
-## Schema 23: Segmentwahl für automatisch erzeugte Türme
+## Schema 23: Segmentwahl für iterativ erzeugte Türme
 
 22→23 ergänzt `generation.automatic_circle_segments` als boolesche, anfangs
 aktivierte Option und `generation.circle_segments` als manuelle Ganzzahl mit
@@ -416,7 +416,7 @@ nach den allgemeinen Schutzregeln erhalten.
 `output_root` je einen gleichnamigen Unterordner ab. Vorhandene Exporte werden
 weder verschoben noch verändert. Ohne gültigen bisherigen Pfad gelten die
 Standardordner der Anwendung. `output_root` bleibt als Schnittstelle zum
-automatischen Exportpfad erhalten und wird bei der Migration auf diesen gesetzt.
+Exportpfad der iterativen Methode erhalten und wird bei der Migration auf diesen gesetzt.
 Sein neues Kompatibilitätstoken `automatic-export-directory-path-v2` verhindert,
 dass eine ältere Version ihren gemeinsamen Exportpfad ungeprüft auf die drei
 unabhängigen Ziele überträgt.
@@ -650,8 +650,8 @@ Unbekannte neuere oder beschädigte Dateien sperren jede Speicherung;
 zwischenzeitliche externe Änderungen werden vom vorhandenen Bytesvergleich
 erkannt. Explizite Wiederherstellung nutzt `replace_with_recovery()` mit Backup.
 Die manuelle Datei hat keinen gemeinsamen Kompatibilitätskatalog mit der
-Automatik: Downgrades können manuelle Werte niemals anhand ähnlicher Feldnamen
-in automatische Werte übernehmen. Neue manuelle Schemata benötigen eine direkte
+iterativen Methode: Downgrades können manuelle Werte niemals anhand ähnlicher Feldnamen
+in Werte der iterativen Methode übernehmen. Neue manuelle Schemata benötigen eine direkte
 Migration und die bestehenden Sicherungs-/Fehler-/Downgrade-Prüfungen.
 
 Gespeichert werden wiederverwendbare manuelle Werte einschließlich der eigenen

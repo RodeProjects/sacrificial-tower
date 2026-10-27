@@ -157,5 +157,5 @@ SOURCE_SUPPORT_HINT_HTML = """
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Stützen anpassen</b></p>
 <p style="margin-top:0; margin-bottom:8px;">&#8226; Wenn die Stützen deinen Anforderungen nicht entsprechen, passe sie im Slicer direkt im gewählten Prozessprofil an. Speichere das Profil und lies die Profile im Kühlturm-Generator erneut ein. Die angepassten Stützparameter werden dann für die Simulation übernommen; soweit verfügbar, bleibt der Baumstützenstil aktiv.</p>
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Vorschau und Export</b></p>
-<p style="margin-top:0; margin-bottom:0;">&#8226; Die Stützen werden bei der Turmgenerierung und beim gemeinsamen Prüfslice berücksichtigt und im exportierten 3MF für das Originalobjekt aktiviert. Die Originalprofile bleiben unverändert. Nur die gemeinsam geslicte automatische Vorschau zeigt die simulierten Stützen.</p>
+<p style="margin-top:0; margin-bottom:0;">&#8226; Die Stützen werden bei der Turmgenerierung und beim gemeinsamen Prüfslice berücksichtigt und im exportierten 3MF für das Originalobjekt aktiviert. Die Originalprofile bleiben unverändert. Nur die gemeinsam geslicte Vorschau der iterativen Methode zeigt die simulierten Stützen.</p>
 """.strip()

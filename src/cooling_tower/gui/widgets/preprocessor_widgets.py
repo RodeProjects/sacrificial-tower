@@ -1,6 +1,6 @@
 """Compact coordinates, colour keys and a content-sized postprocessor footer."""
-from PySide6.QtCore import QEvent, QRect, QTimer, Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QStyle, QStyleOptionSpinBox, QWidget
+from PySide6.QtCore import QEvent, QRect, QSize, QTimer, Qt
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QStyleOptionSpinBox, QWidget
 
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.manual_preview_info import LegendSwatch
@@ -41,6 +41,93 @@ class CoordinatePair(QFrame):
         self.setFixedHeight(71)
 
 
+class _LegendFlowLayout(QLayout):
+    """Wrap whole legend entries in reading order at their natural widths."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._items = []
+        self.setContentsMargins(0, 3, 0, 3)
+        self.setSpacing(15)
+        self._vertical_spacing = 5
+
+    def addItem(self, item):  # noqa: N802
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):  # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):  # noqa: N802
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def hasHeightForWidth(self):  # noqa: N802
+        return True
+
+    def heightForWidth(self, width):  # noqa: N802
+        return self._arrange(QRect(0, 0, width, 0), apply=False)
+
+    def minimumSize(self):  # noqa: N802
+        size = QSize(0, 0)
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(margins.left()+margins.right(), margins.top()+margins.bottom())
+
+    def sizeHint(self):  # noqa: N802
+        margins = self.contentsMargins()
+        width = sum(item.sizeHint().width() for item in self._items)
+        width += max(0, len(self._items)-1)*self.spacing()+margins.left()+margins.right()
+        return QSize(width, self.heightForWidth(width))
+
+    def setGeometry(self, rect):  # noqa: N802
+        super().setGeometry(rect)
+        self._arrange(rect, apply=True)
+
+    def _arrange(self, rect, *, apply):
+        margins = self.contentsMargins()
+        left, top = rect.x()+margins.left(), rect.y()+margins.top()
+        right = rect.x()+rect.width()-margins.right()
+        x, y, row_height = left, top, 0
+        sizes = [item.sizeHint().expandedTo(item.minimumSize()) for item in self._items]
+        single_column = right-left <= max((size.width() for size in sizes), default=0)
+        for item, size in zip(self._items, sizes):
+            if x > left and (single_column or x+size.width() > right):
+                x, y, row_height = left, y+row_height+self._vertical_spacing, 0
+            if apply:
+                item.setGeometry(QRect(x, y, size.width(), size.height()))
+            x += size.width()+self.spacing()
+            row_height = max(row_height, size.height())
+        return y+row_height+margins.bottom()-rect.y()
+
+
+class FlowColourLegend(QWidget):
+    """A preview legend that uses the full row before wrapping each entry."""
+
+    def __init__(self, entries):
+        super().__init__()
+        layout = _LegendFlowLayout(self)
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self.swatches, self.labels, self.entries = [], [], []
+        for title, colour in entries:
+            entry = QWidget(self)
+            row = QHBoxLayout(entry)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            swatch, label = LegendSwatch(colour), QLabel(title)
+            swatch.setAccessibleName(title)
+            row.addWidget(swatch)
+            row.addWidget(label)
+            layout.addWidget(entry)
+            self.swatches.append(swatch)
+            self.labels.append(label)
+            self.entries.append(entry)
+
+
 class ColourLegend(QWidget):
     def __init__(self, entries, *, columns=3, column_major=False, horizontal_spacing=16, compact=False):
         super().__init__()
@@ -60,6 +147,8 @@ class ColourLegend(QWidget):
         if compact:
             grid.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.swatches, self.labels = [], []
+        self._grid, self._entry_rows = grid, []
+        self._columns, self._column_major = columns, column_major
         entries = tuple(entries)
         rows = max(1, (len(entries)+columns-1)//columns)
         for i, (title, colour) in enumerate(entries):
@@ -74,6 +163,31 @@ class ColourLegend(QWidget):
                 i // rows if column_major else i % columns)
             self.swatches.append(swatch)
             self.labels.append(label)
+            self._entry_rows.append(row)
+
+    def intrinsic_width(self, columns):
+        rows = max(1, (len(self._entry_rows)+columns-1)//columns)
+        widths = [0]*columns
+        for i, row in enumerate(self._entry_rows):
+            column = i//rows if self._column_major else i % columns
+            widths[column] = max(widths[column], row.minimumSize().width())
+        margins = self._grid.contentsMargins()
+        return sum(widths)+(columns-1)*self._grid.horizontalSpacing()+margins.left()+margins.right()
+
+    def set_columns(self, columns):
+        if columns == self._columns:
+            return
+        self._columns = columns
+        rows = max(1, (len(self._entry_rows)+columns-1)//columns)
+        for row in self._entry_rows:
+            self._grid.removeItem(row)
+        for i, row in enumerate(self._entry_rows):
+            self._grid.addLayout(row, i % rows if self._column_major else i//columns,
+                i//rows if self._column_major else i % columns)
+        self._grid.invalidate()
+        self._grid.activate()
+        self.layout().invalidate()
+        self.updateGeometry()
 
 
 class LayerNumberSpinBox(CommittedSpinBox):

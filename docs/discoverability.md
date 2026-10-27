@@ -4,7 +4,7 @@ Stand: 22.10.2026. Ziel ist, Zweck, Plattform, Eingaben, Ausgaben, Grenzen und
 getestete Slicer für Menschen und Suchsysteme klar zu beschreiben. Verwendete
 Begriffe sind unter anderem „sacrificial cooling tower“, „minimum layer time“,
 FDM-/FFF-3D-Druck, Kühlturm und Mindest-Layerzeit. Im Mittelpunkt stehen der
-Nutzen bei kurzen Layerzeiten, die automatische oder manuelle Turmerstellung
+Nutzen bei kurzen Layerzeiten, die iterative oder manuelle Turmerstellung
 und das gemeinsame 3MF-Projekt mit Modell und Turm. Die G-Code-Auswertung dient
 der Bewertung der Layerzeiten; „G-code analyzer“ wird nicht als Produktbezeichnung
 verwendet. Für den grafischen Ablauf genügt als Voraussetzung der Hinweis auf
@@ -37,7 +37,7 @@ Der Projektlink des Hauptrepositorys führt zum öffentlichen Windows-Download:
 Vorgesehene Kurzbeschreibung für das Haupt-Repository
 `RodeProjects/sacrificial-tower`:
 
-> Add cooling time when FDM/FFF layer times are too short: create a matching sacrificial cooling tower automatically or shape it yourself, check layer times and export your model with its tower as a 3MF project. Free for Windows; supports Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer.
+> Add cooling time when FDM/FFF layer times are too short: create a matching sacrificial cooling tower iteratively or shape it yourself, check layer times and export your model with its tower as a 3MF project. Free for Windows; supports Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer.
 
 Topics: `3d-printing`, `fdm`, `fff`, `sacrificial-tower`, `cooling-tower`,
 `minimum-layer-time`, `gcode`, `gcode-analysis`, `stl`, `3mf`, `orcaslicer`,

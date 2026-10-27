@@ -607,7 +607,7 @@ class Phase18UiTests(unittest.TestCase):
             label.text()
             for label in dialog.findChildren(QLabel)
         }
-        self.assertTrue({"Exportordner · Automatisch", "Exportordner · Manuell",
+        self.assertTrue({"Exportordner · Iterativ", "Exportordner · Manuell",
             "Exportordner · Postprozessor"}.issubset(dialog_labels))
         self.assertNotIn(
             "Hier legen Sie programmweite Ausgabeoptionen fest.",

@@ -1,7 +1,7 @@
 """Bounded raster checkpoints for already projected lower-layer geometry."""
 from bisect import bisect_right
 from collections import OrderedDict
-from itertools import chain
+from itertools import chain, islice
 import math
 
 from PySide6.QtCore import Qt
@@ -26,11 +26,13 @@ class LowerLayerFrames:
             heights = extra[0] if extra else ()
             stride = max(1, math.ceil(len(segments)/maximum)) if maximum else 1
             by_height = {}
-            for i, (segment, line) in enumerate(zip(segments[::stride], chain.from_iterable(blocks))):
-                z = heights[i*stride] if heights else segment.end.z
-                if math.isfinite(z):
-                    by_height.setdefault(z, []).append(line)
-                    levels.add(z)
+            line_heights = (islice(heights, 0, None, stride) if heights else
+                (segment.end.z for segment in islice(segments, 0, None, stride)))
+            for z, line in zip(line_heights, chain.from_iterable(blocks)):
+                by_height.setdefault(z, []).append(line)
+            # Validate and merge each distinct height once, not every stroke.
+            by_height = {z: lines for z, lines in by_height.items() if math.isfinite(z)}
+            levels.update(by_height)
             self.sources.append((by_height, layer_context_colour(color, subdued=subdued), line_width))
         self.levels = sorted(levels)
         image_bytes = max(1, round(width*ratio)*round(height*ratio)*4)

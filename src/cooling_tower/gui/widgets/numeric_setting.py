@@ -262,12 +262,12 @@ class NumericSettingWidget(QWidget):
         x = (
             self.editor.width()
             - METRICS.form_spin_button_width_px
-            - METRICS.form_unit_width_px
+            - self.unit_label.width()
         )
         self.unit_label.setGeometry(
             max(0, x),
             1,
-            METRICS.form_unit_width_px,
+            self.unit_label.width(),
             max(0, self.editor.height() - 2),
         )
         self.unit_label.raise_()

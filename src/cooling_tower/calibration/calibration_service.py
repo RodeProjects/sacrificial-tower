@@ -186,7 +186,7 @@ class CalibrationService:
                 config, CalibrationState.UNSUPPORTED, source_hash,
                 CalibrationFailureCode.PROFILE_INCOMPLETE,
                 "Für diesen Slicer ist noch kein gemeinsamer Objekt-/Turm-Slice verfügbar. "
-                "Die automatische Erstellung kann deshalb kein geprüftes gemeinsames Ergebnis liefern.",
+                "Die iterative Erstellung kann deshalb kein geprüftes gemeinsames Ergebnis liefern.",
             )
         if settings.simulate_source_supports and (joint_source_stl is None or not config.perform_joint_final_slice):
             return self._failure(

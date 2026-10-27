@@ -2,7 +2,7 @@
 
 Sacrificial Tower erstellt zusätzliche Kühltürme, die beim FDM-/FFF-3D-Druck
 mehr Zeit zum Abkühlen zwischen den Layern schaffen. Die Turmform wird
-automatisch berechnet oder manuell gestaltet und mit dem gewählten Slicer auf
+iterativ berechnet oder manuell gestaltet und mit dem gewählten Slicer auf
 ihre Layerzeiten geprüft. Beide Geometriemodi exportieren im STL-Ablauf ein gemeinsames
 3MF-Projekt mit Modell und Turm sowie die zusätzliche Turm-STL.
 Als dritte Methode ergänzt der [Postprozessor](preprocessor.md) den vorhandenen
@@ -54,8 +54,9 @@ getrennt unter „Nachweise und historische Einordnung“.
 - [UI-Abnahmekriterien](ui_overarbeitung_abnahmekriterien.md): ursprünglicher
   Anforderungskatalog; aktuelle Umsetzung und Tests haben Vorrang.
 
-Anbieterangaben werden nur in `config/legal_profile.json`, gemeinsame und
-automatische Produktstandardwerte in `config/default_settings.json` gepflegt.
+Anbieterangaben werden nur in `config/legal_profile.json`, gemeinsame
+Produktstandardwerte und die Standards der iterativen Methode in
+`config/default_settings.json` gepflegt.
 Die unabhängigen manuellen Standards stehen in `ManualSettings`;
 gemeinsame Anfangswerte beziehen sich auf die unveränderlichen Produktdefaults.
 Die überprüften Windows-Artefakte stehen in `requirements-windows.lock` und

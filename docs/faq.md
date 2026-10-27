@@ -5,7 +5,7 @@
 Sacrificial Tower is a free Windows application that creates cooling towers for
 FDM/FFF 3D printing. A tower is printed alongside your model to add time before
 the next layer, helping the model cool when layer times would otherwise be too short.
-Automatic mode calculates and tests a tower for your desired minimum layer
+Iterative mode calculates and tests a tower for your desired minimum layer
 time; manual mode lets you shape the tower yourself and check the resulting
 layer times. Both modes export a 3MF project containing your model and tower,
 plus a separate tower STL. RodeProjects develops the application.
@@ -15,11 +15,11 @@ The [main README](../README.md) contains downloads, setup and the supported slic
 
 Printing an additional object adds toolpath time before the printer returns
 to the next layer of the original model. Sacrificial Tower uses the selected
-printer, process and filament profiles to evaluate that extra time. Automatic
+printer, process and filament profiles to evaluate that extra time. Iterative
 generation searches for a suitable tower; manual generation keeps the edited
 shape fixed and reports the measured timing. The result depends on the actual
 profiles, printer, material and cooling settings.
-How closely an automatically generated tower matches your desired layer time
+How closely an iteratively generated tower matches your desired layer time
 depends substantially on the profiles selected in the application and their settings.
 The target is evaluated from slicer output; actual cooling and print quality
 also depend on conditions at the printer. The extra object uses additional
@@ -49,7 +49,7 @@ textual G-code from the slicer; binary Prusa G-code is not an analysis input.
 
 ## What can I export?
 
-With an STL model and any of the four supported slicers, both automatic and
+With an STL model and any of the four supported slicers, both iterative and
 manual mode export a native 3MF project containing the model and tower. The tower
 STL is saved alongside it. Reports describe the measured times and any simulated
 settings. Open the 3MF in the selected slicer and check the final arrangement and

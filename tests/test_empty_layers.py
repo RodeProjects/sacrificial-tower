@@ -84,7 +84,7 @@ class EmptyLayerTests(unittest.TestCase):
         self.assertIn("Originalobjekt", enabled)
         direct = empty_layer_message(evidence, simulation_available=True, direct_simulation_action=True)
         self.assertIn("Stützen simulieren", direct)
-        self.assertIn("automatischen und manuellen Turmerstellung", direct)
+        self.assertIn("iterativen und manuellen Turmerstellung", direct)
         for active in (False, True):
             message = empty_layer_message(evidence, simulation_available=False, supports_active=active)
             self.assertNotIn("simulieren", message)

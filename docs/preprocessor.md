@@ -3,12 +3,15 @@
 ## Bedienung
 
 Nach STL-Auswahl, Slicer-/Profilbestätigung und Pre-Slice steht neben
-**Automatisch** und **Manuell** die dritte Methode **Postprozessor** bereit.
+**Iterativ** und **Manuell** die dritte Methode **Postprozessor** bereit.
 Unterstützt werden Anycubic Slicer Next, Bambu Studio, OrcaSlicer und PrusaSlicer.
 Dieser Modus bearbeitet den bereits vorhandenen Pre-Slice; eine Änderung der
 Turmeinstellungen startet keinen weiteren Slicerlauf.
 
 **G-Code und Vorschau erzeugen** startet die Berechnung ausdrücklich.
+Sobald ein gültiger G-Code zum Export bereitsteht, ersetzt **G-Code exportieren**
+diese Schaltfläche. Nach Änderungen an Quelle oder Druckeinstellungen erscheint
+die Erzeugung wieder; reine Ansichtsänderungen behalten den Exportzustand bei.
 Einstellungsänderungen verwerfen das alte Ergebnis und starten keine Berechnung.
 Links stehen die Einstellungen, rechts die Vorschau. Die Bereiche schließen
 ohne Außenabstände und Rundungen aneinander und an den Fensterrand an.
@@ -27,15 +30,18 @@ Die Trennlinie stoppt an den Mindestbreiten der Bedienelemente. Einstellungsname
 Schalterbeschriftungen und Vorschau-Buttons bleiben ohne zusätzliche Umbrüche
 lesbar. Mehrzeilige Hinweise und Ergebnistexte passen sich der Spaltenbreite an.
 Schmale Fenster stapeln die Vorschau über den Einstellungen; beim erneuten
-Verbreitern wird die gewählte Aufteilung wiederhergestellt. Die automatische
+Verbreitern wird die gewählte Aufteilung wiederhergestellt. Die iterative
 Methode behält ihre feste Halbierung. Die Einstellungen besitzen links
 ein Hover-Hinweis-Icon mit kurzer Erklärung. Numerische Einstellungen haben rechts einen Reset im gemeinsamen
 Design. Bei numerischen Automatikzeilen folgen rechts auf den Funktionsnamen der Text
-**Automatisch**, die Checkbox, das Eingabefeld und der Reset. Bei **Hohler Turm**
+**Auto**, die Checkbox, das Eingabefeld und der Reset. Alle Zahlenfelder verwenden
+die gemeinsame Breite des breitesten aktuellen Inhalts einschließlich Einheit
+und Pfeiltasten. Die Breite folgt auch unbestätigten Texteingaben, ohne sie zu
+übernehmen oder den Cursor zu verändern. Bei **Hohler Turm**
 steht die Checkbox hinter dem Namen; der Reset bleibt am rechten Rand.
 Turmhöhe, Schaftdurchmesser und Standfußbreite besitzen jeweils eine eigene
 Automatik. Die gemeinsame Zeile **Turm- und Warteposition** enthält rechts
-**Automatisch**, die Checkbox und **Positionen bearbeiten**. Abschalten aktiviert den
+**Auto**, die Checkbox und **Positionen bearbeiten**. Abschalten aktiviert den
 Editor-Button; Einschalten setzt beide Positionen wieder auf Automatik.
 Die Koordinaten bleiben im Positionseditor: jeweils ein verbundenes X/Y-Feld,
 X wie die Vorschauachse rot, Y grün. Im Editor können die beiden Positionen
@@ -50,10 +56,13 @@ automatischen Maße 0,00 und nicht verwendete Positionen einen Gedankenstrich.
 Die Einstellungen bleiben während der Sitzung erhalten;
 sie werden derzeit nicht als globale Benutzervorgaben gespeichert.
 
-**Turm-Brim Breite** und **Turm-Brim Abstand** steuern einen eigenen Brim nur
+**Wandlinien** und **Warteabstand** stehen in den Postprozessor-Einstellungen.
+**Z-Hop** bezeichnet den Sicherheitshub in den erweiterten Einstellungen.
+**Turm-Brim Breite** und **Turm-Brim Abstand** stehen ebenfalls in den erweiterten
+Einstellungen und steuern einen eigenen Brim nur
 für den Turm. Brim-Art und Brimbreite des Modellprofils werden dafür nicht
 übernommen; die bereits geslicten Modellbahnen einschließlich Modell-Brim
-bleiben erhalten. Die Breitenautomatik erzeugt 0,2 mm pro Seite. Manuell sind
+bleiben erhalten. Die Breitenautomatik und der Standard erzeugen 2 mm pro Seite. Manuell sind
 0 bis 20 mm einstellbar; 0 mm schaltet den Turm-Brim aus. Die Abstandsautomatik
 liest `brim_separation` beziehungsweise `brim_object_gap`, ersatzweise gelten
 0,2 mm. Manuell sind 0,1 bis 1 mm möglich. Auch ein automatischer Profilabstand
@@ -205,7 +214,7 @@ zum Ausgleichen der Schichtzeit dynamisch kalibriert.
   `min(150 mm, 1,25 × max(14 mm, 1,8 × Schaftdurchmesser, 0,25 × Turmhöhe))`.
   Das sind geometrische Stabilitätsrichtwerte, keine Material-/Haftungsgarantie.
 - Der Standfuß verwendet dieselbe konkave Kurve und Höhenregel wie die
-  automatische Methode mit 100 % Füllung: mindestens 6 mm, 22 reale
+  iterative Methode mit 100 % Füllung: mindestens 6 mm, 22 reale
   Schichtintervalle oder 2,5 % der Modellhöhe, begrenzt durch die Turmhöhe.
   Soweit darüber noch Schichten verfügbar sind, endet die Kurve fünf
   Schichten später. Die verbreiterte zweite Schicht schließt bis zur dritten
@@ -553,26 +562,26 @@ Die Bettkontur einschließlich negativer Ursprünge, runder/polygonaler Formen
 und Sperrflächen stammt aus dem bestätigten Druckprofil. Wissenschaftliche
 Schreibweise wie `7e-15` bleibt beim Einlesen erhalten.
 
-Direkt unter der Vorschau stehen links drei unabhängige Schalter mit Hinweis
-und Einzelreset. Die Zeilen stehen mit festen Höhen und normalen Abständen
-untereinander. Die linke Spalte erhält nur ihre notwendige Breite; zwischen
-Checkbox-Beschriftung und Reset bleiben mindestens 30 Pixel.
-Die restliche Breite gehört der Farblegende: links Modell, Turm und Warteposition,
-rechts Warteplatzfahrten, Modell-/Turmfahrten und Brim, jeweils untereinander.
-Zwischen den beiden kompakten Legendenspalten liegen 15 Pixel; freier Platz
-bleibt rechts. Beide Bereiche schließen mit der rechten Vorschaukante ab. Bei zu
-wenig Platz werden diese Spalten untereinander angeordnet.
+Direkt unter der Vorschau steht ausschließlich die Farblegende mit Modell,
+Turm, Warteposition, Warteplatzfahrten, Modell-/Turmfahrten und Brim. Zwischen
+benachbarten Einträgen liegen 15 Pixel; bei minimaler Breite stehen die Einträge
+einspaltig untereinander. Die Fahrwege werden innerhalb der Vorschau bedient.
 
-- **Warteposition anzeigen**: gelbe Markierung, standardmäßig sichtbar.
-- **Fahrwege zum/vom Warteplatz anzeigen**: violette gestrichelte Wege vom
-  Modell zum Warteplatz und weiter zum Turm, standardmäßig ausgeblendet.
-- **Fahrwege Modell ↔ Turm anzeigen**: rosa gestrichelte direkte Anfahrt in
+- Die **Warteposition** bleibt als gelbe Markierung sichtbar.
+- **Warteplatzfahrten**: violette gestrichelte Wege vom
+  Modell zum Warteplatz und weiter zum Turm.
+- **Modell-/Turmfahrten**: rosa gestrichelte direkte Anfahrt in
   Schichten ohne Originaldefizit und Rückfahrt vom Turm zum Modell samt
-  zugehöriger lokaler Turmfahrten, standardmäßig ausgeblendet. Dieselbe
+  zugehöriger lokaler Turmfahrten. Dieselbe
   Zuordnung gilt in der Draufsicht des Positionseditors.
 
 Legenden verwenden sichtbare Farbfelder mit denselben Farben wie die
 zugehörigen Vorschauobjekte beziehungsweise Diagrammreihen.
+Die Farblegende unter der Vorschau nutzt deren gesamte Breite. Ihre Einträge
+stehen in Leserichtung nebeneinander und wandern bei Platzmangel einzeln in
+die nächste Zeile; die Höhe berücksichtigt sämtliche entstandenen Zeilen.
+Am Druckbettursprung sind die positiven Achsen mit **X+** in Rot, **Y+** in Grün
+und **Z+** in Blau gekennzeichnet.
 Beide Fahrweggruppen enthalten ihre jeweiligen Sicherheitshübe. Die Zuordnung
 wird beim Rekonstruieren der tatsächlich ausgegebenen Befehle vorgenommen;
 die G-Code-Befehle selbst ändern sich dabei nicht. **Warten** markiert die
@@ -622,8 +631,8 @@ die Skala verwendet die übrigen Layer und mindestens die eingestellte
 Mindest-Layerzeit. Layer 1 bleibt als auswählbarer Layer samt vollständiger
 Zeitangabe und unveränderten Berechnungs- und Exportdaten erhalten. Es entsteht
 kein zusätzlicher Legendeneintrag. Beide Skalenoptionen lassen sich unabhängig
-kombinieren. Der Hinweis am Informationssymbol erläutert den Nutzen bei langen
-ersten Schichten.
+kombinieren. Vor beiden Checkboxen steht dasselbe Informationssymbol mit einem
+passenden Hover-Hinweis zur jeweiligen Skala.
 
 Bei neuen Vorschauzeiten und beim Zurücksetzen der Vorschau ist die
 Normalisierung aktiviert, wenn Layer 1 allein die längste Gesamtzeit aus
@@ -655,30 +664,49 @@ Fahrwege bei. Die Auswahl ändert keinen G-Code und
 startet keine Berechnung. Einstellungsänderungen oder Fehler entfernen das
 Diagramm zusammen mit der ungültig gewordenen Vorschau.
 
-Bei ausgeschaltetem **Alle Fahrwege anzeigen** gelten die beiden einzelnen
-Fahrwegschalter unter der Vorschau für den ausgewählten Layer. Auch bei
-vollständiger Modelldarstellung bleibt die gewählte Fahrwegschicht wirksam.
-Die Zuordnung verwendet auch bei Z-Hops den Drucklayer.
+Rechts unten in der Vorschau bestimmt der Umschalter **Alle / Einzeln** den Anzeigemodus
+der Fahrwege. **Alle** zeigt ihre Fahrwege bis einschließlich
+des gewählten Layers; ohne aktive Layerbegrenzung sind alle Layer sichtbar.
+**Einzeln** zeigt nur die Fahrwege des gewählten Layers und ist der Standard.
+Auch bei vollständiger Modelldarstellung bleibt dabei die gewählte
+Fahrwegschicht wirksam. Die Zuordnung verwendet auch bei Z-Hops den Drucklayer.
+Der Auswahlhintergrund gleitet beim Umschalten horizontal zur anderen Seite.
+Der Modus lässt sich auch mit Leertaste und Links-/Rechtstasten bedienen.
+Die beiden Fahrweggruppen werden gemeinsam über **Fahrwege anzeigen** geschaltet;
+ein Moduswechsel verändert weder Kamera, Layerauswahl noch G-Code.
 
 **Vorschau zurücksetzen** links unten innerhalb der Vorschau stellt die
 eingepasste 3/4-Ansicht mit möglichst nebeneinander sichtbaren Objekten her.
-Warteposition, Fahrwegschalter, logarithmische Skala und Layerauswahl erhalten
+Warteposition, Fahrwegschalter, Anzeigemodus, logarithmische Skala und Layerauswahl erhalten
 ihre Standardwerte; die Navigation wird aktiviert. Die Sichtbarkeit der
-Diagrammspalte bleibt erhalten. **Färbung zurücksetzen** rechts unten stellt
-die normalen Farben und Deckkraft der sichtbaren Layer wieder her, ohne
-Kamera, Layerauswahl oder Fahrwegschalter zu verändern. Beide Schaltflächen
+Diagrammspalte bleibt erhalten. Direkt darüber schaltet **Transparenz aktiv**
+beziehungsweise **Transparenz inaktiv** die vorhandene Färbung und reduzierte
+Deckkraft der unteren Modell- und Fahrweglayer um. Bei aktiver Transparenz
+verwendet auch die Gesamtansicht dieselbe Darstellung wie die Diagrammauswahl
+des letzten Layers. Die Layerauswahl über Diagramm oder Nummernfeld aktiviert
+die Transparenz automatisch. Ausschalten stellt die normalen Farben und die
+volle Deckkraft wieder her; ein ausgewählter Layer und die Kamera bleiben
+erhalten. Der Layerreset zeigt das vollständige Modell und behält den
+Transparenzzustand bei. Eingeschaltet ist die Schaltfläche dunkelgrün;
+ausgeschaltet dunkelblau. Beide linken Schaltflächen sind gleich breit und
 schließen bündig und ohne Rundungen mit dem Vorschaurand ab. Diese Funktionen
 ändern keine Druckeinstellungen und starten keine G-Code-Erzeugung.
 
-Direkt über **Färbung zurücksetzen** schaltet **Alle Fahrwege anzeigen** beide
-Fahrweggruppen unter der Vorschau ein und zeigt sie für alle Layer. Der
-Schalter ist standardmäßig aus und dunkelblau. Eingeschaltet erscheint er
-dunkelgrün; dann bleiben auch die Fahrwege oberhalb des ausgewählten Layers
-sichtbar. Beim Ausschalten werden beide Fahrweggruppen deaktiviert. Werden sie
-danach einzeln wieder eingeschaltet, zeigen sie nur die Fahrwege des aktuellen
-Layers. Kamera, Modell-Layerauswahl, Färbung und G-Code bleiben unverändert.
-**Vorschau zurücksetzen** und die allgemeinen Standardwerte schalten diesen
-Modus wieder aus; Färbungs- und Layerreset behalten die Auswahl bei.
+Direkt über dem Umschalter **Alle / Einzeln** schaltet **Fahrwege anzeigen** beide
+Fahrweggruppen gemeinsam ein oder aus. Der gewählte
+Anzeigemodus **Alle** oder **Einzeln** bleibt dabei erhalten.
+Der Schalter ist standardmäßig eingeschaltet und dunkelgrün; ausgeschaltet
+erscheint er dunkelblau. Beim Ausschalten gleitet der Modusumschalter nach unten
+aus der Vorschau, während **Fahrwege anzeigen** zur rechten unteren Ecke wandert.
+Beim Einschalten läuft die Bewegung umgekehrt. Die 240-ms-Animation beginnt bei
+einem schnellen Richtungswechsel an der aktuellen Position; die Vorschau
+schneidet die Bedienelemente an ihrer Grenze ab. Ohne gültige Vorschau bleibt
+der Modusumschalter verborgen. Kamera, Modell-Layerauswahl, Färbung und G-Code
+bleiben unverändert. **Vorschau zurücksetzen** und die allgemeinen Standardwerte
+aktivieren die Fahrwege und stellen den Anzeigemodus **Einzeln** wieder her;
+Transparenzumschaltung und Layerreset behalten den Modus bei.
+Die beiden rechten Bedienelemente haben dieselbe Breite und eckige Kanten.
+Der aktive Teil des gleitenden Umschalters ist dunkelgrün.
 Ohne gültige Vorschau ist die Schaltfläche nicht bedienbar. Die Projektion
 der vollständigen Fahrweggruppen wird beim Layerwechsel wiederverwendet und
 bei Änderungen von Szene oder Kamera neu aufgebaut.
@@ -697,15 +725,23 @@ Skala und Übersicht werden bis zu Größen-, Daten- oder Skalenänderungen
 gepuffert. Beim Ziehen bewegt sich der Greifer direkt; die 3D-Vorschau erhält
 höchstens alle 33 ms den neuesten Layer und beim Loslassen sofort den Endwert.
 Die Kameraberechnung wird bei unveränderter Szene und Ansicht wiederverwendet.
+Die projizierten Einpassungsgrenzen bleiben bei Verschieben, Zoom und
+Größenänderungen erhalten. Größere Liniengruppen werden mit unveränderter
+Rechenreihenfolge gebündelt projiziert; ein begrenzter Koordinatenpuffer
+verwendet die Quelldaten bei Kamerabewegungen erneut. Kleine Gruppen werden
+direkt ohne temporäre Qt-Punktobjekte projiziert. Linienauswahl, Reihenfolge,
+Farben und Strichbreiten bleiben dabei gleich.
 Ein begrenzter Layerindex vermeidet das wiederholte Durchsuchen sämtlicher
 Modell- und Fahrwegsegmente; die genaue Höhen-Toleranz bleibt erhalten.
 Für die unteren Layer werden die bereits projizierten Druckbahnen wiederverwendet.
+Die Gruppierung prüft gemeinsame Höhen einmal je Höhenwert und behält die
+Zuordnung angehobener Fahrwege zu ihrem Drucklayer bei.
 Bis zu sechs Raster-Zwischenstände verkürzen den Bildaufbau beim Ziehen;
 ihre Anzahl sinkt bei großen oder hochauflösenden Vorschauen entsprechend dem
 Bildspeicherbudget. Kamera-, Größen- und Szenenänderungen erneuern diese Puffer.
 
 Die Ansicht startet mit vollständig eingepasstem Bett und zeigt X+/Y+ am
-G-Code-Ursprung. Wie im automatischen Modus gibt es **3/4-Ansicht**,
+G-Code-Ursprung. Wie im iterativen Modus gibt es **3/4-Ansicht**,
 **Vorderansicht**, **Seitenansicht** und **Draufsicht**, zusätzlich **Einpassen**
 für das vollständige Druckbett. **3/4-Ansicht** sucht anhand der XY-Umrisse der
 dargestellten Modell- und Turmbahnen eine Richtung mit möglichst großer
@@ -718,7 +754,7 @@ zum Mauszeiger. Der Punkt unter dem Zeiger bleibt beim Vergrößern und
 Verkleinern an derselben Bildschirmposition, auch nach dem Verschieben
 der Ansicht. An den Zoomgrenzen verschiebt sich das Bild nicht weiter.
 Die Drehrichtung beider Mausachsen ist auf die G-Code-Ansicht abgestimmt,
-damit sich das Ziehen wie in der automatischen Vorschau anfühlt. Verschieben
+damit sich das Ziehen wie in der Vorschau der iterativen Methode anfühlt. Verschieben
 und Zoom verwenden die gemeinsame Steuerung.
 Symbol oder Statusschalter schalten die Mausnavigation um. Bei deaktivierter
 Navigation erreicht das Mausrad die umgebende Seite. Ansichtsbuttons bleiben

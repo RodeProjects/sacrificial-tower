@@ -162,7 +162,7 @@ Die reale Abnahme in `tests/test_source_support_regressions.py` wird mit
 die vollständige Test-STL `input/Test-STL (manifold).stl` aus dem Repository
 und benötigt die benannten Testprofile in einer installierten Slicer-Umgebung.
 Der Dateipfad wird relativ zum Projektverzeichnis bestimmt und muss nach einem
-Klon nicht angepasst werden. Die Abnahme prüft automatischen und manuellen
+Klon nicht angepasst werden. Die Abnahme prüft iterativen und manuellen
 Prüfslice, die Quellobjekt-Metadaten im 3MF, erneutes Slicen des Exports,
 Layerzahl/Zeitübereinstimmung und unveränderte Slicerquelldateien.
 Standardmäßig beginnt dieser Test ohne Stützen im Vorslice und schaltet die
@@ -187,7 +187,7 @@ Sie ersetzt keine allgemeine Tragfähigkeits- oder Überhangprüfung.
 Die erfolgreiche Analyse bleibt nutzbar und zeigt einen Warnhinweis mit
 gegebenenfalls erkannten Höhenbereichen. Er empfiehlt Stützen für das
 Originalobjekt. „Stützen simulieren“ aktiviert direkt die bestehende Option
-für die automatische und manuelle Turmerstellung, auch vor dem ersten Öffnen
+für die iterative und manuelle Turmerstellung, auch vor dem ersten Öffnen
 des manuellen Editors; ein neuer Lauf wird damit noch nicht gestartet.
 Der grüne Button wird nur bei bestätigtem, unterstütztem Profil mit erkanntem
 Stützen-Aus-Wert angeboten. Die Aktion prüft den Quellen-/Profilkontext erneut.
@@ -425,7 +425,7 @@ Ein erfolgreich geprüftes natives gemeinsames 3MF bewahrt exakt die geslicte
 Form und feste Anordnung. Einzelheiten stehen im [manuellen Editor](manual_editor.md).
 
 Für unterstützte native Projekte, einschließlich PrusaSlicer, führt die
-Automatik zuerst die eingestellte Anzahl isolierter Turmslices und danach die
+iterative Methode zuerst die eingestellte Anzahl isolierter Turmslices und danach die
 gemeinsamen Objekt-/Turmslices aus. Eine vorzeitige Übernahme ist erst nach
 mindestens drei erfolgreich geprüften gemeinsamen Slices möglich; höhere
 konfigurierte Mindestzahlen bleiben verbindlich. Nach jedem gemeinsamen Slice

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 EXPORT_METHOD_LABELS = {
-    "automatic": "Automatisch",
+    "automatic": "Iterativ",
     "manual": "Manuell",
     "preprocessor": "Postprozessor",
 }

@@ -286,14 +286,16 @@ class PreprocessorController(QObject):
 
     def refresh(self):
         busy = self.job_id is not None
+        can_export = not busy and self.session.preview is not None
         self.panel.input_group.setEnabled(not busy)
         self.panel.advanced_group.setEnabled(not busy)
         self.panel.generate_button.setEnabled(not busy)
+        self.panel.generate_button.setVisible(not can_export)
         self.panel.reset_button.setEnabled(not busy)
         self.panel.cancel_button.setEnabled(busy and not self.cancelled)
         self.panel.cancel_button.setVisible(busy)
-        self.panel.export_button.setEnabled(not busy and self.session.preview is not None)
-        self.panel.export_button.setVisible(not busy and self.session.preview is not None)
+        self.panel.export_button.setEnabled(can_export)
+        self.panel.export_button.setVisible(can_export)
         self.panel.progress.setVisible(busy)
         exported = self.session.last_export_report
         self.panel.export_actions.setVisible(exported is not None)

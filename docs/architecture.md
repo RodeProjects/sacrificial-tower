@@ -382,8 +382,18 @@ steht als Badge direkt neben „3D-Vorschau“.
 ### Auswahl der Generierungsmethode und Sitzungszustände
 
 Nach bestätigter Datei-/Slicer-Vorbereitung und „Fertig“ zeigt der Inhaltsbereich
-zunächst drei responsive Methodenkarten für „Automatisch“, „Manuell“ und
-„Postprozessor“. Die bestehenden Geometriemodi behalten ihren dezenten Lilaton
+zunächst drei responsive Methodenkarten für „Iterativ“, „Manuell“ und
+„Postprozessor“. Die Karten stehen zunächst in drei Spalten mit dem Postprozessor
+an erster Stelle. Bei weniger Platz steht er über Iterativ und Manuell;
+anschließend werden alle drei in dieser Reihenfolge untereinander angeordnet.
+Die Methodenbuttons im Header folgen derselben Reihenfolge.
+Unter „Im Export enthalten“ benennen einzeilige Tags die Druckdateien:
+Modell und Kühlturm als gemeinsames 3MF sowie die separate Kühlturm-STL bei
+Iterativ und Manuell, bearbeiteter G-Code beim Postprozessor. Bei Platzmangel
+werden die Tagtexte in der Mitte gekürzt, sodass die Dateiendungen sichtbar
+bleiben. Der Tooltip und die zugängliche Kartenbeschreibung enthalten die
+vollständigen Exportangaben.
+Die bestehenden Geometriemodi behalten ihren dezenten Lilaton
 beziehungsweise dunkleren Blauton. Die hellen Aktionsflächen
 innerhalb der Karten zeigen dauerhaft ihren bisherigen violetten bzw. blauen
 Hover-Verlauf. Beim Hover werden ausschließlich diese inneren Flächen zusätzlich
@@ -449,7 +459,7 @@ Die Methodenwahl beginnt links neben dem Menübereich direkt am oberen
 Fensterrand. In der Kartenansicht bleibt dieser Bereich ausgeblendet.
 Nach der Wahl erscheint `HeaderMethodSelection` als verbundenes
 Element: oben die zentrierte Textüberschrift „Erstellungsmethode“, unmittelbar
-darunter nebeneinander „Automatisch“ und „Manuell“. Die Buttons behalten die
+darunter nebeneinander „Iterativ“ und „Manuell“. Die Buttons behalten die
 Höhe des Menübuttons; die Überschriftenfläche wächst bis zur Höhe der Infofläche,
 sodass beide Bereiche bündig an der gemeinsamen Header-Trennlinie enden.
 Layoutabstände sind null. Alle Ecken der Methodenfläche und ihrer Buttons sind
@@ -473,7 +483,7 @@ Die Methodenbuttons wechseln direkt in den jeweiligen Arbeitsbereich und dienen
 auch zur Rückkehr aus der Vorbereitung. Ein Klick auf die bereits aktive Methode
 erhält die aktuelle Auswahl im manuellen Editor. Bei unbestätigter Vorbereitung
 werden Infofläche und Methodenaktionen gemeinsam ausgeblendet.
-Der bestehende automatische Arbeitsbereich bleibt beim Navigieren erhalten;
+Der bestehende iterative Arbeitsbereich bleibt beim Navigieren erhalten;
 er wird lediglich ausgeblendet. `ManualGenerationPanel` besitzt einen eigenen
 eingebetteten Editor mit links angeordneten Einstellungen und rechts der Vorschau.
 Ein Methodenwechsel startet keinen Slice und invalidiert kein Ergebnis.
@@ -500,27 +510,27 @@ einer anderen Methode. Laufende Generierung und Export sperren beide Header-Zug�
 mit Vorschauergebnis/-status, Exportergebnis und Identität des exportierten
 Turmstands. Die bisherigen Attribute `current_preview`, `preview_state`,
 `last_export_result` und `_last_exported_preview_identity` greifen ausdrücklich
-auf die automatische Sitzung zu. So können automatische Callbacks kein
-manuelles Ergebnis überschreiben, auch wenn die automatische Ansicht verborgen ist.
+auf die Sitzung der iterativen Methode zu. So können Callbacks der iterativen Methode kein
+manuelles Ergebnis überschreiben, auch wenn die Ansicht der iterativen Methode verborgen ist.
 Ein Quell-/Profilwechsel verwirft die betroffenen Vorschauen aller Methoden;
 beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
 Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
 Der Postprozessor besitzt eine eigene Sitzung, einen verwalteten Vorschaujob und
 einen unmittelbaren G-Code-Export. Sein Datenfluss und seine Sicherheits-/
 Zeitinvarianten stehen unter [Postprozessor](preprocessor.md).
-Die Einstellungen und Fortschrittssteuerung der Automatik bleiben in ihrem
+Die Einstellungen und Fortschrittssteuerung der iterativen Methode bleiben in ihrem
 bestehenden Arbeitsbereich. Manuelle Eingaben verwenden ausschließlich die
 manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.
 `ManualGenerationController` orchestriert methodenspezifische Worker; negative
-Request-IDs und eigene Signalverbindungen trennen sie von automatischen Jobs.
+Request-IDs und eigene Signalverbindungen trennen sie von Jobs der iterativen Methode.
 Die vorhandenen Jobarten `PREVIEW` und `EXPORT` erhalten alle gemeinsamen Sperren
 und die kontrollierte Thread-/Prozessfreigabe. `ManualGenerationService` erzeugt
 eine ausdrücklich gestaltete Form und ermittelt ihre Layerzeiten mit einem
-vollständigen Prüfslice, ohne `CalibrationService.calibrate()` oder automatische
+vollständigen Prüfslice, ohne `CalibrationService.calibrate()` oder iterative
 Formung. Die manuelle Methode bewertet keine Zielzeit oder Toleranz.
 Die manuellen Fachmodule unter `manual/` bleiben Qt-unabhängig.
 Die Methodenauswahl und Ergebnisse werden nicht in Benutzereinstellungen gespeichert.
-Das automatische Einstellungsschema 21 bleibt unverändert; manuelle,
+Das Einstellungsschema der iterativen Methode 21 bleibt unverändert; manuelle,
 wiederverwendbare Werte liegen getrennt in `manual_settings.json`; dessen eigenes
 Schema und Migrationen stehen in [Persistenz](settings_migrations.md#getrennte-manuelle-einstellungen-eigenes-schema-10).
 Modell, Zustände, Bedienung und Prüfnachweise stehen im
@@ -549,7 +559,7 @@ simulieren“ folgt darunter; ihre Wirkungsweise steht in
 [Turmgeometrie](tower_geometry.md#objektspezifische-stützen-für-das-original-stl). Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
-Die äußeren Automatikbereiche „Turmeinstellungen“ und „Generierung und Vorschau“
+Die äußeren Bereiche der iterativen Methode „Turmeinstellungen“ und „Generierung und Vorschau“
 sind dauerhaft geöffnet und besitzen keine Aufklappdreiecke, seitlichen Rahmen
 oder abgerundeten Ecken. Beide schließen ohne oberen oder seitlichen Außenabstand
 an den Programmheader und die nutzbaren Fensterränder an; der Headerschatten
@@ -620,7 +630,7 @@ ist stets aktiv; eine Dev-Umgehung existiert nicht. Fehlermeldungen an den
 Einstellungen prüfen jeweils nur den eigenen Wert und wachsen mit dem Inhalt,
 ohne die Bedienelemente zu überdecken.
 
-In der automatischen Methode befindet sich „Standardwerte wiederherstellen“
+In der iterativen Methode befindet sich „Standardwerte wiederherstellen“
 links unten im Footer. Die manuellen Resets beschreibt [manual_editor.md](manual_editor.md).
 Nach dem
 Zurücksetzen wird das lokale Zeitfenster an die analysierte Layerzahl angepasst

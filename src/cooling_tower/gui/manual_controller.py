@@ -513,7 +513,7 @@ class ManualGenerationController(QObject):
             return
         box = self.window._create_reset_defaults_message_box()
         box.setWindowTitle("Alles zurücksetzen")
-        box.setText("Alle Werte der manuellen Methode, die Turmform und die Vorschau werden auf ihre Standardwerte zurückgesetzt. Die automatische Methode und die Dateivorbereitung bleiben erhalten.")
+        box.setText("Alle Werte der manuellen Methode, die Turmform und die Vorschau werden auf ihre Standardwerte zurückgesetzt. Die iterative Methode und die Dateivorbereitung bleiben erhalten.")
         box.exec()
         if box.clickedButton() is box._reset_yes_button:
             self.panel.reset_all()

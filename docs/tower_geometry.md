@@ -546,12 +546,15 @@ sind 32 px hoch.
 
 Nach Abschluss der Datei-/Slicer-Vorbereitung erscheint im Inhaltsbereich die
 Methodenauswahl mit der zentrierten Überschrift „Wie soll der Kühlturm erstellt werden?“. Die Karten
-„Automatisch“ und „Manuell“ stehen bei ausreichend Platz nebeneinander,
-ansonsten untereinander. Die gemeinsame Kartenbreite ist auf 980 px begrenzt;
-die Gruppe steht zentriert. Beim Verkleinern schrumpfen zunächst die seitlichen
-Freiräume bis zum regulären Seitenrand, bevor die Karten unter 800 px
-verfügbarer Breite umbrechen. Die Kartentitel sind ebenfalls zentriert.
-„Automatisch“ öffnet den bestehenden Arbeitsbereich;
+„Postprozessor“, „Iterativ“ und „Manuell“ stehen bei ausreichend Platz in
+dieser Reihenfolge nebeneinander. Reicht der Platz für drei Karten nicht,
+steht der Postprozessor über den beiden anderen Karten. Reicht auch deren
+gemeinsame Breite nicht mehr aus, stehen alle drei untereinander: Postprozessor,
+Iterativ, Manuell. Die zentrierte Gruppe verwendet regulär höchstens 1100 px;
+größere Schrift kann die erforderliche Breite erhöhen. Zunächst schrumpfen die
+seitlichen Freiräume bis zum regulären Seitenrand, danach die Spaltenzahl.
+Die Kartentitel sind ebenfalls zentriert.
+„Iterativ“ öffnet den bestehenden Arbeitsbereich;
 „Manuell“ öffnet den eingebetteten [Profil- und Béziereditor](manual_editor.md).
 Nach der ersten Wahl über die Karten sind beide Methoden im Header direkt erreichbar.
 Die grauen Bereichsbezeichnungen oberhalb der jeweiligen Inhalte entfallen.
@@ -569,7 +572,7 @@ In der Kartenansicht bleibt dieser Bereich ausgeblendet. Nach der Wahl steht
 dort „Erstellungsmethode“ als zentrierte Textüberschrift.
 Ihre Fläche wächst in der Höhe, sodass die darunterliegenden Methodenbuttons
 mit der Infofläche und der Header-Trennlinie bündig abschließen.
-Direkt darunter schließen die violette Aktion „Automatisch“ und die blaue Aktion
+Direkt darunter schließen die violette Aktion „Iterativ“ und die blaue Aktion
 „Manuell“ nebeneinander ohne Abstand an. Alle Ecken sind rechtwinklig;
 zusammen bilden sie ein Element. Die aktive Methode wirkt durch einen
 hellen umgekehrten Verlauf und dünne Schatten-/Lichtkanten eingedrückt. Die Schrift
@@ -625,7 +628,7 @@ Z=0 und besitzt geschlossenen Boden und Deckel. Fachliche Invarianten,
 Fußabhängigkeiten und Sicherheitsgrenzen stehen zentral in
 [Manueller Editor – Geometrie](manual_editor.md#geometriemodell-und-invarianten).
 
-Im automatischen Arbeitsbereich enthält das gemeinsame Dropdown
+Im Arbeitsbereich der iterativen Methode enthält das gemeinsame Dropdown
 „Turmeinstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
 Simulation deaktivierter Turmstützen. Das lokale Zeitfenster befindet sich
 in „Allgemeine Einstellungen“ und besitzt dort einen eigenen Reset.
@@ -697,7 +700,7 @@ veraltet; die Veraltet-Anzeige gilt erst für Szenen mit Kühlturm.
 Ist die globale Stützeneinstellung im bestätigten Prozessprofil eindeutig
 deaktiviert, wird in beiden Methoden **Stützen für STL-Objekt simulieren**
 angeboten. Die Option startet deaktiviert und wird nicht als globale
-Benutzervoreinstellung gespeichert. Im automatischen Modus steht sie unter
+Benutzervoreinstellung gespeichert. Im iterativen Modus steht sie unter
 „Deaktivierte Turmstützen simulieren“, manuell unter „Turm und Standfuß“.
 Der gemeinsame objektspezifische 3MF-Pfad ist für Orca Slicer, Bambu Studio und
 Anycubic Slicer Next verfügbar. Bei anderen Adaptern bleibt die angebotene Option
@@ -710,7 +713,7 @@ setzen `enable_support=1` ausschließlich am Originalobjekt. Die globale
 Stützeneinstellung und sämtliche weiteren Stützenparameter bleiben erhalten;
 Turmfüllung und Turmstützen werden unabhängig am Turm gesetzt. Bambu erhält
 dieselbe Einstellung zusätzlich im objektspezifischen `print_params` der
-temporären Assembly. Auch der verzögert erstellte automatische Endexport trägt
+temporären Assembly. Auch der verzögert erstellte Endexport der iterativen Methode trägt
 diesen Wert weiter. Native Projektvalidierung prüft die Übernahme am richtigen
 Objekt. Slicer-Originale werden ausschließlich gelesen.
 Wurde zuvor bereits der Pre-Slice nach einem Fehler mit simulierten Stützen
@@ -719,7 +722,7 @@ Generierungsauftrag durch die objektspezifische Aktivierung. Damit schaltet sie
 keine zusätzlichen Turmstützen ein; das vorbereitete Original bleibt erhalten.
 
 Die vorbereitete Originalanalyse und die manuelle Vorschau bleiben unverändert.
-Bei aktiver Objektstützensimulation liest die automatische Vorschau die
+Bei aktiver Objektstützensimulation liest die Vorschau der iterativen Methode die
 Originalbahnen einschließlich der Stützen aus dem tatsächlichen gemeinsamen
 G-Code des besten Kandidaten. Benannte Objektblöcke trennen Original und Turm;
 Bambus numerische Objektkennungen werden anhand ihrer exakten Druckbahngrenzen
@@ -741,7 +744,7 @@ als aktuell angezeigt; Export bleibt bis zur Ergebnisübernahme gesperrt.
 Außerhalb einer Generierung erscheint das Turm-Fortschrittsbild vollständig,
 während sein letzter interner Fortschrittswert für die Fortsetzung erhalten bleibt.
 
-Das automatische Ergebnis erscheint auf einer durchgehend weißen Fläche ohne
+Das Ergebnis der iterativen Methode erscheint auf einer durchgehend weißen Fläche ohne
 zusätzlichen äußeren Kartenrahmen. Die eckigen Farbflächen reichen bis zum
 Abschnittsrand und schließen horizontal und vertikal ohne Lücken aneinander an.
 Feine Trennlinien grenzen die Flächen ab und folgen auch der gestapelten Anordnung.
@@ -785,7 +788,7 @@ während der gemeinsamen Berechnung sichtbar, ebenso nach vorzeitiger Übernahme
 automatischen Ende und nach einer fehlgeschlagenen Fortsetzung mit erhaltenem,
 exportierbarem Turm. Während vorbereitender Slices und der Vorbereitung einer
 Fortsetzung bleibt er verborgen. Der Wechsel über die Methodenwahl im Header erhält
-die getrennten Sitzungen und das automatische Ergebnis; laufende Generierungen
+die getrennten Sitzungen und das Ergebnis der iterativen Methode; laufende Generierungen
 oder Exporte sperren die Methodenwahl.
 
 Links vor „3D-Vorschau“ erläutert ein Info-Icon beim Darüberfahren, dass die
@@ -809,7 +812,7 @@ Start-/Stopp-Lebenszyklus bei Sichtbarkeits- und Statuswechseln.
 Profilrollen, Historienschritte und Wiederholungszweige, schmale Vorschauleisten,
 den sicheren Neustart eines übernommenen Ergebnisses, die aktuelle gemeinsame
 Vorschau sowie objektspezifische Stützen und Turmfüllung einschließlich des
-verzögerten automatischen Endexports ab. `test_real_object_simulations.py`
+verzögerten Endexports der iterativen Methode ab. `test_real_object_simulations.py`
 prüft bei `COOLING_TOWER_RUN_REAL_SLICER_TESTS=1` beide installierten nativen
 Adapter in getrennten Prozessen, einschließlich G-Code-Nachweis der Turmfüllung,
 3MF-Metadaten, getrennten Original-/Stützbahnen für die Vorschau und unveränderten

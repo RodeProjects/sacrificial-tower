@@ -6,10 +6,10 @@ Opferobjekt)**: Er wird neben deinem Modell mitgedruckt und erzeugt durch seine
 dynamische Form an den nötigen Stellen zusätzliche Layerzeit.
 
 Das kostenlose Windows-Programm wertet die Layerzeiten deines STL-Modells mit
-dem gewählten Slicer aus. Im **automatischen Modus** berechnet und prüft es einen
+dem gewählten Slicer aus. Im **iterativen Modus** berechnet und prüft es einen
 Turm für die gewünschte Mindest-Layerzeit. Im **manuellen Modus** gestaltest du die
 Turmform selbst und lässt ihre Wirkung auf die Layerzeiten prüfen.
-Wie gut ein automatisch erstellter Turm die gewünschte Layerzeit erreicht,
+Wie gut ein iterativ erstellter Turm die gewünschte Layerzeit erreicht,
 hängt maßgeblich von den im Programm gewählten Profilen und deren Einstellungen ab.
 Beide Modi
 exportieren ein **gemeinsames 3MF-Projekt mit Modell und Kühlturm** für deinen
@@ -26,9 +26,9 @@ Short layer times can leave too little time for cooling. Sacrificial Tower is a
 free Windows application for FDM/FFF 3D printing that creates an additional
 **cooling tower (a sacrificial object)**, printed alongside your model. Its dynamic
 shape adds layer time where needed. It evaluates your STL model's layer times using your selected
-slicer. **Automatic mode** calculates and tests a tower for your desired minimum
+slicer. **Iterative mode** calculates and tests a tower for your desired minimum
 layer time; **manual mode** lets you shape the tower yourself and check the
-resulting layer times. How closely an automatically generated tower matches your
+resulting layer times. How closely an iteratively generated tower matches your
 desired layer time depends substantially on the profiles selected in the
 application and their settings. Both modes export a **3MF project containing your model
 and tower**, plus a separate tower STL.
@@ -45,7 +45,7 @@ the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 
 - Lokale Auswertung der Layerzeiten eines STL-Modells über den gewählten
   Slicer; Analyse der Layerzeiten von vorhandenem G-Code über die CLI.
-- Automatischer Kühlturm mit Ziel-Layerzeit oder manueller Béziereditor mit
+- Iterative Kühlturmerstellung mit Ziel-Layerzeit oder manueller Béziereditor mit
   festem Prüfslice und tatsächlicher Zeitbewertung.
 - Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden
   Modi; zusätzliche STL-Datei des Turms.

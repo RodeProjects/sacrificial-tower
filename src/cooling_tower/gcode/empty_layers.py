@@ -134,7 +134,7 @@ def empty_layer_message(
     if simulation_available:
         if direct_simulation_action:
             message += (
-                ' Mit „Stützen simulieren“ werden sie bei der automatischen und '
+                ' Mit „Stützen simulieren“ werden sie bei der iterativen und '
                 "manuellen Turmerstellung berücksichtigt."
             )
         else:

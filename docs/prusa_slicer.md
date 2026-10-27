@@ -1,7 +1,7 @@
 # PrusaSlicer-Integration
 
 PrusaSlicer besitzt einen eigenen Adapter, INI-Profilkatalog und Projektbau.
-Profilbestätigung, Vorslice, automatische und manuelle Erstellung verwenden
+Profilbestätigung, Vorslice, iterative und manuelle Erstellung verwenden
 denselben aufgelösten Profilkontext. Installationsdateien, Originalprofile und
 Slicer-Konfigurationen werden ausschließlich gelesen. Jeder CLI-Aufruf erhält
 ein eigenes Arbeits- und Datenverzeichnis außerhalb der Slicer-Verzeichnisse.
@@ -51,7 +51,7 @@ gelesen. Dasselbe gilt für die Objektvorschau aus einem gemeinsamen Slice.
 
 Ein Projekt wird erst nach Validierung und erneuter Prüfung der STL-Hashes
 atomar übernommen. Fehler, Zeitlimit und Abbruch lassen einen vorhandenen
-Zielstand bestehen. Die Regeln für automatische Phasen, Übernahme und Export
+Zielstand bestehen. Die Regeln für die Phasen der iterativen Methode, Übernahme und Export
 stehen zentral im [Quellenablauf](source_workflow.md#tests-und-reale-abnahme).
 
 ## Tests und Grenzen des Nachweises

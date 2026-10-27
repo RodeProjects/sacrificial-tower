@@ -9,15 +9,125 @@ import test_preprocessor_gui as fixture_module
 from test_preprocessor import make_gcode
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import QStyle, QStyleOptionFrame
 from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.preprocessor_safety import ExclusionRect
 
 
 class PreprocessorUpgradeGuiTests(unittest.TestCase):
+    def test_reorganized_settings_use_auto_and_two_millimetre_brim(self):
+        panel = self.panel
+        self.assertEqual(panel.settings().tower_brim_width_mm, 2)
+        for name in ("wall_count", "wait_clearance_mm"):
+            self.assertTrue(panel.input_group.isAncestorOf(panel.rows[name]))
+        for name in ("tower_brim_width_mm", "tower_brim_gap_mm"):
+            self.assertTrue(panel.advanced_group.isAncestorOf(panel.rows[name]))
+        self.assertEqual(panel.rows["z_hop_mm"].label.text(), "Z-Hop")
+        for flag, checkbox in panel.automatic.items():
+            if flag in ("automatic_position", "automatic_wait_position"):
+                continue
+            row = checkbox.parentWidget()
+            self.assertEqual(row.layout().itemAtPosition(0, 2).widget().text(), "Auto")
+        self.assertEqual(panel.positions_button.parentWidget().layout().itemAt(3).widget().text(), "Auto")
+
+    def test_numeric_fields_share_content_width_and_preserve_uncommitted_drafts(self):
+        self.window._apply_style()
+        panel = self.panel
+        panel.advanced_group.set_expanded(True)
+        QTest.qWait(40)
+        widths = {row.editor.width() for row in panel.rows.values()}
+        self.assertEqual(len(widths), 1)
+        initial = widths.pop()
+        editor = panel.inputs["target_layer_time_s"]
+        editor.setFocus()
+        editor.selectAll()
+        QTest.keyClicks(editor, "1234,56")
+        QTest.qWait(40)
+        self.assertEqual(editor.lineEdit().text(), "1234,56")
+        self.assertEqual(editor.value(), 10)
+        self.assertGreater(editor.width(), initial)
+        self.assertEqual({row.editor.width() for row in panel.rows.values()}, {editor.width()})
+        for row in panel.rows.values():
+            line = row.editor.lineEdit()
+            option = QStyleOptionFrame()
+            option.initFrom(line)
+            contents = line.style().subElementRect(QStyle.SubElement.SE_LineEditContents, option, line)
+            self.assertGreaterEqual(contents.width(), line.fontMetrics().horizontalAdvance(line.text())+4)
+            self.assertGreaterEqual(row.unit_label.width(), row.unit_label.fontMetrics().horizontalAdvance(row.unit_label.text()))
+            self.assertGreaterEqual(row.unit_label.width(), row.unit_label.minimumSizeHint().width())
+        editor.selectAll()
+        QTest.keyClicks(editor, "10")
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        QTest.qWait(40)
+        self.assertEqual(editor.width(), initial)
+
+    def test_unit_padding_is_funded_by_both_value_gaps_without_widening_fields(self):
+        panel = self.panel
+        panel.advanced_group.set_expanded(True)
+        QTest.qWait(40)
+        initial = panel.inputs["travel_speed_mm_s"].width()
+        for row in panel.rows.values():
+            row.unit_label.setMargin(1)
+        panel.refresh_layout()
+        self.assertEqual({row.editor.width() for row in panel.rows.values()}, {initial})
+        for row in panel.rows.values():
+            self.assertGreaterEqual(row.unit_label.width(), row.unit_label.minimumSizeHint().width())
+            line = row.editor.lineEdit()
+            option = QStyleOptionFrame()
+            option.initFrom(line)
+            contents = line.style().subElementRect(QStyle.SubElement.SE_LineEditContents, option, line)
+            self.assertGreaterEqual(contents.width(), line.fontMetrics().horizontalAdvance(line.text())+4)
+
+    def test_preview_renders_blue_positive_z_axis(self):
+        self.harness.wait_for_result()
+        canvas = self.panel.canvas
+        self.assertIsNotNone(canvas.scene.bed_geometry)
+        canvas.fit_scene(emit=False)
+        canvas.grab()
+        image = canvas._rendered_frame.toImage()
+        from cooling_tower.preview import Point3D
+        length = min(30, (canvas.scene.bed_bounds.maximum_x_mm-canvas.scene.bed_bounds.minimum_x_mm)/8)
+        point = canvas._project(Point3D(0, 0, length*.6), canvas._fit_parameters())
+        ratio = canvas.devicePixelRatioF()
+        expected = QColor(canvas.Z_AXIS_COLOR)
+        pixels = [image.pixelColor(round(point.x()*ratio)+dx, round(point.y()*ratio)+dy)
+            for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+        self.assertLess(min(abs(p.red()-expected.red())+abs(p.green()-expected.green())+
+            abs(p.blue()-expected.blue()) for p in pixels), 150)
+
+    def test_preview_legend_wraps_entries_in_reading_order_and_uses_full_width(self):
+        legend = self.panel.legend
+        legend.ensurePolished()
+        legend.setMinimumHeight(0)
+        legend.setMaximumHeight(16777215)
+        entries = legend.entries
+        widths = [entry.sizeHint().width() for entry in entries]
+        gap = legend.layout().spacing()
+        full = sum(widths)+(len(entries)-1)*gap
+        distributions = set()
+        for width in range(full, max(widths)-1, -1):
+            height = legend.heightForWidth(width)
+            legend.resize(width, height)
+            legend.layout().setGeometry(legend.rect())
+            rows = {}
+            for entry in entries:
+                self.assertTrue(legend.rect().contains(entry.geometry()))
+                rows.setdefault(entry.y(), []).append(entry)
+            distributions.add(tuple(len(row) for row in rows.values()))
+            for row in rows.values():
+                self.assertEqual(row[0].x(), 0)
+                for first, second in zip(row, row[1:]):
+                    self.assertEqual(second.x()-first.geometry().right()-1, gap)
+        self.assertIn((6,), distributions)
+        self.assertIn((5, 1), distributions)
+        self.assertIn((1, 1, 1, 1, 1, 1), distributions)
+        self.assertTrue(any(len(rows) >= 3 for rows in distributions))
+        self.assertFalse(hasattr(self.panel, 'view_controls'))
+        self.assertFalse(hasattr(self.panel, 'view_checkboxes'))
+
     def test_clearance_display_is_removed_without_changing_safety_metadata(self):
         result = self.harness.wait_for_result()
-        self.assertNotIn("show_clearance", self.panel.view_checkboxes)
         self.assertFalse(hasattr(self.panel.canvas, "set_clearance_visible"))
         self.assertGreater(result.printhead.radius_mm, 0)
         self.assertTrue(result.collision_notes)
@@ -77,7 +187,11 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertAlmostEqual(chart._maximum, 10*1.05)
         layout = panel.timing_panel.layout()
         row = panel.normalized_scale.parentWidget()
-        self.assertEqual(layout.indexOf(row), layout.indexOf(panel.logarithmic_scale)+1)
+        self.assertEqual(layout.indexOf(row), layout.indexOf(panel.logarithmic_scale.parentWidget())+1)
+        self.assertEqual(panel.logarithmic_info.objectName(), "settingInfoButton")
+        self.assertEqual(panel.logarithmic_info.width(), panel.normalization_info.width())
+        self.assertIn("lineare Zeitskala", panel.logarithmic_info.toolTip())
+        self.assertLess(panel.logarithmic_info.x(), panel.logarithmic_scale.x())
         self.assertEqual(panel.normalization_info.objectName(), "settingInfoButton")
         self.assertIn("<b>Zeitskala normalisieren</b>", panel.normalization_info.toolTip())
         self.assertIn("Layer 1", panel.normalization_info.toolTip())
@@ -196,7 +310,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
                 QTest.qWait(80)
                 self.assertFalse(panel.time_chart.isVisible())
 
-    def test_chart_sits_right_of_complete_preview_and_legend_has_compact_columns(self):
+    def test_chart_sits_right_of_complete_preview_and_full_width_legend(self):
         self.window.resize(2400, 1200)
         panel = self.panel
         QTest.qWait(80)
@@ -207,21 +321,17 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         QTest.qWait(100)
         self.assertLess(panel.canvas.width(), initial_width)
         self.assertGreater(panel.timing_panel.x(), panel.preview_view.geometry().right())
-        self.assertLess(panel.view_controls.geometry().right(), panel.legend.x())
+        self.assertEqual(panel.legend.width(), panel.canvas.width())
         chart, legend = panel.time_chart, panel.time_legend
         self.assertGreater(legend.y(), chart.geometry().bottom())
         self.assertFalse(hasattr(panel, "summary"))
         self.assertFalse(hasattr(panel, "layer_slider"))
         self.assertEqual(panel.timing_panel.height(), panel.preview_view.height())
-        self.assertTrue(panel.preview_view.isAncestorOf(panel.preview_details))
-        labels = panel.legend.labels[:3]
-        points = [label.mapTo(panel.legend, QPoint()) for label in labels]
-        self.assertEqual(len({point.x() for point in points}), 1)
-        self.assertEqual([point.y() for point in points], sorted(point.y() for point in points))
-        second = [label.mapTo(panel.legend, QPoint()) for label in panel.legend.labels[3:]]
-        self.assertEqual([point.y() for point in points], [point.y() for point in second])
-        first_right = max(label.mapTo(panel.legend, QPoint()).x()+label.width() for label in panel.legend.labels[:3])
-        self.assertEqual(panel.legend.swatches[3].mapTo(panel.legend, QPoint()).x()-first_right, 15)
+        self.assertIs(panel.legend.parentWidget(), panel.preview_view)
+        entries = panel.legend.entries
+        self.assertEqual(len({entry.y() for entry in entries}), 1)
+        for first, second in zip(entries, entries[1:]):
+            self.assertEqual(second.x()-first.geometry().right()-1, 15)
         self.assertFalse(hasattr(panel, "all_layers"))
         self.assertFalse(hasattr(panel.timing_panel, "header"))
         self.assertEqual(panel.timing_toggle.width(), panel.timing_toggle.height())
@@ -268,6 +378,7 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         QTest.qWait(100)
         chart, canvas = self.panel.time_chart, self.panel.canvas
         chart.grab()
+        self.panel.transparency_toggle.setChecked(False)
         x = chart.plot_rect().right()
         with patch.object(chart, "_paint_plot", wraps=chart._paint_plot) as plotted, \
                 patch.object(canvas, "set_layer_height", wraps=canvas.set_layer_height) as displayed:
@@ -279,6 +390,56 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
             self.assertEqual(canvas._layer_z, result.layer_heights_mm[99])
             self.assertLess(displayed.call_count, 25)
             self.assertEqual(plotted.call_count, 0)
+        self.assertTrue(self.panel.transparency_toggle.isChecked())
+
+    def test_transparency_button_matches_chart_and_restores_opaque_rendering(self):
+        result = self.harness.wait_for_result()
+        panel, canvas = self.panel, self.panel.canvas
+        QTest.qWait(100)
+        camera = canvas.camera_state()
+        gcode = result.gcode_path.read_bytes()
+
+        def rendered_image():
+            canvas.grab()
+            return canvas._rendered_frame.toImage()
+
+        panel.transparency_toggle.click()
+        opaque = rendered_image()
+        self.assertIsNone(canvas._layer_z)
+        panel.transparency_toggle.click()
+        transparent = rendered_image()
+        self.assertNotEqual(transparent, opaque)
+        self.assertIsNotNone(canvas._prepare_line_frame().lower_layers)
+        panel.transparency_toggle.click()
+        self.assertEqual(rendered_image(), opaque)
+
+        # Choosing the same last layer in the chart must produce exactly the
+        # same scene as activating transparency without a prior layer choice.
+        QTest.keyClick(panel.time_chart, Qt.Key.Key_End)
+        self.assertTrue(panel.transparency_toggle.isChecked())
+        self.assertEqual(panel.transparency_toggle.text(), "Transparenz aktiv")
+        self.assertEqual(rendered_image(), transparent)
+
+        panel.transparency_toggle.click()
+        chart = panel.time_chart
+        x = round(chart.plot_rect().right())
+        start = QPoint(x, round(chart.layer_y(chart.selected)))
+        end = QPoint(x, round(chart.layer_y(3)))
+        QTest.mousePress(chart, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(chart, end)
+        QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, pos=end)
+        self.assertTrue(panel.transparency_toggle.isChecked())
+        selected_transparent = rendered_image()
+        panel.transparency_toggle.click()
+        self.assertEqual(panel.transparency_toggle.text(), "Transparenz inaktiv")
+        self.assertNotEqual(rendered_image(), selected_transparent)
+        self.assertEqual(canvas._layer_z, result.layer_heights_mm[2])
+        self.assertEqual(canvas.camera_state(), camera)
+        panel.layer_reset.click()
+        self.assertFalse(panel.transparency_toggle.isChecked())
+        self.assertEqual(rendered_image(), opaque)
+        self.assertEqual(result.gcode_path.read_bytes(), gcode)
+        self.assertIsNone(self.controller.job_id)
 
     def test_layer_number_fits_its_digits_and_remains_within_object_layer_range(self):
         self.harness.request = self.harness.fixture.request(make_gcode(layers=123))
@@ -384,25 +545,25 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         QTest.qWait(100)
         self.assertTrue(canvas.navigation_enabled)
 
-    def test_colour_layer_and_preview_resets_preserve_generated_result(self):
+    def test_transparency_layer_and_preview_resets_preserve_generated_result(self):
         panel, canvas = self.panel, self.panel.canvas
-        self.assertEqual(panel.all_travel.width(), panel.colour_reset.width())
+        self.assertEqual(panel.travel_visibility_button.width(), panel.travel_mode_toggle.width())
         result = self.harness.wait_for_result()
-        self.assertEqual(panel.all_travel.width(), panel.colour_reset.width())
+        self.assertEqual(panel.preview_reset.width(), panel.transparency_toggle.width())
         settings = panel.settings()
         self.assertEqual(panel.layer_spin.value(), panel.layer_spin.maximum())
         self.assertEqual(panel.time_chart.selected, panel.layer_spin.maximum())
-        self.assertFalse(panel.all_travel.isChecked())
+        self.assertTrue(panel.travel_visibility_button.isChecked())
         panel.select_layer(3)
-        panel.view_checkboxes["show_wait_travel"].setChecked(True)
-        panel.view_checkboxes["show_tower_travel"].setChecked(True)
         self.assertTrue(canvas._wait_travel_visible)
         self.assertTrue(canvas._tower_travel_visible)
         self.assertFalse(canvas._cumulative_travel)
         frame = canvas._prepare_line_frame()
         self.assertIsNotNone(frame.lower_layers)
         camera = canvas.camera_state()
-        panel.colour_reset.click()
+        self.assertEqual(panel.transparency_toggle.text(), "Transparenz aktiv")
+        panel.transparency_toggle.click()
+        self.assertEqual(panel.transparency_toggle.text(), "Transparenz inaktiv")
         self.assertFalse(canvas._layer_colours_highlight)
         self.assertEqual(canvas.camera_state(), camera)
         self.assertEqual(canvas._layer_z, result.layer_heights_mm[2])
@@ -431,20 +592,29 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
             for s, i in zip(result.scene.wait_travel_segments, result.scene.wait_travel_layer_indices) if s in last_routes))
         panel.select_layer(2)
         self.assertTrue(canvas._layer_colours_highlight)
+        self.assertTrue(panel.transparency_toggle.isChecked())
+        panel.transparency_toggle.click()
+        self.assertFalse(canvas._layer_colours_highlight)
+        panel.transparency_toggle.click()
+        self.assertTrue(canvas._layer_colours_highlight)
+        self.assertEqual(panel.transparency_toggle.text(), "Transparenz aktiv")
         panel.logarithmic_scale.setChecked(False)
-        panel.view_checkboxes["show_wait_position"].setChecked(False)
+        canvas.set_wait_position_visible(False)
         canvas.set_navigation_enabled(False)
         panel.preview_reset.click()
         self.assertIs(panel.preview_reset.parentWidget(), canvas)
         self.assertEqual(panel.preview_reset.x(), 0)
         self.assertEqual(canvas.height()-panel.preview_reset.geometry().bottom()-1, 0)
-        self.assertEqual(canvas.width()-panel.colour_reset.geometry().right()-1, 0)
-        self.assertEqual(canvas.height()-panel.colour_reset.geometry().bottom()-1, 0)
+        self.assertEqual(panel.transparency_toggle.x(), 0)
+        self.assertEqual(panel.transparency_toggle.geometry().bottom()+1, panel.preview_reset.y())
+        self.assertEqual(canvas.width()-panel.travel_mode_toggle.geometry().right()-1, 0)
+        self.assertEqual(canvas.height()-panel.travel_mode_toggle.geometry().bottom()-1, 0)
+        self.assertEqual(panel.travel_visibility_button.geometry().bottom()+1, panel.travel_mode_toggle.y())
         self.assertEqual(panel.layer_spin.value(), panel.layer_spin.maximum())
-        self.assertIsNone(canvas._layer_z)
+        self.assertEqual(canvas._layer_z, result.layer_heights_mm[-1])
         self.assertFalse(canvas._cumulative_travel)
-        self.assertFalse(canvas._wait_travel_visible)
-        self.assertFalse(canvas._tower_travel_visible)
+        self.assertTrue(canvas._wait_travel_visible)
+        self.assertTrue(canvas._tower_travel_visible)
         self.assertTrue(canvas._wait_position_visible)
         self.assertTrue(panel.logarithmic_scale.isChecked())
         self.assertTrue(canvas.navigation_enabled)
@@ -454,28 +624,96 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertIs(self.harness.controller.session.preview, result)
         self.assertIsNone(self.harness.controller.job_id)
 
-    def test_individual_travel_toggles_are_independent_and_keep_layer(self):
+    def test_travel_visibility_controls_both_routes_and_preserves_layer_and_mode(self):
         result = self.harness.wait_for_result()
         panel, canvas = self.panel, self.panel.canvas
         panel.select_layer(2)
-        panel.view_checkboxes["show_tower_travel"].setChecked(True)
-        self.assertFalse(canvas._cumulative_travel)
-        self.assertFalse(canvas._wait_travel_visible)
-        self.assertTrue(canvas._tower_travel_visible)
-        self.assertEqual(canvas._layer_z, result.layer_heights_mm[1])
-        panel.all_travel.click()
-        self.assertTrue(panel.view_checkboxes["show_wait_travel"].isChecked())
-        self.assertTrue(panel.view_checkboxes["show_tower_travel"].isChecked())
+        self.assertEqual(panel.travel_visibility_button.text(), 'Fahrwege anzeigen')
+        self.assertTrue(panel.travel_visibility_button.isChecked())
+        self.assertFalse(panel.travel_mode_toggle.isChecked())
+        self.assertTrue(canvas._wait_position_visible)
+        panel.travel_mode_toggle.click()
+        self.assertTrue(canvas._all_travel_visible)
+        for visible in (False, True, False):
+            panel.travel_visibility_button.click()
+            self.assertEqual(panel.travel_visibility_button.isChecked(), visible)
+            self.assertEqual(canvas._wait_travel_visible, visible)
+            self.assertEqual(canvas._tower_travel_visible, visible)
+            self.assertTrue(canvas._wait_position_visible)
+            self.assertTrue(canvas._all_travel_visible)
+            self.assertEqual(canvas._layer_z, result.layer_heights_mm[1])
+        panel.preview_reset.click()
+        self.assertTrue(panel.travel_visibility_button.isChecked())
+        self.assertFalse(panel.travel_mode_toggle.isChecked())
         self.assertTrue(canvas._wait_travel_visible)
         self.assertTrue(canvas._tower_travel_visible)
-        self.assertTrue(canvas._all_travel_visible)
-        panel.all_travel.click()
-        self.assertFalse(panel.view_checkboxes["show_wait_travel"].isChecked())
-        self.assertFalse(panel.view_checkboxes["show_tower_travel"].isChecked())
-        self.assertFalse(canvas._wait_travel_visible)
-        self.assertFalse(canvas._tower_travel_visible)
+
+    def test_travel_mode_in_preview_preserves_enabled_groups_and_resets(self):
+        panel, canvas = self.panel, self.panel.canvas
+        self.assertFalse(panel.travel_mode_toggle.isEnabled())
+        result = self.harness.wait_for_result()
+        self.assertTrue(panel.travel_mode_toggle.isEnabled())
+        self.assertFalse(panel.travel_mode_toggle.isChecked())
+        self.assertIs(panel.travel_mode_toggle.parentWidget(), canvas)
+        self.assertEqual(panel.travel_mode_toggle.width(), panel.travel_visibility_button.width())
+        panel.select_layer(3)
+        camera = canvas.camera_state()
+        gcode = result.gcode_path.read_bytes()
+        for all_layers in (True, False, True):
+            panel.travel_mode_toggle.click()
+            self.assertEqual(canvas._all_travel_visible, all_layers)
+            self.assertTrue(canvas._wait_travel_visible)
+            self.assertTrue(canvas._tower_travel_visible)
+            frame = canvas._prepare_line_frame()
+            self.assertTrue(frame.tower_travel_blocks)
+            self.assertEqual(len(canvas._lower_layer_frames.sources), 5 if all_layers else 3)
+            self.assertEqual(canvas.camera_state(), camera)
+            self.assertEqual(canvas._layer_z, result.layer_heights_mm[2])
+        self.assertEqual(result.gcode_path.read_bytes(), gcode)
+        self.assertIsNone(self.controller.job_id)
+        panel.preview_reset.click()
+        self.assertFalse(panel.travel_mode_toggle.isChecked())
         self.assertFalse(canvas._all_travel_visible)
+        panel.travel_mode_toggle.setChecked(True)
+        panel.reset()
+        self.assertFalse(panel.travel_mode_toggle.isChecked())
+        self.assertFalse(canvas._all_travel_visible)
+        panel.clear_timing()
+        self.assertFalse(panel.travel_mode_toggle.isEnabled())
+
+    def test_all_travel_follows_time_chart_scrubber_and_layer_reset(self):
+        result = self.harness.wait_for_result()
+        panel, canvas = self.panel, self.panel.canvas
+        gcode = result.gcode_path.read_bytes()
+        panel.travel_mode_toggle.setChecked(True)
+        chart = panel.time_chart
+        x = round(chart.plot_rect().right())
+        start = QPoint(x, round(chart.layer_y(chart.selected)))
+        end = QPoint(x, round(chart.layer_y(2)))
+        QTest.mousePress(chart, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(chart, end)
+        QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, pos=end)
+        self.assertEqual(panel.layer_spin.value(), 2)
         self.assertEqual(canvas._layer_z, result.layer_heights_mm[1])
+        frame = canvas._prepare_line_frame()
+        for segments, indices, blocks in (
+                (result.scene.wait_travel_segments, result.scene.wait_travel_layer_indices, frame.wait_travel_blocks),
+                (result.scene.tower_travel_segments, result.scene.tower_travel_layer_indices, frame.tower_travel_blocks)):
+            expected = tuple(canvas._line_blocks(tuple(s for s, i in zip(segments, indices) if i == 1),
+                canvas._fit_parameters(), canvas._projection_context()))
+            self.assertEqual(blocks, expected)
+        self.assertIsNotNone(frame.lower_layers)
+        panel.layer_reset.click()
+        frame = canvas._prepare_line_frame()
+        self.assertTrue(panel.travel_visibility_button.isChecked())
+        self.assertIsNotNone(frame.lower_layers)
+        for source, blocks, segments in zip(canvas._lower_layer_frames.sources[-2:],
+                (frame.wait_travel_blocks, frame.tower_travel_blocks),
+                (result.scene.wait_travel_segments, result.scene.tower_travel_segments)):
+            lower = sum(len(lines) for z, lines in source[0].items() if z < result.layer_heights_mm[-1]-.001)
+            self.assertEqual(lower+sum(map(len, blocks)), len(segments))
+        self.assertEqual(result.gcode_path.read_bytes(), gcode)
+        self.assertIsNone(self.controller.job_id)
 
     def test_time_chart_has_compact_width_and_one_column_legend(self):
         self.harness.wait_for_result()
@@ -489,20 +727,51 @@ class PreprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertEqual(layout.rowCount(), 4)
         self.assertLessEqual(self.panel.time_chart.width(), compact_width)
 
-    def test_preview_function_rows_have_fixed_spacing_and_minimum_reset_gap(self):
-        self.harness.wait_for_result()
-        QTest.qWait(100)
-        panel = self.panel
-        rows = [box.parentWidget() for box in panel.view_checkboxes.values()]
-        for first, second in zip(rows, rows[1:]):
-            self.assertEqual(second.y()-first.geometry().bottom()-1, 6)
-            self.assertEqual(first.height(), first.minimumHeight())
-            self.assertEqual(first.minimumHeight(), first.maximumHeight())
-        gaps = []
-        for name, box in panel.view_checkboxes.items():
-            gaps.append(panel.reset_buttons[name].x()-box.geometry().right()-1)
-        self.assertEqual(min(gaps), 30)
-        self.assertEqual(panel.view_controls.width(), panel.view_controls.layout().minimumSize().width())
+    def test_travel_mode_reveal_clips_at_preview_edge_and_reverses_continuously(self):
+        from PySide6.QtCore import QAbstractAnimation
+        panel, canvas = self.panel, self.panel.canvas
+        self.assertTrue(panel.travel_visibility_button.isChecked())
+        self.assertTrue(panel.travel_mode_toggle.isHidden())
+        result = self.harness.wait_for_result()
+        QTest.qWait(80)
+        button, toggle = panel.travel_visibility_button, panel.travel_mode_toggle
+        animation = panel._travel_reveal_animation
+        camera, gcode = canvas.camera_state(), result.gcode_path.read_bytes()
+        self.assertTrue(toggle.isVisible())
+        self.assertFalse(toggle.isChecked())
+        panel.travel_visibility_button.click()
+        self.assertEqual(animation.state(), QAbstractAnimation.State.Running)
+        self.assertFalse(toggle.isEnabled())
+        animation.setCurrentTime(animation.duration()//2)
+        self.assertGreater(toggle.y(), canvas.height()-toggle.height())
+        self.assertLess(toggle.y(), canvas.height())
+        self.assertEqual(button.geometry().bottom()+1, toggle.y())
+        self.assertTrue(canvas.rect().contains(button.geometry()))
+        self.assertLess(toggle.visibleRegion().boundingRect().height(), toggle.height())
+        animation.setCurrentTime(animation.duration())
+        self.assertTrue(toggle.isHidden())
+        self.assertEqual(button.geometry().bottom()+1, canvas.height())
+        button.click()
+        self.assertTrue(toggle.isVisible())
+        self.assertTrue(toggle.isEnabled())
+        self.assertEqual(toggle.y(), canvas.height())
+        animation.setCurrentTime(animation.duration()//2)
+        middle = panel._travel_reveal
+        button.click()
+        self.assertAlmostEqual(panel._travel_reveal, middle)
+        animation.setCurrentTime(animation.duration()//2)
+        animation.pause()
+        self.window.resize(1100, 1000)
+        QTest.qWait(50)
+        self.assertEqual(button.geometry().right()+1, canvas.width())
+        self.assertEqual(toggle.geometry().right()+1, canvas.width())
+        self.assertEqual(button.geometry().bottom()+1, toggle.y())
+        panel.clear_timing()
+        self.assertEqual(animation.state(), QAbstractAnimation.State.Stopped)
+        self.assertTrue(toggle.isHidden())
+        self.assertEqual(button.geometry().bottom()+1, canvas.height())
+        self.assertEqual(canvas.camera_state(), camera)
+        self.assertEqual(result.gcode_path.read_bytes(), gcode)
 
     def test_layer_above_tower_does_not_invent_wait_position_or_tower_paths(self):
         lines, z = [], 0

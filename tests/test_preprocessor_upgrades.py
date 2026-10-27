@@ -24,13 +24,13 @@ class PreprocessorUpgradeTests(unittest.TestCase):
                 source_bytes = request.prepared_source.analysis_gcode_path.read_bytes()
                 result = self.fixture.prepare(request)
                 self.assertTrue(result.scene.brim_segments)
-                self.assertEqual(result.placement.brim_width_mm, .2)
+                self.assertEqual(result.placement.brim_width_mm, 2)
                 self.assertEqual(result.placement.brim_gap_mm, .15)
                 center = result.scene.tower_center_xy_mm
                 maximum = max(math.hypot(p.x-center[0], p.y-center[1])
                     for segment in result.scene.brim_segments for p in (segment.start, segment.end))
                 self.assertAlmostEqual(maximum + result.placement.brim_line_width_mm/2,
-                    result.base_width_mm/2+.35, places=5)
+                    result.base_width_mm/2+2.15, places=5)
                 self.assertEqual({round(s.end.z, 5) for s in result.scene.brim_segments}, {.2})
                 self.assertGreaterEqual(result.placement.reserved_radius_mm, maximum)
                 tracker, in_brim, deposits = MachineStateTracker(), False, []
@@ -58,7 +58,7 @@ class PreprocessorUpgradeTests(unittest.TestCase):
             request.profile.effective_values.update({"brim_type": brim_type, "brim_width": 5})
             result = self.fixture.prepare(request)
             self.assertTrue(result.scene.brim_segments)
-            self.assertEqual(result.placement.brim_width_mm, .2)
+            self.assertEqual(result.placement.brim_width_mm, 2)
 
     def setUp(self):
         self.fixture = fixture_module.PreprocessorTests()

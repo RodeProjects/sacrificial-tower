@@ -3216,16 +3216,18 @@ class MainWindow(QMainWindow):
         picker_layout.addWidget(self.generation_method_heading)
         self.generation_method_grid = GenerationModeGrid()
         self.automatic_generation_card = GenerationModeCard(
-            "Automatisch",
+            "Iterativ",
             "Der Kühlturm wird passend zum Kühlbedarf Ihres Modells berechnet "
             "und schrittweise an die gewünschte Layerzeit angepasst.",
-            "Automatische Erstellung öffnen →",
+            "Iterative Erstellung öffnen →",
+            exports=("Modell + Kühlturm (.3mf)", "Kühlturm-STL (.stl)"),
         )
         self.manual_generation_card = GenerationModeCard(
             "Manuell",
             "Die Turmform selbst festlegen und anschließend prüfen, "
             "welche Layerzeiten das Modell mit diesem Kühlturm erreicht.",
             "Manuelle Erstellung öffnen →",
+            exports=("Modell + Kühlturm (.3mf)", "Kühlturm-STL (.stl)"),
         )
         self.automatic_generation_card.setProperty("generationMode", "automatic")
         self.manual_generation_card.setProperty("generationMode", "manual")
@@ -3235,20 +3237,21 @@ class MainWindow(QMainWindow):
         self.manual_generation_card.clicked.connect(
             lambda: self.select_generation_mode(GenerationMode.MANUAL)
         )
-        self.generation_method_grid.add_pair(
-            self.automatic_generation_card, self.manual_generation_card
-        )
         self.preprocessor_generation_card = GenerationModeCard(
             "Postprozessor",
-            "Den Pre-Slice um Park- und Wartephasen sowie einen Opferturm zum "
-            "Abwischen und Primen ergänzen. Mit rekonstruierter Vorschau und G-Code-Export.",
+            "Der vorhandene G-Code wird nachträglich um passende Wartephasen und "
+            "einen Abstreifturm ergänzt. Nach jeder Wartephase wischt die Düse "
+            "am Abstreifturm eventuell ausgetretenes Material ab und setzt "
+            "anschließend den Druck am Modell fort.",
             "Postprozessor öffnen →",
+            exports=("Bearbeiteter G-Code (.gcode)",),
         )
         self.preprocessor_generation_card.setProperty("generationMode", "preprocessor")
         self.preprocessor_generation_card.clicked.connect(
             lambda: self.select_generation_mode(GenerationMode.PREPROCESSOR)
         )
-        self.generation_method_grid.add_full_width(self.preprocessor_generation_card)
+        self.generation_method_grid.set_cards(self.preprocessor_generation_card,
+            self.automatic_generation_card, self.manual_generation_card)
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
         )
@@ -11770,6 +11773,11 @@ class MainWindow(QMainWindow):
         result: PreviewExportResult,
     ) -> None:
         dialog = self.export_success_dialog
+        self.export_success_title_label.setText(
+            "✓ G-Code erfolgreich exportiert"
+            if getattr(result, "generation_method", None) == "preprocessor"
+            else "✓ Kühlturm erfolgreich exportiert"
+        )
         target = getattr(result, "target_layer_time_s", None)
         achieved = getattr(result, "minimum_verified_layer_time_s", None)
         tolerance = float(

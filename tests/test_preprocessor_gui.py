@@ -89,6 +89,12 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertEqual(self.window.preprocessor_method_button.text(), "Postprozessor")
         self.assertTrue(panel.export_actions.isVisible())
         self.assertTrue(self.window.export_success_dialog.isVisible())
+        self.assertEqual(self.window.export_success_title_label.text(), "✓ G-Code erfolgreich exportiert")
+        self.assertFalse(panel.generate_button.isVisible())
+        self.window._show_export_success_dialog(replace(exported, generation_method="automatic"))
+        self.assertEqual(self.window.export_success_title_label.text(), "✓ Kühlturm erfolgreich exportiert")
+        self.window._show_export_success_dialog(exported)
+        self.assertEqual(self.window.export_success_title_label.text(), "✓ G-Code erfolgreich exportiert")
         self.assertIn("G-Code", self.window.export_success_usage_label.text())
         self.assertNotIn("Turm-STL manuell", self.window.export_success_usage_label.text())
         with patch("cooling_tower.gui.main_window.open_directory") as opened:
@@ -195,7 +201,7 @@ class PreprocessorGuiTests(unittest.TestCase):
             checkbox = panel.automatic[flag]
             self.assertEqual(checkbox.text(), "")
             auto_label = grid.itemAtPosition(0, 2).widget()
-            self.assertEqual(auto_label.text(), "Automatisch")
+            self.assertEqual(auto_label.text(), "Auto")
             self.assertLess(row.label.geometry().right(), auto_label.x())
             self.assertLess(auto_label.geometry().right(), checkbox.x())
             editor = row.editor
@@ -334,41 +340,30 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertTrue(canvas.navigation_enabled)
 
     def test_preview_travel_toggle_keeps_generated_gcode_and_marks_free_park(self):
-        from itertools import product
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
         result = self.wait_for_result()
         panel = self.window.preprocessor_panel
-        self.assertIsNotNone(result.scene.wait_position_xy_mm)
-        self.assertTrue(result.scene.wait_travel_segments)
-        self.assertTrue(result.scene.tower_travel_segments)
+        panel.select_layer(2)
         initial = panel.canvas._prepare_line_frame()
-        self.assertFalse(initial.travel_blocks)
         self.assertIsNotNone(initial.wait_position)
+        self.assertTrue(initial.wait_travel_blocks)
+        self.assertTrue(initial.tower_travel_blocks)
         gcode = result.gcode_path.read_bytes()
-        keys = set()
-        for marker, wait, tower in product((False, True), repeat=3):
-            panel.view_checkboxes["show_wait_position"].setChecked(marker)
-            panel.view_checkboxes["show_wait_travel"].setChecked(wait)
-            panel.view_checkboxes["show_tower_travel"].setChecked(tower)
+        for visible in (False, True, False):
+            panel.travel_visibility_button.click()
             frame = panel.canvas._prepare_line_frame()
-            keys.add(frame.key)
-            self.assertEqual(frame.wait_position is not None, marker)
-            self.assertEqual(bool(frame.wait_travel_blocks), wait)
-            self.assertEqual(bool(frame.tower_travel_blocks), tower)
+            self.assertIsNotNone(frame.wait_position)
+            self.assertEqual(bool(frame.wait_travel_blocks), visible)
+            self.assertEqual(bool(frame.tower_travel_blocks), visible)
             self.assertEqual(frame.object_blocks, initial.object_blocks)
             self.assertEqual(frame.tower_blocks, initial.tower_blocks)
-            self.assertTrue(all(panel.preview_group.isAncestorOf(box) for box in panel.view_checkboxes.values()))
-        self.assertEqual(len(keys), 8)
         self.assertEqual(result.gcode_path.read_bytes(), gcode)
         self.assertIs(self.controller.session.preview, result)
         self.assertIsNone(self.controller.job_id)
         self.assertTrue(panel.export_button.isEnabled())
-        # Camera fitting stays stable in the object-focused view as well.
         panel.three_quarter_view()
         before = panel.canvas._fit_parameters()
-        panel.view_checkboxes["show_wait_position"].setChecked(False)
-        panel.view_checkboxes["show_wait_travel"].setChecked(False)
-        panel.view_checkboxes["show_tower_travel"].setChecked(False)
+        panel.travel_visibility_button.setChecked(True)
         self.assertEqual(panel.canvas._fit_parameters(), before)
 
     def test_switch_from_automatic_dimensions_adopts_calculated_values(self):
@@ -450,8 +445,15 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(panel.export_button.isVisible())
         self.assertFalse(panel.cancel_button.isVisible())
-        self.assertLess(panel.generate_button.x(), panel.export_button.x())
+        self.assertFalse(panel.generate_button.isVisible())
         self.assertIs(self.controller.session.preview, result)
+        panel.travel_visibility_button.click()
+        self.assertFalse(panel.generate_button.isVisible())
+        panel.inputs["target_layer_time_s"].setValue(12)
+        self.assertIsNone(self.controller.session.preview)
+        self.assertFalse(panel.export_button.isVisible())
+        self.assertTrue(panel.generate_button.isVisible())
+        self.assertIsNone(self.controller.job_id)
 
     def test_basic_advanced_and_view_resets_do_not_start_generation(self):
         panel = self.window.preprocessor_panel
@@ -461,7 +463,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.app.processEvents()
         for row in panel.rows.values():
             self.assertGreaterEqual(row.height(), row.editor.height())
-        visible_rows = [panel.rows[name] for name in ("wall_count", "edge_clearance_mm", "wait_clearance_mm", "print_speed_mm_s")]
+        visible_rows = [panel.rows[name] for name in ("tower_brim_width_mm", "tower_brim_gap_mm", "edge_clearance_mm", "print_speed_mm_s")]
         for first, second in zip(visible_rows, visible_rows[1:]):
             self.assertGreaterEqual(second.y(), first.y()+first.height())
         panel.hollow_checkbox.setChecked(False)
@@ -473,12 +475,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         panel.inputs["z_hop_mm"].setValue(2)
         panel.reset_buttons["z_hop_mm"].click()
         self.assertEqual(panel.inputs["z_hop_mm"].value(), .6)
-        for name, default in (("show_wait_position", True), ("show_wait_travel", False), ("show_tower_travel", False)):
-            panel.view_checkboxes[name].setChecked(not default)
-            self.assertTrue(panel.reset_buttons[name].isEnabled())
-            panel.reset_buttons[name].click()
-            self.assertEqual(panel.view_checkboxes[name].isChecked(), default)
-            self.assertFalse(panel.reset_buttons[name].isEnabled())
+        self.assertFalse(hasattr(panel, 'view_checkboxes'))
         self.assertIsNone(self.controller.job_id)
         self.window.resize(760, 850)
         self.app.processEvents()
@@ -544,7 +541,7 @@ class PreprocessorGuiTests(unittest.TestCase):
         self.assertLessEqual(abs(splitter.sizes()[0] - splitter.sizes()[1]), 1)
         self.assertIsNone(self.controller.job_id)
 
-    def test_initial_preview_and_resizes_never_overlap_legend_or_view_controls(self):
+    def test_initial_preview_and_resizes_reserve_all_wrapped_legend_rows(self):
         from PySide6.QtCore import QPoint
         self.window.resize(1384, 1245)
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)
@@ -557,14 +554,10 @@ class PreprocessorGuiTests(unittest.TestCase):
             canvas_bottom = panel.canvas.mapTo(body, QPoint(0, panel.canvas.height())).y()
             legend_top = panel.legend.mapTo(body, QPoint()).y()
             self.assertGreaterEqual(legend_top, canvas_bottom)
-            for name, checkbox in panel.view_checkboxes.items():
-                row = checkbox.parentWidget()
-                top = row.mapTo(body, QPoint()).y()
-                self.assertGreaterEqual(top, canvas_bottom, name)
-                self.assertGreaterEqual(panel.reset_buttons[name].mapTo(body, QPoint()).y(), canvas_bottom, name)
-                self.assertLessEqual(top+row.height(), body.height(), name)
-                self.assertFalse(row.rect().translated(row.mapTo(body, QPoint())).intersects(
-                    panel.legend.rect().translated(panel.legend.mapTo(body, QPoint()))), name)
+            self.assertEqual(panel.legend.width(), panel.canvas.width())
+            self.assertLessEqual(legend_top+panel.legend.height(), body.height())
+            for entry in panel.legend.entries:
+                self.assertTrue(panel.legend.rect().contains(entry.geometry()))
 
     def test_wall_count_defaults_range_and_solid_disables_wall_control(self):
         self.window.select_generation_mode(GenerationMode.PREPROCESSOR)

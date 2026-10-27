@@ -498,7 +498,7 @@ class PreviewService:
                             and getattr(calibration, "project_path", None) is None):
                         raise PreviewBuildError(
                             "Es wurde noch kein vollständiger gemeinsamer Objekt-/Turm-Slice geprüft. "
-                            "Die automatische Erstellung kann deshalb noch kein verwendbares 3MF-Ergebnis liefern."
+                            "Die iterative Erstellung kann deshalb noch kein verwendbares 3MF-Ergebnis liefern."
                         )
                     profile = calibration.profile
                     placement = calibration.placement

@@ -82,6 +82,18 @@ class LayerContextTests(unittest.TestCase):
         self.assertEqual(image.pixelColor(40, 20).alpha(), 0)
         self.assertEqual(image.pixelColor(40, 30).alpha(), 0)
 
+    def test_sampled_context_uses_matching_heights_and_discards_invalid_route_layers(self):
+        segments = tuple(LineSegment3D(Point3D(10, 10+i*10, 5), Point3D(70, 10+i*10, 5))
+            for i in range(5))
+        lines = tuple(QLineF(10, y, 70, y) for y in (10, 30, 50))
+        context = LowerLayerFrames(80, 80, 1, (
+            (segments, (lines,), "#bc98f4", 1, 3, (.2, .4, float("inf"), .8, 1.0)),))
+        self.assertEqual(context.levels, [.2, 1.0])
+        image = context.before(.6).toImage()
+        self.assertGreater(image.pixelColor(40, 10).alpha(), 0)
+        self.assertEqual(image.pixelColor(40, 30).alpha(), 0)
+        self.assertEqual(image.pixelColor(40, 50).alpha(), 0)
+
     def test_cumulative_travels_reuse_projection_while_layer_and_navigation_stay_selected(self):
         canvas = PreviewCanvas()
         canvas.set_layer_context_enabled(True)

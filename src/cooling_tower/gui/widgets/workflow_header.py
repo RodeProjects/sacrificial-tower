@@ -190,7 +190,7 @@ class HeaderMethodSelection(QWidget):
         self.buttons_layout.setSpacing(0)
         self.group = QButtonGroup(self)
         self.buttons: dict[str, QPushButton] = {}
-        for mode, text in (("automatic", "Automatisch"), ("manual", "Manuell"), ("preprocessor", "Postprozessor")):
+        for mode, text in (("preprocessor", "Postprozessor"), ("automatic", "Iterativ"), ("manual", "Manuell")):
             button = QPushButton(text)
             button.setObjectName("headerMethodButton")
             button.setProperty("generationMode", mode)
