@@ -66,3 +66,8 @@ Prüfsummen wurden mit dem bisher offenen Veröffentlichungsnachweis abgeglichen
 | `input/Test-STL Vase (manifold).stl` | `e0c7e3441bcfe5f12f09b1e24d30dc06ce7e751738c4558f9bfd659618202fba` |
 | `input/Test-STL gemischt (manifold).stl` | `f0bb2062ebedd2a832e323b1fd920f72456f26c13ca3d140e03e9e6f128c2891` |
 | `input/Test-STL mehrere Objekte in einer STL.stl` | `0807455bc904d274d76013346396472d287ea93130962d05f097e34bbef8a362` |
+| `input/Test-STL Vogelkopf (kurz).stl` | `71a480a2ee0c1d88e27d5d388ca4cb008c5f27b0d715741b60683e059848fae3` |
+
+Das Vogelkopf-Testmodell wird ebenfalls unter Apache-2.0 einschließlich Änderung
+und kommerzieller Weitergabe bereitgestellt. Die erforderlichen Nutzungs- und
+Weitergaberechte liegen vor.
