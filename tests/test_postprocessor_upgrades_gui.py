@@ -64,10 +64,19 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertEqual(panel.positions_button.parentWidget().layout().itemAt(3).widget().text(), "Auto")
 
     def test_numeric_fields_share_content_width_and_preserve_uncommitted_drafts(self):
+        def wait_for_layout():
+            deadline = time.monotonic() + 3
+            while True:
+                QTest.qWait(20)
+                if not self.panel._layout_timer.isActive():
+                    return
+                self.assertLess(time.monotonic(), deadline,
+                    "Die Anpassung der Zahlenfeldbreiten wurde nicht abgeschlossen")
+
         self.window._apply_style()
         panel = self.panel
         panel.advanced_group.set_expanded(True)
-        QTest.qWait(40)
+        wait_for_layout()
         widths = {row.editor.width() for row in panel.rows.values()}
         self.assertEqual(len(widths), 1)
         initial = widths.pop()
@@ -75,7 +84,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         editor.setFocus()
         editor.selectAll()
         QTest.keyClicks(editor, "1234,56")
-        QTest.qWait(40)
+        wait_for_layout()
         self.assertEqual(editor.lineEdit().text(), "1234,56")
         self.assertEqual(editor.value(), 10)
         self.assertGreater(editor.width(), initial)
@@ -91,7 +100,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         editor.selectAll()
         QTest.keyClicks(editor, "10")
         QTest.keyClick(editor, Qt.Key.Key_Return)
-        QTest.qWait(40)
+        wait_for_layout()
         self.assertEqual(editor.width(), initial)
 
     def test_unit_padding_is_funded_by_both_value_gaps_without_widening_fields(self):
