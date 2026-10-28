@@ -1216,7 +1216,11 @@ class LayerRangeUiTests(unittest.TestCase):
             self.assertEqual(window.layer_range_button.width(), window.layer_range_button.sizeHint().width())
             self.assertEqual(window.layer_range_button.height(), window.reset_button.height() - 2)
             geometry_layout = window.geometry_fields_layout
-            self.assertIs(geometry_layout.itemAt(geometry_layout.count() - 1).widget(), window.layer_range_button_row)
+            geometry_widgets = [geometry_layout.itemAt(index).widget()
+                for index in range(geometry_layout.count())
+                if geometry_layout.itemAt(index).widget() is not None]
+            range_index = geometry_widgets.index(window.layer_range_button_row)
+            self.assertIs(geometry_widgets[range_index + 1], window.generation_settings_heading)
             self.assertIs(window.layer_range_button_row.layout().itemAt(0).widget(), window.layer_range_info_button)
             self.assertIs(window.layer_range_button_row.layout().itemAt(1).widget(), window.layer_range_button)
             self.assertIs(window.layer_range_button_row.layout().itemAt(2).widget(), window.layer_range_summary)
