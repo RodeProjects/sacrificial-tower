@@ -468,7 +468,13 @@ class NumericSettingWidgetTests(GuiCase):
             self.window.geometry_settings_group,
         ):
             group.setChecked(True)
-        self.assertEqual(len(self.window._setting_widgets), 8)
+        self.assertEqual(set(self.window._setting_widgets), {
+            "target_layer_time_s", "layer_time_tolerance_s",
+            "minimum_outer_diameter_mm", "maximum_outer_diameter_mm",
+            "manual_base_width_mm", "circle_segments",
+            "maximum_expansion_angle_deg", "maximum_contraction_angle_deg",
+            "local_reference_window",
+        })
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
             self.assertIn("Standard", setting.reset_button.toolTip())
@@ -519,8 +525,10 @@ class NumericSettingWidgetTests(GuiCase):
         self.window.target_time_spin.setValue(91)
         self.window.automatic_base_checkbox.setChecked(False)
         self.window.output_root_edit.setText(str(self.root / "other"))
-        self.window.maximum_separate_slices = 9
-        self.window.maximum_joint_slices = 15
+        self.window.slice_budget_settings["maximum_separate_slices"].editor.setValue(9)
+        self.window.slice_budget_settings["maximum_joint_slices"].editor.setValue(15)
+        self.window.layer_time_tolerance_spin.setValue(0.6)
+        self.window.local_window_spin.setValue(31)
         self.window._apply_show_setting_limits(True)
         self.window.reset_defaults()
         self.assertEqual(
@@ -535,8 +543,10 @@ class NumericSettingWidgetTests(GuiCase):
             Path(self.window.output_root_edit.text()),
             self.root / "other",
         )
-        self.assertEqual(self.window.maximum_separate_slices, 9)
-        self.assertEqual(self.window.maximum_joint_slices, 15)
+        self.assertEqual(self.window.maximum_separate_slices, self.window.default_maximum_separate_slices)
+        self.assertEqual(self.window.maximum_joint_slices, self.window.default_maximum_joint_slices)
+        self.assertEqual(self.window.layer_time_tolerance_spin.value(), self.window.default_settings.layer_time_tolerance_s)
+        self.assertEqual(self.window.local_window_spin.value(), self.window.default_settings.local_reference_window)
         self.assertTrue(self.window.show_setting_limits)
 
     def test_output_and_base_mode_have_dedicated_resets(self) -> None:
@@ -626,8 +636,6 @@ class NumericSettingWidgetTests(GuiCase):
 
     def test_spin_text_area_does_not_cover_arrow_buttons(self) -> None:
         for setting in self.window._setting_widgets.values():
-            if setting is self.window._setting_widgets["local_reference_window"]:
-                continue  # This editor now lives in the general settings dialog.
             editor = setting.editor
             up = self.spin_subcontrol(
                 editor,
