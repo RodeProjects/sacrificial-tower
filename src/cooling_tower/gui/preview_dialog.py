@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import Counter
 import math
 
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QTimer, Signal, Qt
+from PySide6.QtGui import QCloseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
@@ -31,6 +31,9 @@ class PreviewDialog(QDialog):
     def __init__(self, parent=None, *, embedded: bool = False) -> None:
         super().__init__(parent)
         self.embedded = bool(embedded)
+        self._layout_resize_timer = QTimer(self)
+        self._layout_resize_timer.setSingleShot(True)
+        self._layout_resize_timer.timeout.connect(self._notify_visible_layout_resize)
         self.setObjectName("embeddedPreviewPanel" if embedded else "previewDialog")
         if embedded:
             # A QDialog with widget flags participates in the parent layout and
@@ -669,6 +672,17 @@ class PreviewDialog(QDialog):
         self.progress.hide()
         self.progress_status_widget.hide()
         self._set_preview_controls_visible(False)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.embedded and self.isVisible() and event.size().height() != event.oldSize().height():
+            # Child layouts can settle after the host measured their old height.
+            # Notify it once the current resize and layout pass has completed.
+            self._layout_resize_timer.start(0)
+
+    def _notify_visible_layout_resize(self) -> None:
+        if self.isVisible():
+            self.layout_changed.emit()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.closed.emit()
