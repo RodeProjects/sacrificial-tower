@@ -180,9 +180,20 @@ class PostprocessorGuiTests(unittest.TestCase):
         panel = self.window.postprocessor_panel
         with patch.object(self.window, "_show_export_success_dialog"):
             self.controller.export()
+
+        def wait_for_footer_layout():
+            deadline = time.monotonic() + 3
+            while True:
+                QTest.qWait(20)
+                if not (panel.footer_widget._fit_timer.isActive() or panel._layout_timer.isActive()):
+                    return
+                self.assertLess(time.monotonic(), deadline,
+                    "Die Anpassung der sichtbaren Fußleiste wurde nicht abgeschlossen")
+
+        self.assertTrue(panel.footer_widget.isVisible())
         for width in (2200, 1600, 1200, 1000, 760, 1000, 2200):
             self.window.resize(width, 1000)
-            QTest.qWait(60)
+            wait_for_footer_layout()
             visible = [button for button in (panel.open_output_button, panel.open_last_button,
                 panel.open_report_button, panel.generate_button, panel.cancel_button, panel.export_button)
                 if not button.isHidden()]
@@ -199,7 +210,7 @@ class PostprocessorGuiTests(unittest.TestCase):
                 self.assertEqual(len({rect.bottom() for rect in rects}), 1)
                 self.assertEqual([rect.left() for rect in rects], sorted(rect.left() for rect in rects))
         panel.progress.show()
-        QTest.qWait(60)
+        wait_for_footer_layout()
         self.assertTrue(panel.footer_columns.is_two_column())
         divider = panel.footer_columns.findChild(QFrame, "footerVerticalDivider")
         left_edge = panel.progress.mapTo(panel.footer_columns, QPoint(panel.progress.width(), 0)).x()

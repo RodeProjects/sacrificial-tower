@@ -821,6 +821,7 @@ class PostprocessorPanel(QWidget):
         actions.setHorizontalSpacing(8)
         actions.setVerticalSpacing(0)
         actions.setColumnStretch(3, 1)
+        self._footer_actions_layout_mode = "single"
         self.open_output_button = QPushButton("Alle Exporte öffnen")
         self.open_output_button.setObjectName("openBaseOutputFolderButton")
         self.open_last_button = QPushButton("Letzten Export öffnen")
