@@ -27,63 +27,20 @@ Diese Regeln gelten ergänzend zur globalen `AGENTS.md` für das Repository `sac
 - Während der Push-Vorbereitung rein administrative oder mechanische Begleitänderungen wie die vorgeschriebene Anhebung der statischen Versionsnummer, vom Benutzer im Rahmen der aktuellen Aufgabe angeforderte Anpassungen an `AGENTS.md`, Formatkorrekturen oder vergleichbare nicht ausführungsrelevante Metadatenänderungen erfordern keine erneute Push-Freigabe.
 - Eine erneute ausdrückliche Push-Freigabe einholen, wenn nach der ursprünglichen Freigabe zusätzliche inhaltliche Änderungen hinzukommen, die Programmlogik, Laufzeitverhalten, Build/Packaging, Abhängigkeiten, ausführungsrelevante Konfiguration, Persistenz/Migrationen, Schnittstellen, Kompatibilität, Tests oder CI möglicherweise beeinflussen. Dabei nicht danach unterscheiden, ob die funktionale Änderung subjektiv klein oder wesentlich erscheint. Die Freigabe nicht aus einer lediglich allgemeinen Änderungs- oder Arbeitsanweisung ableiten, die keinen Push nennt.
 
-## Offizielle private Actions vor der Übernahme nach main
+## Offizielle Prüfungen und Veröffentlichung
 
-- Ausschließlich `RodeProjects/project-ci` darf den lokalen offiziellen Runner
-  `FLO-PC-private` besitzen. Haupt- und Update-Repository erhalten auch über
-  Gruppen keinen Zugriff. Öffentliche Workflows laufen nur auf GitHub-Hardware;
-  keine öffentlichen Ereignisse oder privilegierten Dispatch-Brücken anbinden.
-- Normale freigegebene Pushes: Patchversion erhöhen, Commitnachricht und Runner
-  nennen, `codex/`-Prüfbranch über SSH pushen und PR nach `main` erstellen.
-  `D:\Entwicklung Software\_Tools\github_actions_runner\scripts\Complete-CheckedPush.ps1`
-  mit Repositorypfad, Repository, PR und exakter SHA verwenden. Der Helfer
-  erzeugt die konkrete lokale Freigabe, startet offizielle private Actions und
-  übernimmt nach gültigen Nachweisen automatisch dieselbe SHA per SSH-Fast-Forward.
-- Projektcommit, Basis und CI-Steuerungscommit unterscheiden. Freigaben/Nachweise
-  binden Repository-ID, Quellbaum, Prüflogik, ursprünglichen Lauf, Versuch und
-  vollständige Pflichtjobs. Fehlende, fehlgeschlagene oder nur übersprungene
-  Prüfungen und geänderte Commit-/Basis-/Prüflogik blockieren. Kein Artefakt oder
-  freier SHA-Wert ersetzt den erneuten GitHub-Abgleich.
-- Nach Übernahme Remote-main und ursprüngliche private Nachweise erneut bestätigen.
-  Keine zweite Vollsuite für exakt dieselbe unverändert geprüfte SHA starten.
-  Öffentliche main-Pushes lösen deshalb keine redundante Vollsuite aus.
-- Normale Prüfungen laufen nur auf dem privaten lokalen offiziellen Runner.
-  Bei offline geschaltetem Runner warten. Keine eigene lokale CI-Nachbildung
-  und keine zusätzliche lokale Vollsuite als Push-Voraussetzung verwenden.
-- Prozess-/Thread- und GUI-Lebenszyklusänderungen benötigen zusätzlich die volle
-  private Stressmatrix: `-Workflows tests.yml,windows-stress-tests.yml`.
-- Sacrificial Tower behält die projektspezifische gehostete Releaseprüfung mit
-  genau einem lokalen offiziellen Fallback bei `failure`, `timed_out` oder
-  `startup_failure`. Beide verwenden die private vertrauenswürdige Steuerung und
-  dieselbe Projekt-SHA. Gültige unveränderte Vollprüfungen werden wiederverwendet.
-  Abbruch, veränderter Ref oder unklarer Dispatch erlaubt keinen blinden Neustart.
-- Lizenzdialoge benötigen zusätzlich die eigene erfolgreiche gehostete Pflichtprüfung
-  `installer-checks.yml` für dieselbe Projekt-SHA, Basis und CI-Steuerung. Releasehelfer
-  und Artefaktübernahme bestätigen den ursprünglichen Erfolg erneut. Der lokale
-  Buildfallback übernimmt diese Prüfung, behält native Übergabe, Ersetzung und
-  Deinstallation bei. Fehlende gehostete GUI-Prüfung blockiert; keine Ausführung
-  unter dem privilegierten Entwicklerkonto und keine abgeschwächten Assertions.
-- `scripts/publish_update.ps1 -DevelopmentRelease` verwendet den zentralen
-  Releasehelfer; Builds ohne Verwaltungszugänge, Signierung und Veröffentlichung
-  anschließend im geschützten Entwicklerkonto. Die frühere CI-Zeitlimit-Ausnahme
-  mit eigener lokaler Vollsuite wird durch den nachgewiesenen offiziellen Fallback
-  ersetzt; `-AllowTimedOutCI` autorisiert keine Umgehung.
-- Die zusätzliche tatsächliche Updateabnahme `update-acceptance.yml` darf unter
-  privater Steuerung auf GitHub-Hardware in einem eigens angelegten Standardkonto
-  laufen. Konto, Profil und Testinstallation anschließend entfernen. Der normale
-  lokale Runnerbetrieb bleibt unverändert. Lokale Virenscannersperren nicht durch
-  Abschaltung, breite Ausnahmen oder Umgehung beseitigen; Grenzen dokumentieren.
-- Runnerbetrieb als Windows-Standardkonto `RodeCiRunner`, Verwaltung weiter unter
-  dem bisherigen Entwicklerkonto. Code/Konfiguration/Freigaben/Nachweise gegen
-  Runner-Schreibzugriff und persönliche Anmeldungen/Schlüssel gegen Jobzugriff
-  schützen. Profilvariablen und Venvs sind keine Sicherheitsgrenze.
-- Fremde PRs zunächst nur gehostet prüfen. Lokale Ausführung fremden Codes nur
-  nach bewusster Vertrauensentscheidung für den konkreten Commit einschließlich
-  Tests, Buildskripten und Abhängigkeiten; spätere Commits sind nicht umfasst.
-  Ohne VM bleiben gemeinsame Hardware und Runnerkonto kompromittierbar.
-- Bestehende unabhängige Änderungen und Benutzerdaten erhalten. Setup/Details und
-  aktuelle Abnahme: `docs/private_ci.md` sowie das private Infrastrukturrepository.
-  Vor erfolgreicher Phase-1-Abnahme weder Phase 2 noch öffentliche Freigabe beginnen.
+- Eigene Änderungen über Prüfbranch und Pull Request mit der getrennt verwalteten
+  offiziellen CI prüfen; nur denselben erfolgreichen Commit nach `main` übernehmen.
+- Fehlende, fehlgeschlagene, abgebrochene oder nur übersprungene Pflichtprüfungen
+  blockieren. Quellcommit, Basis und ursprüngliche Nachweise unverändert binden.
+- Prozess-, Thread- und GUI-Lebenszyklusänderungen benötigen zusätzlich die volle
+  Stressmatrix. Installer benötigen ihre eigene erfolgreiche Lizenzdialogprüfung.
+- Tests und Builds ohne persönliche Verwaltungs- und Signierzugänge ausführen;
+  Signierung und Veröffentlichung anschließend im geschützten Verwaltungsprozess.
+- Konkrete Runner, Konten, lokale Pfade, Betriebsregeln und Abnahmen ausschließlich
+  in der privaten CI-Verwaltung pflegen. Die öffentliche Architektur steht in
+  `docs/ci.md`; externe Verwaltungswerkzeuge werden lokal konfiguriert.
+- Bestehende unabhängige Änderungen, Benutzerdaten und Sicherheitsprüfungen erhalten.
 
 ## Entwicklungsreleases und nachzureichende Freigabeangaben
 

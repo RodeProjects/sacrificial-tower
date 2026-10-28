@@ -20,6 +20,9 @@ tatsächlich geprüften Quellcommit.
 eine eigene UTF-8-Releasebeschreibung. Leere Texte werden vor dem
 Veröffentlichungsablauf abgewiesen. Bei `-DevelopmentRelease` muss auch die
 Beschreibung die Veröffentlichung ausdrücklich als Entwicklungsversion kennzeichnen.
+Die externe Veröffentlichungsverwaltung wird mit `-RunnerToolsRoot` oder
+`SACRIFICIAL_CI_TOOLS_ROOT` angebunden. Konkrete Betriebspfade und
+Ausführungsrichtlinien werden außerhalb des öffentlichen Projekts gepflegt.
 
 **Bisherige Tester müssen die neue Version einmal manuell installieren.**
 Testinstallationen aus `RodeProjects/sacrificial-tower-updates` wechseln nicht
@@ -56,7 +59,7 @@ ersetzt keine öffentliche Herausgeberreputation oder Virenscannerprüfung.
 
 ## Geprüft veröffentlichen
 
-Zuerst den [privaten Prüfbranch-/Pushablauf](private_ci.md) abschließen. Anschließend
+Zuerst den [privaten Prüfbranch-/Pushablauf](ci.md) abschließen. Anschließend
 im normalen Entwicklerkonto aus dem sauberen Projektordner mit PowerShell 7:
 
 ```powershell

@@ -30,7 +30,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Abhängigkeiten, Versionen, Lizenzquellen und Pflichten | [Dependencies](dependencies.md) |
 | Apache-2.0, kostenlose offizielle Downloads, Microsoft Store und Freigaben | [Veröffentlichung](distribution.md) |
 | Nachprüfung der Lizenzumstellung, Paketnachweise und offene Freigabepunkte | [Apache-2.0-Prüfnachweis](license_review.md) |
-| Aktueller Gesamtabgleich: offene GitHub-/Store-Schritte, Runner-Sicherheit und öffentliche Rechtstexte | [Veröffentlichungsprüfung](publication_readiness.md) |
+| Freigabeanforderungen, Lizenztexte und veröffentlichter Lieferumfang | [Veröffentlichungsprüfung](publication_readiness.md) |
 | Freiwilliges Dankeschön über PayPal, Datenfluss, Gebühren und Betreiberpflichten | [Freiwillige Unterstützung](voluntary_support.md) |
 | GitHub Issues, Diagnosepakete, Datenminimierung und vertraulicher Kontakt | [Support und Diagnose](support.md) |
 | Lebensdauer von 3D-Vorschauen, Cachegrößen, Fehlerarchiv und Protokollrotation | [Lokale Daten und Speichergrenzen](local_storage.md) |
@@ -43,7 +43,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Einstellungen, Schema, Migrationen und Downgrade | [Persistenz](settings_migrations.md) |
 | Python-/C++-Analyse, Parität und Fallback | [Native Analyse](native_analysis.md) |
 | Signierte Programmaktualisierungen und Veröffentlichung | [Update-Kanal](update_channel.md) |
-| Private gemeinsame CI, Runnertrennung und geprüfte Push-/Releasebefehle | [Private CI](private_ci.md) |
+| Offizielle Prüfungen und Veröffentlichung | [CI](ci.md) |
 | Installation und Datenbereinigung | [Deinstallation](uninstallation.md) |
 
 ## Nachweise und historische Einordnung

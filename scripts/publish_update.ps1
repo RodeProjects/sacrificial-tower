@@ -5,7 +5,7 @@ param(
     [switch]$DevelopmentRelease,
     [string]$ReleaseNotesPath = "",
     [switch]$AllowTimedOutCI,
-    [string]$RunnerToolsRoot = (Join-Path $PSScriptRoot '..\..\_Tools\github_actions_runner')
+    [string]$RunnerToolsRoot = $env:SACRIFICIAL_CI_TOOLS_ROOT
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,6 +112,9 @@ if ($localCommit -ne $remoteCommit) {
     throw "Der lokale Commit entspricht nicht dem veröffentlichten main-Branch."
 }
 
+if ([string]::IsNullOrWhiteSpace($RunnerToolsRoot)) {
+    throw 'Die externe Veröffentlichungsverwaltung muss über -RunnerToolsRoot oder SACRIFICIAL_CI_TOOLS_ROOT konfiguriert sein.'
+}
 $releaseWorkflowHelper = Join-Path $RunnerToolsRoot 'scripts\Invoke-ReleaseWorkflow.ps1'
 if (-not (Test-Path -LiteralPath $releaseWorkflowHelper -PathType Leaf)) {
     throw "Der zentrale offizielle Runner-Releasehelfer fehlt: $releaseWorkflowHelper"
@@ -126,7 +129,7 @@ if (-not $AllowTimedOutCI) {
 }
 $run = & $releaseWorkflowHelper `
     -Repository $SourceRepository -Workflow 'build-update.yml' `
-    -Ref main -ExpectedSha $localCommit -HostedFirst `
+    -Ref main -ExpectedSha $localCommit `
     -Inputs @{
         version = $version
         release_kind = $releaseKind
