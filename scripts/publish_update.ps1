@@ -126,7 +126,7 @@ if (-not $AllowTimedOutCI) {
 }
 $run = & $releaseWorkflowHelper `
     -Repository $SourceRepository -Workflow 'build-update.yml' `
-    -Ref main -ExpectedSha $localCommit `
+    -Ref main -ExpectedSha $localCommit -HostedFirst `
     -Inputs @{
         version = $version
         release_kind = $releaseKind

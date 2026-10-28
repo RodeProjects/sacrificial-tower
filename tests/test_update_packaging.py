@@ -413,6 +413,7 @@ class UpdatePackagingTests(unittest.TestCase):
         self.assertIn("Invoke-ReleaseWorkflow.ps1", script)
         self.assertIn("-Workflow 'tests.yml'", script)
         self.assertIn("-Workflow 'build-update.yml'", script)
+        self.assertIn("-Ref main -ExpectedSha $localCommit -HostedFirst", script)
         self.assertIn("-Ref main -ExpectedSha $localCommit", script)
         self.assertIn("$run.conclusion -ne 'success'", script)
         self.assertNotIn("contents/latest.json", script)
