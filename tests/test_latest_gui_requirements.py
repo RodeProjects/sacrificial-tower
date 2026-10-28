@@ -419,7 +419,7 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         dialog.accept()
         self.assertEqual(window.output_root_edit.text(), str(self.root / "custom-output"))
         window._reset_output_root()
-        self.assertEqual(Path(window.output_root_edit.text()), window.settings_store.load_default_output_root() / "automatic")
+        self.assertEqual(Path(window.output_root_edit.text()), window.settings_store.load_default_output_root() / "exports_automatic_mode")
         self.assertEqual({key: path for key, path in window.export_roots.items() if key != "automatic"}, other_destinations)
 
     def test_program_information_contains_requested_icons_and_scrolling(self) -> None:
@@ -1567,10 +1567,8 @@ class LatestGuiRequirementsTests(unittest.TestCase):
             window._setting_widgets["manual_base_width_mm"].range_label.text(),
             "20 - 80 mm",
         )
-        window.show_joint_slice_settings()
-        tolerance = window._joint_slice_settings_dialog.tolerance_spin_box
-        self.assertEqual((tolerance.minimum(), tolerance.maximum()), (0.1, 3.0))
-        window._joint_slice_settings_dialog.reject()
+        tolerance = window.layer_time_tolerance_spin
+        self.assertEqual((tolerance.property("validationMinimum"), tolerance.property("validationMaximum")), (0.1, 3.0))
         self.assertEqual(
             window._setting_widgets["maximum_expansion_angle_deg"].range_label.text(),
             "20,0 - 89,0 °",

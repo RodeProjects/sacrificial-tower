@@ -92,7 +92,7 @@ QLabel#preparationFactsStatus[confirmed="false"] {
 }
 
 QWidget#mainFooter,
-QWidget#preprocessorFooter {
+QWidget#postprocessorFooter {
     background: #f3f6f9;
     border-top: 1px solid #cbd6e1;
 }
@@ -685,7 +685,7 @@ QPushButton[generationMode="manual"] QLabel#generationModeExportTag {
     color: #22486f;
     border-color: #91aecb;
 }
-QPushButton[generationMode="preprocessor"] QLabel#generationModeExportTag {
+QPushButton[generationMode="postprocessor"] QLabel#generationModeExportTag {
     color: #245b3b;
     border-color: #91b69e;
 }
@@ -752,29 +752,29 @@ QPushButton[generationMode="manual"] QLabel#generationModeCardAction[cardHover="
     border-color: #6c96bc;
 }
 
-QPushButton[generationMode="preprocessor"] {
+QPushButton[generationMode="postprocessor"] {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
     border-color: #91b69e;
 }
-QPushButton[generationMode="preprocessor"]:hover {
+QPushButton[generationMode="postprocessor"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #edf9f0, stop:0.45 #d2e9da, stop:1 #a5ceb3);
     border-color: #528567;
 }
-QPushButton[generationMode="preprocessor"]:focus { border-color: #27643f; }
-QPushButton[generationMode="preprocessor"]:pressed {
+QPushButton[generationMode="postprocessor"]:focus { border-color: #27643f; }
+QPushButton[generationMode="postprocessor"]:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1, stop:0 #d5e9dc, stop:1 #a9cbb6);
     border-color: #27643f;
 }
-QPushButton[generationMode="preprocessor"] QLabel#generationModeCardTitle,
-QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction {
+QPushButton[generationMode="postprocessor"] QLabel#generationModeCardTitle,
+QPushButton[generationMode="postprocessor"] QLabel#generationModeCardAction {
     color: #245b3b;
 }
-QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction {
+QPushButton[generationMode="postprocessor"] QLabel#generationModeCardAction {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #f3fcf6, stop:1 #d2e9da);
     border-color: #91b69e;
 }
-QPushButton[generationMode="preprocessor"] QLabel#generationModeCardAction[cardHover="true"] {
+QPushButton[generationMode="postprocessor"] QLabel#generationModeCardAction[cardHover="true"] {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #effbf3, stop:1 #bfdfcb);
     border-color: #6c9b7e;
@@ -1547,6 +1547,20 @@ QFrame#geometrySubsectionDivider {
     border: none;
     min-height: 1px;
     max-height: 1px;
+}
+
+QLabel#towerSettingsSubsectionTitle {
+    color: #667786;
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0;
+}
+
+QFrame#towerSettingsSubsectionDivider {
+    background: #dce3e9;
+    border: none;
 }
 
 QFrame#slicerVerticalDivider {
@@ -2914,34 +2928,34 @@ QPushButton#headerMethodButton[generationMode="automatic"]:focus,
 QPushButton#headerMethodButton[generationMode="manual"]:focus {
     border-bottom: 1px dotted #1769aa;
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"] {
+QPushButton#headerMethodButton[generationMode="postprocessor"] {
     color: #245b3b;
     border-color: #91b69e;
     border-right: 0;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"]:hover {
+QPushButton#headerMethodButton[generationMode="postprocessor"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #edf9f0, stop:0.45 #d2e9da, stop:1 #a5ceb3);
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"]:checked {
+QPushButton#headerMethodButton[generationMode="postprocessor"]:checked {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #c3ddcc, stop:0.18 #deefe4, stop:1 #eff8f2);
     border-top: 1px solid #97bca4;
     border-bottom: 1px solid #f8fdf9;
     padding: 1px 10px 0;
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"]:checked:hover {
+QPushButton#headerMethodButton[generationMode="postprocessor"]:checked:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #bad7c5, stop:0.18 #d5eade, stop:1 #e8f5ed);
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"]:pressed {
+QPushButton#headerMethodButton[generationMode="postprocessor"]:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #bad7c5, stop:0.18 #d5eade, stop:1 #e8f5ed);
     border-top: 1px solid #97bca4;
 }
-QPushButton#headerMethodButton[generationMode="preprocessor"]:focus {
+QPushButton#headerMethodButton[generationMode="postprocessor"]:focus {
     border-bottom: 1px dotted #27643f;
 }
 QPushButton#headerMethodButton:disabled {
@@ -4154,11 +4168,11 @@ QWidget#generationResultActions QPushButton {
 }
 /* Left controls stay compact; all right-side actions retain their original size. */
 QWidget#mainFooter QPushButton,
-QWidget#preprocessorFooter QPushButton {
+QWidget#postprocessorFooter QPushButton {
     min-height: 30px; max-height: 30px; padding: 0 12px;
 }
 QWidget#mainFooter QWidget#footerActionArea QPushButton,
-QWidget#preprocessorFooter QWidget#footerActionArea QPushButton {
+QWidget#postprocessorFooter QWidget#footerActionArea QPushButton {
     min-height: 34px; max-height: 34px; padding: 7px 13px;
 }
 QWidget#mainFooter QFrame#previewActionControl { border: none; }
@@ -4171,26 +4185,26 @@ QWidget#mainFooter QFrame#previewActionControl[cancelAction="true"] QPushButton#
 QWidget#mainFooter QFrame#previewActionControl[acceptAction="true"] QPushButton#previewButton {
     border-color: #a4d5b6;
 }
-QWidget#preprocessorFooter QPushButton#preprocessorCancelButton {
+QWidget#postprocessorFooter QPushButton#postprocessorCancelButton {
     color: #8c2820;
     background: #f8e4e4;
     border: 1px solid #dfbcbc;
 }
-QWidget#preprocessorFooter QPushButton#preprocessorCancelButton:hover {
+QWidget#postprocessorFooter QPushButton#postprocessorCancelButton:hover {
     background: #eac5c5;
 }
-QWidget#preprocessorPanel QDoubleSpinBox:disabled,
-QWidget#preprocessorPanel QSpinBox:disabled {
+QWidget#postprocessorPanel QDoubleSpinBox:disabled,
+QWidget#postprocessorPanel QSpinBox:disabled {
     color: #74808c;
     background: #edf0f2;
     border-color: #d6dde3;
 }
-QWidget#preprocessorPanel QDoubleSpinBox::up-button:disabled,
-QWidget#preprocessorPanel QDoubleSpinBox::down-button:disabled {
+QWidget#postprocessorPanel QDoubleSpinBox::up-button:disabled,
+QWidget#postprocessorPanel QDoubleSpinBox::down-button:disabled {
     background: #e4e9ed;
     border-color: #d6dde3;
 }
-QWidget#preprocessorPanel QLabel#numericEditorUnit:disabled {
+QWidget#postprocessorPanel QLabel#numericEditorUnit:disabled {
     color: #8995a0;
 }
 QSpinBox#circleSegments:disabled {

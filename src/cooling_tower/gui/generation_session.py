@@ -7,12 +7,19 @@ from pathlib import Path
 from typing import Any
 
 from cooling_tower.preview import PreviewExportResult, PreviewResult, PreviewState
+from cooling_tower.legacy_method_ids import LEGACY_POSTPROCESSOR_ID
 
 
 class GenerationMode(str, Enum):
     AUTOMATIC = "automatic"
     MANUAL = "manual"
-    PREPROCESSOR = "preprocessor"
+    POSTPROCESSOR = "postprocessor"
+
+    @classmethod
+    def _missing_(cls, value):
+        if value == LEGACY_POSTPROCESSOR_ID:
+            return cls.POSTPROCESSOR
+        return None
 
 
 @dataclass(slots=True)

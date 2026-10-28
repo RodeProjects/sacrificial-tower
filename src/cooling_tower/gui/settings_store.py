@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
-from cooling_tower.export_paths import default_export_roots, normalize_export_roots
+from cooling_tower.export_paths import (
+    default_export_roots,
+    migrate_standard_export_roots,
+    normalize_export_roots,
+)
+from cooling_tower.legacy_method_ids import LEGACY_POSTPROCESSOR_ID
 from cooling_tower.models import GenerationSettings
 from cooling_tower.persistence import (
     FutureSchemaVersionError,
@@ -449,10 +454,53 @@ def _migrate_settings_23_to_24(payload: dict[str, Any]) -> dict[str, Any]:
     """Separate future exports without moving any existing user files."""
     migrated = dict(payload)
     root = migrated.get("output_root")
-    migrated["export_roots"] = default_export_roots(root) if (
+    # Freeze the historical layout; later steps rename only standard paths.
+    migrated["export_roots"] = {
+        method: str(Path(root) / method)
+        for method in ("automatic", "manual", LEGACY_POSTPROCESSOR_ID)
+    } if (
         isinstance(root, str) and root.strip() and not any(ord(c) < 32 for c in root)
     ) else {}
     if migrated["export_roots"]:
+        migrated["output_root"] = migrated["export_roots"]["automatic"]
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_24_to_25(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rename only the earlier method-separated standard destination."""
+    migrated = dict(payload)
+    roots = normalize_export_roots(migrated.get("export_roots"))
+    if "postprocessor" in roots:
+        roots[LEGACY_POSTPROCESSOR_ID] = roots.pop("postprocessor")
+    old = roots.get(LEGACY_POSTPROCESSOR_ID)
+    if old:
+        path = Path(old)
+        if path.name.casefold() == LEGACY_POSTPROCESSOR_ID and any(
+                Path(roots[name]) == path.parent/name for name in ("automatic", "manual") if name in roots):
+            roots[LEGACY_POSTPROCESSOR_ID] = str(path.with_name("postprocessor"))
+    migrated["export_roots"] = roots
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_25_to_26(payload: dict[str, Any]) -> dict[str, Any]:
+    """Canonical method identifier; existing custom paths keep their values."""
+    migrated = dict(payload)
+    migrated["export_roots"] = normalize_export_roots(migrated.get("export_roots"))
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
+def _migrate_settings_26_to_27(
+    payload: dict[str, Any], *, default_base: Path | None = None,
+) -> dict[str, Any]:
+    """New standard directory names; custom destinations retain their values."""
+    migrated = dict(payload)
+    migrated["export_roots"] = migrate_standard_export_roots(
+        migrated.get("export_roots"), default_base=default_base,
+    )
+    if "automatic" in migrated["export_roots"]:
         migrated["output_root"] = migrated["export_roots"]["automatic"]
     migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
     return migrated
@@ -608,6 +656,9 @@ _USER_SETTINGS_MIGRATIONS = {
     21: _migrate_settings_21_to_22,
     22: _migrate_settings_22_to_23,
     23: _migrate_settings_23_to_24,
+    24: _migrate_settings_24_to_25,
+    25: _migrate_settings_25_to_26,
+    26: _migrate_settings_26_to_27,
 }
 
 
@@ -636,7 +687,8 @@ class UserSettingsStore:
             self.user_path,
             schema_key="settings_schema_version",
             current_version=SETTINGS_SCHEMA_VERSION,
-            migrations=_USER_SETTINGS_MIGRATIONS,
+            migrations={**_USER_SETTINGS_MIGRATIONS, 26: lambda payload: _migrate_settings_26_to_27(
+                payload, default_base=self.load_default_output_root())},
             normalizer=_normalize_user_settings,
             document_name="Die gespeicherten Benutzereinstellungen",
         )
@@ -867,11 +919,12 @@ class UserSettingsStore:
         }
 
     def _default_payload(self, defaults: GenerationSettings) -> dict[str, Any]:
+        export_roots = default_export_roots(self.load_default_output_root())
         return {
             "settings_schema_version": SETTINGS_SCHEMA_VERSION,
             "generation": defaults.to_dict(),
-            "output_root": str(self.load_default_output_root() / "automatic"),
-            "export_roots": default_export_roots(self.load_default_output_root()),
+            "output_root": export_roots["automatic"],
+            "export_roots": export_roots,
             "preview_iterations": _DEFAULT_PREVIEW_ITERATIONS,
             "maximum_joint_slices": self.load_default_maximum_joint_slices(),
             "maximum_separate_slices": (

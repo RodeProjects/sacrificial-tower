@@ -43,7 +43,7 @@ Die Vorlage enthält unter anderem diese Abnahmen:
 | `orca_unselected_system_filament` | Orca-Maschine, Prozess und Systemfilament |
 | `orca_confirmation_preslice` | Orca-Benutzerprofile und Preslice |
 | `prusa_confirmation_preslice` | Prusa-Benutzerprofile und Preslice |
-| `preprocessor_acceptance` | Vollständiger Postprozessorablauf für alle vier Slicer mit eigenen Profilkombinationen |
+| `postprocessor_acceptance` | Vollständiger Postprozessorablauf für alle vier Slicer mit eigenen Profilkombinationen |
 | `phase14_anycubic_base_slice` | Anycubic-Systemprofile für einen realen STL-Slice |
 | `phase16_sparse_user_profile` | Anycubic-Systemmaschine und Benutzerprofile für die Sparse-Profilprüfung |
 | `phase16_system_profile_slice` | Anycubic-Systemprofile für eine Kalibrierungsprüfung |
@@ -77,11 +77,11 @@ Konfigurationsfehler gemeldet, damit ungültige lokale Angaben nicht still
 übersehen werden.
 
 Die vollständige Postprozessor-Abnahme wird mit den vier Profilkombinationen
-unter `tests.preprocessor_acceptance` gestartet:
+unter `tests.postprocessor_acceptance` gestartet:
 
 ```powershell
 $env:COOLING_TOWER_RUN_REAL_SLICER_TESTS='1'
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_preprocessor_real_slicers.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_postprocessor_real_slicers.py -v
 ```
 
 Sie verwendet eigene STL-Testkörper: einen kleinen Quader, einen 35 mm hohen

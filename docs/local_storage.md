@@ -7,15 +7,17 @@ dabei gelöscht.
 
 ## Exportordner
 
-Neue Exporte werden standardmäßig unter `output/automatic`, `output/manual`
-beziehungsweise `output/preprocessor` abgelegt. Jede Methode erzeugt darin
+Neue Exporte werden standardmäßig unter `output/exports_automatic_mode`, `output/exports_manual_mode`
+beziehungsweise `output/exports_postprocessor` abgelegt. Frühere Standardpfade werden
+mit gesicherten Einstellungen umgestellt; alte Exporte im früheren Standardordner
+bleiben über die Exporthistorie erreichbar. Jede Methode erzeugt darin
 eigene Zeitstempel-Unterordner mit Druckdateien und Berichten. Die allgemeinen
 Einstellungen bieten für jede Methode eine unabhängige Ordnerauswahl und einen
 Reset auf ihren Standard. Bereits vorhandene Exporte bleiben an ihrem bisherigen
 Ort. Die zuletzt exportierte Datei und ihr erneut aufrufbarer Bericht werden
 je Methode während der Sitzung gemerkt; die Ordnersuche berücksichtigt den
 jeweiligen Methodenordner. Das gespeicherte Format ist unter
-[Schema 24](settings_migrations.md#schema-24-getrennte-exportordner) beschrieben.
+[Einstellungsmigrationen](settings_migrations.md#schema-27-standardnamen-der-exportordner) beschrieben.
 
 ## Vorschauen und Arbeitsdateien
 

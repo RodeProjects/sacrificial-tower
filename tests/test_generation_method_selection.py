@@ -72,7 +72,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
 
     def test_both_methods_require_source_slicer_and_preparation_confirmation(self) -> None:
         window = self.window
-        self.assertEqual(set(GenerationMode), {GenerationMode.AUTOMATIC, GenerationMode.MANUAL, GenerationMode.PREPROCESSOR})
+        self.assertEqual(set(GenerationMode), {GenerationMode.AUTOMATIC, GenerationMode.MANUAL, GenerationMode.POSTPROCESSOR})
         self.assertEqual(set(window.generation_sessions), set(GenerationMode))
         workflow = window.workflow
         workflow.set_slicer_step_visible(True)
@@ -102,14 +102,14 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertFalse(window.workflow_group.isVisible())
                 self.assertTrue(window.preparation_open_button.isVisible())
                 self.assertIs(window.window_pages.currentWidget(), window.main_surface)
-                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
-                self.assertEqual(window.preprocessor_panel.footer_widget.isVisible(), mode is GenerationMode.PREPROCESSOR)
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.POSTPROCESSOR)
+                self.assertEqual(window.postprocessor_panel.footer_widget.isVisible(), mode is GenerationMode.POSTPROCESSOR)
                 window.show_generation_method_selection()
                 self.assertTrue(window.footer.isHidden())
-                self.assertTrue(window.preprocessor_panel.footer_widget.isHidden())
+                self.assertTrue(window.postprocessor_panel.footer_widget.isHidden())
                 window._on_workflow_stage_changed(window.workflow.stage.value)
                 self.assertTrue(window.footer.isHidden())
-                self.assertTrue(window.preprocessor_panel.footer_widget.isHidden())
+                self.assertTrue(window.postprocessor_panel.footer_widget.isHidden())
 
     def test_startup_divider_and_overlay_shadow_preserve_brand_top_and_bottom_insets(self) -> None:
         window=self.window
@@ -373,7 +373,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         for mode in GenerationMode:
             with self.subTest(mode=mode), patch.object(window.manual_controller,"ensure_context"):
                 window.select_generation_mode(mode)
-                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.POSTPROCESSOR)
                 window.show_preparation_workspace()
                 self.app.processEvents()
                 self.assertTrue(window.workflow_group.isVisible())
@@ -385,7 +385,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 window.close_preparation_workspace()
                 self.app.processEvents()
                 self.assertIs(window.generation_mode,mode)
-                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.PREPROCESSOR)
+                self.assertEqual(window.footer.isVisible(), mode is not GenerationMode.POSTPROCESSOR)
 
     def test_manual_mode_only_shows_centered_red_notice_in_single_column_layout(self) -> None:
         window = self.window
@@ -939,21 +939,21 @@ class GenerationMethodSelectionTests(unittest.TestCase):
             self.assertEqual(grid.column_count, columns)
             automatic_rect = window.automatic_generation_card.geometry()
             manual_rect = window.manual_generation_card.geometry()
-            preprocessor_rect = window.preprocessor_generation_card.geometry()
+            postprocessor_rect = window.postprocessor_generation_card.geometry()
             if columns >= 2:
                 self.assertEqual(automatic_rect.top(), manual_rect.top())
                 self.assertLess(automatic_rect.right(), manual_rect.left())
                 if columns == 3:
-                    self.assertEqual(preprocessor_rect.top(), automatic_rect.top())
-                    self.assertLess(preprocessor_rect.right(), automatic_rect.left())
+                    self.assertEqual(postprocessor_rect.top(), automatic_rect.top())
+                    self.assertLess(postprocessor_rect.right(), automatic_rect.left())
                 else:
-                    self.assertLess(preprocessor_rect.bottom(), automatic_rect.top())
-                    self.assertEqual(preprocessor_rect.left(), automatic_rect.left())
-                    self.assertEqual(preprocessor_rect.right(), manual_rect.right())
+                    self.assertLess(postprocessor_rect.bottom(), automatic_rect.top())
+                    self.assertEqual(postprocessor_rect.left(), automatic_rect.left())
+                    self.assertEqual(postprocessor_rect.right(), manual_rect.right())
             else:
-                self.assertLess(preprocessor_rect.bottom(), automatic_rect.top())
+                self.assertLess(postprocessor_rect.bottom(), automatic_rect.top())
                 self.assertLess(automatic_rect.bottom(), manual_rect.top())
-            for card in (window.preprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
+            for card in (window.postprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
                 self.assertTrue(card.isVisible())
                 self.assertLessEqual(card.geometry().right(), grid.width())
                 self.assertLessEqual(card.geometry().bottom(), grid.height() - 1)
@@ -991,7 +991,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                     self.assertEqual(left_space, 0)
                 else:
                     self.assertGreater(left_space, 0)
-                for card in (window.preprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
+                for card in (window.postprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
                     self.assertTrue(grid.rect().contains(card.geometry()))
 
     def test_hovering_a_method_card_also_highlights_its_action_text(self) -> None:

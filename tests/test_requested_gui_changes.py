@@ -1085,6 +1085,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         expected_units = {
             "target_layer_time_s": "Sek.",
+            "layer_time_tolerance_s": "Sek.",
             "minimum_outer_diameter_mm": "mm",
             "maximum_outer_diameter_mm": "mm",
             "manual_base_width_mm": "mm",
@@ -1270,9 +1271,45 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertEqual(window.geometry_group.title(), "Erweiterte Turmeinstellungen")
         for name in ("manual_base_width_mm", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg"):
             self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets[name]))
-        self.assertFalse(window.geometry_group.isAncestorOf(window._setting_widgets["local_reference_window"]))
+        self.assertTrue(window.geometry_group.isAncestorOf(window._setting_widgets["local_reference_window"]))
+        layout = window.geometry_fields_layout
+        geometry_index = layout.indexOf(window.tower_geometry_heading)
+        generation_index = layout.indexOf(window.generation_settings_heading)
+        self.assertLess(geometry_index, generation_index)
+        for name in ("minimum_outer_diameter_mm", "maximum_outer_diameter_mm", "manual_base_width_mm",
+                "circle_segments", "maximum_expansion_angle_deg", "maximum_contraction_angle_deg"):
+            self.assertLess(geometry_index, layout.indexOf(window._setting_widgets[name]))
+            self.assertLess(layout.indexOf(window._setting_widgets[name]), generation_index)
+        for setting in (window._setting_widgets["layer_time_tolerance_s"],
+                *window.slice_budget_settings.values(), window._setting_widgets["local_reference_window"]):
+            self.assertLess(generation_index, layout.indexOf(setting))
         self.assertTrue(window.stability_group.isHidden())
         self.assertTrue(window.overhang_group.isHidden())
+
+    def test_advanced_subsection_titles_stay_close_above_their_dividers(self) -> None:
+        window = self.window()
+        self.addCleanup(window.close)
+        window.show()
+        self.complete_source_step(window)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
+        for width in (1422, 760):
+            window.resize(width, 1000)
+            for _ in range(5):
+                self.app.processEvents()
+            for heading, title_text in ((window.tower_geometry_heading, "Turmgeometrie"),
+                    (window.generation_settings_heading, "Generierung")):
+                title, divider = (heading.layout().itemAt(i).widget() for i in (0, 1))
+                self.assertEqual(title.text(), title_text)
+                self.assertTrue(heading.isVisible())
+                self.assertGreaterEqual(divider.y()-title.geometry().bottom()-1, 0)
+                self.assertLessEqual(divider.y()-title.geometry().bottom()-1, 4)
+                self.assertEqual(divider.height(), 1)
+                self.assertEqual(divider.width(), heading.width())
+            window.geometry_group.setChecked(False)
+            self.assertFalse(window.generation_settings_heading.isVisible())
+            window.geometry_group.setChecked(True)
 
     def test_advanced_settings_toggle_resizes_outer_card_without_bottom_gap(self) -> None:
         window = self.window()

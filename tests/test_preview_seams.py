@@ -93,9 +93,9 @@ class PreviewSeamTests(unittest.TestCase):
             dispose_test_widget(canvas)
 
     def test_postprocessor_preview_keeps_seams_from_generated_gcode(self):
-        from test_preprocessor import PreprocessorTests, make_gcode
+        from test_postprocessor import PostprocessorTests, make_gcode
 
-        fixture = PreprocessorTests()
+        fixture = PostprocessorTests()
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
         request = fixture.request(make_gcode().replace(";HEIGHT:0.2", ";HEIGHT:0.2\n;TYPE:External perimeter"))

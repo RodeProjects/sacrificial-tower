@@ -32,7 +32,7 @@ resulting layer times. How closely an iteratively generated tower matches your
 desired layer time depends substantially on the profiles selected in the
 application and their settings. Both modes export a **3MF project containing your model
 and tower**, plus a separate tower STL.
-The third **Preprocessor** method adds cooling pauses and a hollow wiping tower
+The third **Postprocessor** method adds cooling pauses and a hollow wiping tower
 to the existing pre-slice. It accounts for travel and tower time, reconstructs
 the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 
@@ -49,7 +49,7 @@ the bed and toolpaths in their G-code coordinates, and exports verified G-code.
   festem Prüfslice und tatsächlicher Zeitbewertung.
 - Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden
   Modi; zusätzliche STL-Datei des Turms.
-- [Postprozessor](docs/preprocessor.md) mit hohlem Abstreifturm, automatischer
+- [Postprozessor](docs/postprocessor.md) mit hohlem Abstreifturm, automatischer
   sicherer Platzierung, Restwartezeiten und direktem G-Code-Export.
 - Hinweise auf erkannte leere Layer und optionale objektspezifische
   Stützensimulation bei erkanntem, global ausgeschaltetem Stützenprofil.

@@ -517,7 +517,7 @@ beim Schließen werden deren temporäre Artefakte freigegeben. Der letzte
 Exportbericht bleibt als sitzungsweiter Verlauf verfügbar.
 Der Postprozessor besitzt eine eigene Sitzung, einen verwalteten Vorschaujob und
 einen unmittelbaren G-Code-Export. Sein Datenfluss und seine Sicherheits-/
-Zeitinvarianten stehen unter [Postprozessor](preprocessor.md).
+Zeitinvarianten stehen unter [Postprozessor](postprocessor.md).
 Die Einstellungen und Fortschrittssteuerung der iterativen Methode bleiben in ihrem
 bestehenden Arbeitsbereich. Manuelle Eingaben verwenden ausschließlich die
 manuelle Sitzung mit `manual_draft`, `running_request` und `successful_request`.
@@ -549,16 +549,21 @@ Elemente. Transformation, Deckkraft, Pixeldichte und Original-Zeichenfolge besti
 die Bildgültigkeit. Details zu Einpassung, Mindestmaßgriff und verlustfreien
 Renderoptimierungen stehen im [manuellen Editor](manual_editor.md).
 
-Unter „Turmeinstellungen“ steht die Mindest-Layerzeit. Die Layerzeit-Toleranz
-wird zusammen mit ihrem Einzelreset unter „Allgemeine Einstellungen“ verwaltet.
-Der Reset im Hauptfenster lässt sie unverändert; der allgemeine Reset setzt sie
-zurück. Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
+Unter „Turmeinstellungen“ steht die Mindest-Layerzeit.
+Auf die Mindest-Layerzeit folgen „100% Turmfüllung simulieren“ und
 „Deaktivierte Turmstützen simulieren“. Die
 bei global deaktivierten Stützen angebotene Option „Stützen für STL-Objekt
 simulieren“ folgt darunter; ihre Wirkungsweise steht in
 [Turmgeometrie](tower_geometry.md#objektspezifische-stützen-für-das-original-stl). Die
 darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
+Er ist in „Turmgeometrie“ und „Generierung“ unterteilt. Dezente Überschriften
+stehen jeweils knapp über einer horizontalen Trennlinie. „Turmgeometrie“
+enthält die Abmessungen, Standfuß-, Überhang- und Ausschlussbereicheinstellungen.
+„Generierung“ enthält Layerzeit-Toleranz, maximale getrennte und gemeinsame
+Slices sowie das lokale Zeitfenster. Alle vier Optionen besitzen Einzelresets
+und gehören zum Reset der Turmeinstellungen. Die gespeicherten Werte und ihre
+Bedeutung bleiben beim Verschieben erhalten.
 Die äußeren Bereiche der iterativen Methode „Turmeinstellungen“ und „Generierung und Vorschau“
 sind dauerhaft geöffnet und besitzen keine Aufklappdreiecke, seitlichen Rahmen
 oder abgerundeten Ecken. Beide schließen ohne oberen oder seitlichen Außenabstand
@@ -614,13 +619,11 @@ Nach Bestätigung wird ein Turm über die gesamte Modellhöhe erzwungen; dabei
 darf allein die durch die aktuelle Messung erhöhte Zielzeit-Untergrenze für
 diesen Lauf unterschritten werden. Andere Eingabefehler bleiben gesperrt.
 Eingabegrenzen sind standardmäßig verborgen; die frühere Anzeigeoption ist aus
-„Allgemeine Einstellungen“ entfernt. Dort befinden sich außerdem Slice-Budget,
-Layerzeit-Toleranz, lokales Zeitfenster und Exportordner; ein eigener
-Exportordner-Menüpunkt entfällt. Bis Datei-, Slicer- und Profilvorbereitung
-erfolgreich bestätigt sind, bleiben die Einstellungen außer dem Exportordner
-ausgegraut. Ein Hinweis direkt unter der Überschrift erklärt die Verfügbarkeit.
-Die Info-Symbole bieten ihre Hover-Hinweise auch vor Abschluss der Vorbereitung an.
-Die Zahlenfelder des Dialogs sind gleich breit. Ein durchgehender
+„Allgemeine Einstellungen“ entfernt. Dort befinden sich die getrennten
+Exportordner der drei Methoden mit Einzelresets und gemeinsamem Reset;
+ein eigener Exportordner-Menüpunkt entfällt. Die Ordner sind bereits vor
+Abschluss der Vorbereitung einstellbar. Änderungen und Resets werden erst mit
+„Übernehmen“ gespeichert. Ein durchgehender
 Trennstrich setzt die Aktionen „Abbrechen“ und „Übernehmen“ mit gleichem
 Innenabstand vom Inhalt ab.
 Das Ausblenden verkleinert die gesamte Einstellungskarte. Einige Zahlenfelder

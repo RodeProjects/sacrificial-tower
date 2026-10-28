@@ -3,6 +3,7 @@ param(
     [string]$SourceRepository = "",
     [string]$UpdateRepository = "",
     [switch]$DevelopmentRelease,
+    [string]$ReleaseNotesPath = "",
     [switch]$AllowTimedOutCI,
     [string]$RunnerToolsRoot = (Join-Path $PSScriptRoot '..\..\_Tools\github_actions_runner')
 )
@@ -16,6 +17,17 @@ if ($AllowTimedOutCI) {
 }
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     $PSNativeCommandUseErrorActionPreference = $true
+}
+
+$customReleaseNotes = $null
+if ($ReleaseNotesPath) {
+    $customReleaseNotes = Get-Content -LiteralPath $ReleaseNotesPath -Raw -Encoding utf8
+    if ([string]::IsNullOrWhiteSpace($customReleaseNotes)) {
+        throw 'Die Releasebeschreibung darf nicht leer sein.'
+    }
+    if ($DevelopmentRelease -and $customReleaseNotes -notmatch 'Entwicklungsversion') {
+        throw 'Die Releasebeschreibung muss die Entwicklungsversion ausdrücklich kennzeichnen.'
+    }
 }
 
 $ghCommand = Get-Command gh -ErrorAction SilentlyContinue
@@ -243,6 +255,9 @@ Supports **Anycubic Slicer Next, Bambu Studio, PrusaSlicer and OrcaSlicer**. Ins
     $releaseNotes += "`n`nQuellcode: $SourceRepository, Tag $tag, Commit $localCommit.`nInstaller und signiertes latest.json gehören unveränderlich zu diesem Release."
     $releaseNotes += "`n`n---`n`n" + $releaseSummaryEn.Trim() + "`n`n" + $releaseStatusEn
     $releaseNotes += "`n`nSource: $SourceRepository, tag $tag, commit $localCommit.`nThe installer and signed latest.json are immutable assets of this release."
+    if ($customReleaseNotes) {
+        $releaseNotes = $customReleaseNotes.Trim()
+    }
     $notesPath=Join-Path $resolvedTemporaryRoot 'release-notes.md'
     [IO.File]::WriteAllText($notesPath,$releaseNotes,[Text.UTF8Encoding]::new($false))
     $legalRoot=Join-Path $resolvedTemporaryRoot 'legal-texts'

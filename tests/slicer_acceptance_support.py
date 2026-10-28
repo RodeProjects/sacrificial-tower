@@ -23,6 +23,9 @@ from cooling_tower.slicers import (
 )
 
 
+from cooling_tower.legacy_method_ids import LEGACY_POSTPROCESSOR_ID
+
+
 CONFIG_PATH = PROJECT_ROOT / "tests" / "slicer_acceptance.local.json"
 CONFIG_ENV_VAR = "COOLING_TOWER_SLICER_ACCEPTANCE_CONFIG"
 
@@ -53,7 +56,7 @@ def _test_config(test_key: str, adapter_id: str) -> dict[str, object]:
     tests = config.get("tests", {})
     if not isinstance(tests, dict):
         return {}
-    test = tests.get(test_key, {})
+    test = tests.get(test_key, tests.get(LEGACY_POSTPROCESSOR_ID+"_acceptance", {}) if test_key == "postprocessor_acceptance" else {})
     if not isinstance(test, dict):
         return {}
     slicer = test.get(adapter_id, {})
@@ -69,7 +72,7 @@ def require_test_path(
 ) -> Path:
     config = load_acceptance_config()
     tests = config.get("tests", {})
-    test = tests.get(test_key, {}) if isinstance(tests, dict) else {}
+    test = tests.get(test_key, tests.get(LEGACY_POSTPROCESSOR_ID+"_acceptance", {}) if test_key == "postprocessor_acceptance" else {}) if isinstance(tests, dict) else {}
     if not isinstance(test, dict):
         test = {}
     section = test.get(adapter_id, {}) if adapter_id else test

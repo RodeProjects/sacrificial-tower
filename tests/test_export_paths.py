@@ -10,7 +10,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
-from cooling_tower.export_paths import default_export_roots
+from cooling_tower.legacy_method_ids import LEGACY_POSTPROCESSOR_ID
+from cooling_tower.export_paths import default_export_roots, EXPORT_FOLDER_NAMES
 from cooling_tower.gui.settings_store import UserSettingsStore
 from cooling_tower.models import GenerationSettings
 from cooling_tower.persistence import VersionedDocumentError, VersionedDocumentWriteBlockedError
@@ -48,10 +49,10 @@ class ExportPathsTests(unittest.TestCase):
                 _, state = store.load()
                 self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
                 self.assertEqual(state["export_roots"], default_export_roots(old_root))
-                self.assertEqual(state["output_root"], str(old_root / "automatic"))
+                self.assertEqual(state["output_root"], default_export_roots(old_root)["automatic"])
                 self.assertEqual(store.last_migration_backup.read_bytes(), before)
                 self.assertEqual(old_export.read_bytes(), b"original")
-                self.assertFalse((old_root / "automatic").exists())
+                self.assertFalse((old_root / EXPORT_FOLDER_NAMES["automatic"]).exists())
 
     def test_individual_paths_round_trip_and_invalid_values_are_discarded(self):
         roots = default_export_roots(self.root / "exports")
@@ -60,9 +61,38 @@ class ExportPathsTests(unittest.TestCase):
         _, state = self.store().load()
         self.assertEqual(state["export_roots"], roots)
         payload = json.loads(self.path.read_text(encoding="utf-8"))
-        payload["export_roots"] = {"automatic": 3, "manual": "x\x00y", "preprocessor": "   ", "unknown": "x"}
+        payload["export_roots"] = {"automatic": 3, "manual": "x\x00y", "postprocessor": "   ", "unknown": "x"}
         self.path.write_text(json.dumps(payload), encoding="utf-8")
         self.assertEqual(self.store().load()[1]["export_roots"], {})
+
+    def test_schema_24_updates_standard_spelling_with_backup_and_keeps_custom_paths(self):
+        for standard in (True, False):
+            with self.subTest(standard=standard):
+                base = self.root/"exports"
+                roots = default_export_roots(base)
+                old = base/LEGACY_POSTPROCESSOR_ID if standard else self.root/"custom"/LEGACY_POSTPROCESSOR_ID
+                roots[LEGACY_POSTPROCESSOR_ID] = str(old)
+                roots.pop("postprocessor")
+                payload = {"settings_schema_version": 24, "generation": {},
+                    "output_root": roots["automatic"], "export_roots": roots}
+                self.path.write_text(json.dumps(payload), encoding="utf-8")
+                original = self.path.read_bytes()
+                store = self.store()
+                _, state = store.load()
+                self.assertEqual(state["settings_schema_version"], SETTINGS_SCHEMA_VERSION)
+                self.assertEqual(state["export_roots"]["postprocessor"], default_export_roots(base)["postprocessor"] if standard else str(old))
+                self.assertEqual(store.last_migration_backup.read_bytes(), original)
+                self.assertFalse(old.exists())
+
+    def test_failed_schema_24_migration_write_preserves_original(self):
+        roots = {**default_export_roots(self.root), LEGACY_POSTPROCESSOR_ID: str(self.root/LEGACY_POSTPROCESSOR_ID)}
+        roots.pop("postprocessor")
+        self.path.write_text(json.dumps({"settings_schema_version": 24, "generation": {},
+            "output_root": roots["automatic"], "export_roots": roots}), encoding="utf-8")
+        original = self.path.read_bytes()
+        with patch("cooling_tower.persistence.versioned_json.os.replace", side_effect=OSError("locked")):
+            self.store().load()
+        self.assertEqual(self.path.read_bytes(), original)
 
     def test_failed_atomic_write_preserves_original(self):
         store = self.store()
@@ -112,10 +142,10 @@ class ExportPathsTests(unittest.TestCase):
             with self.subTest(value=value, token=token):
                 result = merge_compatible_setting_changes({"generation": {}, "export_roots": roots}, {
                     "export_roots.manual": {"token": token, "value": value},
-                    "export_roots.preprocessor": {"token": "method-export-directory-path-v1", "value": "safe"}})
+                    "export_roots.postprocessor": {"token": "method-export-directory-path-v1", "value": "safe"}})
                 self.assertIn("export_roots.manual", result.rejected_ids)
                 self.assertEqual(result.payload["export_roots"]["manual"], roots["manual"])
-                self.assertEqual(result.payload["export_roots"]["preprocessor"], "safe")
+                self.assertEqual(result.payload["export_roots"]["postprocessor"], "safe")
 
     def test_old_shared_directory_token_cannot_replace_method_destinations(self):
         roots = default_export_roots(self.root)

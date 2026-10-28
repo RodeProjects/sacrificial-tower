@@ -4,6 +4,7 @@ import math
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
+from cooling_tower.legacy_method_ids import LEGACY_POSTPROCESSOR_ID, LEGACY_POSTPROCESSOR_EXPORT_SETTING
 
 _MISSING = object()
 
@@ -160,7 +161,7 @@ SETTING_COMPATIBILITY_RULES = (
     *(SettingCompatibilityRule(
         f"export_roots.{method}", "method-export-directory-path-v1",
         ("export_roots", method), "path", f"export_roots.{method}",
-    ) for method in ("automatic", "manual", "preprocessor")),
+    ) for method in ("automatic", "manual", "postprocessor")),
     SettingCompatibilityRule(
         "window.width", "window-pixel-width-v1", ("window", "width"), "int",
         "window.width", minimum=100, maximum=100_000,
@@ -303,7 +304,11 @@ def merge_compatible_setting_changes(
     rejected: set[str] = set()
 
     for stable_id, raw_entry in changes.items():
-        rule = RULE_BY_ID.get(stable_id)
+        canonical_id = ("export_roots.postprocessor" if stable_id == LEGACY_POSTPROCESSOR_EXPORT_SETTING else stable_id)
+        if canonical_id != stable_id and canonical_id in changes:
+            rejected.add(stable_id)
+            continue
+        rule = RULE_BY_ID.get(canonical_id)
         if rule is None or not isinstance(raw_entry, Mapping):
             rejected.add(str(stable_id))
             continue
@@ -346,12 +351,16 @@ def project_compatible_settings(
     if isinstance(source_catalog, Mapping):
         for rule in SETTING_COMPATIBILITY_RULES:
             source_token = source_catalog.get(rule.stable_id)
+            source_path = rule.path
+            if source_token is None and rule.stable_id == "export_roots.postprocessor":
+                source_token = source_catalog.get(LEGACY_POSTPROCESSOR_EXPORT_SETTING)
+                source_path = ("export_roots", LEGACY_POSTPROCESSOR_ID)
             if source_token is None:
                 continue
             if source_token != rule.token:
                 incompatible_ids.add(rule.stable_id)
                 continue
-            value = _value_at(source_payload, rule.path)
+            value = _value_at(source_payload, source_path)
             if value is _MISSING:
                 continue
             changes[rule.stable_id] = {"token": rule.token, "value": value}

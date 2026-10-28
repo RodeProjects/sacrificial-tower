@@ -98,7 +98,7 @@ class SlicerLayerTimesTests(unittest.TestCase):
                 self.assertEqual(snapshot.layers[1].deposition_count, 3)
                 self.assertAlmostEqual(snapshot.layers[1].total_time_s, 13.76)
                 self.assertTrue(collector.finish(expected_layer_count=3).object_segments)
-                raw = GCodeAnalysisService(preprocessor_mode=True).analyze(self.source)
+                raw = GCodeAnalysisService(postprocessor_mode=True).analyze(self.source)
                 self.assertEqual(tuple(layer.z_mm for layer in raw.layers), (.2, .4, .6))
         self.assertEqual(self.source.read_bytes(), original)
 

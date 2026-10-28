@@ -20,12 +20,12 @@ class GenerationModeGrid(QWidget):
         self._spacing = METRICS.card_spacing_px
         self.setMaximumWidth(1100)
 
-    def set_cards(self, preprocessor, automatic, manual):
-        self._cards = preprocessor, automatic, manual
+    def set_cards(self, postprocessor, automatic, manual):
+        self._cards = postprocessor, automatic, manual
         for card in self._cards:
             card.setParent(self)
             card.show()
-        QWidget.setTabOrder(preprocessor, automatic)
+        QWidget.setTabOrder(postprocessor, automatic)
         QWidget.setTabOrder(automatic, manual)
         self.refresh_card_heights()
 

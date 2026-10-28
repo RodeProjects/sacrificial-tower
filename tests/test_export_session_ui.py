@@ -99,8 +99,8 @@ class ExportSessionUiTests(unittest.TestCase):
     def test_slicer_check_hint_is_hidden_only_for_postprocessor_reports(self) -> None:
         window = self.window()
         try:
-            for method, visible in (("automatic", True), ("preprocessor", False),
-                    ("manual", True), ("preprocessor", False), ("automatic", True)):
+            for method, visible in (("automatic", True), ("postprocessor", False),
+                    ("manual", True), ("postprocessor", False), ("automatic", True)):
                 with self.subTest(method=method):
                     result = SimpleNamespace(**(asdict(self.export_result("model.gcode")) |
                         {"generation_method":method, "output_mode":OutputMode.GCODE, "joint_sliced":False}))

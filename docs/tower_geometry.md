@@ -630,11 +630,14 @@ Fußabhängigkeiten und Sicherheitsgrenzen stehen zentral in
 
 Im Arbeitsbereich der iterativen Methode enthält das gemeinsame Dropdown
 „Turmeinstellungen“ Kühlzeit, Abmessungen, Standfuß, Überhänge und die
-Simulation deaktivierter Turmstützen. Das lokale Zeitfenster befindet sich
-in „Allgemeine Einstellungen“ und besitzt dort einen eigenen Reset.
+Simulation deaktivierter Turmstützen. Im erweiterten Bereich trennt
+„Turmgeometrie“ die geometrischen Einstellungen von „Generierung“ mit
+Layerzeit-Toleranz, Slice-Budgets und lokalem Zeitfenster. Die vier
+Generierungsoptionen besitzen jeweils einen eigenen Reset.
 Der aktuelle Standard des lokalen Zeitfensters ist 51 Layer; explizit gespeicherte
 Benutzerwerte bleiben erhalten. Das Speicherformat und die Bedeutung des Feldes
-ändern sich dadurch nicht. Der globale Reset lässt den Wert unverändert.
+ändern sich dadurch nicht. Der Reset der Turmeinstellungen setzt auch die
+Generierungsoptionen zurück.
 
 Aufweitungs- und Verjüngungswinkel werden in der Oberfläche zur Horizontalen
 (Druckbett) angegeben: 90° steht für eine senkrechte Fläche; kleinere Werte
@@ -646,7 +649,7 @@ der Schwelle kann der Slicer Stützen erzeugen. Nach einem erfolgreichen
 Pre-Slice wird bei aktiven Stützen entsprechend am Aufweitungswinkel gewarnt. Der Hinweis
 entfällt bei deaktivierten Stützen oder aktivierter Simulation ohne Stützen.
 
-Die kleine Zusatzzeile „Auf Threshold-angle des Slicer-Profils begrenzen“
+Die kleine Zusatzzeile „Threshold-angle des Slicer-Profils verwenden“
 übernimmt bei Aktivierung den expliziten Schwellenwinkel des bestätigten
 Prozessprofils. Für neue Einstellungen und beim Wiederherstellen der Standardwerte
 ist sie aktiviert; ausdrücklich gespeicherte Auswahlen und historische Migrationen

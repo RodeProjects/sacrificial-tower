@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
-from cooling_tower.gui.preprocessor_controls import PreprocessorPanel
+from cooling_tower.gui.postprocessor_controls import PostprocessorPanel
 from gui_lifecycle import dispose_test_widget
 
 
@@ -17,7 +17,7 @@ class TowerBrimGuiTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        self.panel = PreprocessorPanel()
+        self.panel = PostprocessorPanel()
         self.panel.footer_widget.setParent(self.panel)
         self.panel.resize(1400, 1000)
         self.panel.show()

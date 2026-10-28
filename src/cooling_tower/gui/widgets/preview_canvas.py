@@ -706,10 +706,13 @@ class PreviewCanvas(QWidget):
         self, scene: PreviewScene, context: _ProjectionContext,
     ) -> tuple[float, float, float, float]:
         """Exact camera-space bounds, independent of viewport, zoom and pan."""
+        wait_top = (Point3D(*scene.wait_position_xy_mm,
+            (scene.object_height_mm or scene.tower_height_mm)+scene.wait_height_offset_mm),
+            ) if scene.wait_position_xy_mm is not None else ()
         if self._fit_whole_bed:
             bed = scene.bed_bounds
             z_max = max(1.0, scene.tower_height_mm,
-                scene.object_height_mm or 0.0, *(point.z for point in scene.wait_points))
+                scene.object_height_mm or 0.0, *(point.z for point in chain(scene.wait_points, wait_top)))
             fit_points: Iterable[Point3D] = (
                 Point3D(x, y, z)
                 for x in (bed.minimum_x_mm, bed.maximum_x_mm)
@@ -729,9 +732,7 @@ class PreviewCanvas(QWidget):
             )
             # Visibility changes must not move the objects or the camera. Keep
             # the independent wait marker in the same fixed projection bounds.
-            wait_points = scene.wait_points or ((Point3D(*scene.wait_position_xy_mm,
-                scene.tower_height_mm+scene.wait_height_offset_mm),) if scene.wait_position_xy_mm is not None else ())
-            fit_points = chain(segment_points, wait_points)
+            fit_points = chain(segment_points, scene.wait_points, wait_top)
         bounds = self._projected_bounds(fit_points, context)
         if bounds is None:
             bed = scene.bed_bounds
@@ -894,11 +895,11 @@ class PreviewCanvas(QWidget):
         if self._layer_z is not None:
             for point, index in zip(scene.wait_points, scene.wait_point_layer_indices):
                 if index < len(scene.layer_z_mm) and abs(scene.layer_z_mm[index] - self._layer_z) < .001:
-                    return point
-            if self._layer_z > scene.tower_height_mm + .001:
-                return None
+                    return Point3D(*scene.wait_position_xy_mm, point.z)
             return Point3D(*scene.wait_position_xy_mm, self._layer_z + scene.wait_height_offset_mm)
-        return scene.wait_points[-1] if scene.wait_points else Point3D(*scene.wait_position_xy_mm, 0)
+        height = (scene.wait_points[-1].z if scene.wait_points else
+            (scene.object_height_mm or scene.tower_height_mm) + scene.wait_height_offset_mm)
+        return Point3D(*scene.wait_position_xy_mm, height)
 
     def _line_blocks(
         self,

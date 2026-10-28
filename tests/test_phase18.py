@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.background_jobs import JobKind
-from cooling_tower.gui.main_window import MainWindow
+from cooling_tower.gui.main_window import MainWindow, INTERNAL_DIALOG_REVEAL_DELAY_MS
 from cooling_tower.gui.user_messages import german_user_message
 from cooling_tower.gui.workflow_controller import WorkflowController
 from cooling_tower.gui.widgets import PreviewCanvas, SectionCard, SectionState
@@ -499,7 +499,7 @@ class Phase18UiTests(unittest.TestCase):
             "Berechnungsdetails",
             [card.title() for card in window.findChildren(SectionCard)],
         )
-        self.assertFalse(
+        self.assertTrue(
             geometry.content_widget.isAncestorOf(window.local_window_spin)
         )
         self.assertTrue(
@@ -630,15 +630,12 @@ class Phase18UiTests(unittest.TestCase):
         window.show()
         self.app.processEvents()
         window.joint_slice_settings_action.trigger()
-        QTest.qWait(30)
+        QTest.qWait(INTERNAL_DIALOG_REVEAL_DELAY_MS + 20)
         self.app.processEvents()
         dialog = window._joint_slice_settings_dialog
         self.assertGreaterEqual(dialog.width(), 707)
-        self.assertEqual(
-            (dialog.separate_spin_box.width(), dialog.spin_box.width(),
-             dialog.local_window_spin_box.width()),
-            (165, 165, 165),
-        )
+        self.assertFalse(hasattr(dialog, "separate_spin_box"))
+        self.assertFalse(hasattr(dialog, "local_window_spin_box"))
         self.assertEqual(dialog.height(), dialog.layout().sizeHint().height())
         self.assertLess(dialog.height(), window.height() * 0.65)
         self.assertEqual(dialog.footer_divider.x(), 0)
@@ -676,8 +673,8 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertEqual(
             dialog.footer_divider.y()
-            - dialog.export_browse_buttons["preprocessor"].mapTo(dialog,
-                QPoint(0, dialog.export_browse_buttons["preprocessor"].height())).y(),
+            - dialog.export_browse_buttons["postprocessor"].mapTo(dialog,
+                QPoint(0, dialog.export_browse_buttons["postprocessor"].height())).y(),
             20,
         )
         self.assertEqual(
@@ -685,13 +682,13 @@ class Phase18UiTests(unittest.TestCase):
             - (dialog.footer_divider.y() + dialog.footer_divider.height()),
             20,
         )
-        self.assertLessEqual(
-            abs(
-                dialog.frameGeometry().center().y()
-                - window.frameGeometry().center().y()
-            ),
-            2,
-        )
+        expected_frame = dialog.frameGeometry()
+        expected_frame.moveCenter(window.frameGeometry().center())
+        available = window.screen().availableGeometry()
+        expected_top = max(available.top(), min(expected_frame.top(),
+            available.bottom()-expected_frame.height()+1))
+        self.assertLessEqual(abs(dialog.frameGeometry().top()-expected_top), 2,
+            (dialog.frameGeometry(), window.frameGeometry(), available))
         window.close()
 
     def test_preparation_steps_are_sequential_and_bounded_to_700_px(self) -> None:
@@ -1205,10 +1202,16 @@ class Phase18UiTests(unittest.TestCase):
                 ),
                 1,
             )
-        self.assertGreaterEqual(
-            window.slicer_group.content_widget.height(),
-            window.slicer_group.content_widget.sizeHint().height() - 2,
-        )
+        body = window.slicer_group.content_widget
+        # Wrapped preparation text has a different natural height at this
+        # actual width than its unconstrained size hint.
+        required_height = body.heightForWidth(body.width()) if body.hasHeightForWidth() else body.sizeHint().height()
+        self.assertGreaterEqual(body.height(), required_height - 2)
+        bottom = body.contentsRect().bottom() - body.layout().contentsMargins().bottom()
+        for i in range(body.layout().count()):
+            child = body.layout().itemAt(i).widget()
+            if child is not None and not child.isHidden():
+                self.assertLessEqual(child.geometry().bottom(), bottom)
         self.assertLessEqual(
             window.filament_profile_combo.geometry().bottom(),
             window.slicer_selector_column.contentsRect().bottom(),
@@ -1772,7 +1775,7 @@ class Phase18UiTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(window.timing_group.isVisible())
             self.assertTrue(window.geometry_group.isVisible())
-            self.assertFalse(window.local_window_spin.isVisible())
+            self.assertTrue(window.local_window_spin.isVisible())
             self.assertTrue(window.target_time_spin.isVisible())
             self.assertIsNone(window.timing_group.graphicsEffect())
             self.assertIsNone(window.prediction_frame.graphicsEffect())
@@ -1823,7 +1826,7 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertTrue(window.minimum_outer_spin.isVisible())
         self.assertTrue(window.maximum_expansion_angle_spin.isVisible())
-        self.assertFalse(window.local_window_spin.isVisible())
+        self.assertTrue(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()
@@ -1847,7 +1850,7 @@ class Phase18UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(body.isHidden())
         self.assertGreaterEqual(body.height(), body.sizeHint().height() - 2)
-        self.assertFalse(window.local_window_spin.isVisible())
+        self.assertTrue(window.local_window_spin.isVisible())
         self.assertTrue(window.geometry_group.isVisible())
         self.assertTrue(window.geometry_calculation_section.isHidden())
         window.close()

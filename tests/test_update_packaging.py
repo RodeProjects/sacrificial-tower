@@ -4,6 +4,7 @@ import io
 import json
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +23,28 @@ from scripts.verify_release_ci import (
 
 
 class UpdatePackagingTests(unittest.TestCase):
+    def test_custom_release_notes_are_validated_before_publication(self) -> None:
+        powershell = shutil.which("pwsh")
+        if powershell is None:
+            self.skipTest("PowerShell 7 ist nicht verfügbar.")
+        with tempfile.TemporaryDirectory() as temporary:
+            notes = Path(temporary) / "release-notes.md"
+            for content, expected in (
+                (" \n", "Die Releasebeschreibung darf nicht leer sein."),
+                ("- Geometrie verbessert.", "Entwicklungsversion ausdrücklich kennzeichnen"),
+            ):
+                with self.subTest(content=content):
+                    notes.write_text(content, encoding="utf-8")
+                    result = subprocess.run(
+                        [powershell, "-NoProfile", "-NonInteractive", "-File",
+                         str(PROJECT_ROOT / "scripts/publish_update.ps1"),
+                         "-DevelopmentRelease", "-ReleaseNotesPath", str(notes)],
+                        cwd=PROJECT_ROOT, capture_output=True, text=True,
+                        encoding="utf-8", timeout=30,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stdout + result.stderr)
+
     def test_installer_replacement_supports_minor_and_major_boundaries(
         self,
     ) -> None:

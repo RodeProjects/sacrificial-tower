@@ -20,7 +20,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QDoubleSpinBox, QSpinBox
 
 from cooling_tower.config import SETTINGS_SCHEMA_VERSION
 from cooling_tower.gui.generation_progress_dialog import (
@@ -44,6 +44,19 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.app.processEvents()
+
+    def prepared_window(self):
+        window = MainWindow(user_settings_path=self.root / "generation-settings.json",
+            enable_update_check=False, enable_startup_slicer_discovery=False)
+        self.addCleanup(dispose_test_widget, window)
+        window.show()
+        window.workflow.set_slicer_step_visible(True)
+        window.workflow.source_validation_succeeded("STL", analysis_complete=True)
+        window.workflow.slicer_succeeded("Testslicer")
+        window.workflow.complete_preparation()
+        window.automatic_generation_card.click()
+        self.app.processEvents()
+        return window
 
     def test_image_progress_and_best_timing_are_presented(self) -> None:
         dialog = TowerGenerationDialog(
@@ -169,220 +182,78 @@ class GenerationProgressDialogTests(unittest.TestCase):
         )
         dialog.close()
 
-    def test_joint_slice_setting_is_bounded_between_five_and_twenty(self) -> None:
-        dialog = JointSliceSettingsDialog(
-            17, maximum_separate_slices=9, preparation_ready=True
-        )
-        self.assertEqual(dialog.spin_box.minimum(), 5)
-        self.assertEqual(dialog.spin_box.maximum(), 20)
-        self.assertGreaterEqual(dialog.minimumWidth(), 707)
-        self.assertEqual(dialog.separate_spin_box.minimum(), 1)
-        self.assertEqual(dialog.separate_spin_box.maximum(), 15)
-        self.assertEqual(dialog.separate_spin_box.value(), 9)
-        self.assertEqual(
-            dialog.maximum_separate_slices_label.text(),
-            "Max. getrennte Slices:",
-        )
-        self.assertIn("±0,09 s", dialog.info_button.toolTip())
-        self.assertEqual(
-            dialog.maximum_joint_slices_label.text(),
-            "Max. gemeinsame Slices:",
-        )
-        self.assertLess(
-            dialog.settings_row_layout.indexOf(dialog.info_button),
-            dialog.settings_row_layout.indexOf(
-                dialog.maximum_joint_slices_label
-            ),
-        )
-        self.assertLess(
-            dialog.settings_row_layout.indexOf(dialog.spin_box),
-            dialog.settings_row_layout.indexOf(dialog.reset_button),
-        )
-        dialog.show()
-        self.app.processEvents()
-        reset_buttons = (
-            dialog.tolerance_reset_button,
-            dialog.separate_reset_button,
-            dialog.reset_button,
-            dialog.local_window_reset_button,
-            dialog.output_reset_button,
-        )
-        for button in reset_buttons:
-            self.assertEqual(button.objectName(), "settingResetButton")
-            self.assertEqual(button.text(), "↺")
-            self.assertTrue(button.icon().isNull())
-            self.assertEqual((button.width(), button.height()), (36, 36))
-        self.assertFalse(dialog.local_window_reset_button.property("modified"))
-        dialog.local_window_spin_box.setValue(53)
-        self.assertTrue(dialog.local_window_reset_button.property("modified"))
-        dialog.local_window_reset_button.click()
-        self.assertEqual(dialog.local_window_spin_box.value(), 51)
-        self.assertFalse(dialog.local_window_reset_button.property("modified"))
-        self.assertLess(
-            dialog.tolerance_label.mapTo(
-                dialog, dialog.tolerance_label.rect().topLeft()
-            ).y(),
-            dialog.maximum_separate_slices_label.mapTo(
-                dialog, dialog.maximum_separate_slices_label.rect().topLeft()
-            ).y(),
-        )
-        self.assertLess(
-            dialog.maximum_separate_slices_label.mapTo(
-                dialog, dialog.maximum_separate_slices_label.rect().topLeft()
-            ).y(),
-            dialog.maximum_joint_slices_label.mapTo(
-                dialog, dialog.maximum_joint_slices_label.rect().topLeft()
-            ).y(),
-        )
-        self.assertEqual(dialog.info_button.width(), 19)
-        self.assertEqual(dialog.info_button.height(), 19)
-        self.assertEqual(
-            dialog.maximum_joint_slices_label.mapTo(
-                dialog, dialog.maximum_joint_slices_label.rect().topLeft()
-            ).x()
-            - dialog.info_button.mapTo(
-                dialog, dialog.info_button.rect().topRight()
-            ).x()
-            - 1,
-            10,
-        )
-        self.assertLessEqual(
-            abs(
-                dialog.info_button.mapTo(
-                    dialog, dialog.info_button.rect().center()
-                ).y()
-                - dialog.maximum_joint_slices_label.mapTo(
-                    dialog, dialog.maximum_joint_slices_label.rect().center()
-                ).y()
-            ),
-            1,
-        )
-        QApplication.sendEvent(
-            dialog.info_button,
-            QEvent(QEvent.Type.Enter),
-        )
-        self.app.processEvents()
-        popover = dialog._bounded_hint_popover
-        self.assertTrue(popover.isVisible())
-        self.assertTrue(
-            popover.testAttribute(
-                Qt.WidgetAttribute.WA_TransparentForMouseEvents
-            )
-        )
-        self.assertTrue(dialog.reset_button.isEnabled())
-        dialog.reset_button.click()
-        self.assertEqual(dialog.spin_box.value(), 12)
-        self.assertIn("Standardwert 12", dialog.reset_button.toolTip())
-        self.assertFalse(dialog.reset_button.isEnabled())
-        self.assertTrue(dialog.separate_reset_button.isEnabled())
-        dialog.separate_reset_button.click()
-        self.assertEqual(dialog.separate_spin_box.value(), 6)
-        self.assertFalse(dialog.separate_reset_button.isEnabled())
-        self.assertEqual(dialog.output_reset_button.objectName(), "settingResetButton")
-        self.assertEqual(dialog.output_reset_button.size().width(), 36)
-        self.assertFalse(dialog.output_reset_button.isEnabled())
-        applied: list[int] = []
-        dialog.value_applied.connect(applied.append)
-        dialog.spin_box.setValue(14)
-        dialog.spin_box.setFocus()
-        QTest.keyClick(dialog.spin_box, Qt.Key.Key_Return)
-        self.app.processEvents()
-        self.assertEqual(applied, [14])
-        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
-        dialog.close()
+    def test_slice_budgets_are_bounded_and_apply_with_individual_resets(self):
+        window = self.prepared_window()
+        for name, minimum, maximum, value in (
+            ("maximum_separate_slices", 1, 15, 9),
+            ("maximum_joint_slices", 5, 20, 17),
+        ):
+            setting = window.slice_budget_settings[name]
+            self.assertTrue(window.geometry_group.isAncestorOf(setting))
+            self.assertTrue(setting.isVisible())
+            self.assertEqual((setting.editor.minimum(), setting.editor.maximum()), (minimum, maximum))
+            setting.editor.setValue(value)
+            self.assertEqual(getattr(window, name), value)
+            self.assertTrue(setting.reset_button.isEnabled())
+            self.assertEqual(setting.reset_button.objectName(), "settingResetButton")
+            self.assertEqual(setting.reset_button.text(), "↺")
+            self.assertEqual((setting.reset_button.width(), setting.reset_button.height()), (36, 36))
+            setting.reset_button.click()
+            self.assertEqual(getattr(window, name), getattr(window, "default_"+name))
+            self.assertFalse(setting.reset_button.isEnabled())
+        self.assertIn("±0,09 s", window.slice_budget_settings["maximum_joint_slices"].info_button.toolTip())
+        self.assertEqual(window._calibration_config().maximum_iterations,
+            window.maximum_separate_slices+window.maximum_joint_slices)
 
-    def test_unavailable_general_settings_keep_hover_information_accessible(self) -> None:
-        dialog = JointSliceSettingsDialog(17, output_root="custom")
+    def test_general_settings_only_offer_export_folders_before_preparation(self):
+        dialog = JointSliceSettingsDialog(output_root="custom")
         self.addCleanup(dispose_test_widget, dialog)
         dialog.show()
         self.app.processEvents()
-        for label, editor, info in (
-            (dialog.tolerance_label, dialog.tolerance_spin_box, dialog.tolerance_info_button),
-            (dialog.maximum_separate_slices_label, dialog.separate_spin_box, dialog.separate_info_button),
-            (dialog.maximum_joint_slices_label, dialog.spin_box, dialog.info_button),
-            (dialog.local_window_label, dialog.local_window_spin_box, dialog.local_window_info_button),
-        ):
-            with self.subTest(setting=label.text()):
-                self.assertFalse(label.isEnabled())
-                self.assertFalse(editor.isEnabled())
-                self.assertTrue(info.isEnabled())
-                QApplication.sendEvent(info, QEvent(QEvent.Type.Enter))
-                self.assertTrue(dialog._bounded_hint_popover.isVisible())
-                self.assertEqual(dialog._bounded_hint_popover.label.text(), info.toolTip())
-                QApplication.sendEvent(info, QEvent(QEvent.Type.Leave))
-        self.assertTrue(dialog.output_root_edit.isEnabled())
+        self.assertFalse(dialog.findChildren(QSpinBox))
+        self.assertFalse(dialog.findChildren(QDoubleSpinBox))
+        for edit in dialog.export_root_edits.values():
+            self.assertTrue(edit.isEnabled())
+        self.assertTrue(dialog.general_reset_button.isEnabled())
         self.assertIsNot(dialog.focusWidget(), dialog.output_root_edit)
         self.assertFalse(dialog.output_root_edit.hasSelectedText())
-        self.assertFalse(dialog.general_reset_button.isEnabled())
-        dialog.spin_box.setValue(18)
-        self.assertFalse(dialog.reset_button.isEnabled())
 
-    def test_general_settings_reset_only_changes_dialog_values_until_applied(self) -> None:
-        dialog = JointSliceSettingsDialog(
-            17,
-            output_root="custom",
-            default_output_root="default",
-            maximum_separate_slices=9,
-            local_reference_window=31,
-            layer_time_tolerance_s=0.6,
-            preparation_ready=True,
-        )
+    def test_general_settings_reset_only_changes_dialog_values_until_applied(self):
+        dialog = JointSliceSettingsDialog(output_root="custom", default_output_root="default")
+        self.addCleanup(dispose_test_widget, dialog)
         self.assertTrue(dialog.general_reset_button.isEnabled())
         footer_layout = dialog.general_reset_button.parentWidget().layout()
         self.assertEqual(footer_layout.itemAt(0).widget(), dialog.general_reset_button)
-
-        applied = QSignalSpy(dialog.value_applied)
+        applied = QSignalSpy(dialog.export_roots_applied)
         dialog.general_reset_button.click()
-        self.assertEqual(dialog.separate_spin_box.value(), 6)
-        self.assertEqual(dialog.spin_box.value(), 12)
-        self.assertEqual(dialog.local_window_spin_box.value(), 51)
-        self.assertEqual(dialog.tolerance_spin_box.value(), 0.25)
         self.assertEqual(dialog.output_root_edit.text(), "default")
         self.assertFalse(dialog.general_reset_button.isEnabled())
         self.assertEqual(applied.count(), 0)
-
-        dialog.separate_spin_box.setValue(7)
+        dialog.output_root_edit.setText("other")
         self.assertTrue(dialog.general_reset_button.isEnabled())
         dialog.reject()
         self.assertEqual(applied.count(), 0)
-        dialog.close()
 
-    def test_layer_time_tolerance_belongs_to_general_settings_reset(self) -> None:
-        window = MainWindow(
-            user_settings_path=self.root / "tolerance-settings.json",
-            enable_update_check=False,
-            enable_startup_slicer_discovery=False,
-        )
-        self.addCleanup(dispose_test_widget, window)
-        window.workflow.set_slicer_step_visible(True)
-        window.workflow.source_validation_succeeded(
-            "STL", analysis_complete=True
-        )
-        window.workflow.slicer_succeeded("Testslicer")
-        window.workflow.complete_preparation()
+    def test_generation_settings_reset_with_tower_settings_and_preserve_export_folders(self):
+        window = self.prepared_window()
         window.layer_time_tolerance_spin.setValue(0.6)
-        self.assertFalse(window._has_non_default_settings())
-        window.target_time_spin.setValue(12.0)
+        window.local_window_spin.setValue(31)
+        window.slice_budget_settings["maximum_separate_slices"].editor.setValue(9)
+        window.slice_budget_settings["maximum_joint_slices"].editor.setValue(17)
+        exports = dict(window.export_roots)
+        self.assertTrue(window._has_non_default_settings())
         window.reset_defaults()
-        self.assertEqual(window.layer_time_tolerance_spin.value(), 0.6)
-
-        window.show_joint_slice_settings()
-        dialog = window._joint_slice_settings_dialog
-        self.assertEqual(dialog.tolerance_spin_box.value(), 0.6)
-        self.assertTrue(dialog.tolerance_reset_button.isEnabled())
-        dialog.tolerance_reset_button.click()
-        self.assertEqual(dialog.tolerance_spin_box.value(), 0.25)
-        dialog.reject()
-        self.assertEqual(window.layer_time_tolerance_spin.value(), 0.6)
-
-        window.show_joint_slice_settings()
-        dialog = window._joint_slice_settings_dialog
-        dialog.general_reset_button.click()
-        dialog.accept()
-        self.assertEqual(window.collect_settings().layer_time_tolerance_s, 0.25)
-        self.assertEqual(
-            window.settings_store.load()[0].layer_time_tolerance_s, 0.25
-        )
+        self.assertEqual(window.layer_time_tolerance_spin.value(), 0.25)
+        self.assertEqual(window.local_window_spin.value(), 51)
+        self.assertEqual(window.maximum_separate_slices, 6)
+        self.assertEqual(window.maximum_joint_slices, 12)
+        self.assertEqual(window.export_roots, exports)
+        window._save_user_settings()
+        saved, data = window.settings_store.load()
+        self.assertEqual(saved.layer_time_tolerance_s, 0.25)
+        self.assertEqual(saved.local_reference_window, 51)
+        self.assertEqual(data["maximum_separate_slices"], 6)
+        self.assertEqual(data["maximum_joint_slices"], 12)
 
     def test_generation_panel_is_embedded_and_keeps_preview_accessible(self) -> None:
         window = MainWindow(user_settings_path=self.root / "settings.json", enable_update_check=False, enable_startup_slicer_discovery=False)
@@ -491,30 +362,18 @@ class GenerationProgressDialogTests(unittest.TestCase):
                 }), encoding="utf-8")
                 self.assertEqual(store.load()[0].target_layer_time_s, expected)
 
-    def test_local_window_is_only_reset_in_general_settings(self) -> None:
-        window = MainWindow(
-            user_settings_path=self.root / 'local-window.json',
-            enable_update_check=False,
-            enable_startup_slicer_discovery=False,
-        )
-        self.addCleanup(dispose_test_widget, window)
-        window.workflow.set_slicer_step_visible(True)
-        window.workflow.source_validation_succeeded(
-            "STL", analysis_complete=True
-        )
-        window.workflow.slicer_succeeded("Testslicer")
-        window.workflow.complete_preparation()
+    def test_local_window_individual_reset_and_export_dialog_do_not_change_other_settings(self):
+        window = self.prepared_window()
         window.local_window_spin.setValue(31)
-        window.target_time_spin.setValue(12)
-        window.reset_defaults()
-        self.assertEqual(window.local_window_spin.value(), 31)
-        self.assertEqual(window.target_time_spin.value(), 9)
+        window.layer_time_tolerance_spin.setValue(0.6)
+        window._setting_widgets["local_reference_window"].reset_button.click()
+        self.assertEqual(window.local_window_spin.value(), 51)
+        self.assertEqual(window.layer_time_tolerance_spin.value(), 0.6)
         window.show_joint_slice_settings()
         dialog = window._joint_slice_settings_dialog
-        self.assertEqual(dialog.local_window_spin_box.value(), 31)
-        dialog.local_window_reset_button.click()
+        dialog.general_reset_button.click()
         dialog.accept()
-        self.assertEqual(window.local_window_spin.value(), 51)
+        self.assertEqual(window.layer_time_tolerance_spin.value(), 0.6)
 
     def test_main_menu_uses_persisted_joint_slice_budget(self) -> None:
         user_path = self.root / "settings.json"
@@ -539,6 +398,11 @@ class GenerationProgressDialogTests(unittest.TestCase):
         self.assertEqual(window.maximum_separate_slices, 8)
         self.assertEqual(window._calibration_config().maximum_joint_slices, 17)
         self.assertEqual(window._calibration_config().maximum_iterations, 25)
+        self.assertEqual(window.slice_budget_settings["maximum_joint_slices"].editor.value(), 17)
+        self.assertEqual(window.slice_budget_settings["maximum_separate_slices"].editor.value(), 8)
+        window.slice_budget_settings["maximum_joint_slices"].editor.setValue(14)
+        self.assertEqual(window.maximum_joint_slices, 14)
+        self.assertEqual(window.settings_store.load()[1]["maximum_joint_slices"], 14)
         self.assertEqual(
             window.joint_slice_settings_action.text(),
             "Allgemeine Einstellungen",

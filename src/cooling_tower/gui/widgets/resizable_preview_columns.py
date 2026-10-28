@@ -65,7 +65,7 @@ class ResizablePreviewColumns(QWidget):
         self.stack.setSpacing(0)
         self.stack.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.splitter = _PreviewSplitter(Qt.Orientation.Horizontal, self)
-        self.splitter.setObjectName("preprocessorSplitter")
+        self.splitter.setObjectName("postprocessorSplitter")
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(7)
         self.splitter.setOpaqueResize(True)

@@ -383,9 +383,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
                 self.assertAlmostEqual(editor.value(), value, places=3)
                 self.assertEqual(editor.text(), displayed)
         self.assertEqual(w._setting_widgets["target_layer_time_s"].unit_label.text(), "Sek.")
-        w.show_joint_slice_settings()
-        self.assertEqual(w._joint_slice_settings_dialog.tolerance_spin_box.suffix(), " Sek.")
-        w._joint_slice_settings_dialog.reject()
+        self.assertEqual(w._setting_widgets["layer_time_tolerance_s"].unit_label.text(), "Sek.")
 
     def test_live_progress_keeps_best_candidate_when_next_slice_is_worse(self):
         w = self.window()

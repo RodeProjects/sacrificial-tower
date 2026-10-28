@@ -263,6 +263,10 @@ class CircleSegmentsUiTests(unittest.TestCase):
         for _ in range(5):
             self.app.processEvents()
         controls = (w.profile_angle_limit, w.circle_segments_setting.automatic_control)
+        self.assertEqual(w.profile_angle_limit.checkbox.accessibleName(),
+            "Threshold-angle des Slicer-Profils verwenden")
+        self.assertEqual(w.profile_angle_limit.prefix.text(), "")
+        self.assertEqual(w.profile_angle_limit.suffix.text(), " des Slicer-Profils verwenden")
         offsets = []
         for control in controls:
             control._position()

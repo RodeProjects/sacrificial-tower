@@ -14,6 +14,7 @@ os.environ.setdefault("COOLING_TOWER_DISABLE_SLICER_DISCOVERY", "1")
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication
+from cooling_tower.export_paths import EXPORT_FOLDER_NAMES
 from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.gui.main_window import MainWindow
 from gui_lifecycle import dispose_test_widget
@@ -43,14 +44,16 @@ class ExportPathsGuiTests(unittest.TestCase):
         defaults = self.window.default_export_roots
         self.assertEqual(len(set(defaults.values())), 3)
         for method, path in defaults.items():
-            self.assertEqual(Path(path).name, method)
+            self.assertEqual(Path(path).name, EXPORT_FOLDER_NAMES[method])
         dialog = self.dialog()
         for method, edit in dialog.export_root_edits.items():
             edit.setText(str(self.root / method))
         dialog.export_reset_buttons["manual"].click()
         self.assertEqual(dialog.export_root_edits["manual"].text(), defaults["manual"])
         self.assertEqual(dialog.export_root_edits["automatic"].text(), str(self.root / "automatic"))
-        self.assertEqual(dialog.export_root_edits["preprocessor"].text(), str(self.root / "preprocessor"))
+        self.assertEqual(dialog.export_root_edits["postprocessor"].text(), str(self.root / "postprocessor"))
+        dialog.export_reset_buttons["postprocessor"].click()
+        self.assertEqual(dialog.export_root_edits["postprocessor"].text(), defaults["postprocessor"])
         for method, edit in dialog.export_root_edits.items():
             with patch("cooling_tower.gui.generation_progress_dialog.QFileDialog.getExistingDirectory",
                     return_value=str(self.root / (method + "-selected"))):
@@ -103,22 +106,22 @@ class ExportPathsGuiTests(unittest.TestCase):
         self.assertEqual(start.call_args.args[0].output_root, self.root / "manual")
 
     def test_opening_output_folder_respects_active_method_and_protected_slicer_paths(self):
-        self.window.generation_mode = GenerationMode.PREPROCESSOR
-        self.window.export_roots["preprocessor"] = str(self.root / "preprocessor")
+        self.window.generation_mode = GenerationMode.POSTPROCESSOR
+        self.window.export_roots["postprocessor"] = str(self.root / "postprocessor")
         with patch("cooling_tower.gui.main_window.open_directory") as opened:
             self.window.open_output_directory()
-            opened.assert_called_once_with((self.root / "preprocessor").resolve())
+            opened.assert_called_once_with((self.root / "postprocessor").resolve())
         protected = self.root / "slicer-profiles"
         installation = SimpleNamespace(executable_path=self.root / "slicer-installation/slicer.exe",
             profile_roots=(protected,))
         self.window.profile_match_result = SimpleNamespace(
             selected=SimpleNamespace(effective_profile=SimpleNamespace(installation=installation)))
-        self.window.export_roots["preprocessor"] = str(protected / "outputs")
+        self.window.export_roots["postprocessor"] = str(protected / "outputs")
         with patch("cooling_tower.gui.main_window.open_directory") as opened:
             self.window.open_output_directory()
             opened.assert_not_called()
         self.assertFalse(protected.exists())
-        self.assertIn("nicht geöffnet", self.window.preprocessor_panel.status.text())
+        self.assertIn("nicht geöffnet", self.window.postprocessor_panel.status.text())
         self.window.profile_match_result = None
 
     def test_empty_automatic_directory_never_opens_working_directory(self):

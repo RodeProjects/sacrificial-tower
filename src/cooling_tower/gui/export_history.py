@@ -38,6 +38,7 @@ def resolve_latest_export_directory(
     output_root: str | Path,
     *,
     preferred_directory: Path | None = None,
+    additional_roots: tuple[Path, ...] = (),
 ) -> LatestExportResolution:
     """Resolve the latest complete export without guessing on exact ties."""
 
@@ -48,20 +49,22 @@ def resolve_latest_export_directory(
         root = Path(raw_root).expanduser().resolve()
     except OSError:
         return LatestExportResolution(None, OUTPUT_FOLDER_UNAVAILABLE)
-    if not root.is_dir():
+    roots = tuple(dict.fromkeys((root, *(Path(p).expanduser().resolve() for p in additional_roots))))
+    roots = tuple(path for path in roots if path.is_dir())
+    if not roots:
         return LatestExportResolution(None, NO_EXPORT_FOLDER)
 
     try:
         child_directories = tuple(
-            child for child in root.iterdir() if child.is_dir()
+            (parent, child) for parent in roots for child in parent.iterdir() if child.is_dir()
         )
     except OSError:
         return LatestExportResolution(None, EXPORT_FOLDERS_UNREADABLE)
 
     candidates = tuple(
         candidate
-        for child in child_directories
-        if (candidate := _read_export_candidate(root, child)) is not None
+        for parent, child in child_directories
+        if (candidate := _read_export_candidate(parent, child)) is not None
     )
     if not candidates:
         reason = (

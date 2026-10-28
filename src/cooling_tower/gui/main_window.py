@@ -104,7 +104,7 @@ from cooling_tower.gui.generation_panel import GenerationPanel
 from cooling_tower.gui.generation_session import GenerationMode, GenerationSession
 from cooling_tower.gui.manual_panel import ManualGenerationPanel
 from cooling_tower.gui.manual_controller import ManualGenerationController
-from cooling_tower.gui.preprocessor_panel import PreprocessorController, PreprocessorPanel
+from cooling_tower.gui.postprocessor_panel import PostprocessorController, PostprocessorPanel
 from cooling_tower.gui.widgets.generation_mode_card import GenerationModeCard, GenerationModeGrid
 from cooling_tower.gui.widgets.workflow_header import WorkflowHeader
 from cooling_tower.gui.widgets.header_update_controls import HeaderUpdateControls
@@ -113,10 +113,12 @@ from cooling_tower.gui.widgets.stl_validation_feedback import StlValidationFeedb
 from cooling_tower.gui.generation_progress_dialog import (
     JointSliceSettingsDialog,
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
+    JOINT_SLICE_HINT,
+    SEPARATE_SLICE_HINT,
 )
 from cooling_tower.gui.export_history import resolve_latest_export_directory
 from cooling_tower.gui.widgets.footer_actions import fit_footer_actions
-from cooling_tower.export_paths import default_export_roots, normalize_export_roots
+from cooling_tower.export_paths import default_export_roots, normalize_export_roots, legacy_export_roots
 from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.gui.export_worker import ExportWorker
 from cooling_tower.gui.preview_dialog import PreviewDialog
@@ -2512,7 +2514,6 @@ class MainWindow(QMainWindow):
         self.layer_time_tolerance_spin = self._double_spin(0.1, 3.0, 2, 0.01, "layerTimeTolerance")
         self.layer_time_tolerance_spin.setParent(self)
         self.layer_time_tolerance_spin.hide()
-        self.layer_time_tolerance_spin.valueChanged.connect(self._on_value_changed)
         target_setting = self._add_numeric_setting(
             timing_layout,
             "target_layer_time_s",
@@ -3150,6 +3151,42 @@ class MainWindow(QMainWindow):
                         continue
                     geometry_layout.addWidget(item.widget())
         geometry_layout.addWidget(self.layer_range_button_row)
+        self.tower_geometry_heading = self._settings_subsection_heading("Turmgeometrie")
+        geometry_layout.insertWidget(0, self.tower_geometry_heading)
+        self.generation_settings_heading = self._settings_subsection_heading("Generierung")
+        geometry_layout.addSpacing(10)
+        geometry_layout.addWidget(self.generation_settings_heading)
+        self._add_numeric_setting(
+            geometry_layout, "layer_time_tolerance_s", "Layerzeit-Toleranz (±)",
+            self.layer_time_tolerance_spin,
+        )
+        self.layer_time_tolerance_spin.show()
+        self.slice_budget_settings = {}
+        for name, label, minimum, maximum, value, default, hint, apply in (
+            ("maximum_separate_slices", "Max. getrennte Slices", 1, 15,
+             self.maximum_separate_slices, self.default_maximum_separate_slices,
+             SEPARATE_SLICE_HINT, self._apply_maximum_separate_slices),
+            ("maximum_joint_slices", "Max. gemeinsame Slices", 5, 20,
+             self.maximum_joint_slices, self.default_maximum_joint_slices,
+             JOINT_SLICE_HINT, self._apply_maximum_joint_slices),
+        ):
+            editor = WheelSafeSpinBox()
+            editor.setObjectName(name)
+            editor.setRange(minimum, maximum)
+            editor.setProperty("validationMinimum", minimum)
+            editor.setProperty("validationMaximum", maximum)
+            editor.setProperty("rangeLabelShowMinimum", True)
+            editor.setValue(value)
+            setting = NumericSettingWidget(
+                setting_name=name, label=label, editor=editor, unit="Slices",
+                default_provider=lambda value=default: value, info_text=hint,
+            )
+            setting.set_limits_visible(self.show_setting_limits)
+            self.slice_budget_settings[name] = setting
+            geometry_layout.addWidget(setting)
+            editor.valueChanged.connect(apply)
+        geometry_layout.addWidget(self._setting_widgets["local_reference_window"])
+        self._setting_widgets["local_reference_window"].show()
         stability_group.hide()
         overhang_group.hide()
         self.geometry_calculation_section.hide()
@@ -3197,7 +3234,7 @@ class MainWindow(QMainWindow):
         self.header_method_selection = self.workflow_header.method_selection
         self.automatic_method_button = self.header_method_selection.buttons["automatic"]
         self.manual_method_button = self.header_method_selection.buttons["manual"]
-        self.preprocessor_method_button = self.header_method_selection.buttons["preprocessor"]
+        self.postprocessor_method_button = self.header_method_selection.buttons["postprocessor"]
         self.header_method_selection.method_selected.connect(self.select_generation_mode)
         self.generation_method_recommendation = QLabel("(Zweispaltige Ansicht empfohlen - Fenster verbreitern)")
         self.generation_method_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -3238,7 +3275,7 @@ class MainWindow(QMainWindow):
         self.manual_generation_card.clicked.connect(
             lambda: self.select_generation_mode(GenerationMode.MANUAL)
         )
-        self.preprocessor_generation_card = GenerationModeCard(
+        self.postprocessor_generation_card = GenerationModeCard(
             "Postprozessor",
             "Der vorhandene G-Code wird nachträglich um passende Wartephasen und "
             "einen Abstreifturm ergänzt. Nach jeder Wartephase wischt die Düse "
@@ -3247,11 +3284,11 @@ class MainWindow(QMainWindow):
             "Postprozessor öffnen →",
             exports=("Bearbeiteter G-Code (.gcode)",),
         )
-        self.preprocessor_generation_card.setProperty("generationMode", "preprocessor")
-        self.preprocessor_generation_card.clicked.connect(
-            lambda: self.select_generation_mode(GenerationMode.PREPROCESSOR)
+        self.postprocessor_generation_card.setProperty("generationMode", "postprocessor")
+        self.postprocessor_generation_card.clicked.connect(
+            lambda: self.select_generation_mode(GenerationMode.POSTPROCESSOR)
         )
-        self.generation_method_grid.set_cards(self.preprocessor_generation_card,
+        self.generation_method_grid.set_cards(self.postprocessor_generation_card,
             self.automatic_generation_card, self.manual_generation_card)
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
@@ -3261,10 +3298,10 @@ class MainWindow(QMainWindow):
         self.manual_generation_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.manual_controller = ManualGenerationController(self, self.manual_generation_panel)
         generation_layout.addWidget(self.manual_generation_panel)
-        self.preprocessor_panel = PreprocessorPanel()
-        self.preprocessor_panel.layout_changed.connect(self._refresh_preprocessor_content_height)
-        self.preprocessor_controller = PreprocessorController(self, self.preprocessor_panel)
-        generation_layout.addWidget(self.preprocessor_panel)
+        self.postprocessor_panel = PostprocessorPanel()
+        self.postprocessor_panel.layout_changed.connect(self._refresh_postprocessor_content_height)
+        self.postprocessor_controller = PostprocessorController(self, self.postprocessor_panel)
+        generation_layout.addWidget(self.postprocessor_panel)
         self.content_layout.addWidget(self.generation_workspace)
         # Keep this workflow block pinned to the top when its final row is
         # expanded or collapsed.
@@ -3693,7 +3730,7 @@ class MainWindow(QMainWindow):
         self._footer_narrow_layout: bool | None = None
         self._refresh_footer_responsive_layout(force=True)
         root_layout.addWidget(footer)
-        root_layout.addWidget(self.preprocessor_panel.footer_widget)
+        root_layout.addWidget(self.postprocessor_panel.footer_widget)
         self.setCentralWidget(central)
         self._footer_height_timer = QTimer(self)
         self._footer_height_timer.setSingleShot(True)
@@ -3836,7 +3873,7 @@ class MainWindow(QMainWindow):
         )
         self.preparation_open_button.setEnabled(available)
         self.preparation_view_button.setEnabled(available)
-        for button in (self.automatic_method_button, self.manual_method_button, self.preprocessor_method_button):
+        for button in (self.automatic_method_button, self.manual_method_button, self.postprocessor_method_button):
             button.setEnabled(available and ready)
 
     def _show_preparation_workspace(self, view: str) -> None:
@@ -3948,9 +3985,9 @@ class MainWindow(QMainWindow):
             and self.window_pages.currentWidget() is self.preparation_workspace
         )
         ready = self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged
-        self.footer.setVisible(ready and not preparation_open and self.generation_mode is not GenerationMode.PREPROCESSOR)
-        self.preprocessor_panel.footer_widget.setVisible(
-            ready and not preparation_open and self.generation_mode is GenerationMode.PREPROCESSOR)
+        self.footer.setVisible(ready and not preparation_open and self.generation_mode is not GenerationMode.POSTPROCESSOR)
+        self.postprocessor_panel.footer_widget.setVisible(
+            ready and not preparation_open and self.generation_mode is GenerationMode.POSTPROCESSOR)
 
     def _generation_method_change_available(self) -> bool:
         return not (
@@ -3976,8 +4013,8 @@ class MainWindow(QMainWindow):
             self.manual_controller.ensure_context()
             if changed:
                 self.manual_controller.panel.select("")
-        elif mode is GenerationMode.PREPROCESSOR:
-            self.preprocessor_controller.ensure_context()
+        elif mode is GenerationMode.POSTPROCESSOR:
+            self.postprocessor_controller.ensure_context()
         self._refresh_phase17_actions()
 
     def show_generation_method_selection(self) -> None:
@@ -3989,12 +4026,12 @@ class MainWindow(QMainWindow):
         workspace_visible = preparation_ready
         source_ready = (self.workflow.stage is WorkflowStage.READY and self.workflow.preparation_acknowledged)
         self.generation_workspace.setVisible(workspace_visible)
-        for card in (self.automatic_generation_card,self.manual_generation_card,self.preprocessor_generation_card):
+        for card in (self.automatic_generation_card,self.manual_generation_card,self.postprocessor_generation_card):
             card.setEnabled(source_ready)
             card.setToolTip("" if source_ready else "Zuerst Datei, Slicer und Druckprofile vorbereiten.")
         self.ready_grid.setVisible(source_ready and self.generation_mode is GenerationMode.AUTOMATIC)
         self.manual_generation_panel.setVisible(source_ready and self.generation_mode is GenerationMode.MANUAL)
-        self.preprocessor_panel.setVisible(source_ready and self.generation_mode is GenerationMode.PREPROCESSOR)
+        self.postprocessor_panel.setVisible(source_ready and self.generation_mode is GenerationMode.POSTPROCESSOR)
         self._refresh_generation_method_recommendation()
 
     def _refresh_generation_method_recommendation(self, *_):
@@ -4026,7 +4063,7 @@ class MainWindow(QMainWindow):
         self.export_roots.update(normalize_export_roots(roots))
         self.output_root_edit.setText(self.export_roots["automatic"])
         self._refresh_folder_action_states(rescan=True)
-        self.preprocessor_controller.refresh()
+        self.postprocessor_controller.refresh()
         self._save_user_settings()
 
     def _export_history_session(self) -> GenerationSession:
@@ -4099,9 +4136,9 @@ class MainWindow(QMainWindow):
     def _set_preparation_viewport_fill(self, enabled: bool) -> None:
         """Fill preparation and attach automatic sections to the window edges."""
 
-        edge_attached = enabled or self.generation_mode in (GenerationMode.AUTOMATIC, GenerationMode.PREPROCESSOR)
+        edge_attached = enabled or self.generation_mode in (GenerationMode.AUTOMATIC, GenerationMode.POSTPROCESSOR)
         inset = 0 if edge_attached else MAIN_CONTENT_EDGE_PADDING_PX
-        bottom_inset = 0 if enabled or self.generation_mode is GenerationMode.PREPROCESSOR else MAIN_CONTENT_EDGE_PADDING_PX
+        bottom_inset = 0 if enabled or self.generation_mode is GenerationMode.POSTPROCESSOR else MAIN_CONTENT_EDGE_PADDING_PX
         self._settings_content_bottom_margin_px = bottom_inset
         left_inset = 0 if self.generation_mode is GenerationMode.MANUAL else inset
         self.content_layout.setContentsMargins(left_inset, inset, inset, bottom_inset)
@@ -4351,6 +4388,22 @@ class MainWindow(QMainWindow):
         widget.setSingleStep(step)
         widget.setKeyboardTracking(True)
         return widget
+
+    @staticmethod
+    def _settings_subsection_heading(title: str) -> QWidget:
+        heading = QWidget()
+        heading.setObjectName("towerSettingsSubsectionHeading")
+        layout = QVBoxLayout(heading)
+        layout.setContentsMargins(0, 0, 0, 4)
+        layout.setSpacing(2)
+        label = QLabel(title)
+        label.setObjectName("towerSettingsSubsectionTitle")
+        layout.addWidget(label)
+        divider = QFrame()
+        divider.setObjectName("towerSettingsSubsectionDivider")
+        divider.setFixedHeight(1)
+        layout.addWidget(divider)
+        return heading
 
     def _add_numeric_setting(
         self,
@@ -5253,8 +5306,8 @@ class MainWindow(QMainWindow):
         if self.generation_mode is GenerationMode.MANUAL:
             self.manual_controller.refresh()
             return
-        if self.generation_mode is GenerationMode.PREPROCESSOR:
-            self.preprocessor_controller.refresh()
+        if self.generation_mode is GenerationMode.POSTPROCESSOR:
+            self.postprocessor_controller.refresh()
             return
         self._refresh_layer_range_tool()
         block_reason = self._export_block_reason()
@@ -8164,7 +8217,7 @@ class MainWindow(QMainWindow):
         self._preview_cancel_requested = False
         self._last_exported_preview_identity = None
         self.manual_controller.invalidate_context()
-        self.preprocessor_controller.invalidate()
+        self.postprocessor_controller.invalidate()
         if self._preview_dialog is not None:
             self._preview_dialog.canvas.set_scene(None)
             self._preview_dialog.mark_stale()
@@ -8799,7 +8852,7 @@ class MainWindow(QMainWindow):
         if self.ready_grid.isVisible():
             QTimer.singleShot(0, self, self._refresh_settings_content_minimum_height)
 
-    def _refresh_preprocessor_content_height(self) -> None:
+    def _refresh_postprocessor_content_height(self) -> None:
         # The workspace caches its child's height-for-width. Invalidate that
         # intermediate layout before measuring the enclosing scroll content.
         workspace = self.generation_workspace
@@ -10269,7 +10322,7 @@ class MainWindow(QMainWindow):
             JobKind.PREVIEW,
             reason="source_removed",
         )
-        self.preprocessor_controller.invalidate()
+        self.postprocessor_controller.invalidate()
         for session in self.generation_sessions.values():
             session.discard_preview()
         self.preview_state = PreviewState.EMPTY
@@ -11628,35 +11681,14 @@ class MainWindow(QMainWindow):
 
     def show_joint_slice_settings(self) -> None:
         dialog = JointSliceSettingsDialog(
-            self.maximum_joint_slices,
             self,
             output_root=self.output_root_edit.text(),
             default_output_root=str(self.default_output_root),
             export_roots=self.export_roots,
             default_export_roots=self.default_export_roots,
-            maximum_separate_slices=self.maximum_separate_slices,
-            default_maximum_separate_slices=(
-                self.default_maximum_separate_slices
-            ),
-            default_maximum_joint_slices=self.default_maximum_joint_slices,
-            local_reference_window=self.local_window_spin.value(),
-            default_local_reference_window=self.default_settings.local_reference_window,
-            maximum_local_reference_window=self.local_window_spin.property("validationMaximum") or 999,
-            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
-            default_layer_time_tolerance_s=self.default_settings.layer_time_tolerance_s,
-            preparation_ready=(
-                self.workflow.stage is WorkflowStage.READY
-                and self.workflow.preparation_acknowledged
-            ),
         )
         dialog.output_root_applied.connect(self.output_root_edit.setText)
         dialog.export_roots_applied.connect(self._apply_export_roots)
-        dialog.separate_value_applied.connect(
-            self._apply_maximum_separate_slices
-        )
-        dialog.value_applied.connect(self._apply_maximum_joint_slices)
-        dialog.local_window_applied.connect(self._apply_local_reference_window)
-        dialog.layer_time_tolerance_applied.connect(self._apply_layer_time_tolerance)
         self._joint_slice_settings_dialog = dialog
         dialog.finished.connect(
             lambda _result: setattr(
@@ -11674,7 +11706,7 @@ class MainWindow(QMainWindow):
     def _apply_show_setting_limits(self, visible: bool) -> None:
         """Apply a previously saved numeric-range visibility preference."""
         self.show_setting_limits = bool(visible)
-        for setting in self._setting_widgets.values():
+        for setting in (*self._setting_widgets.values(), *self.slice_budget_settings.values()):
             setting.set_limits_visible(self.show_setting_limits)
             setting.layout().invalidate()
             setting.layout().activate()
@@ -11701,10 +11733,13 @@ class MainWindow(QMainWindow):
         if normalized == self.maximum_separate_slices:
             return
         self.maximum_separate_slices = normalized
+        with QSignalBlocker(self.slice_budget_settings["maximum_separate_slices"].editor):
+            self.slice_budget_settings["maximum_separate_slices"].editor.setValue(normalized)
         self._save_user_settings()
         self._invalidate_preview(
             "Die maximale Anzahl getrennter Slices wurde geändert."
         )
+        self._update_section_summaries()
 
     @Slot(int)
     def _apply_maximum_joint_slices(self, value: int) -> None:
@@ -11712,10 +11747,13 @@ class MainWindow(QMainWindow):
         if normalized == self.maximum_joint_slices:
             return
         self.maximum_joint_slices = normalized
+        with QSignalBlocker(self.slice_budget_settings["maximum_joint_slices"].editor):
+            self.slice_budget_settings["maximum_joint_slices"].editor.setValue(normalized)
         self._save_user_settings()
         self._invalidate_preview(
             "Die maximale Anzahl gemeinsamer Slices wurde geändert."
         )
+        self._update_section_summaries()
 
     @Slot(int)
     def _apply_local_reference_window(self, value: int) -> None:
@@ -11774,11 +11812,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         dialog = self.export_success_dialog
         self.export_success_check_hint.setVisible(
-            getattr(result, "generation_method", None) != "preprocessor"
+            getattr(result, "generation_method", None) != "postprocessor"
         )
         self.export_success_title_label.setText(
             "✓ G-Code erfolgreich exportiert"
-            if getattr(result, "generation_method", None) == "preprocessor"
+            if getattr(result, "generation_method", None) == "postprocessor"
             else "✓ Kühlturm erfolgreich exportiert"
         )
         target = getattr(result, "target_layer_time_s", None)
@@ -11880,7 +11918,7 @@ class MainWindow(QMainWindow):
         self.export_success_deviation_label.show()
         if getattr(result, "generation_method", None) == "manual":
             self.manual_controller.describe_export(result)
-        elif getattr(result, "generation_method", None) == "preprocessor":
+        elif getattr(result, "generation_method", None) == "postprocessor":
             self.export_success_usage_label.setText(
                 "Der exportierte G-Code enthält das Druckobjekt und alle für diesen Lauf "
                 "erzeugten Turm-, Warte- und Fahrbefehle. Verwenden Sie ihn direkt für den vorbereiteten "
@@ -14301,8 +14339,8 @@ class MainWindow(QMainWindow):
             open_directory(directory.resolve())
         except (OSError, ValueError) as error:
             message = "Der Exportordner konnte nicht geöffnet werden: " + german_user_message(error)
-            if self.generation_mode is GenerationMode.PREPROCESSOR:
-                self.preprocessor_panel.status.setText(message)
+            if self.generation_mode is GenerationMode.POSTPROCESSOR:
+                self.postprocessor_panel.status.setText(message)
             else:
                 self.result_label.setText(message)
             self._schedule_footer_height_update()
@@ -14505,6 +14543,8 @@ class MainWindow(QMainWindow):
             resolution = resolve_latest_export_directory(
                 output_root_text,
                 preferred_directory=self._latest_export_directory,
+                additional_roots=legacy_export_roots(output_root_text,
+                    (self.generation_mode or GenerationMode.AUTOMATIC).value),
             )
             self._latest_export_directory = resolution.directory
             self._latest_export_unavailable_reason = (
@@ -14523,11 +14563,9 @@ class MainWindow(QMainWindow):
 
     def _has_non_default_settings(self) -> bool:
         defaults = self.settings_store.load_defaults()
-        return self.collect_settings() != replace(
-            defaults,
-            local_reference_window=self.local_window_spin.value(),
-            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
-        )
+        return (self.collect_settings() != defaults
+                or self.maximum_separate_slices != self.default_maximum_separate_slices
+                or self.maximum_joint_slices != self.default_maximum_joint_slices)
 
     def request_reset_defaults(self) -> None:
         if self.generation_mode is GenerationMode.MANUAL:
@@ -14564,11 +14602,9 @@ class MainWindow(QMainWindow):
         self.profile_feasibility = None
         self._clear_feasibility_issues()
         self._last_changed_setting_name = None
-        self.apply_settings(replace(
-            self.settings_store.load_defaults(),
-            local_reference_window=self.local_window_spin.value(),
-            layer_time_tolerance_s=self.layer_time_tolerance_spin.value(),
-        ))
+        self.apply_settings(self.settings_store.load_defaults())
+        for setting in self.slice_budget_settings.values():
+            setting.reset_to_default()
         self._incomplete_setting_names.clear()
         if self.analysis_snapshot is not None:
             self._update_local_window_layer_limit(self.analysis_snapshot.layer_count)

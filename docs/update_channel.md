@@ -16,6 +16,11 @@ abgewiesen. Der Installer liegt nicht im Quellcodebestand. `main` kann neuer als
 der letzte veröffentlichte Installer sein; jeder Release-Tag identifiziert dessen
 tatsächlich geprüften Quellcommit.
 
+`scripts/publish_update.ps1 -ReleaseNotesPath pfad/zur/beschreibung.md` verwendet
+eine eigene UTF-8-Releasebeschreibung. Leere Texte werden vor dem
+Veröffentlichungsablauf abgewiesen. Bei `-DevelopmentRelease` muss auch die
+Beschreibung die Veröffentlichung ausdrücklich als Entwicklungsversion kennzeichnen.
+
 **Bisherige Tester müssen die neue Version einmal manuell installieren.**
 Testinstallationen aus `RodeProjects/sacrificial-tower-updates` wechseln nicht
 automatisch. Das alte Repository bleibt seit dem 23.10.2026 als privates,

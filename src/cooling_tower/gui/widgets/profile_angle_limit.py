@@ -138,8 +138,9 @@ class ProfileAngleLimitControl(SettingSubline):
         self.row = row
         self._row_alive = True
         self._fit_key = None
-        self._suffix_text = ' begrenzen' if compact else ' des Slicer-Profils begrenzen'
-        self._label_text = 'Auf Threshold-angle'+self._suffix_text
+        self._suffix_text = ' begrenzen' if compact else ' des Slicer-Profils verwenden'
+        prefix_text = 'Auf ' if compact else ''
+        self._label_text = prefix_text+'Threshold-angle'+self._suffix_text
         self.state = ProfileAngleBinding()
         self.setObjectName('profileAngleLimit')
         font = QFont(row.label.font())
@@ -150,7 +151,7 @@ class ProfileAngleLimitControl(SettingSubline):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.arrow = _CornerArrow(self)
-        self.prefix = QLabel('Auf ', self)
+        self.prefix = QLabel(prefix_text, self)
         self.threshold_hint = _ThresholdHint(self)
         self.suffix = QLabel(self._suffix_text, self)
         self.checkbox = QCheckBox(self)

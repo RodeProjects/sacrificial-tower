@@ -34,6 +34,9 @@ einfacheres Format behalten.
 - [Schema 22: Profilbindung des Aufweitungswinkels](#schema-22-profilbindung-des-aufweitungswinkels)
 - [Schema 23: Segmentwahl für iterativ erzeugte Türme](#schema-23-segmentwahl-für-iterativ-erzeugte-türme)
 - [Schema 24: getrennte Exportordner](#schema-24-getrennte-exportordner)
+- [Schema 25: Postprozessor-Standardordner](#schema-25-postprozessor-standardordner)
+- [Schema 26: Postprozessor-Methodenkennung](#schema-26-postprozessor-methodenkennung)
+- [Schema 27: Standardnamen der Exportordner](#schema-27-standardnamen-der-exportordner)
 - [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
 
@@ -412,7 +415,7 @@ nach den allgemeinen Schutzregeln erhalten.
 ## Schema 24: getrennte Exportordner
 
 23→24 ergänzt `export_roots` mit den stabilen Methodenkennungen `automatic`,
-`manual` und `preprocessor`. Die Migration leitet unterhalb des bisherigen
+`manual` und der damaligen Kennung der dritten Methode. Die Migration leitet unterhalb des bisherigen
 `output_root` je einen gleichnamigen Unterordner ab. Vorhandene Exporte werden
 weder verschoben noch verändert. Ohne gültigen bisherigen Pfad gelten die
 Standardordner der Anwendung. `output_root` bleibt als Schnittstelle zum
@@ -431,11 +434,28 @@ bei Downgrade-Übernahmen abgewiesen. Bestehende Migrationsschritte, Sicherung,
 atomare Speicherung und Schutz vor neueren, beschädigten oder extern
 veränderten Dateien bleiben wirksam.
 
+## Schema 25: Postprozessor-Standardordner
+
+24→25 ändert den früheren Standardunterordner der dritten Methode zu `postprocessor`.
+Die interne Methodenkennung und die gültige Bedeutung eigener Pfade bleiben
+erhalten. Umgestellt wird ein alter Pfad mit dem damaligen Methodennamen als letztem
+Bestandteil, wenn mindestens ein anderer Methodenpfad noch dessen gemeinsamer
+Standardstruktur `automatic` beziehungsweise `manual` entspricht. Abweichende
+eigene Ziele bleiben unverändert.
+
+`VersionedJsonStore` sichert das Original vor der Migration und schreibt atomar.
+Exporte werden nicht verschoben oder zusammengeführt. Die Exporthistorie kann
+zusätzlich den früheren Geschwisterordner lesen, damit alte Ergebnisse nach der
+Umstellung erreichbar bleiben. Die bisherigen Typ-/Einheiten-/Pfadprüfungen
+sowie Schutz und Wiederherstellung beschädigter, neuerer oder extern geänderter
+Dateien gelten unverändert. Postprozessor-Druckparameter bleiben sitzungsgebunden
+und sind von dieser Pfadmigration unabhängig.
+
 ## Getrennte manuelle Einstellungen (eigenes Schema 19)
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
-gemeinsame Format verwendet Schema 24. `ManualSettingsStore` normalisiert
+gemeinsame Format verwendet Schema 27. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
 gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
 18→19 ergänzt die zunächst deaktivierte Option `limit_expansion_to_profile`.
@@ -664,3 +684,43 @@ Startwert mehr. Automatisch erweiterte Fußgrenzen bleiben gültige Millimeterwe
 deren Resetstandard ist an das aktuelle Objekt gebunden und wird nicht separat
 persistiert. Diese Initialisierungs-/Resetregeln verändern das gespeicherte Format
 und dessen Wertebereiche nicht.
+
+## Schema 26: Postprozessor-Methodenkennung
+
+25→26 benennt den gespeicherten Methodenschlüssel in `export_roots.postprocessor`
+um. Gültige eigene Pfade behalten ihren Wert; bei gleichzeitig vorhandenen
+alten und aktuellen Schlüsseln hat der aktuelle Schlüssel Vorrang. Frühere
+Schritte bleiben vorhanden. Originaldateien werden vor der Migration gesichert
+und atomar aktualisiert; neuere, beschädigte oder extern geänderte Dateien
+bleiben geschützt.
+
+Die ausdrücklich kompatible Pfadbedeutung verwendet weiterhin das Token
+`method-export-directory-path-v1`. Frühere Änderungsjournale und geschützte
+neuere Einstellungen werden über die zentrale historische Kennung eingelesen.
+Typ-, Token- und Pfadvalidierung gelten vor jeder Übernahme; ein historischer
+Schlüssel überschreibt keinen gleichzeitig vorhandenen aktuellen Wert.
+Neue Berichte und Programmkennungen verwenden ausschließlich `postprocessor`.
+
+## Schema 27: Standardnamen der Exportordner
+
+26→27 stellt die bisherigen Methodenordner auf folgende Standardnamen um:
+
+| Methode | Standardordner unter `output/` |
+|---|---|
+| Iterativ | `exports_automatic_mode` |
+| Manuell | `exports_manual_mode` |
+| Postprozessor | `exports_postprocessor` |
+
+Die internen Methodenkennungen bleiben unverändert. Erkannt werden die bekannten
+Pfade im Standarddatenverzeichnis sowie gemeinsame frühere Standardstrukturen.
+Abweichende eigene Ziele behalten ihren Wert. `output_root` folgt weiterhin dem
+Exportpfad der iterativen Methode. Alle vorigen Migrationsschritte bleiben
+vorhanden; Sicherung, atomare Speicherung, Typ-/Pfadprüfung und der Schutz
+neuerer, beschädigter oder extern geänderter Dateien bleiben wirksam.
+
+Die Exporthistorie berücksichtigt für jede Methode zusätzlich ihre früheren
+Geschwisterordner. Vorhandene Berichte bleiben auch nach einer Ordnerumbenennung
+lesbar: Die Druckdatei wird relativ zum Berichtordner gefunden, ohne historische
+Berichte umzuschreiben. Ordnerauswahl und Standardwert-Reset verwenden dieselbe
+zentrale Zuordnung. Eine automatische Zusammenführung alter Exportinhalte findet
+bei der Einstellungsmigration nicht statt.

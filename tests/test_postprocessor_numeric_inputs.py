@@ -11,9 +11,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 
-from cooling_tower.gui.preprocessor_controls import PreprocessorPanel
+from cooling_tower.gui.postprocessor_controls import PostprocessorPanel
 from cooling_tower.gui.widgets.committed_numeric_inputs import CommittedDoubleSpinBox
-from cooling_tower.gui.widgets.preprocessor_widgets import LayerNumberSpinBox
+from cooling_tower.gui.widgets.postprocessor_widgets import LayerNumberSpinBox
 from gui_lifecycle import dispose_test_widget
 
 
@@ -23,7 +23,7 @@ class PostprocessorNumericInputTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        self.panel = PreprocessorPanel()
+        self.panel = PostprocessorPanel()
         self.panel.footer_widget.setParent(self.panel)
         self.panel.resize(1400, 1000)
         self.panel.show()

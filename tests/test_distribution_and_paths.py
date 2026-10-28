@@ -17,6 +17,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from PySide6.QtWidgets import QApplication
 
+from cooling_tower.export_paths import EXPORT_FOLDER_NAMES
 from cooling_tower.distribution import (
     DistributionChannel,
     detect_distribution_channel,
@@ -166,10 +167,10 @@ class DistributionAndPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 window.default_output_root,
-                window.user_data_root / "output" / "automatic",
+                window.user_data_root / "output" / "exports_automatic_mode",
             )
             for method, path in window.default_export_roots.items():
-                self.assertEqual(Path(path), window.user_data_root / "output" / method)
+                self.assertEqual(Path(path), window.user_data_root / "output" / EXPORT_FOLDER_NAMES[method])
             self.assertEqual(
                 window.slicer_service.preference_store.path,
                 window.user_data_root / "config" / "slicer_settings.json",

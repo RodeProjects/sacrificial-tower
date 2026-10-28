@@ -8,17 +8,17 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-import test_preprocessor as fixture_module
+import test_postprocessor as fixture_module
 from cooling_tower.gcode.parser import MachineStateTracker, Movement, iter_parsed_gcode_lines
-from cooling_tower.preprocessor import PreprocessorSettings, SUPPORTED_SLICERS
-from cooling_tower.preprocessor_profiles import resolve_profile_settings
-from cooling_tower.preprocessor_export import export_preprocessor_run
+from cooling_tower.postprocessor import PostprocessorSettings, SUPPORTED_SLICERS
+from cooling_tower.postprocessor_profiles import resolve_profile_settings
+from cooling_tower.postprocessor_export import export_postprocessor_run
 from cooling_tower.tower.diameter_transitions import full_infill_foot_taper
 
 
 class TowerBrimTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = fixture_module.PreprocessorTests()
+        self.fixture = fixture_module.PostprocessorTests()
         self.fixture.setUp()
 
     def tearDown(self):
@@ -41,7 +41,7 @@ class TowerBrimTests(unittest.TestCase):
                     self.assertEqual(request.prepared_source.analysis_gcode_path.read_bytes(), source)
 
     def test_manual_zero_disables_tower_brim_even_with_model_brim_enabled(self):
-        settings = PreprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=0)
+        settings = PostprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=0)
         request = self.fixture.request(settings=settings)
         request.profile.effective_values.update({"brim_type": "outer_only", "brim_width": 20, "brim_separation": 4})
         result = self.fixture.prepare(request)
@@ -52,7 +52,7 @@ class TowerBrimTests(unittest.TestCase):
 
     def test_manual_width_and_gap_define_physical_envelope_and_placement(self):
         for width in (.1, 3, 20):
-            settings = PreprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=width,
+            settings = PostprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=width,
                 automatic_tower_brim_gap=False, tower_brim_gap_mm=.7)
             request = self.fixture.request(settings=settings)
             request.profile.effective_values.update({"brim_width": 0, "brim_object_gap": .1})
@@ -61,7 +61,8 @@ class TowerBrimTests(unittest.TestCase):
             radii = [math.dist((p.x, p.y), center) for s in result.scene.brim_segments for p in (s.start, s.end)]
             line_width = min(width, result.placement.brim_line_width_mm)
             self.assertAlmostEqual(max(radii) + line_width/2, result.base_width_mm/2 + .7 + width, places=5)
-            self.assertAlmostEqual(min(radii) - line_width/2, result.base_width_mm/2 + .7, places=5)
+            spine = (result.diameter_mm-result.capture_design.depth_mm)/2
+            self.assertAlmostEqual(min(radii) - line_width/2, result.base_width_mm/2 - spine + .7, places=5)
             self.assertAlmostEqual(result.placement.reserved_radius_mm, result.base_width_mm/2 + .7 + width)
             self.assertEqual({round(s.end.z, 5) for s in result.scene.brim_segments}, {.2})
 
@@ -78,7 +79,7 @@ class TowerBrimTests(unittest.TestCase):
         )
         for adapter, values, expected in cases:
             with self.subTest(adapter=adapter, values=values):
-                request = self.fixture.request(adapter=adapter, settings=PreprocessorSettings(
+                request = self.fixture.request(adapter=adapter, settings=PostprocessorSettings(
                     automatic_tower_brim_width=False, tower_brim_width_mm=3))
                 request.profile.effective_values.update(values)
                 result = self.fixture.prepare(request)
@@ -99,10 +100,10 @@ class TowerBrimTests(unittest.TestCase):
     def test_gap_automation_reads_zero_and_falls_back_without_a_profile_value(self):
         for profile, expected in (({}, .2), ({"brim_separation": 0}, 0),
                 ({"brim_object_gap": [.35]}, .35), ({"brim_separation": "bad"}, .2)):
-            effective, _ = resolve_profile_settings(PreprocessorSettings(tower_brim_width_mm=19), profile)
+            effective, _ = resolve_profile_settings(PostprocessorSettings(tower_brim_width_mm=19), profile)
             self.assertEqual(effective.tower_brim_width_mm, 2.0)
             self.assertEqual(effective.tower_brim_gap_mm, expected)
-        manual = PreprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=7,
+        manual = PostprocessorSettings(automatic_tower_brim_width=False, tower_brim_width_mm=7,
             automatic_tower_brim_gap=False, tower_brim_gap_mm=1)
         self.assertEqual(resolve_profile_settings(manual, {"brim_separation": .15})[0], manual)
 
@@ -113,15 +114,15 @@ class TowerBrimTests(unittest.TestCase):
                 {"automatic_tower_brim_gap": False, "tower_brim_gap_mm": 1.01},
                 {"automatic_tower_brim_width": 1}, {"automatic_tower_brim_gap": "yes"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                PreprocessorSettings(**changes)
+                PostprocessorSettings(**changes)
         for gap in (.1, 1):
-            PreprocessorSettings(automatic_tower_brim_gap=False, tower_brim_gap_mm=gap)
+            PostprocessorSettings(automatic_tower_brim_gap=False, tower_brim_gap_mm=gap)
 
     def test_export_records_effective_independent_brim(self):
         request = self.fixture.request()
         request.profile.effective_values.update({"brim_width": 8, "brim_object_gap": .15})
         result = self.fixture.prepare(request)
-        exported = export_preprocessor_run(self.fixture.service, result, self.fixture.root / "exports")
+        exported = export_postprocessor_run(self.fixture.service, result, self.fixture.root / "exports")
         report = json.loads(exported.report_path.read_text(encoding="utf-8"))
         self.assertEqual(report["tower_brim"]["width_mm"], 2.0)
         self.assertEqual(report["tower_brim"]["gap_mm"], .15)

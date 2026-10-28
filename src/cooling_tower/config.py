@@ -7,7 +7,7 @@ from cooling_tower.write_policy import ensure_writable_output
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 24
+SETTINGS_SCHEMA_VERSION = 27
 _CONFIG_METADATA_KEYS = {
     "angle_storage_reference",
     "settings_schema_version",
