@@ -234,6 +234,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             preview,
             primary_request,
             self.root,
+            cancellation_callback=worker.cancellation_requested,
         )
 
     def test_successful_export_offers_the_folder_without_opening_it(self) -> None:
@@ -1152,7 +1153,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.assertIn("STL-Modell", window.source_guide.text())
         self.assertEqual(
             window.source_guide.text(),
-            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
+            "Wähle ein STL-Modell oder ein vollständiges natives 3MF-Projekt aus, für das ein Kühlturm erstellt werden soll.",
         )
         self.assertEqual(window.source_guide_icon.text(), "ℹ")
         self.assertIs(

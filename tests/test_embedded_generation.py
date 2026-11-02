@@ -272,7 +272,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         w = self.window()
         self.assertEqual(
             w.preparation_requirement_rows["source_selected"][1].text(),
-            "STL-Datei übergeben",
+            "STL oder vollständiges natives 3MF-Projekt übergeben",
         )
         self.assertEqual(
             w.preparation_requirement_rows["source_validated"][1].text(),

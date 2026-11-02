@@ -546,7 +546,8 @@ class StlValidationGuiTests(unittest.TestCase):
                     upper.geometry().bottom(),
                     lower.geometry().top(),
                 )
-            self.assertLess(drop_zone.geometry().bottom(), feedback.geometry().top())
+            self.assertLess(drop_zone.mapTo(window.source_group.content_widget,drop_zone.rect().bottomLeft()).y(),
+                feedback.geometry().top())
             blocks = (
                 window.stl_validation_details_toggle,
                 window.stl_validation_message,
@@ -770,7 +771,7 @@ class StlValidationGuiTests(unittest.TestCase):
             self.assertTrue(window.drop_zone.remove_button.isHidden())
             self.assertEqual(
                 window.drop_zone.browse_button.text(),
-                "STL auswählen …",
+                "STL oder 3MF auswählen …",
             )
             self.assertTrue(window.stl_validation_message.isHidden())
             self.assertTrue(window.stl_validation_details_toggle.isHidden())

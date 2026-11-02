@@ -127,7 +127,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertEqual(header.separator.height(),1)
                 self.assertEqual(header.separator.y()+1,window.main_header.height())
                 shadow=header.divider_shadow
-                self.assertIs(shadow.parentWidget(),window.centralWidget())
+                self.assertIs(shadow.parentWidget(),window._stl_page)
                 self.assertEqual(shadow.mapTo(window,QPoint()).y(),caption.y())
                 self.assertEqual(shadow.width(),window.width())
                 self.assertEqual(shadow.height(),8)
@@ -173,7 +173,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertEqual(separator.height(), 1)
         self.assertEqual(separator_y, window.preparation_open_button.height() - 1)
         self.assertEqual(header_image.pixelColor(header_image.width() // 2, separator_y).name(), "#bac7d4")
-        self.assertIs(window.workflow_header.divider_shadow.parentWidget(),window.centralWidget())
+        self.assertIs(window.workflow_header.divider_shadow.parentWidget(),window._stl_page)
         self.assertTrue(window.workflow_header.divider_shadow.isVisible())
         self.assertTrue(window.workflow_group.isChecked())
         self.assertFalse(window.workflow_group.isCheckable())

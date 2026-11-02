@@ -106,7 +106,7 @@ class PostprocessorNamingTests(unittest.TestCase):
         self.assertEqual(GenerationMode(LEGACY_POSTPROCESSOR_ID),GenerationMode.POSTPROCESSOR)
         self.assertEqual(GenerationMode.POSTPROCESSOR.value,"postprocessor")
         self.assertEqual(set(mode.value for mode in GenerationMode),{"automatic","manual","postprocessor"})
-        self.assertEqual(set(default_export_roots(self.root)),{"automatic","manual","postprocessor"})
+        self.assertEqual(set(default_export_roots(self.root)),{"automatic","manual","postprocessor","native_project"})
 
 
 if __name__ == "__main__":

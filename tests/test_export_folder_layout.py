@@ -32,7 +32,8 @@ class ExportFolderLayoutTests(unittest.TestCase):
         self.assertEqual(default_export_roots(self.root),{
             "automatic":str(self.root/"exports_automatic_mode"),
             "manual":str(self.root/"exports_manual_mode"),
-            "postprocessor":str(self.root/"exports_postprocessor")})
+            "postprocessor":str(self.root/"exports_postprocessor"),
+            "native_project":str(self.root/"exports_3mf_projects")})
 
     def test_recovery_defaults_use_the_same_automatic_destination(self):
         store = self.store()
@@ -61,7 +62,8 @@ class ExportFolderLayoutTests(unittest.TestCase):
         self.path.write_text(json.dumps({"settings_schema_version":26,"generation":{},
             "export_roots":roots}),encoding="utf-8")
         _,state=self.store().load()
-        self.assertEqual(state["export_roots"],{**roots,"automatic":str(self.root/"output"/"exports_automatic_mode")})
+        self.assertEqual(state["export_roots"],{**roots,"automatic":str(self.root/"output"/"exports_automatic_mode"),
+            "native_project":str(self.root/"output"/"exports_3mf_projects")})
 
     def test_custom_paths_survive_and_failed_migration_does_not_overwrite_original(self):
         roots={"automatic":str(self.root/"custom"/"automatic"),
@@ -73,7 +75,8 @@ class ExportFolderLayoutTests(unittest.TestCase):
             self.store().load()
         self.assertEqual(self.path.read_bytes(),original)
         _,state=self.store().load()
-        self.assertEqual(state["export_roots"],roots)
+        self.assertEqual(state["export_roots"],{**roots,
+            "native_project":str(self.root/"output"/"exports_3mf_projects")})
 
     def test_legacy_history_remains_visible_before_and_after_physical_rename(self):
         for method in ("automatic","manual","postprocessor"):

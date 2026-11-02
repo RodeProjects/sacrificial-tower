@@ -449,7 +449,7 @@ class UxImprovementTests(unittest.TestCase):
         )
         source_layout = window.source_group.content_layout
         self.assertLess(
-            source_layout.indexOf(window.drop_zone),
+            source_layout.indexOf(window.source_handover),
             source_layout.indexOf(feedback),
         )
         self.assertLess(

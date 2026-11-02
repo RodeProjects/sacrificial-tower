@@ -24,6 +24,7 @@ from cooling_tower.slicers.failure_diagnostics import SlicerFailureArchive, prun
 from cooling_tower.slicers.models import SliceRequest
 from cooling_tower.slicers.process import ProcessOutcome
 from cooling_tower.calibration.joint_project import JointProjectError
+from cooling_tower.protected_io import OwnedWorkspace
 
 
 class SlicerFailureDiagnosticsTests(unittest.TestCase):
@@ -38,7 +39,9 @@ class SlicerFailureDiagnosticsTests(unittest.TestCase):
 
     def prepared(self):
         parent = self.root / "temporary/preview/calibration"
-        work = parent / "slicer"
+        workspace = OwnedWorkspace(parent=parent, name="slicer")
+        self.addCleanup(workspace.close)
+        work = workspace.path
         (work / "input").mkdir(parents=True)
         (work / "output").mkdir()
         (work / "effective_profiles").mkdir()
@@ -54,7 +57,8 @@ class SlicerFailureDiagnosticsTests(unittest.TestCase):
                                purpose="calibration", calibration_round=7)
         prepared = SimpleNamespace(request=request, working_root=work, input_directory=work / "input",
                                    output_directory=work / "output", copied_model=model,
-                                   arguments=("--arrange", "1"), executable=profile.installation.executable_path)
+                                   arguments=("--arrange", "1"), executable=profile.installation.executable_path,
+                                   working_lease=workspace)
         outcome = ProcessOutcome(("slicer.exe", "--slice", "0", str(model)), 2, "output", "error", 100,
                                  process_id=123, backend="qprocess")
         return prepared, outcome

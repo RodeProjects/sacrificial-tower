@@ -673,8 +673,8 @@ class Phase18UiTests(unittest.TestCase):
         )
         self.assertEqual(
             dialog.footer_divider.y()
-            - dialog.export_browse_buttons["postprocessor"].mapTo(dialog,
-                QPoint(0, dialog.export_browse_buttons["postprocessor"].height())).y(),
+            - dialog.export_browse_buttons["native_project"].mapTo(dialog,
+                QPoint(0, dialog.export_browse_buttons["native_project"].height())).y(),
             20,
         )
         self.assertEqual(
@@ -1097,7 +1097,7 @@ class Phase18UiTests(unittest.TestCase):
         self.assertIn("STL-Modell", window.source_guide.text())
         self.assertEqual(
             window.source_guide.text(),
-            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden soll.",
+            "Wähle ein STL-Modell oder ein vollständiges natives 3MF-Projekt aus, für das ein Kühlturm erstellt werden soll.",
         )
         self.assertEqual(window.geometry_group.title(), "Erweiterte Turmeinstellungen")
         self.assertEqual(window.stability_group.title(), "Standfuß")
