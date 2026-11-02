@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 import re
+import weakref
 
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.models.gcode_metadata import SlicerIdentity
+from cooling_tower.protected_io import InputSnapshot, OwnedWorkspace
 
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -17,13 +19,16 @@ class SourceKind(str, Enum):
     """User-supplied source formats accepted by the application."""
 
     STL = "stl"
+    NATIVE_3MF = "3mf"
 
     @classmethod
     def from_path(cls, path: str | Path) -> "SourceKind":
         suffix = Path(path).suffix.casefold()
         if suffix == ".stl":
             return cls.STL
-        raise ValueError("Unterstützt werden derzeit ausschließlich STL-Dateien.")
+        if suffix == ".3mf":
+            return cls.NATIVE_3MF
+        raise ValueError("Unterstützt werden STL-Dateien und native 3MF-Projekte.")
 
 
 class GCodeOrigin(str, Enum):
@@ -32,6 +37,17 @@ class GCodeOrigin(str, Enum):
 
 class SourceChangedError(RuntimeError):
     """Raised when a file changes while its immutable identity is captured."""
+
+
+@dataclass(frozen=True, slots=True, weakref_slot=True)
+class _CapturedSource:
+    workspace: OwnedWorkspace
+    snapshot: InputSnapshot
+
+    def __post_init__(self):
+        # Artifact copies share this lifetime object; dataclasses.replace must
+        # not let the first discarded artifact remove another job's snapshot.
+        weakref.finalize(self, self.workspace.close)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +59,7 @@ class SourceArtifact:
     original_size: int
     original_mtime_ns: int
     original_sha256: str
+    _captured: _CapturedSource | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         path = Path(self.original_path)
@@ -69,23 +86,25 @@ class SourceArtifact:
         kind = source_kind or SourceKind.from_path(candidate)
         if SourceKind.from_path(candidate) is not kind:
             raise ValueError("Dateiendung und angegebener Quellentyp stimmen nicht überein.")
-        before = candidate.stat()
-        digest = sha256_file(candidate)
-        after = candidate.stat()
-        if (before.st_size, before.st_mtime_ns) != (
-            after.st_size,
-            after.st_mtime_ns,
-        ):
-            raise SourceChangedError(
-                "Die Quelldatei wurde während der Prüfung verändert."
-            )
-        return cls(
-            source_kind=kind,
-            original_path=candidate,
-            original_size=after.st_size,
-            original_mtime_ns=after.st_mtime_ns,
-            original_sha256=digest,
-        )
+        workspace = OwnedWorkspace(prefix='source_')
+        try:
+            snapshot = workspace.capture(candidate, name='input' + candidate.suffix.casefold())
+            return cls(source_kind=kind, original_path=candidate, original_size=snapshot.size,
+                original_mtime_ns=snapshot.mtime_ns, original_sha256=snapshot.sha256,
+                _captured=_CapturedSource(workspace, snapshot))
+        except BaseException:
+            workspace.close()
+            raise
+
+    @property
+    def processing_path(self) -> Path:
+        return self._captured.snapshot.path if self._captured else self.original_path
+
+    def verify_processing_snapshot(self) -> None:
+        if self._captured:
+            self._captured.snapshot.verify()
+        elif not self.matches_current_file(verify_content=True):
+            raise SourceChangedError('Die Quelle wurde seit ihrer Identifizierung verändert.')
 
     def matches_current_file(self, *, verify_content: bool = False) -> bool:
         try:

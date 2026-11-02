@@ -12,6 +12,7 @@ from cooling_tower.slicers.base import BaseSlicerAdapter, environment_roots, exi
 from cooling_tower.slicers.errors import SlicerProcessError
 from cooling_tower.slicers.detection.base import SlicerDetectionModule
 from cooling_tower.slicers.detection.registry import detection_module_for
+from cooling_tower.protected_io import read_locked
 from cooling_tower.slicers.models import (
     SliceRequest, ProfileKind, ProfileRecord, SlicerCandidate,
     SlicerCapability, SlicerDiscoverySource, SlicerInstallation, SlicerSupportLevel,
@@ -228,7 +229,10 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         prepared = self.prepare_slice(project_request)
         try:
             copied_tower = prepared.input_directory / Path(tower_model_path).name
-            shutil.copy2(Path(tower_model_path).resolve(), copied_tower)
+            if copied_tower == prepared.copied_model:
+                copied_tower = prepared.input_directory / "tower_input.stl"
+            assert prepared.working_lease is not None
+            prepared.working_lease.capture(tower_model_path, name=copied_tower.relative_to(prepared.working_root))
             arguments = list(prepared.arguments)
             try:
                 option_index = arguments.index("--arrange")
@@ -319,7 +323,8 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 f"Profil '{record.name}' besitzt keinen CLI-fähigen Typ."
             )
         try:
-            payload = json.loads(record.path.read_text(encoding="utf-8-sig"))
+            with read_locked(record.path) as stream:
+                payload = json.loads(stream.read().decode("utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise SlicerProcessError(
                 f"Profil '{record.name}' konnte nicht sicher für den CLI-Lauf "

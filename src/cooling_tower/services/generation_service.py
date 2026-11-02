@@ -153,197 +153,197 @@ class GenerationService:
                 "A required cooling tower unexpectedly has no layers."
             )
 
-        paths = self.output_service.create_run_directories(source)
-        self.output_service.write_settings(paths, settings)
-        diagnostic_report = AnalysisDiagnosticReport.from_snapshot(snapshot)
-        self.output_service.write_analysis_diagnostic(
-            paths,
-            diagnostic_report,
-        )
-        notify(40, "Turmrelevante Layer werden ausgewählt")
-
-        profile_config = replace(
-            profile_config,
-            excluded_layer_indices=excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges),
-        )
-        radius_profile = build_tower_radius_profile(
-            layers=tower_layers,
-            config=profile_config,
-        )
-        solid_profile = build_solid_tower_profile(
-            phase2_profile=radius_profile,
-            settings=settings,
-            tower_end_z_mm=assessment.tower_end_z_mm,
-            object_height_mm=snapshot.maximum_print_z_mm,
-        )
-        notify(60, "Verkürztes Turmprofil wird berechnet")
-
-        mesh = generate_solid_tower_mesh(
-            solid_profile, TowerMeshConfig(configured_mesh_segments(solid_profile, settings))
-        )
-        export = write_binary_stl(mesh, paths.stl_path)
-        notify(80, "STL und Berichte werden gespeichert")
-
-        deficits = {
-            layer.index: deficit
-            for layer, deficit in zip(
-                snapshot.layers,
-                assessment.layer_time_deficits_s,
-                strict=True,
+        with self.output_service.run_directory(source) as paths:
+            self.output_service.write_settings(paths, settings)
+            diagnostic_report = AnalysisDiagnosticReport.from_snapshot(snapshot)
+            self.output_service.write_analysis_diagnostic(
+                paths,
+                diagnostic_report,
             )
-        }
-        self.output_service.write_layer_analysis(
-            paths,
-            snapshot.layers,
-            deficits=deficits,
-        )
-        self.output_service.write_tower_profile(
-            paths,
-            solid_profile.layers,
-        )
+            notify(40, "Turmrelevante Layer werden ausgewählt")
 
-        profile_layers = solid_profile.layers
-        warnings = list(solid_profile.warnings)
-        unresolved_layer_count = sum(
-            not layer.target_reached for layer in profile_layers
-        )
-        summary = {
-            "analysis_report_schema_version": (
-                diagnostic_report.schema_version
-            ),
-            "source_gcode": str(source.resolve()),
-            "tower_required": True,
-            "layer_count": snapshot.layer_count,
-            "layers_below_target": assessment.deficit_layer_count,
-            "first_deficit_layer_index": (
-                assessment.first_deficit_layer_index
-            ),
-            "last_deficit_layer_index": (
-                assessment.last_deficit_layer_index
-            ),
-            "tower_end_layer_index": assessment.tower_end_layer_index,
-            "tower_end_z_mm": assessment.tower_end_z_mm,
-            "original_model_height_mm": (
-                assessment.original_model_height_mm
-            ),
-            "saved_tower_height_mm": assessment.saved_tower_height_mm,
-            "synthetic_final_layer_used": (
-                assessment.synthetic_final_layer_used
-            ),
-            "maximum_time_deficit_s": (
-                assessment.maximum_time_deficit_s
-            ),
-            "base_width_mm": 2.0 * solid_profile.base_outer_radius_mm,
-            "automatic_base_width": settings.automatic_base_width,
-            "maximum_expansion_angle_deg": (
-                90.0-settings.maximum_expansion_angle_deg
-            ),
-            "maximum_contraction_angle_deg": (
-                90.0-settings.maximum_contraction_angle_deg
-            ),
-            "angle_reference": "horizontal",
-            "spline_support_point_count": (
-                solid_profile.support_point_count
-            ),
-            "spline_mesh_ring_count": len(solid_profile.points),
-            "maximum_spline_error_mm": (
-                solid_profile.maximum_spline_error_mm
-            ),
-            "minimum_outer_diameter_mm": min(
-                point.outer_diameter_mm for point in solid_profile.points
-            ),
-            "maximum_outer_diameter_mm": max(
-                point.outer_diameter_mm for point in solid_profile.points
-            ),
-            "solid_geometry": True,
-            "simulate_full_tower_infill": settings.simulate_full_tower_infill,
-            "unresolved_layer_count": unresolved_layer_count,
-            "gcode_metadata": {
-                "schema_version": snapshot.metadata.schema_version,
-                "slicer": snapshot.metadata.slicer.to_dict(),
-                "profile_fingerprint": (
-                    snapshot.metadata.profile_fingerprint.to_dict()
+            profile_config = replace(
+                profile_config,
+                excluded_layer_indices=excluded_layer_indices(snapshot.layers, settings.excluded_layer_ranges),
+            )
+            radius_profile = build_tower_radius_profile(
+                layers=tower_layers,
+                config=profile_config,
+            )
+            solid_profile = build_solid_tower_profile(
+                phase2_profile=radius_profile,
+                settings=settings,
+                tower_end_z_mm=assessment.tower_end_z_mm,
+                object_height_mm=snapshot.maximum_print_z_mm,
+            )
+            notify(60, "Verkürztes Turmprofil wird berechnet")
+
+            mesh = generate_solid_tower_mesh(
+                solid_profile, TowerMeshConfig(configured_mesh_segments(solid_profile, settings))
+            )
+            export = write_binary_stl(mesh, paths.stl_path)
+            notify(80, "STL und Berichte werden gespeichert")
+
+            deficits = {
+                layer.index: deficit
+                for layer, deficit in zip(
+                    snapshot.layers,
+                    assessment.layer_time_deficits_s,
+                    strict=True,
+                )
+            }
+            self.output_service.write_layer_analysis(
+                paths,
+                snapshot.layers,
+                deficits=deficits,
+            )
+            self.output_service.write_tower_profile(
+                paths,
+                solid_profile.layers,
+            )
+
+            profile_layers = solid_profile.layers
+            warnings = list(solid_profile.warnings)
+            unresolved_layer_count = sum(
+                not layer.target_reached for layer in profile_layers
+            )
+            summary = {
+                "analysis_report_schema_version": (
+                    diagnostic_report.schema_version
                 ),
-                "timing_evidence": snapshot.timing_evidence.to_dict(),
-            },
-            "feasibility_issues": [
-                {
-                    "code": issue.code,
-                    "message": issue.message,
-                    "affected_layer_index": issue.affected_layer_index,
-                    "affected_z_mm": issue.affected_z_mm,
-                    "related_setting_names": list(
-                        issue.related_setting_names
+                "source_gcode": str(source.resolve()),
+                "tower_required": True,
+                "layer_count": snapshot.layer_count,
+                "layers_below_target": assessment.deficit_layer_count,
+                "first_deficit_layer_index": (
+                    assessment.first_deficit_layer_index
+                ),
+                "last_deficit_layer_index": (
+                    assessment.last_deficit_layer_index
+                ),
+                "tower_end_layer_index": assessment.tower_end_layer_index,
+                "tower_end_z_mm": assessment.tower_end_z_mm,
+                "original_model_height_mm": (
+                    assessment.original_model_height_mm
+                ),
+                "saved_tower_height_mm": assessment.saved_tower_height_mm,
+                "synthetic_final_layer_used": (
+                    assessment.synthetic_final_layer_used
+                ),
+                "maximum_time_deficit_s": (
+                    assessment.maximum_time_deficit_s
+                ),
+                "base_width_mm": 2.0 * solid_profile.base_outer_radius_mm,
+                "automatic_base_width": settings.automatic_base_width,
+                "maximum_expansion_angle_deg": (
+                    90.0-settings.maximum_expansion_angle_deg
+                ),
+                "maximum_contraction_angle_deg": (
+                    90.0-settings.maximum_contraction_angle_deg
+                ),
+                "angle_reference": "horizontal",
+                "spline_support_point_count": (
+                    solid_profile.support_point_count
+                ),
+                "spline_mesh_ring_count": len(solid_profile.points),
+                "maximum_spline_error_mm": (
+                    solid_profile.maximum_spline_error_mm
+                ),
+                "minimum_outer_diameter_mm": min(
+                    point.outer_diameter_mm for point in solid_profile.points
+                ),
+                "maximum_outer_diameter_mm": max(
+                    point.outer_diameter_mm for point in solid_profile.points
+                ),
+                "solid_geometry": True,
+                "simulate_full_tower_infill": settings.simulate_full_tower_infill,
+                "unresolved_layer_count": unresolved_layer_count,
+                "gcode_metadata": {
+                    "schema_version": snapshot.metadata.schema_version,
+                    "slicer": snapshot.metadata.slicer.to_dict(),
+                    "profile_fingerprint": (
+                        snapshot.metadata.profile_fingerprint.to_dict()
                     ),
-                    "required_value": (90.0-issue.required_value
-                        if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.required_value is not None
-                        else issue.required_value),
-                    "achievable_value": (90.0-issue.achievable_value
-                        if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.achievable_value is not None
-                        else issue.achievable_value),
-                }
-                for issue in solid_profile.feasibility_issues
-            ],
-            "mesh": {
-                "vertices": export.validation.vertex_count,
-                "triangles": export.validation.face_count,
-                "watertight": export.validation.is_watertight,
-                "consistent_winding": (
-                    export.validation.has_consistent_winding
+                    "timing_evidence": snapshot.timing_evidence.to_dict(),
+                },
+                "feasibility_issues": [
+                    {
+                        "code": issue.code,
+                        "message": issue.message,
+                        "affected_layer_index": issue.affected_layer_index,
+                        "affected_z_mm": issue.affected_z_mm,
+                        "related_setting_names": list(
+                            issue.related_setting_names
+                        ),
+                        "required_value": (90.0-issue.required_value
+                            if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.required_value is not None
+                            else issue.required_value),
+                        "achievable_value": (90.0-issue.achievable_value
+                            if issue.code == "EXPANSION_ANGLE_TOO_SMALL" and issue.achievable_value is not None
+                            else issue.achievable_value),
+                    }
+                    for issue in solid_profile.feasibility_issues
+                ],
+                "mesh": {
+                    "vertices": export.validation.vertex_count,
+                    "triangles": export.validation.face_count,
+                    "watertight": export.validation.is_watertight,
+                    "consistent_winding": (
+                        export.validation.has_consistent_winding
+                    ),
+                    "outward_orientation": (
+                        export.validation.has_outward_orientation
+                    ),
+                },
+                "warnings": warnings,
+            }
+            self.output_service.write_summary(paths, summary)
+            self.output_service.write_log(
+                paths,
+                (
+                    f"G-code: {source.resolve()}",
+                    f"Detected layers: {snapshot.layer_count}",
+                    "Reported source slicer: "
+                    f"{snapshot.metadata.slicer.product_name or 'unknown'}",
+                    "Profile fingerprint: "
+                    f"{snapshot.metadata.profile_fingerprint.digest_sha256 or 'unavailable'}",
+                    "Timing evidence: "
+                    f"{snapshot.timing_evidence.confidence_state.value}",
+                    "Layers below target: "
+                    f"{assessment.deficit_layer_count}",
+                    "Last deficit layer: "
+                    f"{assessment.last_deficit_layer_index}",
+                    f"Tower end Z: {assessment.tower_end_z_mm:.6f} mm",
+                    f"Generated triangles: {export.validation.face_count}",
+                    f"STL: {paths.stl_path.resolve()}",
+                    *(f"Warning: {warning}" for warning in warnings),
+                    "Generation completed successfully.",
                 ),
-                "outward_orientation": (
-                    export.validation.has_outward_orientation
-                ),
-            },
-            "warnings": warnings,
-        }
-        self.output_service.write_summary(paths, summary)
-        self.output_service.write_log(
-            paths,
-            (
-                f"G-code: {source.resolve()}",
-                f"Detected layers: {snapshot.layer_count}",
-                "Reported source slicer: "
-                f"{snapshot.metadata.slicer.product_name or 'unknown'}",
-                "Profile fingerprint: "
-                f"{snapshot.metadata.profile_fingerprint.digest_sha256 or 'unavailable'}",
-                "Timing evidence: "
-                f"{snapshot.timing_evidence.confidence_state.value}",
-                "Layers below target: "
-                f"{assessment.deficit_layer_count}",
-                "Last deficit layer: "
-                f"{assessment.last_deficit_layer_index}",
-                f"Tower end Z: {assessment.tower_end_z_mm:.6f} mm",
-                f"Generated triangles: {export.validation.face_count}",
-                f"STL: {paths.stl_path.resolve()}",
-                *(f"Warning: {warning}" for warning in warnings),
-                "Generation completed successfully.",
-            ),
-        )
-        notify(100, "Generierung abgeschlossen")
+            )
+            notify(100, "Generierung abgeschlossen")
 
-        return GenerationResult(
-            run_directory=paths.run_directory.resolve(),
-            stl_path=paths.stl_path.resolve(),
-            analysis_path=paths.analysis_path.resolve(),
-            profile_path=paths.profile_path.resolve(),
-            settings_path=paths.settings_path.resolve(),
-            log_path=paths.log_path.resolve(),
-            summary_path=paths.summary_path.resolve(),
-            metadata_path=paths.metadata_path.resolve(),
-            layer_count=snapshot.layer_count,
-            layers_below_target=assessment.deficit_layer_count,
-            maximum_outer_diameter_mm=summary["maximum_outer_diameter_mm"],
-            warnings=warnings,
-            analysis=snapshot.analysis,
-            profile=tuple(profile_layers),
-            mesh_validation=export.validation,
-            source_gcode_path=source.resolve(),
-            settings=settings,
-            assessment=assessment,
-            analysis_snapshot=snapshot,
-            feasibility_issues=solid_profile.feasibility_issues,
-        )
+            return GenerationResult(
+                run_directory=paths.run_directory.resolve(),
+                stl_path=paths.stl_path.resolve(),
+                analysis_path=paths.analysis_path.resolve(),
+                profile_path=paths.profile_path.resolve(),
+                settings_path=paths.settings_path.resolve(),
+                log_path=paths.log_path.resolve(),
+                summary_path=paths.summary_path.resolve(),
+                metadata_path=paths.metadata_path.resolve(),
+                layer_count=snapshot.layer_count,
+                layers_below_target=assessment.deficit_layer_count,
+                maximum_outer_diameter_mm=summary["maximum_outer_diameter_mm"],
+                warnings=warnings,
+                analysis=snapshot.analysis,
+                profile=tuple(profile_layers),
+                mesh_validation=export.validation,
+                source_gcode_path=source.resolve(),
+                settings=settings,
+                assessment=assessment,
+                analysis_snapshot=snapshot,
+                feasibility_issues=solid_profile.feasibility_issues,
+            )
 
     @staticmethod
     def _validated_configs(

@@ -42,7 +42,7 @@ class ExportPathsGuiTests(unittest.TestCase):
 
     def test_defaults_are_separate_and_single_resets_restore_only_their_method(self):
         defaults = self.window.default_export_roots
-        self.assertEqual(len(set(defaults.values())), 3)
+        self.assertEqual(len(set(defaults.values())), len(EXPORT_FOLDER_NAMES))
         for method, path in defaults.items():
             self.assertEqual(Path(path).name, EXPORT_FOLDER_NAMES[method])
         dialog = self.dialog()
@@ -52,6 +52,7 @@ class ExportPathsGuiTests(unittest.TestCase):
         self.assertEqual(dialog.export_root_edits["manual"].text(), defaults["manual"])
         self.assertEqual(dialog.export_root_edits["automatic"].text(), str(self.root / "automatic"))
         self.assertEqual(dialog.export_root_edits["postprocessor"].text(), str(self.root / "postprocessor"))
+        self.assertEqual(dialog.export_root_edits["native_project"].text(), str(self.root / "native_project"))
         dialog.export_reset_buttons["postprocessor"].click()
         self.assertEqual(dialog.export_root_edits["postprocessor"].text(), defaults["postprocessor"])
         for method, edit in dialog.export_root_edits.items():
@@ -65,6 +66,7 @@ class ExportPathsGuiTests(unittest.TestCase):
             enable_update_check=False, enable_startup_slicer_discovery=False)
         for mode in GenerationMode:
             self.assertEqual(self.window.export_directory(mode), self.root / (mode.value + "-selected"))
+        self.assertEqual(self.window.native_project_page._export_root(), self.root / 'native_project-selected')
 
     def test_cancel_preserves_all_paths_and_empty_values_prevent_apply(self):
         before = dict(self.window.export_roots)

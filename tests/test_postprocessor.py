@@ -643,11 +643,11 @@ class PostprocessorTests(unittest.TestCase):
         result = self.prepare(self.request())
         output = self.root / "existing.gcode"
         output.write_bytes(b"previous export")
-        with patch("cooling_tower.postprocessor.shutil.copyfileobj", side_effect=OSError("disk failure")):
+        with patch("cooling_tower.export_io.atomic_export", side_effect=OSError("disk failure")):
             with self.assertRaises(OSError):
                 self.service.export(result, output, overwrite=True)
         self.assertEqual(output.read_bytes(), b"previous export")
-        self.assertFalse(list(self.root.glob(".postprocessor_export_*")))
+        self.assertFalse(list(self.root.glob(".st-export-*")))
         self.service.export(result, output, overwrite=True)
         self.assertEqual(output.read_bytes(), result.gcode_path.read_bytes())
 

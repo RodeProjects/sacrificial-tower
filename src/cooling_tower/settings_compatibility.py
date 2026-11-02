@@ -161,7 +161,7 @@ SETTING_COMPATIBILITY_RULES = (
     *(SettingCompatibilityRule(
         f"export_roots.{method}", "method-export-directory-path-v1",
         ("export_roots", method), "path", f"export_roots.{method}",
-    ) for method in ("automatic", "manual", "postprocessor")),
+    ) for method in ("automatic", "manual", "postprocessor", "native_project")),
     SettingCompatibilityRule(
         "window.width", "window-pixel-width-v1", ("window", "width"), "int",
         "window.width", minimum=100, maximum=100_000,

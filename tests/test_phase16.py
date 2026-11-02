@@ -253,7 +253,9 @@ class Phase16Tests(unittest.TestCase):
         self.tower = self.root / "tower.gcode"
         self.tower.write_text(tower_gcode(), encoding="utf-8")
         self.snapshot = GCodeAnalysisService().analyze(self.source)
-        self.executable = self.root / "slicer.exe"
+        installation_root = self.root / 'slicer-installation'
+        installation_root.mkdir()
+        self.executable = installation_root / "slicer.exe"
         self.executable.write_bytes(b"MZ")
         self.process = self.root / "process.json"
         self.process.write_text(

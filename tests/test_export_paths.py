@@ -65,6 +65,31 @@ class ExportPathsTests(unittest.TestCase):
         self.path.write_text(json.dumps(payload), encoding="utf-8")
         self.assertEqual(self.store().load()[1]["export_roots"], {})
 
+    def test_schema_27_adds_native_folder_and_keeps_all_existing_stl_targets(self):
+        base = self.root / 'exports'
+        roots = {key: value for key, value in default_export_roots(base).items() if key != 'native_project'}
+        roots['manual'] = str(base / 'custom-manual')
+        payload = {'settings_schema_version': 27, 'generation': {},
+                   'export_roots': roots, 'output_root': roots['automatic']}
+        self.path.write_text(json.dumps(payload), encoding='utf-8')
+        original = self.path.read_bytes()
+        store = self.store()
+        _, state = store.load()
+        self.assertEqual(state['export_roots'], {**roots, 'native_project': str(base/'exports_3mf_projects')})
+        self.assertEqual(store.last_migration_backup.read_bytes(), original)
+        self.assertFalse((base/'exports_3mf_projects').exists())
+
+    def test_failed_schema_27_migration_keeps_original_and_its_backup(self):
+        roots = {key:value for key,value in default_export_roots(self.root).items() if key != 'native_project'}
+        self.path.write_text(json.dumps({'settings_schema_version':27,'generation':{},
+            'export_roots':roots,'output_root':roots['automatic']}),encoding='utf-8')
+        original = self.path.read_bytes()
+        store = self.store()
+        with patch('cooling_tower.persistence.versioned_json.os.replace',side_effect=OSError('locked')):
+            store.load()
+        self.assertEqual(self.path.read_bytes(),original)
+        self.assertTrue(any(path.read_bytes() == original for path in self.root.glob('*.schema-27.backup*')))
+
     def test_schema_24_updates_standard_spelling_with_backup_and_keeps_custom_paths(self):
         for standard in (True, False):
             with self.subTest(standard=standard):
@@ -129,10 +154,12 @@ class ExportPathsTests(unittest.TestCase):
         original = self.path.read_bytes()
         store = self.store()
         self.assertEqual(store.load()[1]["export_roots"], roots)
-        journal = self.save(store, {**roots, "manual": "changed"})
+        journal = self.save(store, {**roots, "manual": "changed", 'native_project':'native-changed'})
         self.assertEqual(self.path.read_bytes(), original)
         change = json.loads(journal.read_text(encoding="utf-8"))["changes"]["export_roots.manual"]
         self.assertEqual(change["value"], "changed")
+        native = json.loads(journal.read_text(encoding='utf-8'))['changes']['export_roots.native_project']
+        self.assertEqual(native['value'],'native-changed')
 
     def test_downgrade_rejects_types_units_and_invalid_paths_per_method(self):
         roots = default_export_roots(self.root)
@@ -142,9 +169,12 @@ class ExportPathsTests(unittest.TestCase):
             with self.subTest(value=value, token=token):
                 result = merge_compatible_setting_changes({"generation": {}, "export_roots": roots}, {
                     "export_roots.manual": {"token": token, "value": value},
+                    "export_roots.native_project": {"token": token, "value": value},
                     "export_roots.postprocessor": {"token": "method-export-directory-path-v1", "value": "safe"}})
                 self.assertIn("export_roots.manual", result.rejected_ids)
+                self.assertIn('export_roots.native_project',result.rejected_ids)
                 self.assertEqual(result.payload["export_roots"]["manual"], roots["manual"])
+                self.assertEqual(result.payload['export_roots']['native_project'],roots['native_project'])
                 self.assertEqual(result.payload["export_roots"]["postprocessor"], "safe")
 
     def test_old_shared_directory_token_cannot_replace_method_destinations(self):

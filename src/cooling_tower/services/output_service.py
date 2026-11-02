@@ -3,9 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import re
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.export_io import export_directory, generated_file
 from typing import Any, Iterable, Mapping, Sequence
 
 from cooling_tower.config import save_generation_settings
@@ -58,27 +59,20 @@ class OutputService:
         *,
         timestamp: datetime | None = None,
     ) -> RunPaths:
+        with self.run_directory(source_gcode_path, timestamp=timestamp) as paths:
+            return paths
+
+    @contextmanager
+    def run_directory(self, source_gcode_path, *, timestamp=None):
         source = Path(source_gcode_path)
         moment = timestamp or datetime.now()
         stem = sanitize_filename_component(source.stem)
         base_name = f"{moment:%Y%m%d_%H%M%S}_{stem}"
-        ensure_writable_output(self.runs_root)
-        self.runs_root.mkdir(parents=True, exist_ok=True)
-
-        suffix = 1
-        while True:
-            name = base_name if suffix == 1 else f"{base_name}_{suffix}"
-            paths = RunPaths.for_directory(self.runs_root / name)
-            try:
-                paths.run_directory.mkdir(parents=False, exist_ok=False)
-            except FileExistsError:
-                suffix += 1
-                continue
-            break
-
-        for directory in paths.directories[1:]:
-            directory.mkdir(parents=False, exist_ok=False)
-        return paths
+        with export_directory(self.runs_root, base_name, protected_files=(source,)) as directory:
+            paths = RunPaths.for_directory(directory)
+            for child in paths.directories[1:]:
+                child.mkdir()
+            yield paths
 
     def write_settings(
         self,
@@ -112,7 +106,7 @@ class OutputService:
             "end_line",
             "untimed_event_count",
         )
-        with paths.analysis_path.open(
+        with _report(paths.analysis_path,
             "w", encoding="utf-8-sig", newline=""
         ) as handle:
             writer = csv.DictWriter(
@@ -186,7 +180,7 @@ class OutputService:
             "target_reached",
             "profile_region",
         )
-        with paths.profile_path.open(
+        with _report(paths.profile_path,
             "w", encoding="utf-8-sig", newline=""
         ) as handle:
             writer = csv.DictWriter(
@@ -238,7 +232,7 @@ class OutputService:
         paths: RunPaths,
         summary: Mapping[str, Any],
     ) -> Path:
-        with paths.summary_path.open(
+        with _report(paths.summary_path,
             "w", encoding="utf-8", newline="\n"
         ) as handle:
             json.dump(dict(summary), handle, indent=2, sort_keys=True)
@@ -255,7 +249,7 @@ class OutputService:
             if hasattr(report, "to_dict")
             else dict(report)  # type: ignore[arg-type]
         )
-        with paths.metadata_path.open(
+        with _report(paths.metadata_path,
             "w", encoding="utf-8", newline="\n"
         ) as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
@@ -263,7 +257,7 @@ class OutputService:
         return paths.metadata_path.resolve()
 
     def write_log(self, paths: RunPaths, lines: Iterable[str]) -> Path:
-        with paths.log_path.open(
+        with _report(paths.log_path,
             "w", encoding="utf-8", newline="\n"
         ) as handle:
             for line in lines:
@@ -273,3 +267,10 @@ class OutputService:
 
 def _format_float(value: object) -> str:
     return f"{float(value):.6f}"
+
+
+@contextmanager
+def _report(destination, *args, **kwargs):
+    with generated_file(destination) as temporary:
+        with temporary.open(*args, **kwargs) as stream:
+            yield stream

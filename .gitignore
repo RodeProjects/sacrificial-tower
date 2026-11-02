@@ -68,3 +68,8 @@ config/profile_inventory_cache.json
 config/profile_mappings.json
 config/slicer_settings.json
 tests/slicer_acceptance.local.json
+
+# Private native test inputs and local acceptance workspaces
+/input/*.3mf
+/.tmp/
+/src/cooling_tower/slicers/_native_slicer_host.exe

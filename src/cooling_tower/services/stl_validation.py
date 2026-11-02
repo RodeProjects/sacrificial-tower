@@ -209,7 +209,7 @@ class StlValidationService:
         notify(5, "STL-Datei wird vollständig gelesen")
         artifact = SourceArtifact.capture(source, source_kind=SourceKind.STL)
         try:
-            parsed = self._parse(source, cancelled)
+            parsed = self._parse(artifact.processing_path, cancelled)
         except StlValidationCancelled:
             raise
         except StlResourceLimitError as error:

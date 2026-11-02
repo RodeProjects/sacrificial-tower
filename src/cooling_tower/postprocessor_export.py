@@ -5,12 +5,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
 from pathlib import Path
-import shutil
 
 from cooling_tower.preview.models import OutputMode, PreviewExportResult
 from cooling_tower.postprocessor import PostprocessorResult, PostprocessorService
 from cooling_tower.services.output_service import sanitize_filename_component
-from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.export_io import atomic_export_data, export_directory
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,24 +22,14 @@ def export_postprocessor_run(service: PostprocessorService, result: Postprocesso
     request = result.request
     request.validate_source()
     profile = request.profile
-    root = ensure_writable_output(output_root,
+    protections = dict(
         protected_roots=(profile.installation.executable_path.parent, *profile.installation.profile_roots),
         protected_files=(*profile.source_paths, request.prepared_source.analysis_gcode_path,
-            request.prepared_source.source_artifact.original_path))
-    root.mkdir(parents=True, exist_ok=True)
+                         request.prepared_source.source_artifact.original_path))
     created = datetime.now().astimezone()
     source_name = sanitize_filename_component(request.prepared_source.source_artifact.original_path.stem)
     base = f"{created:%Y%m%d_%H%M%S}_{source_name}"
-    directory = root / base
-    suffix = 2
-    while True:
-        try:
-            directory.mkdir()
-            break
-        except FileExistsError:
-            directory = root / f"{base}_{suffix}"
-            suffix += 1
-    try:
+    with export_directory(output_root, base, **protections) as directory:
         path = service.export(result, directory / f"{source_name}_postprocessor.gcode").resolve()
         minimum = min(result.layer_times_s[:-1], default=None)
         target = (result.effective_settings or request.settings).target_layer_time_s
@@ -79,8 +68,9 @@ def export_postprocessor_run(service: PostprocessorService, result: Postprocesso
             "layer_waits_s": result.layer_waits_s,
             "calculated_layer_times_s": result.layer_times_s,
         }
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        summary_path.write_text(
+        atomic_export_data((json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode('utf-8'),
+                           report_path, **protections)
+        summary = (
             f"G-Code-Postprozessor\n\nDatei: {path.name}\n"
             f"Mindest-Layerzeit: {target:.3f} s\n"
             + (f"Kürzeste kühlungsrelevante Schichtzeit: {minimum:.3f} s\n" if minimum is not None else
@@ -108,10 +98,8 @@ def export_postprocessor_run(service: PostprocessorService, result: Postprocesso
             +
             "Fahrten, Sicherheitshübe, Turmdruck und Primen sind eingerechnet.\n"
             "Die Zeiten sind rechnerische Prognosen. Der G-Code ist für den vorbereiteten Drucker bestimmt; "
-            "erneutes Slicen ersetzt die eingefügten Warte- und Fahrbefehle.\n", encoding="utf-8")
-    except Exception:
-        shutil.rmtree(directory, ignore_errors=True)
-        raise
+            "erneutes Slicen ersetzt die eingefügten Warte- und Fahrbefehle.\n")
+        atomic_export_data(summary.encode('utf-8'), summary_path, **protections)
     return PostprocessorExportResult(output_mode=OutputMode.GCODE,
         run_directory=directory.resolve(), output_path=path, report_path=report_path.resolve(),
         user_report_path=summary_path.resolve(), calibrated=False, slicer_optimized=False,

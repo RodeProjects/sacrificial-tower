@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from cooling_tower.calibration.slice_evaluator import build_calibration_profile
 from cooling_tower.file_integrity import sha256_file
+from cooling_tower.protected_io import OwnedWorkspace, require_owned_workspace, UnsafeWorkspaceError
 from cooling_tower.gcode.empty_layers import (
     EmptyLayerEvidence, empty_layer_message, inspect_empty_layers, reports_empty_layers,
 )
@@ -199,6 +200,7 @@ class SourcePreSliceService:
         output_directory.mkdir()
         started = time.monotonic()
         try:
+            source.verify_processing_snapshot()
             before_source_hash = sha256_file(source.original_path)
             if before_source_hash != source.original_sha256:
                 raise SourcePreSliceError(
@@ -234,7 +236,7 @@ class SourcePreSliceService:
                             workspace / "timing_profile",
                         )
                     request = SliceRequest(
-                        model_path=source.original_path,
+                        model_path=source.processing_path,
                         profile=timing_profile,
                         output_directory=output_directory,
                         timeout_s=self.timeout_s,
@@ -537,15 +539,13 @@ class SourcePreSliceService:
                 source_path.parent,
                 "Diagnoseverzeichnis",
             )
-        parent.mkdir(parents=True, exist_ok=True)
-        root = Path(
-            tempfile.mkdtemp(
-                prefix=_WORKSPACE_PREFIX,
-                dir=str(parent),
-            )
-        ).resolve()
-        (root / _WORKSPACE_MARKER).write_text("source_preslice_v1\n", encoding="ascii")
-        return root
+        owner = OwnedWorkspace(parent=parent, prefix=_WORKSPACE_PREFIX)
+        try:
+            owner.child(_WORKSPACE_MARKER).write_text("source_preslice_v1\n", encoding="ascii")
+            return owner.path
+        except BaseException:
+            owner.close()
+            raise
 
     @staticmethod
     def _slicer_roots(
@@ -925,12 +925,13 @@ def _safe_cleanup_workspace(
     *,
     require_marker: bool = True,
 ) -> None:
-    resolved = Path(root).resolve()
-    if not resolved.name.startswith(_WORKSPACE_PREFIX):
+    try:
+        owner = require_owned_workspace(root)
+    except UnsafeWorkspaceError:
         return
-    if require_marker and not (resolved / _WORKSPACE_MARKER).is_file():
+    if require_marker and not owner.child(_WORKSPACE_MARKER).is_file():
         return
-    shutil.rmtree(resolved, ignore_errors=True)
+    owner.close()
 
 
 def _text_values(value: object) -> tuple[str, ...]:

@@ -6,9 +6,10 @@ import os
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.protected_io import OwnedWorkspace, read_locked
 from typing import Any, Iterable, Mapping, Sequence
 
 from cooling_tower.diagnostic_context import record_diagnostic
@@ -87,6 +88,11 @@ def _slicer_output_failure_explanation(outcome: ProcessOutcome) -> str | None:
     output = f"{outcome.stderr}\n{outcome.stdout}".casefold()
     if not output.strip():
         return None
+    if any(marker in output for marker in ("invalid option", "unknown option", "unrecognized option")):
+        return (
+            "Die installierte Slicer-Version unterstützt eine für diesen "
+            "Aufruf verwendete Kommandozeilenoption nicht."
+        )
     if "no valid nozzle found" in output:
         return (
             "Bambu Studio konnte dem gemeinsamen Projekt keine gültige "
@@ -205,6 +211,7 @@ class PreparedSlice:
     copied_model: Path
     executable: Path
     arguments: tuple[str, ...]
+    working_lease: OwnedWorkspace | None = field(default=None, compare=False, repr=False)
 
     @property
     def command(self) -> tuple[str, ...]:
@@ -453,12 +460,13 @@ class BaseSlicerAdapter:
             and not automatic_candidate
             and self.probe_arguments
         ):
-            probe_outcome = self.runner.run(
-                path,
-                self.probe_arguments,
-                working_directory=path.parent,
-                timeout_s=self.probe_timeout_s,
-            )
+            with OwnedWorkspace(prefix="st_probe_") as probe:
+                probe_outcome = self.runner.run(
+                    path,
+                    self.probe_arguments,
+                    working_directory=probe.path,
+                    timeout_s=self.probe_timeout_s,
+                )
             if probe_outcome.timed_out:
                 raise SlicerVerificationTimeoutError(
                     f"Versionsprüfung für {path.name} hat das Zeitlimit überschritten."
@@ -709,14 +717,15 @@ class BaseSlicerAdapter:
                 "Erkennung verfügbar und kann nicht automatisiert slicen."
             )
 
-        working_root = Path(tempfile.mkdtemp(prefix="cooling_tower_slicer_"))
+        workspace = OwnedWorkspace(prefix="st_")
+        working_root = workspace.path
         work_input = working_root / "input"
         work_output = working_root / "output"
         work_input.mkdir()
         work_output.mkdir()
         copied_model = work_input / request.model_path.name
         try:
-            shutil.copy2(request.model_path, copied_model)
+            workspace.capture(request.model_path, name=Path("input") / request.model_path.name)
             # ``TEMP`` may use an 8.3 alias on Windows runners (for example
             # ``RUNNER~1``).  Resolve the copied input before constructing the
             # command so the arguments and the PreparedSlice contract expose
@@ -736,6 +745,7 @@ class BaseSlicerAdapter:
                 copied_model=copied_model.resolve(),
                 executable=Path(executable).expanduser().resolve(),
                 arguments=tuple(str(item) for item in arguments),
+                working_lease=workspace,
             )
             record_diagnostic(
                 "slice_job_prepared",
@@ -747,7 +757,7 @@ class BaseSlicerAdapter:
             )
             return prepared
         except Exception:
-            shutil.rmtree(working_root, ignore_errors=True)
+            workspace.close()
             raise
 
     def execute_prepared_slice(
@@ -897,7 +907,10 @@ class BaseSlicerAdapter:
 
     @staticmethod
     def cleanup_prepared_slice(prepared: PreparedSlice) -> None:
-        shutil.rmtree(prepared.working_root, ignore_errors=True)
+        if prepared.working_lease is not None:
+            prepared.working_lease.close()
+        else:
+            shutil.rmtree(prepared.working_root, ignore_errors=True)
         record_diagnostic(
             "temporary_data_cleaned",
             temporary_kind="slicer_working_directory",

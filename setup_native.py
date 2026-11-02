@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext
 
 
 ROOT = Path(__file__).resolve().parent
@@ -94,28 +95,48 @@ def _prepare_standalone_msvc_environment() -> tuple[list[str], list[str]]:
 VC_INCLUDE_DIRS, VC_LIBRARY_DIRS = _prepare_standalone_msvc_environment()
 
 
-setup(
-    name="sacrificial-tower-native",
-    version="1.0.0",
-    license_expression="Apache-2.0",
-    license_files=["LICENSE.md", "NOTICE"],
-    ext_modules=[
-        Extension(
-            "cooling_tower._native_timing",
-            sources=[
-                str(ROOT / "native" / "native_timing.cpp"),
-                str(ROOT / "native" / "native_analysis.cpp"),
-            ],
-            depends=[str(path) for path in sorted((ROOT / "native").glob("*.hpp"))],
-            include_dirs=(
-                [str(ROOT / "native")]
-                + VC_INCLUDE_DIRS
-                + SDK_INCLUDE_DIRS
+class BuildNative(build_ext):
+    def run(self):
+        super().run()
+        if os.name != "nt":
+            return
+        objects = self.compiler.compile(
+            [str(ROOT / "native" / "slicer_host.c")],
+            output_dir=self.build_temp,
+            include_dirs=VC_INCLUDE_DIRS + SDK_INCLUDE_DIRS,
+            extra_postargs=["/O2", "/W4", "/guard:cf"],
+        )
+        destination = ROOT / "src" / "cooling_tower" / "slicers" if self.inplace else Path(self.build_lib) / "cooling_tower" / "slicers"
+        destination.mkdir(parents=True, exist_ok=True)
+        self.compiler.link_executable(objects, "_native_slicer_host",
+            output_dir=str(destination), library_dirs=VC_LIBRARY_DIRS + SDK_LIBRARY_DIRS,
+            extra_postargs=["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"])
+
+
+if __name__ == '__main__':
+    setup(
+        name="sacrificial-tower-native",
+        version="1.0.0",
+        license_expression="Apache-2.0",
+        license_files=["LICENSE.md", "NOTICE"],
+        cmdclass={"build_ext": BuildNative},
+        ext_modules=[
+            Extension(
+                "cooling_tower._native_timing",
+                sources=[
+                    str(ROOT / "native" / "native_timing.cpp"),
+                    str(ROOT / "native" / "native_analysis.cpp"),
+                ],
+                depends=[str(path) for path in sorted((ROOT / "native").glob("*.hpp"))],
+                include_dirs=(
+                    [str(ROOT / "native")]
+                    + VC_INCLUDE_DIRS
+                    + SDK_INCLUDE_DIRS
+                ),
+                library_dirs=VC_LIBRARY_DIRS + SDK_LIBRARY_DIRS,
+                language="c++",
+                extra_compile_args=NATIVE_COMPILE_ARGS,
             ),
-            library_dirs=VC_LIBRARY_DIRS + SDK_LIBRARY_DIRS,
-            language="c++",
-            extra_compile_args=NATIVE_COMPILE_ARGS,
-        ),
-    ],
-    package_dir={"": "src"},
-)
+        ],
+        package_dir={"": "src"},
+    )

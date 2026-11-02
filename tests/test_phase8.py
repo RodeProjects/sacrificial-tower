@@ -222,7 +222,7 @@ class EdgeCaseTests(unittest.TestCase):
             )
             with patch.object(
                 OutputService,
-                "create_run_directories",
+                "run_directory",
                 side_effect=PermissionError("read-only output"),
             ):
                 with self.assertRaisesRegex(PermissionError, "read-only"):

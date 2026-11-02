@@ -238,6 +238,28 @@ class _WindowsJobObject:
         kernel32.TerminateJobObject.restype = wintypes.BOOL
         return bool(kernel32.TerminateJobObject(self._handle, int(exit_code)))
 
+    def wait_for_empty(self, timeout_s: float = 5.) -> bool:
+        """Confirm every assigned descendant has stopped before reading output."""
+        if os.name != 'nt' or self._handle is None:
+            return False
+        class Accounting(ctypes.Structure):
+            _fields_ = [('times', ctypes.c_int64 * 4), ('faults', wintypes.DWORD),
+                        ('total', wintypes.DWORD), ('active', wintypes.DWORD), ('terminated', wintypes.DWORD)]
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                      wintypes.DWORD, ctypes.c_void_p)
+        kernel.QueryInformationJobObject.restype = wintypes.BOOL
+        deadline = time.monotonic() + timeout_s
+        while True:
+            info = Accounting()
+            if not kernel.QueryInformationJobObject(self._handle, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+                return False
+            if info.active == 0:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(.02)
+
     def close(self) -> None:
         handle = self._handle
         self._handle = None

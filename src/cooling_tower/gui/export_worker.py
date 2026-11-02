@@ -55,6 +55,7 @@ class ExportWorker(CancelableWorker):
                     self.preview,
                     self.request,
                     self.output_root,
+                    cancellation_callback=self.cancellation_requested,
                 )
             except PreviewCancelled:
                 pass
@@ -66,6 +67,7 @@ class ExportWorker(CancelableWorker):
                         traceback.format_exc(),
                     )
             else:
-                self.succeeded.emit(self.request_id, result)
+                if not self.cancellation_requested():
+                    self.succeeded.emit(self.request_id, result)
             finally:
                 self.finished.emit(self.request_id)

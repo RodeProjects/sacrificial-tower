@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.export_io import generated_file
 
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 27
+SETTINGS_SCHEMA_VERSION = 28
 _CONFIG_METADATA_KEYS = {
     "angle_storage_reference",
     "settings_schema_version",
@@ -46,14 +46,13 @@ def save_generation_settings(
     path: str | Path,
 ) -> Path:
     settings_path = Path(path)
-    ensure_writable_output(settings_path)
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    with settings_path.open("w", encoding="utf-8", newline="\n") as handle:
-        payload = {
-            "settings_schema_version": SETTINGS_SCHEMA_VERSION,
-            "angle_storage_reference": "vertical",
-            **settings.to_dict(),
-        }
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    with generated_file(settings_path) as temporary:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            payload = {
+                "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+                "angle_storage_reference": "vertical",
+                **settings.to_dict(),
+            }
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
     return settings_path.resolve()

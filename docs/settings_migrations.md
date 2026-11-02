@@ -37,6 +37,7 @@ einfacheres Format behalten.
 - [Schema 25: Postprozessor-Standardordner](#schema-25-postprozessor-standardordner)
 - [Schema 26: Postprozessor-Methodenkennung](#schema-26-postprozessor-methodenkennung)
 - [Schema 27: Standardnamen der Exportordner](#schema-27-standardnamen-der-exportordner)
+- [Schema 28: Exportordner für native Projekte](#schema-28-exportordner-für-native-projekte)
 - [Getrennte manuelle Einstellungen (eigenes Schema 19)](#getrennte-manuelle-einstellungen-eigenes-schema-19)
 
 
@@ -455,7 +456,7 @@ und sind von dieser Pfadmigration unabhängig.
 
 `manual_settings.json` verwendet den eigenen Schlüssel
 `manual_settings_schema_version` und `VersionedJsonStore`. Das bestehende
-gemeinsame Format verwendet Schema 27. `ManualSettingsStore` normalisiert
+gemeinsame Format verwendet Schema 28. `ManualSettingsStore` normalisiert
 strikte boolesche Werte, endliche Zahlen, gekoppelte Durchmessergrenzen und
 gültige Zeit-/Defizitwerte einschließlich ihrer Abhängigkeit.
 18→19 ergänzt die zunächst deaktivierte Option `limit_expansion_to_profile`.
@@ -724,3 +725,18 @@ lesbar: Die Druckdatei wird relativ zum Berichtordner gefunden, ohne historische
 Berichte umzuschreiben. Ordnerauswahl und Standardwert-Reset verwenden dieselbe
 zentrale Zuordnung. Eine automatische Zusammenführung alter Exportinhalte findet
 bei der Einstellungsmigration nicht statt.
+
+## Schema 28: Exportordner für native Projekte
+
+27→28 ergänzt `export_roots.native_project` für **Projekte (3MF)**. Sein
+Standardordner heißt `exports_3mf_projects`. Haben die bisherigen STL-Ziele
+denselben übergeordneten Ordner, wird das Projektziel daneben angelegt;
+ansonsten gilt das Standard-Ausgabeverzeichnis. Die Migration ergänzt nur den
+Pfadwert und erzeugt keine Exportverzeichnisse. Alle bestehenden STL-Ziele und
+ein bereits vorhandener gültiger Projektpfad bleiben erhalten.
+
+Der neue Pfad besitzt die stabile Kennung `export_roots.native_project` mit
+dem Kompatibilitätstoken `method-export-directory-path-v1`. Für Downgrade und
+Wiederübernahme gelten dieselbe explizite Typ-/Pfadprüfung, Sicherung und
+atomare Speicherung wie für die bestehenden Methodenpfade. Unbekannte neuere,
+beschädigte oder extern geänderte Einstellungen werden weiterhin geschützt.

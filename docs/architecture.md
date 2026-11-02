@@ -39,6 +39,7 @@ nicht überschreibende Legacy-Übernahme stehen in
 - `models`: unveränderliche fachliche Datenmodelle
 - `tower`: Profil-, Standfuß- und Mesh-Berechnung
 - `slicers`: Erkennung, Profilinventar und abgesicherte Slicer-Aufrufe
+- `native_project`: unveränderliche native 3MF-Kontexte, Druckplatten und eigene automatische Verarbeitung
 - `calibration`: slicerbasierte Iteration und G-Code-Auswertung
 - `preview`: Vorschauaufbau, Export und Berichte
 - `services`: Anwendungsfälle für Quellenerkennung, STL-Prüfung, Pre-Slice,
@@ -51,6 +52,13 @@ Fachmodule dürfen keine Qt-Abhängigkeit erhalten. Die bewusst
 gekapselte Laufzeitausnahme ist das austauschbare Slicer-Transportbackend
 `slicers.qprocess_backend`; Adapter, Prozessauftrag und fachliche Auswertung
 bleiben Qt-unabhängig.
+
+Die Eingabemasken für STL und native 3MF-Projekte sind getrennte Seiten.
+`gui/native_project` besitzt eigene Controller, Zustände, Styles und anpassbare
+Vorschaubausteine. Die native automatische Verarbeitung verwendet die
+Projektkonfiguration direkt; sie durchläuft keine STL-Profilbestätigung und
+keinen Geometrie-Fallback. Datenfluss und Exportherkunft stehen unter
+[Native Projekte](native_projects.md).
 
 Die GUI orchestriert Slicer-Suche und Profiloperationen zusätzlich über
 `slicers.operation_process` in begrenzten Hilfsprozessen. Diese Transportgrenze

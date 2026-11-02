@@ -28,6 +28,10 @@ class JobKind(str, Enum):
     PREVIEW = "preview"
     EXPORT = "export"
     MANUAL_VIEW = "manual-view"
+    NATIVE_IMPORT = "native-import"
+    NATIVE_PREPARE = "native-prepare"
+    NATIVE_AUTOMATIC = "native-automatic"
+    NATIVE_EXPORT = "native-export"
 
 
 class JobState(str, Enum):

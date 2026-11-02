@@ -43,6 +43,15 @@ def recognize_source(path: str | Path) -> SourceRecognitionResult:
     size = candidate.stat().st_size
     if size == 0:
         raise SourceRecognitionError("Die ausgewählte Datei ist leer.")
+    if kind is SourceKind.NATIVE_3MF:
+        from cooling_tower.native_project.archive import ProjectArchive, ProjectArchiveError
+        try:
+            with ProjectArchive(candidate) as archive:
+                if '_rels/.rels' not in archive.names:
+                    raise SourceRecognitionError('Im 3MF-Archiv fehlt die native Hauptmodellzuordnung.')
+        except ProjectArchiveError as error:
+            raise SourceRecognitionError(str(error)) from error
+        return SourceRecognitionResult(candidate, kind, size, '3MF-Projektarchiv')
     with candidate.open("rb") as handle:
         prefix = handle.read(SOURCE_SNIFF_LIMIT_BYTES)
 

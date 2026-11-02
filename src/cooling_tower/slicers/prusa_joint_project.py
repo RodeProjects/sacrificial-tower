@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 
 import numpy as np
 import trimesh
+from cooling_tower.protected_io import OwnedWorkspace
 
 from cooling_tower.calibration.joint_project import (
     CONTENT_TYPES_NAMESPACE, MODEL_NAMESPACE, MODEL_RELATIONSHIP_TYPE,
@@ -104,8 +105,8 @@ def build_prusa_joint_project(
     values["gcode_label_objects"] = "firmware"
     embedded_request = replace(request, profile=replace(request.profile, effective_values=values))
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="prusa_project_", dir=destination.parent) as temporary:
-        work = Path(temporary)
+    with OwnedWorkspace(prefix="stp_", parent=destination.parent) as workspace:
+        work = workspace.path
         adapter.build_slice_command(embedded_request, source_path, work, work)
         effective_ini = work / "phase14_effective_profile.ini"
         complete_ini = work / "complete_profile.ini"

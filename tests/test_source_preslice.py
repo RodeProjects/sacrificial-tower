@@ -159,6 +159,17 @@ class FakeSliceAdapter:
 
 
 class SourcePreSliceServiceTests(unittest.TestCase):
+    def test_forged_workspace_marker_does_not_authorize_cleanup(self):
+        from cooling_tower.services.source_preslice import _safe_cleanup_workspace
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'cooling_tower_source_preslice_forged'
+            root.mkdir()
+            (root / '.cooling_tower_preslice_workspace').write_text('source_preslice_v1\n')
+            original = root / 'neutral-original.stl'
+            original.write_bytes(b'original')
+            _safe_cleanup_workspace(root)
+            self.assertEqual(original.read_bytes(), b'original')
+
     def test_default_timeout_is_eight_minutes(self) -> None:
         self.assertEqual(DEFAULT_PRESLICE_TIMEOUT_S, 480.0)
         self.assertEqual(SourcePreSliceService().timeout_s, 480.0)
@@ -357,9 +368,11 @@ class SourcePreSliceServiceTests(unittest.TestCase):
             self.assertEqual(request.timeout_s, 17)
             self.assertEqual(
                 request.model_path,
-                self.validation.source_artifact.original_path,
+                self.validation.source_artifact.processing_path,
             )
-            self.assertTrue(request.model_path.samefile(self.source))
+            self.assertNotEqual(request.model_path, self.validation.source_artifact.original_path)
+            self.assertFalse(request.model_path.samefile(self.source))
+            self.assertEqual(request.model_path.read_bytes(), self.source.read_bytes())
             self.assertTrue(request.output_directory.is_relative_to(result.workspace_root))
             self.assertTrue(any(busy for _, _, busy in phases))
             analysis_phases = [

@@ -24,6 +24,9 @@ provider_name = json.loads((project_root / "config/legal_profile.json").read_tex
 native_timing_extensions = list(
     (source_root / "cooling_tower").glob("_native_timing*.pyd")
 )
+native_slicer_host = source_root / "cooling_tower" / "slicers" / "_native_slicer_host.exe"
+if not native_slicer_host.is_file():
+    raise RuntimeError("Der native Sliceraufruf muss vor PyInstaller gebaut werden.")
 if len(native_timing_extensions) != 1:
     raise RuntimeError(
         "Die native G-Code-Analyse muss vor PyInstaller genau einmal gebaut werden."
@@ -68,7 +71,8 @@ version_info_path.write_text(
 a = Analysis(
     [str(project_root / "start_gui.pyw")],
     pathex=[str(source_root)],
-    binaries=[(str(native_timing_extensions[0]), "cooling_tower")],
+    binaries=[(str(native_timing_extensions[0]), "cooling_tower"),
+              (str(native_slicer_host), "cooling_tower/slicers")],
     datas=[
         (str(legal_root), "legal"),
         (str(project_root / "config" / "legal_profile.json"), "config"),

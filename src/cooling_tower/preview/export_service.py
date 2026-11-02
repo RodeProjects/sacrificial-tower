@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import shutil
 from datetime import datetime
 from hmac import compare_digest
 from pathlib import Path
-from cooling_tower.write_policy import ensure_writable_output
+from cooling_tower.export_io import atomic_export, atomic_export_data, export_directory
 
 from cooling_tower.file_integrity import sha256_file
 from cooling_tower.preview.models import (
@@ -33,6 +32,7 @@ class PreviewExportService:
         preview: PreviewResult,
         request: PreviewRequest,
         output_root: str | Path,
+        *, cancellation_callback=None,
     ) -> PreviewExportResult:
         validate_output = getattr(
             getattr(request, "adapter", None), "validate_output_directory", None
@@ -76,23 +76,19 @@ class PreviewExportService:
                 "Das gemeinsame 3MF ist nicht mehr unverändert verfügbar."
             )
 
-        root = ensure_writable_output(output_root)
-        root.mkdir(parents=True, exist_ok=True)
+        profile = request.effective_profile
+        installation = getattr(profile, 'installation', None)
+        protected_roots = ((installation.executable_path.parent, *installation.profile_roots)
+                           if installation is not None else ())
+        protected_files = (source, request.output_source_path, *getattr(profile, 'source_paths', ()))
+        protections = dict(protected_files=protected_files, protected_roots=protected_roots,
+                           cancellation_callback=cancellation_callback)
         created_at = datetime.now().astimezone()
         stamp = created_at.strftime("%Y%m%d_%H%M%S")
         source_name = sanitize_filename_component(request.output_source_path.stem)
         base_name = f"{stamp}_{source_name}"
-        suffix = 2
-        destination = root / base_name
-        while True:
-            try:
-                destination.mkdir()
-                break
-            except FileExistsError:
-                destination = root / f"{base_name}_{suffix}"
-                suffix += 1
-
-        try:
+        with export_directory(output_root, base_name, protected_files=protected_files,
+                              protected_roots=protected_roots) as destination:
             extension = (
                 ".gcode" if preview.output_mode is OutputMode.GCODE else ".stl"
             )
@@ -102,7 +98,7 @@ class PreviewExportService:
                 else f"{source_name}_kuehlturm{extension}"
             )
             output_path = destination / output_name
-            shutil.copy2(artifact, output_path)
+            atomic_export(artifact, output_path, expected_sha256=preview.artifact_sha256, **protections)
             output_hash = sha256_file(output_path)
             if not compare_digest(output_hash, preview.artifact_sha256):
                 raise StalePreviewError(
@@ -113,7 +109,7 @@ class PreviewExportService:
                 project_output_path = destination / (
                     f"{source_name}_mit_kuehlturm.3mf"
                 )
-                shutil.copy2(project, project_output_path)
+                atomic_export(project, project_output_path, expected_sha256=preview.project_sha256, **protections)
                 if sha256_file(project_output_path) != preview.project_sha256:
                     raise StalePreviewError(
                         "Das gemeinsame 3MF wurde während des Exports verändert."
@@ -128,11 +124,9 @@ class PreviewExportService:
                 created_at=created_at,
                 project_path=project_output_path,
             )
-            report_path.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            user_report_path.write_text(
+            atomic_export_data((json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode('utf-8'),
+                               report_path, **protections)
+            atomic_export_data(
                 build_user_report(
                     preview,
                     request,
@@ -140,15 +134,9 @@ class PreviewExportService:
                     technical_report_path=report_path.resolve(),
                     created_at=created_at,
                     project_path=project_output_path,
-                ),
-                encoding="utf-8",
+                ).encode('utf-8'), user_report_path, **protections,
             )
-        except Exception:
-            # The directory was created exclusively by this operation.  A
-            # partially copied artifact or report must never look like a
-            # completed export to the user or later history scans.
-            shutil.rmtree(destination, ignore_errors=True)
-            raise
+            self._finish_export(preview, request, destination, protections)
         return PreviewExportResult(
             full_tower_infill_simulated=request.settings.simulate_full_tower_infill,
             tower_supports_disabled_simulated=request.settings.simulate_tower_without_supports,
@@ -176,3 +164,6 @@ class PreviewExportService:
                 preview.calibration_time_tolerance_s
             ),
         )
+
+    def _finish_export(self, preview, request, destination, protections) -> None:
+        """Complete method-specific outputs while the new folder is still owned."""

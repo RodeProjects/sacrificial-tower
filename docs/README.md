@@ -36,6 +36,7 @@ getrennt unter „Nachweise und historische Einordnung“.
 | Lebensdauer von 3D-Vorschauen, Cachegrößen, Fehlerarchiv und Protokollrotation | [Lokale Daten und Speichergrenzen](local_storage.md) |
 | Offene Anbieter-/Veröffentlichungsnachweise mit Fundstellen | [Platzhaltercheckliste](missing_data.md) |
 | G-Code-/STL-Prüfung, Profile, Preslice und Cache | [Quellenablauf](source_workflow.md) |
+| Native 3MF-Eingaben, eingebettete Projekteinstellungen, Druckplatten und iterative Methode | [Native Projekte](native_projects.md) |
 | Slicer-Erkennung und neue Adapter | [Erkennungsmodule](slicer_detection_modules.md) |
 | OrcaSlicer, eigene JSON-Kataloge, Store/Portable und reale Abnahme | [OrcaSlicer](orca_slicer.md) |
 | PrusaSlicer, native Projekte, Füllungsprüfung und Vorschau | [PrusaSlicer](prusa_slicer.md) |

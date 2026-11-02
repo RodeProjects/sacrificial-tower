@@ -42,13 +42,13 @@ class RealObjectSimulationTests(unittest.TestCase):
             kwargs["settings"] = replace(kwargs["settings"], simulate_source_supports=True, simulate_full_tower_infill=True)
             return request_type(**kwargs)
 
-        def export(service, preview, request, output_root):
+        def export(service, preview, request, output_root, **kwargs):
             source_paths = analyze_joint_source_toolpaths(
                 preview.manual_evaluation.gcode_path,
                 tower_center_xy_mm=preview.scene.tower_center_xy_mm,
                 expected_layer_count=request.snapshot.layer_count,
             )
-            result = export_method(service, preview, request, output_root)
+            result = export_method(service, preview, request, output_root, **kwargs)
             validate_joint_project(result.project_path, tower_full_infill=True, source_supports_enabled=True)
             self.assertEqual(request.effective_profile.effective_values["enable_support"], "0")
             self.assertTrue(result.source_supports_simulated)

@@ -138,10 +138,16 @@ def create_slicer_process_runner(
 ) -> SlicerProcessRunner:
     backend = configured_process_backend(adapter_id)
     if backend is ProcessBackend.LEGACY:
-        return SecureSlicerProcessRunner()
-    from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
-
-    return QProcessSlicerProcessRunner()
+        transport = SecureSlicerProcessRunner()
+    else:
+        from cooling_tower.slicers.qprocess_backend import QProcessSlicerProcessRunner
+        transport = QProcessSlicerProcessRunner()
+    if os.name == "nt" and adapter_id in {
+        "anycubic_slicer_next", "bambu_studio", "prusa_slicer", "orca_slicer",
+    }:
+        from cooling_tower.slicers.protected_process import WindowsProtectedSlicerProcessRunner
+        return WindowsProtectedSlicerProcessRunner(transport, adapter_id=adapter_id)
+    return transport
 
 
 def isolated_slicer_environment(root: str | Path) -> dict[str, str]:

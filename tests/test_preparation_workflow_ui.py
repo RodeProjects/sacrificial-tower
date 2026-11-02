@@ -598,7 +598,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
             expected_gap = source_layout.spacing()
 
             def gap(upper: QWidget, lower: QWidget) -> int:
-                return lower.geometry().top() - upper.geometry().bottom() - 1
+                return lower.mapTo(window,QPoint()).y() - upper.mapTo(window,QPoint(0,upper.height())).y()
 
             self.assertEqual(
                 gap(
@@ -732,7 +732,9 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 blocks.append(window.source_progress_bar)
             blocks.append(zone)
             for upper, lower in zip(blocks, blocks[1:]):
-                self.assertEqual(lower.y() - upper.geometry().bottom() - 1, layout.spacing())
+                parent = window.source_group.content_widget
+                self.assertEqual(lower.mapTo(parent,QPoint()).y()
+                    - upper.mapTo(parent,QPoint(0,upper.height())).y(),layout.spacing())
             self.assertEqual(zone.height(), zone.minimumHeight())
             self.assertEqual(zone.maximumHeight(), zone.minimumHeight())
             self.assertEqual(zone.info_widget.y(), zone.frameWidth() + zone.root_layout.contentsMargins().top())
@@ -1757,7 +1759,7 @@ class PreparationWorkflowUiTests(unittest.TestCase):
                 window.source_group.content_layout.indexOf(
                     window.preparation_source_requirements
                 ),
-                window.source_group.content_layout.indexOf(window.drop_zone),
+                window.source_group.content_layout.indexOf(window.source_handover),
             )
             self.assertLess(
                 window.slicer_group.content_layout.indexOf(

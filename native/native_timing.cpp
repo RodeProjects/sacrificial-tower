@@ -24,7 +24,7 @@ namespace {
 constexpr double MOVEMENT_EPSILON = 1e-9;
 constexpr double ARC_EPSILON = 1e-7;
 constexpr std::size_t ROW_WIDTH = 33;
-constexpr std::uint64_t ENGINE_VERSION = 6;
+constexpr std::uint64_t ENGINE_VERSION = 9;
 constexpr std::size_t DEFAULT_CACHE_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 enum RowIndex : std::size_t {
@@ -1416,13 +1416,25 @@ PyObject* native_preview_to_tuple(
     return result;
 }
 
-PyObject* native_seams_to_tuple(const std::vector<std::array<double, 3>>& points) {
+PyObject* native_seams_to_tuple(const std::vector<std::array<double, 4>>& points) {
     PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(points.size()));
     if (result == nullptr) return nullptr;
     for (std::size_t i=0;i<points.size();++i) {
         PyObject* row=Py_BuildValue("(ddd)",points[i][0],points[i][1],points[i][2]);
         if (row==nullptr) { Py_DECREF(result); return nullptr; }
         PyTuple_SET_ITEM(result,static_cast<Py_ssize_t>(i),row);
+    }
+    return result;
+}
+
+template<class Values, class Height>
+PyObject* native_layer_heights_to_tuple(const Values& values, Height height) {
+    PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(values.size()));
+    if (result == nullptr) return nullptr;
+    for (std::size_t i=0; i<values.size(); ++i) {
+        PyObject* value = PyFloat_FromDouble(height(values[i]));
+        if (value == nullptr) { Py_DECREF(result); return nullptr; }
+        PyTuple_SET_ITEM(result, static_cast<Py_ssize_t>(i), value);
     }
     return result;
 }
@@ -1549,19 +1561,28 @@ PyObject* native_result_to_dict(
         : Py_NewRef(Py_None);
     PyObject* metadata = native_metadata_to_tuple(source.metadata_events);
     PyObject* preview = native_preview_to_tuple(source.preview_segments);
+    PyObject* travels = native_preview_to_tuple(source.preview_travel_segments);
+    PyObject* travel_layers = native_layer_heights_to_tuple(source.preview_travel_segments, [](const auto& item) { return item.layer_z; });
     PyObject* seams = native_seams_to_tuple(source.seam_points);
+    PyObject* preview_layers = native_layer_heights_to_tuple(source.preview_segments, [](const auto& item) { return item.layer_z; });
+    PyObject* seam_layers = native_layer_heights_to_tuple(source.seam_points, [](const auto& item) { return item[3]; });
     PyObject* infill = native_infill_to_dict(source.infill);
     PyObject* diagnostics = native_diagnostics_to_dict(source.diagnostics);
     if (
         bounds == nullptr || metadata == nullptr || preview == nullptr
         || infill == nullptr || diagnostics == nullptr || seams == nullptr
+        || preview_layers == nullptr || seam_layers == nullptr || travels == nullptr || travel_layers == nullptr
     ) {
         Py_DECREF(result);
         Py_DECREF(layers);
         Py_XDECREF(bounds);
         Py_XDECREF(metadata);
         Py_XDECREF(preview);
+        Py_XDECREF(travels);
+        Py_XDECREF(travel_layers);
         Py_XDECREF(seams);
+        Py_XDECREF(preview_layers);
+        Py_XDECREF(seam_layers);
         Py_XDECREF(infill);
         Py_XDECREF(diagnostics);
         return nullptr;
@@ -1611,7 +1632,11 @@ PyObject* native_result_to_dict(
         )
         && PyDict_SetItemString(result, "metadata_events", metadata) == 0
         && PyDict_SetItemString(result, "preview_segments", preview) == 0
+        && PyDict_SetItemString(result, "preview_travel_segments", travels) == 0
+        && PyDict_SetItemString(result, "preview_travel_layer_z", travel_layers) == 0
         && PyDict_SetItemString(result, "seam_points", seams) == 0
+        && PyDict_SetItemString(result, "preview_layer_z", preview_layers) == 0
+        && PyDict_SetItemString(result, "seam_layer_z", seam_layers) == 0
         && dict_set_owned(
             result,
             "preview_source_segment_count",
@@ -1624,7 +1649,11 @@ PyObject* native_result_to_dict(
     Py_DECREF(bounds);
     Py_DECREF(metadata);
     Py_DECREF(preview);
+    Py_DECREF(travels);
+    Py_DECREF(travel_layers);
     Py_DECREF(seams);
+    Py_DECREF(preview_layers);
+    Py_DECREF(seam_layers);
     Py_DECREF(infill);
     Py_DECREF(diagnostics);
     if (!ok) {
@@ -1643,10 +1672,11 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
     int explicit_layers = 0;
     int collect_preview = 0;
     int collect_infill = 0;
+    int print_layers_only = 0;
     Py_ssize_t maximum_preview_segments = 60000;
     if (!PyArg_ParseTuple(
         arguments,
-        "Opppppn|OO:analyze_file",
+        "Opppppn|OOp:analyze_file",
         &path_object,
         &bambu,
         &anycubic_slicer_next,
@@ -1655,7 +1685,8 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
         &collect_infill,
         &maximum_preview_segments,
         &cancellation,
-        &orca_policy
+        &orca_policy,
+        &print_layers_only
     )) {
         return nullptr;
     }
@@ -1726,6 +1757,7 @@ PyObject* py_analyze_file(PyObject*, PyObject* arguments) {
     options.anycubic_slicer_next_compatible = anycubic_slicer_next != 0;
     options.use_explicit_layer_markers = explicit_layers != 0;
     options.collect_preview = collect_preview != 0;
+    options.print_layers_only = print_layers_only != 0;
     options.collect_infill_evidence = collect_infill != 0;
     options.maximum_preview_segments = static_cast<std::size_t>(
         maximum_preview_segments

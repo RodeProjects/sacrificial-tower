@@ -74,7 +74,7 @@ class SourceDropZoneTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_zone_accepts_only_stl_and_exposes_stl_kind(self) -> None:
+    def test_zone_retains_stl_display_and_exposes_stl_kind(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             gcode = root / "part.gcode"
@@ -87,6 +87,20 @@ class SourceDropZoneTests(unittest.TestCase):
             self.assertIs(zone.selected_kind, SourceKind.STL)
             self.assertEqual(zone.file_type_label.text(), "Binär-STL")
             self.assertEqual(zone.browse_button.text(), "Andere STL auswählen")
+
+    def test_native_container_routes_without_claiming_completed_preparation(self):
+        from native_project_fixtures import write_native
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'neutral.3mf'
+            write_native(source)
+            recognized = recognize_source(source)
+            self.assertIs(recognized.source_kind, SourceKind.NATIVE_3MF)
+            zone = SourceDropZone()
+            selected = []
+            zone.source_selected.connect(lambda path, kind: selected.append((path, kind)))
+            self.assertTrue(zone.set_file(source))
+            self.assertIs(zone.selected_kind, SourceKind.NATIVE_3MF)
+            self.assertEqual(selected[-1][1], '3mf')
 
     def test_valid_drag_stays_highlighted_until_leave_or_drop(self) -> None:
         class UrlStub:

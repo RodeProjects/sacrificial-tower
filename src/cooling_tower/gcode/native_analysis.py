@@ -31,6 +31,10 @@ class NativePreviewProduct:
     source_segment_count: int
     occupied_bounds: tuple[float, float, float, float] | None
     seam_points: tuple[tuple[float, float, float], ...] = ()
+    layer_z: tuple[float, ...] = ()
+    seam_layer_z: tuple[float, ...] = ()
+    travel_segments: tuple[tuple[float, float, float, float, float, float], ...] = ()
+    travel_layer_z: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +89,7 @@ def analyze_native_gcode(
     use_explicit_layer_markers: bool,
     collect_preview: bool = False,
     maximum_preview_segments: int = 60_000,
+    print_layers_only: bool = False,
     collect_infill: bool = False,
     cancellation_callback: CancellationCallback | None = None,
     orca_policy=None,
@@ -101,6 +106,8 @@ def analyze_native_gcode(
             message="The native full-analysis extension is unavailable.",
         )
     try:
+        if print_layers_only and getattr(_native_timing, "ENGINE_VERSION", 0) < 9:
+            raise TypeError("Native project route previews require native engine version 9.")
         if collect_preview and getattr(_native_timing, "ENGINE_VERSION", 0) < 6:
             raise TypeError("Outer-wall seam preview data requires native engine version 6.")
         if (not bambu_compatible and use_explicit_layer_markers
@@ -125,6 +132,10 @@ def analyze_native_gcode(
                 raise TypeError("Prusa timing requires native engine version 3.")
             arguments += ({"producer": "prusa", "marlin2": prusa_policy.uses_junction_deviation,
                            "limits": prusa_policy.limits},)
+        if print_layers_only:
+            if len(arguments) == 8:
+                arguments += (None,)
+            arguments += (True,)
         payload = _native_timing.analyze_file(*arguments)
     except (OverflowError, RuntimeError, TypeError, ValueError) as error:
         return NativeAnalysisResult(
@@ -358,6 +369,17 @@ def _build_preview(payload: Mapping[str, object]) -> NativePreviewProduct:
         bounds = tuple(
             _finite(value, "occupied bound") for value in bounds_payload
         )  # type: ignore[assignment]
+    layer_z = tuple(_finite(value, 'preview layer') for value in payload.get('preview_layer_z', ()))
+    seam_layer_z = tuple(_finite(value, 'seam layer') for value in payload.get('seam_layer_z', ()))
+    if layer_z and len(layer_z) != len(segments):
+        raise ValueError('Preview layer ownership does not match the segments.')
+    if seam_layer_z and len(seam_layer_z) != len(payload['seam_points']):
+        raise ValueError('Seam layer ownership does not match the points.')
+    travel_segments = tuple(tuple(_finite(value,'travel coordinate') for value in row)
+        for row in payload.get('preview_travel_segments',()))
+    travel_layer_z = tuple(_finite(value,'travel layer') for value in payload.get('preview_travel_layer_z',()))
+    if any(len(row)!=6 for row in travel_segments) or len(travel_segments)!=len(travel_layer_z):
+        raise ValueError('Travel preview ownership does not match the segments.')
     return NativePreviewProduct(
         segments=tuple(segments),
         source_segment_count=_required_payload_int(
@@ -366,6 +388,8 @@ def _build_preview(payload: Mapping[str, object]) -> NativePreviewProduct:
         occupied_bounds=bounds,
         seam_points=tuple(tuple(_finite(value, "seam coordinate") for value in point)
             for point in payload["seam_points"] if _valid_seam_shape(point)),
+        layer_z=layer_z, seam_layer_z=seam_layer_z,
+        travel_segments=travel_segments, travel_layer_z=travel_layer_z,
     )
 
 

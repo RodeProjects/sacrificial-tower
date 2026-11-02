@@ -40,6 +40,52 @@ Bitbelegung: [Microsoft NTSTATUS-Dokumentation](https://learn.microsoft.com/en-u
 
 ## Interne Freigabeschalter
 
+### Windows-Schreibgrenze der vier nativen Slicer
+
+Anycubic Slicer Next, Bambu Studio, PrusaSlicer und OrcaSlicer laufen über
+`WindowsProtectedSlicerProcessRunner`. QProcess und Legacy sind dabei nur
+austauschbare Transporte des vertrauenswürdigen Brokers; beide verwenden
+dieselbe Windows-Schreibgrenze für die tatsächliche Engine.
+
+Der Elternprozess übernimmt Eingaben und benötigte Runtime-Dateien als
+Bytekopien in einen exklusiven eigenen Arbeitsbereich. Verknüpfungen und
+Hardlink-Beziehungen werden nicht übernommen. Nur eigene Kopien erhalten neue
+Zugriffslisten; Originalberechtigungen und Originalattribute bleiben erhalten.
+Die Engine erhält einen Low-Integrity-AppContainer ohne Netzwerkfähigkeit und
+zusätzlich einen `WRITE_RESTRICTED`-Token mit einer zufälligen Auftrags-SID.
+Schreibrechte für diese SID werden ausschließlich an eigene Arbeits- und
+Umgebungsverzeichnisse vergeben. Allgemeine AppContainer-Gruppen reichen
+dadurch nicht aus, um fremde beschreibbare Dateien zu verändern.
+
+Ein eigener unsichtbarer Desktop und ein eingeschränkter Stationshandle
+ermöglichen die Windows-Laufzeitinitialisierung. Der Broker erzeugt dafür eine
+separate, suspendierte Tokenvorlage im selben AppContainer. Die Vorlage führt
+keine Programminstruktion aus und wird vor dem Start der eigentlichen Engine
+nachweislich beendet. Der eigene native Host verwendet die daraus abgeleitete
+Threadidentität ausschließlich zum Laden fest vorgegebener Windows-System-DLLs.
+Er schließt den übergebenen Tokenhandle und beendet die Impersonation, bevor er
+irgendeine Slicer-DLL lädt oder Projektdaten verarbeitet. Der primäre Token
+behält währenddessen unverändert seine Schreibbeschränkung. Bestehende Desktops
+und deren Zugriffslisten werden nicht verändert.
+
+Vor dem Fortsetzen des suspendierten Hosts prüft der Broker AppContainer,
+Integritätsstufe, eindeutige Schreib-SID und wirksame Zugriffsentscheidungen.
+Ein nicht ausbrechbares Job Object umfasst Engine und Kindprozesse. Ausgaben
+werden erst nach bestätigtem Prozessende und vollständigem Beenden des
+Prozessbaums aus dem eigenen Stagingbereich übernommen. Abbruch, Zeitlimit,
+fehlende Schutzbestätigung oder Fehler der Bereinigung verhindern die Übernahme.
+Ein ungeschützter Start ist kein Rückfallweg.
+
+`test_windows_slicer_sandbox.py` enthält opt-in Windows-Abnahmen mit selbst
+erzeugten Originalen. Der native Test-Payload wird mit
+`scripts/build_sandbox_test_probe.py` separat aus `tests/windows_sandbox_probe.c`
+gebaut und gehört nicht zur Anwendung. Er prüft den tatsächlichen Zustand nach
+der Laufzeitinitialisierung über native Datei-APIs und einen echten Kindprozess.
+Die rechtliche Einordnung der nativen CLI-Einstiege steht unter
+[Dependencies](dependencies.md#native-windows-cli-einstiege-geprüft-29102026).
+
+### Transportauswahl
+
 - `COOLING_TOWER_SLICER_PROCESS_BACKEND=qprocess|legacy` wählt den allgemeinen
   Standard. QProcess ist der Programmstandard; `legacy` bleibt als Rückfallweg.
 - `COOLING_TOWER_QPROCESS_ADAPTERS=orca_slicer,bambu_studio` schaltet nur die

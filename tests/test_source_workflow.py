@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import gc
+from dataclasses import replace
 from pathlib import Path
 import sys
 import tempfile
@@ -23,11 +25,12 @@ from cooling_tower.models import (
 
 
 class SourceModelTests(unittest.TestCase):
-    def test_source_kind_accepts_only_stl(self) -> None:
+    def test_source_kind_routes_stl_and_native_projects(self) -> None:
         self.assertIs(SourceKind.from_path("MODEL.STL"), SourceKind.STL)
-        for path in ("print.gcode", "model.3mf"):
+        self.assertIs(SourceKind.from_path("project.3MF"), SourceKind.NATIVE_3MF)
+        for path in ("print.gcode", "model.obj"):
             with self.subTest(path=path):
-                with self.assertRaisesRegex(ValueError, "ausschließlich STL"):
+                with self.assertRaisesRegex(ValueError, "native 3MF"):
                     SourceKind.from_path(path)
 
     def test_source_artifact_captures_immutable_stl_identity(self) -> None:
@@ -68,6 +71,33 @@ class SourceModelTests(unittest.TestCase):
                     analysis_gcode_path=generated,
                     gcode_origin=GCodeOrigin.GENERATED_PRESLICE,
                 )
+
+    def test_processing_snapshot_survives_external_source_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'original.stl'
+            path.write_bytes(b'original content')
+            artifact = SourceArtifact.capture(path)
+            snapshot = artifact.processing_path
+            self.assertNotEqual(snapshot, path)
+            path.write_bytes(b'externally edited')
+            artifact.verify_processing_snapshot()
+            self.assertEqual(snapshot.read_bytes(), b'original content')
+            self.assertFalse(artifact.matches_current_file(verify_content=True))
+
+    def test_artifact_copy_retains_snapshot_until_last_owner_is_released(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'original.stl'
+            path.write_bytes(b'original content')
+            artifact = SourceArtifact.capture(path)
+            retained = replace(artifact)
+            snapshot = artifact.processing_path
+            del artifact
+            gc.collect()
+            self.assertTrue(snapshot.is_file())
+            retained.verify_processing_snapshot()
+            del retained
+            gc.collect()
+            self.assertFalse(snapshot.exists())
 
 
 class WorkflowStageTests(unittest.TestCase):

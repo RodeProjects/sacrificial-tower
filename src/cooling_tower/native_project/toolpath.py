@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import math
+from bisect import bisect_left
+import struct
+import tempfile
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from threading import Event
+from typing import Callable
+
+from cooling_tower.gcode.parser import (
+    MachineStateTracker,
+    Movement,
+    ParsedGCodeLine,
+    iter_parsed_gcode_lines,
+)
+from cooling_tower.models import OccupiedBounds
+from cooling_tower.preview.models import LineSegment3D, Point3D
+from cooling_tower.native_project.seams import NativeSeamCollector
+from cooling_tower.native_project.path_bounds import movement_bounds
+
+
+ProgressCallback = Callable[[int, str], None]
+
+
+class PreviewCancelled(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class DepositionToolpathAnalysis:
+    """One-pass preview sampling plus exact deposition XY bounds."""
+
+    object_segments: tuple[LineSegment3D, ...]
+    source_segment_count: int
+    occupied_bounds: OccupiedBounds | None
+    seam_points: tuple[Point3D, ...] = ()
+    segment_layer_z: tuple[float, ...] = ()
+    seam_layer_z: tuple[float, ...] = ()
+    travel_segments: tuple[LineSegment3D, ...] = ()
+    travel_layer_z: tuple[float, ...] = ()
+
+
+_SEGMENT_RECORD = struct.Struct("<7dq")
+
+
+class DepositionToolpathCollector:
+    """Collect preview products from already parsed movement events.
+
+    Collinearly merged source segments are spooled in a compact binary stream.
+    This keeps the event pass bounded without changing the existing per-layer
+    reservoir sampling after the exact layer count becomes known.
+    """
+
+    native_product_kind = "preview"
+    print_layers_only = True
+
+    def __init__(
+        self,
+        *,
+        maximum_segments: int = 60_000,
+        spool_memory_bytes: int = 8 * 1024 * 1024,
+    ) -> None:
+        if maximum_segments < 100:
+            raise ValueError("maximum_segments must be at least 100")
+        if spool_memory_bytes < 0:
+            raise ValueError("spool_memory_bytes must not be negative")
+        self.maximum_segments = int(maximum_segments)
+        self._records = tempfile.SpooledTemporaryFile(
+            max_size=int(spool_memory_bytes),
+            mode="w+b",
+        )
+        self._total = 0
+        self._pending: LineSegment3D | None = None
+        self._pending_layer: float | None = None
+        self._pending_line = 0
+        self._minimum_x = math.inf
+        self._maximum_x = -math.inf
+        self._minimum_y = math.inf
+        self._maximum_y = -math.inf
+        self._finished = False
+        self._prusa_startup = False
+        self._prusa_layer_started = False
+        self._first_layer_line: int | None = None
+        self._native_analysis: DepositionToolpathAnalysis | None = None
+        self._seams = NativeSeamCollector()
+        self._logical_z = None
+        self._travels = []
+        self._travel_seen = 0
+
+    def consume_native(self, product: object) -> None:
+        """Accept the compact preview product emitted by the C++ core."""
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        if product is None:
+            raise ValueError("The native preview product is missing.")
+        raw_segments = getattr(product, "segments")
+        object_segments = tuple(
+            LineSegment3D(
+                Point3D(row[0], row[1], row[2]),
+                Point3D(row[3], row[4], row[5]),
+            )
+            for row in raw_segments
+        )
+        raw_bounds = getattr(product, "occupied_bounds")
+        occupied_bounds = (
+            None
+            if raw_bounds is None
+            else OccupiedBounds(*raw_bounds)
+        )
+        self._native_analysis = DepositionToolpathAnalysis(
+            object_segments=object_segments,
+            source_segment_count=int(
+                getattr(product, "source_segment_count")
+            ),
+            occupied_bounds=occupied_bounds,
+            seam_points=tuple(Point3D(*point) for point in getattr(product, "seam_points", ())),
+            segment_layer_z=tuple(getattr(product, "layer_z", ())),
+            seam_layer_z=tuple(getattr(product, "seam_layer_z", ())),
+            travel_segments=tuple(LineSegment3D(Point3D(*row[:3]),Point3D(*row[3:]))
+                for row in getattr(product,'travel_segments',())),
+            travel_layer_z=tuple(getattr(product,'travel_layer_z',())),
+        )
+        if not self._records.closed:
+            self._records.close()
+
+    def consume(self, parsed: ParsedGCodeLine, event: object) -> None:
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        comment = (parsed.comment or "").strip()
+        if self._first_layer_line is None and comment in {'LAYER_CHANGE', 'CHANGE_LAYER'}:
+            self._first_layer_line = parsed.number
+        if self._first_layer_line is None or parsed.number < self._first_layer_line:
+            return
+        if comment.casefold().startswith("generated by prusaslicer "):
+            self._prusa_startup = True
+        if self._prusa_startup:
+            self._prusa_layer_started |= comment == "LAYER_CHANGE"
+            # Startup purge is not part of the model's fit or placement bounds.
+            if not self._prusa_layer_started:
+                return
+        folded = comment.casefold()
+        if folded in {'layer_change','change_layer'}:
+            self._logical_z = None
+        elif folded.startswith(('z:','z_height:')):
+            try:
+                value = float(folded.partition(':')[2])
+                self._logical_z = value if math.isfinite(value) else None
+            except ValueError:
+                self._logical_z = None
+        self._seams.consume(parsed, event)
+        if isinstance(event,Movement) and event.category=='travel':
+            coordinates=(event.start_x,event.start_y,event.start_z,event.end_x,event.end_y,event.end_z)
+            if all(math.isfinite(value) for value in coordinates) and math.dist(coordinates[:3],coordinates[3:])>1e-6:
+                record=(parsed.number,self._logical_z if self._logical_z is not None else event.end_z,
+                    LineSegment3D(Point3D(*coordinates[:3]),Point3D(*coordinates[3:])))
+                self._travel_seen+=1
+                if len(self._travels)<self.maximum_segments:self._travels.append(record)
+                else:
+                    slot=(parsed.number*2654435761)%self._travel_seen
+                    if slot<self.maximum_segments:self._travels[slot]=record
+        if not isinstance(event, Movement) or event.category != "deposition":
+            return
+        bounds = movement_bounds(event)
+        self._minimum_x = min(self._minimum_x, bounds[0])
+        self._maximum_x = max(self._maximum_x, bounds[1])
+        self._minimum_y = min(self._minimum_y, bounds[2])
+        self._maximum_y = max(self._maximum_y, bounds[3])
+        coordinates = (
+            event.start_x,
+            event.start_y,
+            event.start_z,
+            event.end_x,
+            event.end_y,
+            event.end_z,
+        )
+        if not all(math.isfinite(value) for value in coordinates):
+            return
+        self._total += 1
+        segment = LineSegment3D(
+            Point3D(event.start_x, event.start_y, event.start_z),
+            Point3D(event.end_x, event.end_y, event.end_z),
+        )
+        layer_key = round(event.end_z if self._logical_z is None else self._logical_z, 4)
+        if (
+            self._pending is not None
+            and self._pending_layer == layer_key
+            and _collinear(self._pending, segment)
+        ):
+            self._pending = LineSegment3D(self._pending.start, segment.end)
+            return
+        self._flush_pending()
+        self._pending = segment
+        self._pending_layer = layer_key
+        self._pending_line = int(getattr(parsed, "number"))
+
+    def _flush_pending(self) -> None:
+        pending = self._pending
+        layer = self._pending_layer
+        if pending is not None and layer is not None:
+            self._records.write(
+                _SEGMENT_RECORD.pack(
+                    layer,
+                    pending.start.x,
+                    pending.start.y,
+                    pending.start.z,
+                    pending.end.x,
+                    pending.end.y,
+                    pending.end.z,
+                    self._pending_line,
+                )
+            )
+        self._pending = None
+        self._pending_layer = None
+
+    def finish(self, *, expected_layer_count: int, layer_records=()) -> DepositionToolpathAnalysis:
+        if self._finished:
+            raise RuntimeError("The toolpath collector is already finished.")
+        if expected_layer_count < 1:
+            raise ValueError("expected_layer_count must be positive")
+        self._finished = True
+        if self._native_analysis is not None:
+            return self._native_analysis
+        self._flush_pending()
+        per_layer_limit = max(
+            8,
+            min(
+                256,
+                self.maximum_segments // max(1, expected_layer_count),
+            ),
+        )
+        layers: dict[float, _LayerSample] = defaultdict(
+            lambda: _LayerSample(per_layer_limit)
+        )
+        self._records.seek(0)
+        while True:
+            raw = self._records.read(_SEGMENT_RECORD.size)
+            if not raw:
+                break
+            if len(raw) != _SEGMENT_RECORD.size:
+                raise RuntimeError("Incomplete temporary toolpath record.")
+            (
+                layer_key,
+                start_x,
+                start_y,
+                start_z,
+                end_x,
+                end_y,
+                end_z,
+                line_number,
+            ) = _SEGMENT_RECORD.unpack(raw)
+            layers[layer_key].add(
+                LineSegment3D(
+                    Point3D(start_x, start_y, start_z),
+                    Point3D(end_x, end_y, end_z),
+                ),
+                line_number,
+            )
+        values = [
+            (layer_key, segment)
+            for layer_key in sorted(layers)
+            for segment in layers[layer_key].values()
+        ]
+        if len(values) > self.maximum_segments:
+            step = len(values) / self.maximum_segments
+            values = [
+                values[int(index * step)]
+                for index in range(self.maximum_segments)
+            ]
+        occupied_bounds = (
+            OccupiedBounds(
+                self._minimum_x,
+                self._maximum_x,
+                self._minimum_y,
+                self._maximum_y,
+            )
+            if all(
+                math.isfinite(value)
+                for value in (
+                    self._minimum_x,
+                    self._maximum_x,
+                    self._minimum_y,
+                    self._maximum_y,
+                )
+            )
+            else None
+        )
+        self._records.close()
+        end_lines=tuple(layer.end_line for layer in layer_records)
+        travel_values=[]
+        for line,z,segment in sorted(self._travels,key=lambda item:item[0]):
+            index=bisect_left(end_lines,line)
+            if end_lines and index>=len(end_lines):continue
+            travel_values.append((layer_records[index].z_mm if end_lines else z,segment))
+        return DepositionToolpathAnalysis(
+            object_segments=tuple(segment for _,segment in values),
+            segment_layer_z=tuple(z for z,_ in values),
+            seam_layer_z=self._seams.layer_z,
+            source_segment_count=self._total,
+            occupied_bounds=occupied_bounds,
+            seam_points=self._seams.points,
+            travel_segments=tuple(segment for _,segment in travel_values),
+            travel_layer_z=tuple(z for z,_ in travel_values),
+        )
+
+    def close(self) -> None:
+        self._finished = True
+        if not self._records.closed:
+            self._records.close()
+
+
+@dataclass(slots=True)
+class _LayerSample:
+    limit: int
+    seen: int = 0
+    samples: list[LineSegment3D] = field(default_factory=list)
+    extremes: dict[str, LineSegment3D] = field(default_factory=dict)
+    extreme_values: dict[str, float] = field(default_factory=dict)
+
+    def add(self, segment: LineSegment3D, line_number: int) -> None:
+        self.seen += 1
+        coordinates = {
+            "min_x": min(segment.start.x, segment.end.x),
+            "max_x": max(segment.start.x, segment.end.x),
+            "min_y": min(segment.start.y, segment.end.y),
+            "max_y": max(segment.start.y, segment.end.y),
+        }
+        for key, value in coordinates.items():
+            previous = self.extreme_values.get(key)
+            if previous is None or (
+                key.startswith("min") and value < previous
+            ) or (key.startswith("max") and value > previous):
+                self.extreme_values[key] = value
+                self.extremes[key] = segment
+
+        if len(self.samples) < self.limit:
+            self.samples.append(segment)
+            return
+        # Deterministic reservoir sampling keeps coverage over an entire layer
+        # without retaining every extrusion move from a large source file.
+        slot = (line_number * 2_654_435_761) % self.seen
+        if slot < self.limit:
+            self.samples[slot] = segment
+
+    def values(self) -> tuple[LineSegment3D, ...]:
+        result: list[LineSegment3D] = []
+        seen: set[LineSegment3D] = set()
+        for segment in (*self.extremes.values(), *self.samples):
+            if segment not in seen:
+                seen.add(segment)
+                result.append(segment)
+        return tuple(result)
+
+
+def _collinear(first: LineSegment3D, second: LineSegment3D) -> bool:
+    if math.dist(
+        (first.end.x, first.end.y, first.end.z),
+        (second.start.x, second.start.y, second.start.z),
+    ) > 1e-5:
+        return False
+    first_vector = (
+        first.end.x - first.start.x,
+        first.end.y - first.start.y,
+        first.end.z - first.start.z,
+    )
+    second_vector = (
+        second.end.x - second.start.x,
+        second.end.y - second.start.y,
+        second.end.z - second.start.z,
+    )
+    first_length = math.sqrt(sum(value * value for value in first_vector))
+    second_length = math.sqrt(sum(value * value for value in second_vector))
+    if first_length <= 1e-9 or second_length <= 1e-9:
+        return False
+    dot = sum(
+        left * right for left, right in zip(first_vector, second_vector)
+    ) / (first_length * second_length)
+    return dot >= 0.99995
+
+
+def analyze_deposition_toolpaths(
+    gcode_path: str | Path,
+    *,
+    expected_layer_count: int,
+    maximum_segments: int = 60_000,
+    cancellation_event: Event | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> DepositionToolpathAnalysis:
+    """Collect preview paths and exact occupied bounds in one parser pass."""
+
+    if maximum_segments < 100:
+        raise ValueError("maximum_segments must be at least 100")
+    notify = progress_callback or (lambda _percent, _status: None)
+    notify(-1, "Objekt-Werkzeugpfade werden vereinfacht …")
+    tracker = MachineStateTracker()
+    collector = DepositionToolpathCollector(maximum_segments=maximum_segments)
+    try:
+        for parsed in iter_parsed_gcode_lines(gcode_path):
+            if parsed.number % 2_000 == 0 and (
+                cancellation_event is not None and cancellation_event.is_set()
+            ):
+                raise PreviewCancelled()
+            collector.consume(parsed, tracker.process_line(parsed))
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise PreviewCancelled()
+        return collector.finish(expected_layer_count=expected_layer_count)
+    except BaseException:
+        collector.close()
+        raise
+
+
+def extract_deposition_toolpaths(
+    gcode_path: str | Path,
+    *,
+    expected_layer_count: int,
+    maximum_segments: int = 60_000,
+    cancellation_event: Event | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[tuple[LineSegment3D, ...], int]:
+    """Return the backward-compatible preview-only result."""
+
+    analysis = analyze_deposition_toolpaths(
+        gcode_path,
+        expected_layer_count=expected_layer_count,
+        maximum_segments=maximum_segments,
+        cancellation_event=cancellation_event,
+        progress_callback=progress_callback,
+    )
+    return analysis.object_segments, analysis.source_segment_count

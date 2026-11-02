@@ -695,11 +695,11 @@ class Phase17Tests(unittest.TestCase):
         preview = PreviewService(SyntheticSuccessfulCalibrator()).prepare(request)
         output_root = self.root / "out"
 
-        def replace_during_copy(_source: Path, destination: Path) -> None:
+        def replace_during_copy(_source: Path, destination: Path, **_options) -> None:
             Path(destination).write_bytes(b"changed during copy")
 
         with patch(
-            "cooling_tower.preview.export_service.shutil.copy2",
+            "cooling_tower.preview.export_service.atomic_export",
             side_effect=replace_during_copy,
         ):
             with self.assertRaisesRegex(StalePreviewError, "während des Exports"):

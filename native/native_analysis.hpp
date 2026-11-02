@@ -50,6 +50,7 @@ struct PreviewSegment {
     double end_x = 0.0;
     double end_y = 0.0;
     double end_z = 0.0;
+    double layer_z = 0.0;
 };
 
 struct MetadataEvent {
@@ -89,6 +90,7 @@ struct Options {
     bool anycubic_slicer_next_compatible = false;
     bool use_explicit_layer_markers = false;
     bool collect_preview = false;
+    bool print_layers_only = false;
     bool collect_infill_evidence = false;
     std::size_t maximum_preview_segments = 60000;
     std::size_t cancellation_interval_lines = 2048;
@@ -108,7 +110,8 @@ struct Result {
     std::int64_t pre_layer_untimed_event_count = 0;
     std::vector<MetadataEvent> metadata_events;
     std::vector<PreviewSegment> preview_segments;
-    std::vector<std::array<double, 3>> seam_points;
+    std::vector<PreviewSegment> preview_travel_segments;
+    std::vector<std::array<double, 4>> seam_points;
     std::uint64_t preview_source_segment_count = 0;
     bool has_occupied_bounds = false;
     double minimum_x = 0.0;

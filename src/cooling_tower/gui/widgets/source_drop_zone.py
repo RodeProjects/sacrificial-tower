@@ -21,10 +21,10 @@ from cooling_tower.gui.update_transaction import suspended_widget_updates
 
 
 class SourceDropZone(QFrame):
-    """Drag-and-drop and file-dialog input for one STL model."""
+    """Common format routing; STL and native projects have separate masks."""
 
     EMPTY_MINIMUM_HEIGHT_PX = 260
-    EMPTY_PROMPT = "STL hier ablegen\noder über den Dialog auswählen"
+    EMPTY_PROMPT = "STL oder 3MF hier ablegen\noder über den Dialog auswählen"
 
     source_selected = Signal(str, str)
     file_rejected = Signal(str)
@@ -123,7 +123,7 @@ class SourceDropZone(QFrame):
         # constructed.  Giving them an owner immediately prevents Qt from
         # treating them as temporary top-level windows before the action layout
         # reparents them.
-        self.browse_button = QPushButton("STL auswählen …", self)
+        self.browse_button = QPushButton("STL oder 3MF auswählen …", self)
         self.browse_button.setObjectName("sourcePrimaryActionButton")
         self.browse_button.clicked.connect(self.select_file)
         self.remove_button = QPushButton("STL entfernen", self)
@@ -179,14 +179,23 @@ class SourceDropZone(QFrame):
     def select_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "STL auswählen",
+            "STL oder natives 3MF-Projekt auswählen",
             str(self._selected_path.parent if self._selected_path else Path.home()),
-            "STL-Modelldateien (*.stl)",
+            "Modelle und Projekte (*.stl *.3mf);;STL-Modelle (*.stl);;3MF-Projekte (*.3mf)",
         )
         if selected:
             self.set_file(selected)
 
     def set_file(self, path: str | Path) -> bool:
+        candidate = Path(path).expanduser()
+        if candidate.suffix.casefold() == '.3mf' and candidate.is_file():
+            # Route tentatively; the native worker validates the complete
+            # archive before accepting a project. Never scan its ZIP on the UI.
+            self._selected_path = candidate.resolve()
+            self._selected_kind = SourceKind.NATIVE_3MF
+            with suspended_widget_updates(self.window()):
+                self.source_selected.emit(str(self._selected_path),SourceKind.NATIVE_3MF.value)
+            return True
         try:
             recognized = recognize_source(path)
         except (OSError, SourceRecognitionError, ValueError) as error:
@@ -201,6 +210,9 @@ class SourceDropZone(QFrame):
     def _apply_recognized_source(self, recognized) -> None:
         self._selected_path = recognized.path
         self._selected_kind = recognized.source_kind
+        if recognized.source_kind is SourceKind.NATIVE_3MF:
+            self.source_selected.emit(str(self._selected_path), recognized.source_kind.value)
+            return
         self.setProperty("loaded", True)
         size = recognized.size_bytes
         self.status_value_label.setText(
@@ -274,7 +286,7 @@ class SourceDropZone(QFrame):
         self.file_type_label.setText("–")
         self.file_path_label.setText("–")
         self.file_info_label.clear()
-        self.browse_button.setText("STL auswählen …")
+        self.browse_button.setText("STL oder 3MF auswählen …")
         self.remove_button.setText("STL entfernen")
         self.reload_button.setText("STL neu einlesen")
         self._apply_display_state("empty")
@@ -313,7 +325,7 @@ class SourceDropZone(QFrame):
         path = self._single_supported_url(urls)
         if path is None:
             self.file_rejected.emit(
-                "Bitte genau eine vorhandene STL-Datei ablegen."
+                "Bitte genau eine vorhandene STL- oder 3MF-Datei ablegen."
             )
             event.ignore()
             return
@@ -327,7 +339,7 @@ class SourceDropZone(QFrame):
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.suffix.casefold() == ".stl" and path.is_file():
+            if path.suffix.casefold() in {".stl", ".3mf"} and path.is_file():
                 supported.append(path)
         return supported[0] if len(supported) == 1 and len(urls) == 1 else None
 

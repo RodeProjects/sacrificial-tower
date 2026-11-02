@@ -73,9 +73,9 @@ und 64 verbleibenden Lookahead-Bewegungen. Die gemeinsame numerische Mechanik
 liegt in `window_planner.py`, die fachlichen Übergangsregeln bleiben in den
 eigenen Modulen. Bambu und die allgemeine Zeitplanung verwenden weiterhin ihre
 bisherigen Durchläufe. Die C++-Entsprechungen liegen in `orca_timing.hpp` und
-`prusa_timing.hpp`; die native Engine trägt Version 6. Eine ältere Erweiterung
+`prusa_timing.hpp`; die native Engine trägt Version 9. Eine ältere Erweiterung
 darf für diese geänderten Semantiken keinen vermeintlich erfolgreichen
-Prusa-Pfad liefern. Der Analyseparserstand 20 verwirft bisherige Analyse- und
+Prusa-Pfad liefern. Der Analyseparserstand 22 verwirft bisherige Analyse- und
 Vorslice-Caches; das Schema persistierter Benutzereinstellungen ändert sich nicht.
 
 Die expliziten Schichtmarkierungen der unterstützten Slicer halten auch
@@ -90,6 +90,28 @@ Vorschauprodukt auf Python zurück, damit Nahtmarkierungen erhalten bleiben.
 Engine 6 beschränkt die Seams-Punkte auf explizit als äußere Wand bezeichnete
 Pfade. Die Vorschau verwendet dafür mindestens diese Engine; ältere
 Erweiterungen liefern die Punkte über den Python-Fallback.
+
+Engine 7 ergänzt die optionale Vorschauabgrenzung `print_layers_only` für native
+Projekte. Sie verwirft Start-/Purgebewegungen vor der ersten expliziten
+Druckschicht und berücksichtigt die tatsächlichen Extrempunkte von Kreisbögen.
+Der native Projekt-Collector fordert diesen Modus ausdrücklich an; der
+bestehende STL-Collector behält seine bisherige Voreinstellung. Beide Varianten
+der nativen Projektvorschau verwenden dieselbe fachliche Abgrenzung.
+
+Engine 8 ergänzt die nominelle Druckschicht für jeden Vorschauabschnitt und
+Nahtpunkt. Die nativen Projektmasken wählen damit ganze Druckschichten aus,
+auch wenn ein Z-Offset oder eine Rampe ihre tatsächlichen Koordinaten verschiebt.
+Physische Koordinaten bleiben für die Darstellung erhalten. Schichtfilter und
+Rasterzwischenspeicher verwenden die getrennte Zuordnung; die STL-Voreinstellung
+bleibt erhalten. Ältere Erweiterungen nutzen hierfür den Python-Fallback.
+
+Engine 9 liefert im nativen Projektmodus zusätzlich begrenzt gesampelte
+Fahrwege. Ihre Druckschicht wird aus den abgeschlossenen Analyseschichten und
+den G-Code-Zeilennummern bestimmt; physische Z-Hops verändern diese Zuordnung
+nicht. Die Sammlung ist auf das Vorschau-Segmentlimit begrenzt und verändert
+weder Druckbahn-Grenzen noch Zeitberechnung. Der Python-Fallback verwendet
+dieselbe Auswahl- und Schichtzuordnung. Der STL-Collector fordert diese
+zusätzlichen Fahrwege nicht an.
 
 Die Schichtzeiten bleiben Bewegungsprognosen. Rundung, Firmwareabläufe und
 die native Diskretisierung von Kreisbögen können geringe Unterschiede zum

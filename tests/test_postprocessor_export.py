@@ -52,12 +52,12 @@ class PostprocessorExportTests(unittest.TestCase):
     def test_report_failure_removes_only_new_incomplete_export(self):
         first = export_postprocessor_run(self.fixture.service, self.result, self.root)
         original = first.output_path.read_bytes()
-        write_text = Path.write_text
-        def fail_report(path, *args, **kwargs):
+        from cooling_tower.postprocessor_export import atomic_export_data
+        def fail_report(data, path, **kwargs):
             if path.name == "export_report.json":
                 raise OSError("report locked")
-            return write_text(path, *args, **kwargs)
-        with patch.object(Path, "write_text", fail_report):
+            return atomic_export_data(data, path, **kwargs)
+        with patch("cooling_tower.postprocessor_export.atomic_export_data", side_effect=fail_report):
             with self.assertRaises(OSError):
                 export_postprocessor_run(self.fixture.service, self.result, self.root)
         self.assertEqual(tuple(self.root.iterdir()), (first.run_directory,))

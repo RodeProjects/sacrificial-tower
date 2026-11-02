@@ -4,7 +4,8 @@ import hashlib
 import json
 import math
 import shutil
-import tempfile
+from cooling_tower.protected_io import OwnedWorkspace
+from cooling_tower.export_io import export_parent, atomic_export, atomic_export_data
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -171,8 +172,14 @@ class CalibrationService:
                 CalibrationFailureCode.GEOMETRY_INVALID,
                 "Die ursprüngliche Quelldatei wurde seit ihrer Prüfung verändert.",
             )
+        if source_artifact is not None:
+            try:
+                source_artifact.verify_processing_snapshot()
+            except (OSError, ValueError, RuntimeError) as error:
+                return self._failure(config, CalibrationState.INVALID_GEOMETRY, source_hash,
+                    CalibrationFailureCode.GEOMETRY_INVALID, str(error))
         joint_source_stl = (
-            source_artifact.original_path
+            source_artifact.processing_path
             if source_artifact is not None
             and source_artifact.source_kind is SourceKind.STL
             and (getattr(adapter, "supports_joint_project", False) or profile.installation.adapter_id in {
@@ -414,11 +421,11 @@ class CalibrationService:
         failures: list[CalibrationFailure] = []
         with (
             protect_profile_sources(profile),
-            tempfile.TemporaryDirectory(
+            OwnedWorkspace(
                 prefix="cooling_tower_calibration_"
             ) as temporary,
         ):
-            work_root = Path(temporary)
+            work_root = temporary.path
             native_joint_template = work_root / "native_joint_template.3mf"
             joint_only = reuse_seed
             initial_profile_root = work_root / (
@@ -1156,6 +1163,7 @@ class CalibrationService:
                         warnings=warnings,
                         source=source,
                         source_hash=source_hash,
+                        protected_roots=(profile.installation.executable_path.parent, *profile.installation.profile_roots),
                         output_directory=Path(output_directory),
                         best_iteration_number=selected_iteration_number,
                         improved_over_initial_candidate=(
@@ -1455,6 +1463,7 @@ class CalibrationService:
                     warnings=warnings,
                     source=source,
                     source_hash=source_hash,
+                    protected_roots=(profile.installation.executable_path.parent, *profile.installation.profile_roots),
                     output_directory=Path(output_directory),
                     best_iteration_number=best_iteration_number,
                     improved_over_initial_candidate=improved,
@@ -1546,6 +1555,7 @@ class CalibrationService:
         warnings: list[str],
         source: Path,
         source_hash: str,
+        protected_roots: tuple[Path, ...],
         output_directory: Path,
         best_iteration_number: int,
         improved_over_initial_candidate: bool,
@@ -1617,65 +1627,63 @@ class CalibrationService:
                     improved_over_initial_candidate=False,
                     termination_reason="error",
                 )
-        output_directory = ensure_writable_output(output_directory)
-        output_directory.mkdir(parents=True, exist_ok=True)
-        stl_destination = ensure_writable_output(output_directory / "cooling_tower_slicer_evaluated.stl", protected_files=(source,))
-        shutil.copy2(candidate_stl, stl_destination)
-        gcode_destination = None
-        if candidate_gcode is not None:
-            gcode_destination = output_directory / f"{source.stem}_cooling_tower.gcode"
-            ensure_writable_output(gcode_destination, protected_files=(source,))
-            shutil.copy2(candidate_gcode, gcode_destination)
-        project_destination = None
-        if candidate_project is not None:
-            project_destination = output_directory / (
-                f"{source.stem}_with_cooling_tower.3mf"
+        with export_parent(output_directory, protected_files=(source,),
+                           protected_roots=protected_roots) as output_directory:
+            stl_destination = ensure_writable_output(output_directory / "cooling_tower_slicer_evaluated.stl", protected_files=(source,))
+            atomic_export(candidate_stl, stl_destination, expected_sha256=sha256_file(candidate_stl), protected_files=(source,), overwrite=True)
+            gcode_destination = None
+            if candidate_gcode is not None:
+                gcode_destination = output_directory / f"{source.stem}_cooling_tower.gcode"
+                ensure_writable_output(gcode_destination, protected_files=(source,))
+                atomic_export(candidate_gcode, gcode_destination, expected_sha256=sha256_file(candidate_gcode), protected_files=(source,), overwrite=True)
+            project_destination = None
+            if candidate_project is not None:
+                project_destination = output_directory / (
+                    f"{source.stem}_with_cooling_tower.3mf"
+                )
+                ensure_writable_output(project_destination, protected_files=(source,))
+                atomic_export(candidate_project, project_destination, expected_sha256=sha256_file(candidate_project), protected_files=(source,), overwrite=True)
+            if config.mode is CalibrationMode.GCODE and gcode_destination is None:
+                raise GCodeIntegrationError(
+                    "Für den ausgewählten besten Kandidaten liegt kein integrierter "
+                    "G-Code vor."
+                )
+            exported = (
+                gcode_destination
+                if config.mode is CalibrationMode.GCODE
+                else stl_destination
             )
-            ensure_writable_output(project_destination, protected_files=(source,))
-            shutil.copy2(candidate_project, project_destination)
-        if config.mode is CalibrationMode.GCODE and gcode_destination is None:
-            raise GCodeIntegrationError(
-                "Für den ausgewählten besten Kandidaten liegt kein integrierter "
-                "G-Code vor."
+            if exported is None:
+                raise GCodeIntegrationError(
+                    "Für den Kalibrierungskandidaten fehlt die erwartete Exportdatei."
+                )
+            result = CalibrationResult(
+                state=state,
+                mode=config.mode,
+                iterations=tuple(iterations),
+                profile=profile,
+                stl_path=stl_destination.resolve(),
+                gcode_path=(
+                    gcode_destination.resolve() if gcode_destination else None
+                ),
+                placement=placement,
+                project_path=(
+                    project_destination.resolve() if project_destination else None
+                ),
+                failures=tuple(failures),
+                warnings=tuple(warnings),
+                source_sha256=source_hash,
+                output_sha256=sha256_file(exported),
+                configured_iteration_count=config.maximum_iterations,
+                best_iteration_number=best_iteration_number,
+                improved_over_initial_candidate=improved_over_initial_candidate,
+                termination_reason=termination_reason,
+                continuation_profile=continuation_profile,
             )
-        exported = (
-            gcode_destination
-            if config.mode is CalibrationMode.GCODE
-            else stl_destination
-        )
-        if exported is None:
-            raise GCodeIntegrationError(
-                "Für den Kalibrierungskandidaten fehlt die erwartete Exportdatei."
-            )
-        result = CalibrationResult(
-            state=state,
-            mode=config.mode,
-            iterations=tuple(iterations),
-            profile=profile,
-            stl_path=stl_destination.resolve(),
-            gcode_path=(
-                gcode_destination.resolve() if gcode_destination else None
-            ),
-            placement=placement,
-            project_path=(
-                project_destination.resolve() if project_destination else None
-            ),
-            failures=tuple(failures),
-            warnings=tuple(warnings),
-            source_sha256=source_hash,
-            output_sha256=sha256_file(exported),
-            configured_iteration_count=config.maximum_iterations,
-            best_iteration_number=best_iteration_number,
-            improved_over_initial_candidate=improved_over_initial_candidate,
-            termination_reason=termination_reason,
-            continuation_profile=continuation_profile,
-        )
-        report_path = ensure_writable_output(output_directory / "calibration_report.json", protected_files=(source,))
-        report_path.write_text(
-            json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return replace(result, report_path=report_path.resolve())
+            report_path = ensure_writable_output(output_directory / "calibration_report.json", protected_files=(source,))
+            atomic_export_data((json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                               report_path, protected_files=(source,), overwrite=True)
+            return replace(result, report_path=report_path.resolve())
 
     def _combined_evaluation(
         self,

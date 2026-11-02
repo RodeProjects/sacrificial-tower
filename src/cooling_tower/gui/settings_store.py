@@ -506,6 +506,18 @@ def _migrate_settings_26_to_27(
     return migrated
 
 
+def _migrate_settings_27_to_28(payload: dict[str, Any], *, default_base: Path) -> dict[str, Any]:
+    """Add an independent native-project destination; keep every STL target."""
+    migrated = dict(payload)
+    roots = normalize_export_roots(migrated.get('export_roots'))
+    parents = {Path(value).parent for method, value in roots.items() if method != 'native_project'}
+    base = next(iter(parents)) if len(parents) == 1 else default_base
+    roots.setdefault('native_project', default_export_roots(base)['native_project'])
+    migrated['export_roots'] = roots
+    migrated['setting_compatibility'] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -687,8 +699,9 @@ class UserSettingsStore:
             self.user_path,
             schema_key="settings_schema_version",
             current_version=SETTINGS_SCHEMA_VERSION,
-            migrations={**_USER_SETTINGS_MIGRATIONS, 26: lambda payload: _migrate_settings_26_to_27(
-                payload, default_base=self.load_default_output_root())},
+            migrations={**_USER_SETTINGS_MIGRATIONS,
+                26: lambda payload: _migrate_settings_26_to_27(payload, default_base=self.load_default_output_root()),
+                27: lambda payload: _migrate_settings_27_to_28(payload, default_base=self.load_default_output_root())},
             normalizer=_normalize_user_settings,
             document_name="Die gespeicherten Benutzereinstellungen",
         )

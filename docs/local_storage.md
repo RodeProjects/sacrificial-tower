@@ -8,7 +8,9 @@ dabei gelöscht.
 ## Exportordner
 
 Neue Exporte werden standardmäßig unter `output/exports_automatic_mode`, `output/exports_manual_mode`
-beziehungsweise `output/exports_postprocessor` abgelegt. Frühere Standardpfade werden
+beziehungsweise `output/exports_postprocessor` abgelegt. Native 3MF-Projekte verwenden
+den zusätzlichen, unabhängig einstellbaren Ordner `output/exports_3mf_projects`.
+Frühere Standardpfade werden
 mit gesicherten Einstellungen umgestellt; alte Exporte im früheren Standardordner
 bleiben über die Exporthistorie erreichbar. Jede Methode erzeugt darin
 eigene Zeitstempel-Unterordner mit Druckdateien und Berichten. Die allgemeinen
@@ -17,7 +19,7 @@ Reset auf ihren Standard. Bereits vorhandene Exporte bleiben an ihrem bisherigen
 Ort. Die zuletzt exportierte Datei und ihr erneut aufrufbarer Bericht werden
 je Methode während der Sitzung gemerkt; die Ordnersuche berücksichtigt den
 jeweiligen Methodenordner. Das gespeicherte Format ist unter
-[Einstellungsmigrationen](settings_migrations.md#schema-27-standardnamen-der-exportordner) beschrieben.
+[Einstellungsmigrationen](settings_migrations.md#schema-28-exportordner-für-native-projekte) beschrieben.
 
 ## Vorschauen und Arbeitsdateien
 

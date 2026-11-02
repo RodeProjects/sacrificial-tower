@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import math
 import shutil
-import tempfile
+import stat
+from cooling_tower.protected_io import OwnedTemporaryDirectory
 from bisect import bisect_left
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -195,7 +196,7 @@ class ManualGenerationService:
             import numpy as np
             import trimesh
             check_cancel(cancellation_event)
-            mesh = trimesh.load(request.source_artifact.original_path,file_type="stl",force="mesh",process=False)
+            mesh = trimesh.load(request.source_artifact.processing_path,file_type="stl",force="mesh",process=False)
             triangles = np.asarray(mesh.triangles,dtype=float).copy()
             triangles[:,:,2] -= float(mesh.bounds[0,2])
             triangles.setflags(write=False)
@@ -217,9 +218,7 @@ class ManualGenerationService:
         data = self.preview_service._source_data(request, cancellation_event=cancellation_event, notify=notify)
         owner = None
         try:
-            if self.workspace_parent is not None:
-                ensure_writable_output(self.workspace_parent).mkdir(parents=True, exist_ok=True)
-            owner = tempfile.TemporaryDirectory(prefix="manual_tower_", dir=self.workspace_parent)
+            owner = OwnedTemporaryDirectory(prefix="manual_tower_", parent=self.workspace_parent)
             root = Path(owner.name)
             stl = root / "manual_tower.stl"
             notify(25, "Die gestaltete Form wird unverändert als geschlossenes STL erzeugt …")
@@ -350,36 +349,54 @@ class ManualGenerationService:
 
 
 class ManualExportService(PreviewExportService):
-    def export(self, preview, request, output_root):
+    def export(self, preview, request, output_root, *, cancellation_callback=None):
         if not request.profiles_are_current():
             raise ValueError("Die bestätigten Slicerprofile wurden nach der Prüfung verändert.")
         e = preview.manual_evaluation
         if e is None or (e.gcode_path is not None and (
                 not e.gcode_path.is_file() or sha256_file(e.gcode_path) != e.gcode_sha256)):
             raise ValueError("Der vollständig geprüfte G-Code ist nicht mehr unverändert verfügbar.")
-        result = super().export(preview, request, output_root)
-        try:
-            # Timing values and the evaluated hash are already in the report.
-            # Printer instructions belong only to this disposable verification job.
-            root = preview.diagnostics_directory
-            for name in ("diagnostics", "project_diagnostics"):
-                source = root / name
-                if source.is_dir():
-                    shutil.copytree(source, result.run_directory / name)
-            if not request.profiles_are_current() or not request.original_source_is_current() or sha256_file(request.source_path) != preview.source_sha256:
-                raise ValueError("Quelle oder Profile wurden während des Exports verändert.")
-            if e.gcode_path is not None:
-                owner = preview._temporary_owner
-                if owner is None or not e.gcode_path.resolve().is_relative_to(Path(owner.name).resolve()):
-                    raise ValueError("Der Prüfslice liegt außerhalb des temporären Arbeitsbereichs.")
-                if sha256_file(e.gcode_path) != e.gcode_sha256:
-                    raise ValueError("Die Prüfdaten wurden während des Exports verändert.")
-                e.gcode_path.unlink()
-                # Re-exports use the retained measurements and still verify the
-                # source, profiles, geometry and project through the base service.
-                preview.manual_evaluation = replace(e, gcode_path=None)
-        except Exception:
-            shutil.rmtree(result.run_directory, ignore_errors=True)
-            raise
+        result = super().export(preview, request, output_root, cancellation_callback=cancellation_callback)
         return ManualExportResult(**{f.name:getattr(result,f.name) for f in fields(result)},
                                   joint_sliced=e.joint_sliced)
+
+    def _finish_export(self, preview, request, destination, protections):
+        from cooling_tower.export_io import atomic_export, export_parent, _pinned_parent
+        e = preview.manual_evaluation
+        # Timing values and the evaluated hash are already in the report.
+        # Printer instructions belong only to this disposable verification job.
+        root = preview.diagnostics_directory
+        for name in ("diagnostics", "project_diagnostics"):
+            source = root / name
+            if source.is_dir():
+                pending = [(source, destination / name)]
+                parents = {key: value for key, value in protections.items() if key != 'cancellation_callback'}
+                while pending:
+                    original, target = pending.pop()
+                    if original.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                        raise ValueError('Die Prüfdaten enthalten eine Verzeichnisverknüpfung.')
+                    with export_parent(target, **parents):
+                        pass
+                    for child in original.iterdir():
+                        info = child.lstat()
+                        if info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                            raise ValueError('Die Prüfdaten enthalten eine Verknüpfung.')
+                        if child.is_dir():
+                            pending.append((child, target / child.name))
+                        elif stat.S_ISREG(info.st_mode):
+                            atomic_export(child, target / child.name, expected_sha256=sha256_file(child), **protections)
+                        else:
+                            raise ValueError('Die Prüfdaten enthalten eine ungültige Datei.')
+        if not request.profiles_are_current() or not request.original_source_is_current() or sha256_file(request.source_path) != preview.source_sha256:
+            raise ValueError("Quelle oder Profile wurden während des Exports verändert.")
+        if e.gcode_path is not None:
+            owner = preview._temporary_owner
+            if owner is None or not e.gcode_path.resolve().is_relative_to(Path(owner.name).resolve()):
+                raise ValueError("Der Prüfslice liegt außerhalb des temporären Arbeitsbereichs.")
+            if sha256_file(e.gcode_path) != e.gcode_sha256:
+                raise ValueError("Die Prüfdaten wurden während des Exports verändert.")
+            with _pinned_parent(e.gcode_path.parent):
+                e.gcode_path.unlink()
+            # Re-exports use the retained measurements and still verify the
+            # source, profiles, geometry and project through the base service.
+            preview.manual_evaluation = replace(e, gcode_path=None)

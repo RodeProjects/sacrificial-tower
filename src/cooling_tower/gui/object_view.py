@@ -50,7 +50,8 @@ class SourceMeshWorker(CancelableWorker):
             if not self.artifact.matches_current_file(verify_content=True):
                 raise ValueError("Die Original-STL wurde seit der Vorbereitung verändert.")
             check_cancel(self.cancellation_event)
-            mesh = trimesh.load(self.artifact.original_path, file_type="stl", force="mesh", process=False)
+            self.artifact.verify_processing_snapshot()
+            mesh = trimesh.load(self.artifact.processing_path, file_type="stl", force="mesh", process=False)
             triangles = np.asarray(mesh.triangles, dtype=float).copy()
             triangles[:, :, 2] -= float(mesh.bounds[0, 2])
             triangles.setflags(write=False)

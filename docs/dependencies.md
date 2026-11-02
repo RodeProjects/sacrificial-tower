@@ -1,6 +1,6 @@
 # Abhängigkeiten und Lizenznachweise
 
-Letzte Prüfung aller folgenden Einträge: **14.09.2026**. Maßgeblich für den
+Basisprüfung: **14.09.2026**; abweichende Prüfdaten stehen beim jeweiligen Eintrag. Maßgeblich für den
 Windows-x64-Build mit Python 3.13 (lokale Prüfung: 3.13.2) sind [requirements-windows.lock](../requirements-windows.lock)
 und [dependency_artifacts.json](../config/dependency_artifacts.json). Die Hashes
 binden die Aussagen an konkrete Wheels. Die Lizenzdateien der tatsächlich
@@ -148,14 +148,41 @@ Publish-Einstieg. Details unter [Kostenlose Veröffentlichung](distribution.md).
 
 ## Slicer, Dienste und eigene Inhalte
 
-Slicer werden ausschließlich als separat installierte externe Programme
-angesprochen und nicht mitgeliefert. Profile werden gelesen und in eigenen
+Slicer bleiben separat installierte externe Engines und werden nicht
+mitgeliefert. Der eigene Windows-Starthelfer lädt ihren nativen CLI-Einstieg
+in einem getrennten, eingeschränkten Prozess. Profile werden gelesen und in eigenen
 Arbeitsordnern isoliert verarbeitet. Das Kopieren von Profilen in exportierte
 Projekte kann deren eigene Rechte berühren; Benutzer müssen passende Rechte an
 ihren Eingaben besitzen. Eine externe Prozessschnittstelle ist keine pauschale
 Freigabe für jede Form der Bündelung oder jeden Drittinhalt. Vor einer späteren
 Mitlieferung eines Slicers ist dessen konkrete Version/Lizenz gesondert zu prüfen.
 Produktnamen bezeichnen Kompatibilität, keine Partnerschaft.
+
+### Native Windows-CLI-Einstiege (geprüft 29.10.2026)
+
+| Externe Engine / Versionsstand | Lizenzquelle | Nutzung und Distributionspflichten |
+|---|---|---|
+| Anycubic Slicer Next 2.0.0.3 | AGPL-3.0, [Projektlizenz](https://github.com/ANYCUBIC-3D/AnycubicSlicerNext/blob/main/LICENSE.txt); installierter Lizenztext entspricht AGPL 3 | Lokale, auch kommerzielle Nutzung ohne Lizenzgebühr oder Umsatzschwelle. Weitergabe und kombinierte Werke unterliegen den AGPL-Bedingungen. |
+| Bambu Studio 02.08.02.61 | AGPL-3.0, [Projektlizenz](https://github.com/bambulab/BambuStudio/blob/master/LICENSE) | Gleiche AGPL-Bedingungen. Einzelne mitinstallierte Dritttexte, etwa zu MCUT, sind keine vollständige Lizenzzuordnung der Engine und ihrer Bibliotheken. |
+| PrusaSlicer 2.9.6 | AGPL-3.0, [Projektlizenz](https://github.com/prusa3d/PrusaSlicer/blob/master/LICENSE) | Gleiche AGPL-Bedingungen; Drittkomponenten behalten ihre jeweiligen Lizenzen. |
+| OrcaSlicer 2.4.2, Windows-Paket 2.4.3.0 | AGPL-3.0, [Projektlizenz](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt); installierter Lizenztext entspricht AGPL 3 | Gleiche AGPL-Bedingungen. Das optionale, nicht freie Netzwerkplugin ist keine Voraussetzung für lokales Slicing. |
+
+Die Anwendung kopiert benötigte installierte Dateien nur in eigene lokale
+Arbeitsbereiche; sie verändert keine Slicer-Binärdateien. Distributionspakete
+enthalten weder diese Kopien noch Profile, Slicer-Netzwerkplugins oder Modelle.
+Der selbst geschriebene Starthelfer enthält keinen übernommenen Engine-Code;
+sein Quellcode gehört zum Apache-2.0-Quellstand des Projekts.
+
+**Direkte DLL-Anbindung:** Die Prozessgrenze allein klärt nicht, ob der Host und
+eine geladene AGPL-Engine als kombiniertes Werk gelten. Vor einer Distribution
+dieser Anbindung sind die konkrete Host-/Engine-Kombination, korrespondierende
+Quellen, Lizenz-/Urheberhinweise und gegebenenfalls Netzwerk-Quellangebote zu
+prüfen. Eine proprietäre kombinierte Distribution wird nicht zugesagt. Diese
+offene Einordnung gehört zur bestehenden Prüfung `release_legal_review`; für
+eine verbindliche Beurteilung ist fachkundige Rechtsberatung erforderlich.
+Eine spätere Bündelung von Engines oder proprietären Plugins benötigt eine
+gesonderte Rechteprüfung. Der lokale Betrieb führt keinen kostenpflichtigen
+Dienst oder Lizenzschwellenwert ein.
 
 GitHub dient dem bestehenden öffentlichen Updatekanal. Es gibt keinen neu
 eingeführten kostenpflichtigen API-Dienst; Verbindungsdaten und Abschaltmöglichkeit

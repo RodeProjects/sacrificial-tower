@@ -19,6 +19,10 @@ Abkühlpausen und einen standardmäßig hohlen Abstreifturm. Sie berücksichtigt
 Fahr- und Turmzeiten, zeigt Druckbett, Modell und Turm in rekonstruierten
 G-Code-Koordinaten und exportiert direkt geprüften G-Code.
 
+Für [native 3MF-Projekte](docs/native_projects.md) steht ein eigener iterativer
+Ablauf bereit. Er übernimmt die eingebetteten Slicereinstellungen, verarbeitet
+die ausgewählte Druckplatte und exportiert das vollständige Projekt mit Kühlturm.
+
 **English: Sacrificial Tower / Cooling Tower Generator - Creating dynamic
 sacrificial objects tailored to your desired layer time**
 
@@ -36,6 +40,10 @@ The third **Postprocessor** method adds cooling pauses and a hollow wiping tower
 to the existing pre-slice. It accounts for travel and tower time, reconstructs
 the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 
+[Native 3MF projects](docs/native_projects.md) use a separate iterative workflow
+with their embedded slicer settings, plate selection and a complete project export
+containing the added cooling tower.
+
 **[Windows-Installer herunterladen](https://github.com/RodeProjects/sacrificial-tower/releases/latest)**
 · [Getestete Slicer](#unterstützte-slicer-und-getestete-versionen)
 · [FAQ / English answers](docs/faq.md)
@@ -45,6 +53,8 @@ the bed and toolpaths in their G-code coordinates, and exports verified G-code.
 
 - Lokale Auswertung der Layerzeiten eines STL-Modells über den gewählten
   Slicer; Analyse der Layerzeiten von vorhandenem G-Code über die CLI.
+- Automatische Verarbeitung nativer 3MF-Projekte mit eingebetteten Einstellungen
+  und getrennter Druckplattenauswahl.
 - Iterative Kühlturmerstellung mit Ziel-Layerzeit oder manueller Béziereditor mit
   festem Prüfslice und tatsächlicher Zeitbewertung.
 - Gemeinsame Objekt-/Turmvorschau und 3MF-Export mit Modell und Kühlturm in beiden

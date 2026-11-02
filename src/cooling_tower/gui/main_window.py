@@ -1376,8 +1376,8 @@ class MainWindow(QMainWindow):
         self.source_guide_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.source_guide_icon.setFixedWidth(22)
         self.source_guide = QLabel(
-            "Wähle das STL-Modell aus, für das ein Kühlturm erstellt werden "
-            "soll."
+            "Wähle ein STL-Modell oder ein vollständiges natives 3MF-Projekt "
+            "aus, für das ein Kühlturm erstellt werden soll."
         )
         self.source_guide.setObjectName("sourceGuide")
         self.source_guide.setWordWrap(True)
@@ -1395,7 +1395,10 @@ class MainWindow(QMainWindow):
         self.drop_zone.file_rejected.connect(self._show_input_error)
         self.drop_zone.reload_requested.connect(self.reload_source)
         self.drop_zone.remove_requested.connect(self.remove_source)
-        source_layout.addWidget(self.drop_zone)
+        from cooling_tower.gui.native_project.handover import SourceHandoverStack
+        self.source_handover = SourceHandoverStack()
+        self.source_handover.addWidget(self.drop_zone)
+        source_layout.addWidget(self.source_handover)
         self.preslice_cancel_button = QPushButton("Pre-Slice abbrechen")
         self.preslice_cancel_button.setObjectName("presliceCancelButton")
         self.preslice_cancel_button.clicked.connect(self.cancel_source_preslice)
@@ -1481,6 +1484,21 @@ class MainWindow(QMainWindow):
         # ist nun unaufdringlich und jederzeit über das Info-Symbol im Kopf
         # erreichbar; das alte Widget bleibt nur für API-Kompatibilität erhalten.
         self.stl_notice_frame.hide()
+
+        # Both independent masks occupy the same visual file-transfer slot.
+        from cooling_tower.gui.native_project.drop_zone import NativeProjectDropZone
+        self.native_drop_zone = NativeProjectDropZone()
+        self.source_handover.addWidget(self.native_drop_zone)
+        self.native_handover = self.source_handover
+        self._native_import_pending = False
+        self._native_handover_active = False
+        self._native_handover_error = False
+        self._stl_handover_text = None
+        self.native_drop_zone.source_selected.connect(self._on_native_handover_source_selected)
+        self.native_drop_zone.reload_requested.connect(lambda:self.native_drop_zone.set_file(self.native_drop_zone.selected_path)
+            if self.native_drop_zone.selected_path else None)
+        self.native_drop_zone.remove_requested.connect(self._remove_native_project)
+        self.native_drop_zone.open_requested.connect(self._open_native_editor)
 
         slicer_group = SectionCard(
             "Slicer-Einstellungen",
@@ -2178,7 +2196,7 @@ class MainWindow(QMainWindow):
         )
         self.preparation_source_requirements.setProperty("active", True)
         self.preparation_source_requirements.setAccessibleName(
-            "Voraussetzungen für die STL-Datei"
+            "Voraussetzungen für die Dateiübergabe"
         )
         source_requirements_layout = QGridLayout(
             self.preparation_source_requirements
@@ -2204,7 +2222,7 @@ class MainWindow(QMainWindow):
             requirements_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preparation_requirement_rows: dict[str, tuple[QLabel, QLabel]] = {}
         source_requirement_texts = (
-            ("source_selected", "STL-Datei übergeben"),
+            ("source_selected", "STL oder vollständiges natives 3MF-Projekt übergeben"),
             ("source_validated", "STL-Geometrie geprüft"),
         )
         slicer_requirement_texts = (
@@ -3731,7 +3749,21 @@ class MainWindow(QMainWindow):
         self._refresh_footer_responsive_layout(force=True)
         root_layout.addWidget(footer)
         root_layout.addWidget(self.postprocessor_panel.footer_widget)
-        self.setCentralWidget(central)
+        from cooling_tower.gui.native_project.page import NativeProjectPage
+        self.input_pages = QStackedWidget()
+        self._stl_page = central
+        self.input_pages.addWidget(central)
+        self.native_project_page = NativeProjectPage(self.background_job_manager,
+            export_directory=lambda:self.export_roots['native_project'])
+        self.native_project_page.source_selected.connect(self.drop_zone.set_file)
+        self.native_project_page.back_requested.connect(self._back_to_native_handover)
+        self.native_project_page.controller.imported_ready.connect(self._native_project_imported)
+        self.native_project_page.controller.failed.connect(self._native_project_import_failed)
+        self.native_project_page.controller.status_changed.connect(self._native_project_import_status)
+        for button in (self.automatic_method_button,self.manual_method_button,self.postprocessor_method_button):
+            button.clicked.connect(self._cancel_pending_native_import)
+        self.input_pages.addWidget(self.native_project_page)
+        self.setCentralWidget(self.input_pages)
         self._footer_height_timer = QTimer(self)
         self._footer_height_timer.setSingleShot(True)
         self._footer_height_timer.timeout.connect(
@@ -3826,6 +3858,9 @@ class MainWindow(QMainWindow):
     def _refresh_preparation_workspace(self, preparation_ready: bool) -> None:
         """Move the accepted preparation once and keep incomplete edits visible."""
 
+        if getattr(self,'_native_handover_active',False) and self.input_pages.currentWidget() is self._stl_page:
+            self._show_native_handover()
+            return
         became_ready = preparation_ready and not self._preparation_workspace_ready
         self._preparation_workspace_ready = preparation_ready
         if preparation_ready and not self._preparation_in_workspace:
@@ -3980,6 +4015,10 @@ class MainWindow(QMainWindow):
         """Show footers only in the selected method's working view."""
         if not hasattr(self,"footer"):
             return
+        if getattr(self,'_native_handover_active',False) and self.input_pages.currentWidget() is self._stl_page:
+            self.footer.hide()
+            self.postprocessor_panel.footer_widget.hide()
+            return
         preparation_open = (
             self._preparation_in_workspace
             and self.window_pages.currentWidget() is self.preparation_workspace
@@ -4064,6 +4103,7 @@ class MainWindow(QMainWindow):
         self.output_root_edit.setText(self.export_roots["automatic"])
         self._refresh_folder_action_states(rescan=True)
         self.postprocessor_controller.refresh()
+        self.native_project_page._refresh_export_actions()
         self._save_user_settings()
 
     def _export_history_session(self) -> GenerationSession:
@@ -9339,6 +9379,9 @@ class MainWindow(QMainWindow):
         self.source_progress_status_widget.hide()
 
     def _finish_source_progress(self, *, completed: bool) -> None:
+        if getattr(self,'_native_handover_active',False):
+            self._present_native_handover()
+            return
         self.source_progress_bar.setRange(0, 100)
         self.source_progress_bar.setFormat("%p %")
         self.source_progress_bar.setValue(100 if completed else 0)
@@ -9438,8 +9481,13 @@ class MainWindow(QMainWindow):
     def _update_preparation_requirements(self) -> None:
         if not hasattr(self, "preparation_step_selectors"):
             return
+        if getattr(self,'_native_handover_active',False):
+            self._present_native_handover()
+            return
         preparation_state = self._current_preparation_state()
         source_selected = preparation_state.source_selected
+        for widget in self.preparation_requirement_rows['source_validated']:
+            widget.setVisible(source_selected and self.current_source_kind is SourceKind.STL)
         guide_visible = not source_selected
         if (not self.source_guide_row.isHidden()) != guide_visible:
             self.source_guide_row.setVisible(guide_visible)
@@ -9673,6 +9721,11 @@ class MainWindow(QMainWindow):
     def _refresh_preparation_header_summary(self, complete: bool) -> None:
         """Publish all facts together only after successful final confirmation."""
 
+        if getattr(self,'_native_handover_active',False):
+            self.workflow_header.set_facts(())
+            self.workflow_header.set_generation_mode(None)
+            self.workflow_header.set_actions_visible(False)
+            return
         self.workflow_group.set_split_summary_columns((), ())
         installation = self.selected_slicer_installation
         source_path = self.current_source_path
@@ -10495,12 +10548,19 @@ class MainWindow(QMainWindow):
     @_atomic_preparation_update
     def _on_source_selected(self, path: str, source_kind: str) -> None:
         kind = SourceKind(source_kind)
+        if kind is SourceKind.NATIVE_3MF:
+            self.native_drop_zone.set_file(path)
+            return
         if kind is not SourceKind.STL:
             self._show_input_error(
                 "Als Modelldatei wird derzeit ausschließlich STL unterstützt."
             )
             return
+        self._set_native_handover_active(False)
         resolved = Path(path).resolve()
+        self._native_import_pending = False
+        self.native_project_page.deactivate()
+        self.input_pages.setCurrentWidget(self._stl_page)
         self.current_source_path = resolved
         self.current_source_kind = kind
         self.source_artifact = None
@@ -10530,6 +10590,144 @@ class MainWindow(QMainWindow):
         ):
             self.start_slicer_discovery()
         self.validate_form()
+
+    def _on_native_handover_source_selected(self,path,kind):
+        if SourceKind(kind) is SourceKind.STL:
+            self.drop_zone.set_file(path)
+        else:
+            self._load_native_project(path)
+
+    def _set_native_handover_active(self,active):
+        if self._stl_handover_text is None:
+            self._stl_handover_text = {key:label.text() for key,(_icon,label) in self.preparation_requirement_rows.items()}
+        self._native_handover_active = active
+        self.source_handover.setCurrentWidget(self.native_drop_zone if active else self.drop_zone)
+        if not active:
+            for key,text in self._stl_handover_text.items():
+                self.preparation_requirement_rows[key][1].setText(text)
+            self.preparation_step_selectors[1].setEnabled(True)
+            self.preparation_progress_bar.setRange(0,100)
+            self.source_progress_bar.setRange(0,100)
+            self.source_progress_bar.setFormat('%p %')
+            self.source_progress_bar.setAccessibleName('Fortschritt der STL-Prüfung')
+
+    def _show_native_handover(self):
+        self.input_pages.setCurrentWidget(self._stl_page)
+        self.preparation_transition.cancel()
+        self._preparation_workspace_view = 'preparation'
+        self.workflow_header.set_facts(())
+        self.workflow_header.set_generation_mode(None)
+        self.workflow_header.set_actions_visible(False)
+        self.workflow_group.show()
+        self.generation_method_picker.hide()
+        # Before the STL prerequisites finish, this card still belongs to the
+        # main surface. Selecting the other, empty container hides everything.
+        self.window_pages.setCurrentWidget(self.preparation_workspace if self._preparation_in_workspace else self.main_surface)
+        self.preparation_tabs.setCurrentIndex(0)
+        self._refresh_preparation_surface_insets()
+        self._refresh_footer_visibility()
+        self._present_native_handover()
+        self._refresh_dynamic_preparation_layout()
+        scroll = self.preparation_workspace_scroll if self._preparation_in_workspace else self.settings_scroll
+        scroll.verticalScrollBar().setValue(0)
+
+    def _present_native_handover(self):
+        pending = self._native_import_pending
+        imported = self.native_project_page.controller.imported
+        ready = not pending and imported is not None and imported.installation is not None and not self._native_handover_error
+        self.source_guide_row.hide()
+        self.stl_validation_feedback.hide()
+        self.source_progress_status_widget.hide()
+        self.preparation_requirement_rows['source_validated'][1].setText('Projektinformationen geprüft')
+        for key,(icon,label) in self.preparation_requirement_rows.items():
+            icon.show(); label.show()
+            complete = key == 'source_selected' or ready
+            state = 'complete' if complete else 'missing'
+            icon.setText('✓' if complete else '○')
+            for widget in (icon,label):
+                widget.setProperty('state',state)
+                self._refresh_widget_style(widget)
+        self.source_progress_bar.setAccessibleName('Fortschritt der 3MF-Projektprüfung')
+        self.source_progress_bar.setRange(0,0 if pending else 100)
+        self.source_progress_bar.setFormat('Projekt wird eingelesen …' if pending else '%p %')
+        self.source_progress_bar.setVisible(pending)
+        if not pending:
+            self.source_progress_bar.setValue(100 if ready else 0)
+        self.preparation_progress_bar.setRange(0,100)
+        self.preparation_progress_bar.setValue(100 if ready else 0)
+        self.preparation_progress_status_label.setText('3MF-Projekt wird eingelesen' if pending else
+            'Projektinformationen vollständig' if ready else '3MF-Projekt prüfen')
+        self.preparation_step_selectors[1].setEnabled(False)
+        self.preparation_step_selectors[1].setToolTip('Die Projekteinstellungen werden aus der 3MF-Datei übernommen.')
+        self.preparation_next_button.setVisible(False)
+        self.preparation_back_button.setVisible(False)
+        self.preparation_finish_button.setVisible(False)
+
+    def _load_native_project(self, path):
+        if self._closing:
+            return
+        # The shared progress bar now belongs to this import. Discard queued
+        # completion/progress signals from an earlier STL validation.
+        self._stl_validation_request_id += 1
+        self.background_job_manager.cancel_jobs(JobKind.STL_VALIDATION,reason='native_source_selected')
+        self._native_import_pending = True
+        self._native_handover_error = False
+        self._set_native_handover_active(True)
+        self.native_project_page.open_source(path)
+        self.native_drop_zone.set_status('Projekt wird eingelesen – eingebettete Einstellungen werden geprüft')
+        self._show_native_handover()
+
+    def _native_project_import_status(self, text):
+        if self._native_import_pending:
+            self.native_drop_zone.set_status(text)
+
+    def _native_project_imported(self, imported):
+        if not self._native_import_pending:
+            return
+        self._native_import_pending = False
+        self.native_drop_zone.show_imported(imported)
+        self._native_handover_error = imported.installation is None
+        self._present_native_handover()
+        if imported.installation is None:
+            self.native_drop_zone.show_problem('Der zum Projekt gehörende Slicer wurde nicht ausführbar gefunden. '
+                'Nach seiner Einrichtung das Projekt erneut einlesen.', None)
+            return
+        self.input_pages.setCurrentWidget(self.native_project_page)
+
+    def _native_project_import_failed(self, message, details, problem):
+        if self._native_import_pending:
+            self._native_import_pending = False
+            self._native_handover_error = True
+            self.native_drop_zone.show_problem(message,problem)
+            self._present_native_handover()
+            self._refresh_dynamic_preparation_layout()
+
+    def _cancel_pending_native_import(self):
+        if self._native_import_pending:
+            self._native_import_pending = False
+            self.native_project_page.deactivate()
+            self.native_drop_zone.set_status('Einlesen abgebrochen')
+            self.native_drop_zone.set_analysis_state('rejected')
+
+    def _remove_native_project(self):
+        self._native_import_pending = False
+        self.native_project_page.deactivate()
+        self.native_drop_zone.clear_file()
+        self._set_native_handover_active(False)
+        self.remove_source()
+
+    def _open_native_editor(self):
+        imported = self.native_project_page.controller.imported
+        if imported is not None and imported.installation is not None:
+            self.input_pages.setCurrentWidget(self.native_project_page)
+        elif self.native_drop_zone.selected_path:
+            self.native_drop_zone.set_file(self.native_drop_zone.selected_path)
+
+    def _back_to_native_handover(self):
+        self._native_import_pending = False
+        if self.native_project_page.controller.busy:
+            self.native_project_page.controller.cancel()
+        self._show_native_handover()
 
     def _prepare_for_replaced_source(self, reason: str) -> None:
         self._restart_preview_after_release = False
@@ -14709,6 +14907,7 @@ class MainWindow(QMainWindow):
         self._cleanup_source_preslice_result()
         for session in self.generation_sessions.values():
             session.discard_preview()
+        self.native_project_page.close_after_shutdown()
         if self._preview_dialog is not None:
             self._preview_dialog.close()
         if self._additional_options_dialog is not None:

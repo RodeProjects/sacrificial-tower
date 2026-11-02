@@ -11,11 +11,9 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, ROUND_HALF_UP
 from functools import lru_cache
 import math
-import os
 import re
-import shutil
 from pathlib import Path
-import tempfile
+from cooling_tower.protected_io import OwnedTemporaryDirectory
 from threading import Event, Lock
 from cooling_tower.models import BedGeometry, GCodeAnalysisSnapshot, PreparedAnalysisSource
 from cooling_tower.slicers import EffectiveProfile
@@ -1023,8 +1021,7 @@ class PostprocessorService:
         final_position = final_route[-1]
         protected_roots = (request.profile.installation.executable_path.parent, *request.profile.installation.profile_roots)
         ensure_writable_output(self.temporary_root, protected_roots=protected_roots)
-        self.temporary_root.mkdir(parents=True, exist_ok=True)
-        workspace = tempfile.TemporaryDirectory(prefix="postprocessor_", dir=self.temporary_root)
+        workspace = OwnedTemporaryDirectory(prefix="postprocessor_", parent=self.temporary_root)
         try:
             output = Path(workspace.name) / "postprocessed.gcode"
             tower_collector = []
@@ -1237,31 +1234,13 @@ class PostprocessorService:
             raise ValueError("Der Postprozessor exportiert ausschließlich .gcode-Dateien.")
         if sha256_file(result.gcode_path) != result.sha256:
             raise ValueError("Der erzeugte G-Code wurde nach der Vorschau verändert.")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        previous_digest = sha256_file(target) if target.is_file() else None
-        if previous_digest is not None and not overwrite:
-            raise FileExistsError("Die Exportdatei existiert bereits. Bitte einen anderen Namen wählen.")
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".postprocessor_export_", suffix=".tmp", dir=target.parent)
-        temporary_path = Path(temporary_name)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                with result.gcode_path.open("rb") as source:
-                    shutil.copyfileobj(source, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            result.request.validate_source()
-            if sha256_file(temporary_path) != result.sha256:
-                raise ValueError("Die Exportkopie stimmt nicht mit der geprüften Vorschau überein.")
-            if overwrite:
-                current_digest = sha256_file(target) if target.is_file() else None
-                if current_digest != previous_digest:
-                    raise ValueError("Die Exportdatei wurde zwischenzeitlich verändert und bleibt erhalten.")
-                os.replace(temporary_path, target)
-            elif os.name == "nt":
-                # Windows rename is atomic and fails if a target already exists.
-                os.rename(temporary_path, target)
-            else:
-                os.link(temporary_path, target)
-        finally:
-            temporary_path.unlink(missing_ok=True)
+        from cooling_tower.export_io import atomic_export, export_parent
+        protections = dict(
+            protected_roots=(profile.installation.executable_path.parent, *profile.installation.profile_roots),
+            protected_files=(*profile.source_paths, result.request.prepared_source.analysis_gcode_path,
+                             result.request.prepared_source.source_artifact.original_path))
+        with export_parent(target.parent, **protections):
+            atomic_export(result.gcode_path, target, expected_sha256=result.sha256,
+                          overwrite=overwrite, **protections)
+
         return target

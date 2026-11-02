@@ -155,6 +155,7 @@ def build_solid_tower_profile(
     *,
     tower_end_z_mm: float | None = None,
     object_height_mm: float | None = None,
+    allow_wide_base: bool = False,
 ) -> SolidTowerProfile:
     """Build a closed, cavity-free tower controlled only by outer diameter.
 
@@ -246,7 +247,7 @@ def build_solid_tower_profile(
             tuple(layer.z_mm for layer in phase2_profile.layers),
             base_outer, minimum_outer, base_reference_height,
         ).duration
-    if calculated_base_outer > settings.maximum_outer_radius_mm + EPSILON:
+    if not allow_wide_base and calculated_base_outer > settings.maximum_outer_radius_mm + EPSILON:
         raise ProfileFeasibilityError(
             FeasibilityIssue(
                 code="BASE_WIDTH_TOO_LARGE",

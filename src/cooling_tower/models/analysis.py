@@ -9,7 +9,7 @@ from cooling_tower.models.timing import TimingEvidence
 
 
 ANALYSIS_SCHEMA_VERSION = 1
-ANALYSIS_PARSER_VERSION = 20
+ANALYSIS_PARSER_VERSION = 22
 
 
 @dataclass(frozen=True, slots=True)

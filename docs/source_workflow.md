@@ -14,12 +14,15 @@
 
 ## Unterstützte Eingaben
 
-Die GUI besitzt genau einen Datei-/Drop-Bereich und akzeptiert jeweils eine
-STL-Datei mit der Endung `.stl`. Vorhandenen G-Code verarbeitet die separate CLI;
+Die GUI besitzt einen gemeinsamen Datei-/Drop-Bereich für jeweils eine STL-Datei
+oder ein [natives 3MF-Projekt](native_projects.md). Dieser Abschnitt beschreibt
+den STL-Ablauf. Vorhandenen G-Code verarbeitet die separate CLI;
 er ist keine aktuelle GUI-Eingabe. Die Endung dient nur als erster Routinghinweis.
-`recognize_source` liest einen begrenzten Dateianfang
-und prüft anschließend das erwartete Format. Leere, beschädigte oder lediglich
-umbenannte Dateien werden nicht an die Fachpipeline weitergereicht.
+Für STL liest `recognize_source` einen begrenzten Dateianfang und prüft das
+erwartete Format. Eine 3MF-Auswahl wird zunächst an den Hintergrundimport
+weitergegeben; erst dessen vollständige Inhaltsprüfung akzeptiert das Projekt.
+Die Dateiübergabe bleibt währenddessen sichtbar. Leere, beschädigte oder lediglich
+umbenannte Dateien werden vor der Verarbeitung zurückgewiesen.
 
 `Andere Datei auswählen`, `STL neu einlesen` und `STL entfernen` invalidieren
 sämtliche abhängigen Analyse-, Profil-, Pre-Slice-, Prognose- und
@@ -32,8 +35,9 @@ abgebrochenen Hintergrundjobs eine inzwischen neu gewählte Quelle übernimmt.
 Die gemeinsame Analyse für Postprozessor, iterative und manuelle Erstellung
 unterstützt klassische Nähte und Scarf-Nähte. Bei Anycubic Slicer Next,
 OrcaSlicer und PrusaSlicer legen die zusammengehörigen Kommentare
-`LAYER_CHANGE`, `Z` und `HEIGHT` die nominellen Druckschichten fest; Bambu Studio
-verwendet `CHANGE_LAYER`, `Z_HEIGHT` und `LAYER_HEIGHT`. Material ablegende
+`LAYER_CHANGE`, `Z` und `HEIGHT` die nominellen Druckschichten fest. Neuere
+Anycubic-/Orca-Varianten und Bambu Studio verwenden auch `CHANGE_LAYER`,
+`Z_HEIGHT` und `LAYER_HEIGHT`. Material ablegende
 Z-Rampen innerhalb einer Scarf-Naht erzeugen dadurch keine zusätzlichen Layer.
 Die tatsächlichen Bewegungen bleiben in der Vorschau und Bewegungszeitberechnung
 erhalten. Anycubics native Zeitmarken müssen weiterhin zur Anzahl und Höhe der

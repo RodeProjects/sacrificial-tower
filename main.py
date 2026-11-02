@@ -18,6 +18,10 @@ if __name__ == "__main__":
     from multiprocessing import freeze_support
 
     freeze_support()
+    if len(sys.argv) > 1 and sys.argv[1] == "--slicer-sandbox":
+        import os
+        from cooling_tower.slicers.sandbox_broker import main as run_sandbox
+        os._exit(run_sandbox(sys.argv[2:]))
     if len(sys.argv) > 1:
         raise SystemExit(_cli_main())
     from cooling_tower.application import run_application

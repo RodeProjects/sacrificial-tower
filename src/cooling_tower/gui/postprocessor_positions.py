@@ -40,7 +40,7 @@ def position_cache_key(request):
     """Bind in-memory results to immutable inputs and current file identities."""
     try:
         signatures = []
-        for path in (request.prepared_source.analysis_gcode_path, request.prepared_source.source_artifact.original_path):
+        for path in (request.prepared_source.analysis_gcode_path, request.prepared_source.source_artifact.processing_path):
             stat = path.stat()
             signatures.append((stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
     except OSError:

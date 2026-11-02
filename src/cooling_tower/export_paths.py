@@ -11,16 +11,19 @@ EXPORT_METHOD_LABELS = {
     "automatic": "Iterativ",
     "manual": "Manuell",
     "postprocessor": "Postprozessor",
+    "native_project": "Projekte (3MF)",
 }
 EXPORT_FOLDER_NAMES = {
     "automatic": "exports_automatic_mode",
     "manual": "exports_manual_mode",
     "postprocessor": "exports_postprocessor",
+    "native_project": "exports_3mf_projects",
 }
 LEGACY_EXPORT_FOLDER_NAMES = {
     "automatic": ("automatic",),
     "manual": ("manual",),
     "postprocessor": ("postprocessor", LEGACY_POSTPROCESSOR_ID),
+    "native_project": (),
 }
 
 
