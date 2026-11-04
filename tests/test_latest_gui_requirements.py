@@ -806,7 +806,22 @@ class LatestGuiRequirementsTests(unittest.TestCase):
                 setting,
                 setting.info_button.rect().center(),
             )
-            self.assertLessEqual(abs(editor_center.y() - info_center.y()), 1)
+            if setting.setting_name == "maximum_expansion_angle_deg":
+                label_top = setting.label.mapTo(
+                    setting,
+                    setting.label.rect().topLeft(),
+                ).y()
+                info_top = setting.info_button.mapTo(
+                    setting,
+                    setting.info_button.rect().topLeft(),
+                ).y()
+                self.assertEqual(info_top, label_top)
+            else:
+                self.assertLessEqual(
+                    abs(editor_center.y() - info_center.y()),
+                    1,
+                    setting.setting_name,
+                )
             text_control = (
                 window.automatic_base_checkbox
                 if setting.setting_name == "manual_base_width_mm"
