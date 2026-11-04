@@ -183,10 +183,19 @@ class ProfileAngleLimitControl(SettingSubline):
             layout.addWidget(self.primary_line)
             layout.addWidget(self.secondary_line)
             # The second line sits below the editor, within the label column.
-            # Aligning the title to the top keeps both sublines inside this row.
+            # Aligning the title and its info icon to the top keeps both
+            # sublines inside this row while retaining their shared baseline.
             row.layout().setAlignment(
                 row.label,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
+            row.layout().setAlignment(
+                row.info_button,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
+            row.label.setFixedHeight(row.info_button.height())
+            row.label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
             row.setMinimumHeight(METRICS.form_control_height_px + 20)
         else:

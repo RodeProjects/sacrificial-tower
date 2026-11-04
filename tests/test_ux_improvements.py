@@ -243,11 +243,7 @@ class UxImprovementTests(unittest.TestCase):
             info_right = setting.info_button.mapTo(
                 window, setting.info_button.rect().topRight()
             ).x()
-            text_control = (
-                window.automatic_base_checkbox
-                if setting.setting_name == "manual_base_width_mm"
-                else setting.label
-            )
+            text_control = setting.label
             label_left = text_control.mapTo(
                 window, text_control.rect().topLeft()
             ).x()
@@ -265,7 +261,6 @@ class UxImprovementTests(unittest.TestCase):
             )
         for info_button, checkbox in (
             (window.full_infill_info_button, window.full_infill_checkbox),
-            (window.automatic_base_info_button, window.automatic_base_checkbox),
         ):
             self.assertEqual(info_button.width(), 19)
             self.assertEqual(info_button.height(), 19)
