@@ -28,7 +28,10 @@ class AutomaticFootTests(unittest.TestCase):
         self.assertAlmostEqual(after.seconds_per_mm, 0.5)
         self.assertEqual(after.start_layer, 31)
 
-    def make_profile(self, heights, radii=None, *, full=True, angle=10, object_height=160, sufficient=(), manual_width=20):
+    def make_profile(
+        self, heights, radii=None, *, full=True, angle=10,
+        automatic_angle=True, object_height=160, sufficient=(), manual_width=20,
+    ):
         radii = radii or [2.0] * len(heights)
         layers = []
         for i, (z, radius) in enumerate(zip(heights, radii)):
@@ -40,13 +43,14 @@ class AutomaticFootTests(unittest.TestCase):
         settings = GenerationSettings(minimum_outer_diameter_mm=4,
             maximum_outer_diameter_mm=max(40, manual_width),
             automatic_base_width=False, manual_base_width_mm=manual_width, simulate_full_tower_infill=full,
-            maximum_expansion_angle_deg=45, maximum_contraction_angle_deg=angle)
+            maximum_expansion_angle_deg=45, maximum_contraction_angle_deg=angle,
+            automatic_contraction_angle=automatic_angle)
         return build_solid_tower_profile(source, settings, object_height_mm=object_height)
 
     def test_full_infill_curve_ends_five_layers_above_six_mm_minimum(self):
         heights = [0.2 * i for i in range(1, 101)]
         profile = self.make_profile(heights)
-        normal = self.make_profile(heights, full=False, angle=80)
+        normal = self.make_profile(heights, full=False, angle=80, automatic_angle=False)
         self.assertAlmostEqual(profile.effective_base_height_mm, 0.2)
         self.assertEqual(profile.layers[0].outer_radius_mm, 10)
         self.assertLess(profile.layers[1].outer_radius_mm, 10)
@@ -86,7 +90,7 @@ class AutomaticFootTests(unittest.TestCase):
         self.assertEqual(low.points, high.points)
         ignored = self.make_profile(heights, angle=0)
         self.assertEqual(low.points, ignored.points)
-        limited = self.make_profile(heights, full=False, angle=10)
+        limited = self.make_profile(heights, full=False, angle=10, automatic_angle=False)
         for a,b in zip(limited.points, limited.points[1:]):
             self.assertGreater(b.z_mm, a.z_mm)
             self.assertGreaterEqual((b.outer_radius_mm-a.outer_radius_mm)/(b.z_mm-a.z_mm), -math.tan(math.radians(10))-1e-8)
