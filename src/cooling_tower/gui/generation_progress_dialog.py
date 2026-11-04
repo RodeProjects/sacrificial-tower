@@ -35,6 +35,7 @@ DEFAULT_MAXIMUM_SEPARATE_SLICES = 6
 MINIMUM_JOINT_SLICES_BEFORE_ACCEPT = 3
 GENERATION_DIALOG_WIDTH_PX = 610
 GENERAL_SETTINGS_DIALOG_WIDTH_PX = 707
+GENERATION_IMAGE_PATH = Path(__file__).with_name("assets") / "tower_gen_finished.png"
 JOINT_SLICE_HINT = """
 <p align="left" style="margin-top:0; margin-bottom:0px;"><b>Was wird begrenzt?</b></p>
 <p style="margin-top:0; margin-bottom:10px;">Die maximale Anzahl gemeinsamer Slices mit Objekt und Kühlturm. Dabei wird die Layerzeit an den Zielwert angeglichen. Nach den ersten drei gemeinsamen Slices kann die Generierung bei höchstens ±0,09 s Zielabweichung, ausbleibender Verbesserung oder manueller Übernahme früher enden.</p>

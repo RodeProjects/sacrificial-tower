@@ -103,17 +103,30 @@ class ManualNumericInputTests(unittest.TestCase):
     def test_all_left_inputs_share_a_measured_width_with_room_for_suffixes(self):
         from cooling_tower.gui.widgets.manual_inputs import compact_manual_width
         p=self.panel
-        spins=tuple(p.editors.values())
+        spins=(*p.editors.values(),p.color_scale_spin)
         widths={spin.width() for spin in spins}
         self.assertEqual(len(widths),1)
         self.assertLess(next(iter(widths)),150)
         self.assertEqual(next(iter(widths)),compact_manual_width(spins))
         for spin in spins:
-            self.assertLess(spin.lineEdit().fontMetrics().horizontalAdvance(spin.text()),spin.lineEdit().width())
+            if spin.isVisible():
+                self.assertLess(spin.lineEdit().fontMetrics().horizontalAdvance(spin.text()),spin.lineEdit().width())
+
+    def test_visible_fields_fit_text_vertically_and_after_longer_input(self):
+        p=self.panel
+        p.color_enabled_checkbox.setChecked(True)
+        self.app.processEvents()
+        for spin in (*p.editors.values(),p.color_scale_spin):
+            if spin.isVisible():
+                self.assertGreaterEqual(spin.lineEdit().height(),spin.lineEdit().fontMetrics().height())
+                self.assertLessEqual(spin.lineEdit().geometry().bottom(),spin.height()-1)
+        self.enter(p.editors["circle_segments"],"256")
+        widths={spin.width() for spin in (*p.editors.values(),p.color_scale_spin)}
+        self.assertEqual(len(widths),1)
 
     def test_scale_is_compact_and_clamps_to_three_with_ordered_color_boundaries(self):
         p=self.panel;p.color_enabled_checkbox.click();self.app.processEvents()
-        self.assertLess(p.color_scale_spin.width(),p.editors["circle_segments"].width())
+        self.assertEqual(p.color_scale_spin.width(),p.editors["circle_segments"].width())
         self.enter(p.color_scale_spin,"2")
         self.assertEqual(p.settings.color_scale_max_time_s,3)
         self.assertEqual((p.settings.color_red_time_s,p.settings.color_reference_time_s),(3,3))

@@ -6,7 +6,7 @@ from cooling_tower.gui.design_tokens import METRICS
 
 
 class GenerationModeGrid(QWidget):
-    """Three method cards, then a leading card over a pair, then one column."""
+    """Three method cards, then a pair above the final card, then one column."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -20,13 +20,13 @@ class GenerationModeGrid(QWidget):
         self._spacing = METRICS.card_spacing_px
         self.setMaximumWidth(1100)
 
-    def set_cards(self, postprocessor, automatic, manual):
-        self._cards = postprocessor, automatic, manual
+    def set_cards(self, automatic, manual, postprocessor):
+        self._cards = automatic, manual, postprocessor
         for card in self._cards:
             card.setParent(self)
             card.show()
-        QWidget.setTabOrder(postprocessor, automatic)
         QWidget.setTabOrder(automatic, manual)
+        QWidget.setTabOrder(manual, postprocessor)
         self.refresh_card_heights()
 
     def _card_width(self):
@@ -50,11 +50,11 @@ class GenerationModeGrid(QWidget):
         if columns == 2:
             first_width = (width-gap)//2
             second_width = width-gap-first_width
-            top_height = self._cards[0].heightForWidth(width)
-            bottom_height = max(self._cards[1].heightForWidth(first_width), self._cards[2].heightForWidth(second_width))
-            return (QRect(0, 0, width, top_height),
-                QRect(0, top_height+gap, first_width, bottom_height),
-                QRect(first_width+gap, top_height+gap, second_width, bottom_height))
+            top_height = max(self._cards[0].heightForWidth(first_width), self._cards[1].heightForWidth(second_width))
+            bottom_height = self._cards[2].heightForWidth(width)
+            return (QRect(0, 0, first_width, top_height),
+                QRect(first_width+gap, 0, second_width, top_height),
+                QRect(0, top_height+gap, width, bottom_height))
         rectangles, y = [], 0
         for card in self._cards:
             height = card.heightForWidth(width)

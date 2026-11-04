@@ -478,7 +478,7 @@ class PositionEditorGuiTests(unittest.TestCase):
         timer.start(10)
         try:
             with patch.object(canvas, "_paint_model", wraps=canvas._paint_model) as model_paints:
-                for kind, target in (("tower", (30, 30)), ("wait", (30, 60))):
+                for kind, target in (("tower", (30, 30)), ("wait", (30, 85))):
                     start = canvas.screen(canvas.positions[kind]).toPoint()
                     QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
                     regions = canvas.region_map
@@ -526,7 +526,7 @@ class PositionEditorGuiTests(unittest.TestCase):
             start = canvas.screen(canvas.positions[kind]).toPoint()
             QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
             target = ((dialog.context.reserved_radius_mm+dialog.edge_spin.value()+.6, 30)
-                if kind == "tower" else (30, 60))
+                if kind == "tower" else (30, 85))
             QTest.mouseMove(canvas, canvas.screen(target).toPoint())
             self.settle(lambda: canvas._drag_valid is True)
             self.assertEqual(dialog._dragging, kind)

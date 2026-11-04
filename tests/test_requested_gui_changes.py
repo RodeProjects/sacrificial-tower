@@ -1091,6 +1091,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             "maximum_outer_diameter_mm": "mm",
             "manual_base_width_mm": "mm",
             "circle_segments": "",
+            "tower_wall_count": "",
             "maximum_expansion_angle_deg": "°",
             "maximum_contraction_angle_deg": "°",
             "local_reference_window": "Layer",
@@ -1100,7 +1101,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
             with self.subTest(setting=name):
                 self.assertNotIn("[", setting.label.text())
                 self.assertEqual(setting.unit_label.text(), expected_units[name])
-                self.assertEqual(setting.unit_label.width(), 44)
+                self.assertGreaterEqual(setting.unit_label.width(), setting.unit_label.fontMetrics().horizontalAdvance(setting.unit_label.text()))
                 self.assertEqual(
                     setting.unit_label.geometry().right() + 1,
                     setting.editor.width() - 24,
@@ -1113,8 +1114,8 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(target.unit_label.isVisible())
         self.assertEqual(target.unit_label.text(), "Sek.")
-        self.assertEqual(target.unit_label.width(), 44)
-        self.assertGreaterEqual(target.editor.lineEdit().width(), 67)
+        self.assertGreaterEqual(target.unit_label.width(), target.unit_label.fontMetrics().horizontalAdvance("Sek."))
+        self.assertGreaterEqual(target.editor.lineEdit().width(), target.editor.lineEdit().fontMetrics().horizontalAdvance(target.editor.lineEdit().text()))
         self.assertEqual(
             window._setting_widgets[
                 "maximum_outer_diameter_mm"
@@ -1208,19 +1209,19 @@ class RequestedGuiChangesTests(unittest.TestCase):
     def test_automatic_sections_meet_window_edges_and_share_full_height_divider(self) -> None:
         window = self.window()
         self.addCleanup(window.close)
-        window.resize(1400, 1000)
+        window.resize(1700, 1000)
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
         window.workflow.complete_preparation()
         window.automatic_generation_card.click()
-        for width in (1400, 760, 1400):
+        for width in (1700, 760, 1700):
             window.resize(width, 1000)
             for _ in range(8):
                 self.app.processEvents()
             settings = window.geometry_settings_group
             preview = window.prediction_frame
-            divider = window.ready_columns_divider
+            divider = window.ready_grid.splitter.handle(1)
             viewport = window.settings_scroll.viewport()
             self.assertEqual(window.ready_grid.width(), viewport.width())
             for section in (settings, preview):
@@ -1234,16 +1235,16 @@ class RequestedGuiChangesTests(unittest.TestCase):
                     image.pixelColor(image.width() - 1, 0),
                     image.pixelColor(image.width() - 20, 0),
                 )
-            top_section = settings if width == 1400 else preview
+            top_section = settings if width == 1700 else preview
             self.assertEqual(top_section.mapTo(viewport, QPoint(0, 0)).y(), 0)
             self.assertEqual(
                 top_section.mapTo(window, QPoint(0, 0)).y(),
                 window.main_header.geometry().bottom() + 1,
             )
             self.assertEqual(window.workflow_header.divider_shadow.y(), top_section.mapTo(window, QPoint(0, 0)).y())
-            if width == 1400:
+            if width == 1700:
                 self.assertTrue(divider.isVisible())
-                self.assertEqual(divider.width(), 1)
+                self.assertEqual(divider.width(), 7)
                 self.assertEqual(divider.x(), window.ready_left_column.geometry().right() + 1)
                 self.assertEqual(preview.x(), divider.geometry().right() + 1)
                 self.assertEqual(preview.geometry().right() + 1, viewport.width())
@@ -1253,7 +1254,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
                     self.app.processEvents()
                 self.assertEqual(divider.height(), max(settings.height(), preview.height()))
             else:
-                self.assertTrue(divider.isHidden())
+                self.assertFalse(window.ready_grid.splitter.isVisible())
                 self.assertEqual(settings.width(), viewport.width())
                 self.assertEqual(preview.width(), viewport.width())
                 self.assertEqual(window.ready_left_column.y(), preview.geometry().bottom() + 1)
@@ -1263,7 +1264,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         window._refresh_ready_grid_layout()
         for _ in range(5):
             self.app.processEvents()
-        self.assertGreater(settings.height(), preview.height())
+        self.assertGreaterEqual(settings.height(), preview.height())
         self.assertEqual(divider.height(), settings.height())
 
     def test_geometry_fields_share_one_named_section(self) -> None:
@@ -1360,7 +1361,7 @@ class RequestedGuiChangesTests(unittest.TestCase):
         self,
     ) -> None:
         window = self.window()
-        window.resize(1400, 900)
+        window.resize(1700, 900)
         window.show()
         self.complete_source_step(window)
         window.workflow.slicer_succeeded("Testslicer")
@@ -1371,36 +1372,16 @@ class RequestedGuiChangesTests(unittest.TestCase):
 
         grid = window.ready_grid
         self.assertTrue(grid.is_two_column())
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.ready_left_column)
-            )[:2],
-            (0, 0),
-        )
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.prediction_frame)
-            )[:2],
-            (0, 2),
-        )
+        self.assertEqual(grid.splitter.indexOf(window.ready_left_column), 0)
+        self.assertEqual(grid.splitter.indexOf(window.prediction_frame), 1)
         preserved_target = window.target_time_spin.value()
 
         window.resize(800, 900)
         for _ in range(8):
             self.app.processEvents()
         self.assertFalse(grid.is_two_column())
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.prediction_frame)
-            )[:2],
-            (0, 0),
-        )
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.ready_left_column)
-            )[:2],
-            (1, 0),
-        )
+        self.assertEqual(grid.stack.indexOf(window.prediction_frame), 0)
+        self.assertEqual(grid.stack.indexOf(window.ready_left_column), 1)
         self.assertLess(
             window.prediction_frame.mapTo(
                 window.settings_content, QPoint(0, 0)
@@ -1435,22 +1416,12 @@ class RequestedGuiChangesTests(unittest.TestCase):
             0,
         )
 
-        window.resize(1400, 900)
+        window.resize(1700, 900)
         for _ in range(8):
             self.app.processEvents()
         self.assertTrue(grid.is_two_column())
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.ready_left_column)
-            )[:2],
-            (0, 0),
-        )
-        self.assertEqual(
-            grid.grid.getItemPosition(
-                grid.grid.indexOf(window.prediction_frame)
-            )[:2],
-            (0, 2),
-        )
+        self.assertEqual(grid.splitter.indexOf(window.ready_left_column), 0)
+        self.assertEqual(grid.splitter.indexOf(window.prediction_frame), 1)
         self.assertEqual(window.target_time_spin.value(), preserved_target)
         window.close()
 

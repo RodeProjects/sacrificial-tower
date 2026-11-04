@@ -210,6 +210,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_wall_count: int | None = None,
         tower_supports_disabled: bool = False,
         source_supports_enabled: bool = False,
     ) -> object:
@@ -290,6 +291,7 @@ class OrcaFamilyAdapter(BaseSlicerAdapter):
                 occupied=occupied,
                 placement=placement,
                 tower_full_infill=tower_full_infill,
+                tower_wall_count=tower_wall_count,
                 tower_supports_disabled=tower_supports_disabled,
                 source_supports_enabled=source_supports_enabled,
                 **({"source_support_settings": self.source_support_simulation_settings(request.profile)}

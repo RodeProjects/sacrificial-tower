@@ -1,5 +1,6 @@
 """Native UI help, independently copied from equivalent STL settings."""
 from html import escape
+from cooling_tower.gui.iterative_hints import CONTRACTION_ANGLE_HINT, TOWER_WALL_COUNT_HINT
 from cooling_tower.tower.base_calculator import BASE_WIDTH_PER_OBJECT_HEIGHT
 
 EXPANSION_ANGLE_CAUTION = 'Vorsicht: Der aktuelle Aufweitungswinkel erzeugt einen sehr starken Überhang.'
@@ -68,16 +69,8 @@ SETTING_INFO_TEXTS = {'layer_time_tolerance_s': '<p align="left" style="margin-t
                            'Layerzahl des Objekts die Eingabe.',
  'manual_base_width_mm': 'Außendurchmesser des Standfußes bei deaktivierter Automatik. Mindestens 20 mm und '
                          'höchstens 80 mm sind zulässig.',
- 'maximum_contraction_angle_deg': '<p><b>Verjüngung begrenzen</b></p><p>• Der Winkel wird zur Horizontalen '
-                                  '(Druckbett) gemessen.<br>• Ein kleinerer Wert erlaubt eine flachere, '
-                                  'stärkere Verjüngung je Schicht; ein größerer Wert erzwingt steilere '
-                                  'Übergänge.<br>• Bei 100 % Turmfüllung bestimmt das Programm die '
-                                  'Verjüngung nach eigenen Regeln. Das Feld ist dann gesperrt und zeigt '
-                                  '„auto“. Der manuell eingestellte Winkel wird dabei nicht verwendet, '
-                                  'bleibt aber erhalten und ist nach dem Ausschalten der Füllungssimulation '
-                                  'wieder einstellbar.<br>• Direkte Absätze nach innen sind bei 100 % '
-                                  'Turmfüllung nur vor einem Objektlayer mit ausreichender eigener Layerzeit '
-                                  'möglich.</p>',
+ 'maximum_contraction_angle_deg': CONTRACTION_ANGLE_HINT,
+ 'tower_wall_count': TOWER_WALL_COUNT_HINT,
  'maximum_expansion_angle_deg': '<p><b>Aufweitung begrenzen</b></p><p>• Der Winkel wird zur Horizontalen '
                                 '(Druckbett) gemessen.<br>• Ein kleinerer Wert erlaubt flachere Außenflächen '
                                 'und mehr Aufweitung je Schicht; ein größerer Wert erzwingt steilere '

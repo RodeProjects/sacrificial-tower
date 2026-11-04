@@ -383,7 +383,10 @@ Ausgeblendete und abgeschlossene
 Balken stoppen ihre Animation. Der Preslice-Controller steuert seine bisherigen
 Frames weiterhin selbst; währenddessen pausiert die automatische Widget-Animation.
 Ausgenommen sind der Gesamtbalken „Fortschritt der Vorbereitungen“ und der
-vertikale Kühlturm-Bildbalken während der Generierung.
+vertikale Kühlturm-Bildbalken während der Generierung. Das Laufzeitbild liegt
+als PNG unter `gui/assets/tower_gen_finished.png` und wird mit den GUI-Assets
+gebündelt. Sein Laden benötigt keinen optionalen Qt-Bildformatdecoder; das
+WebP-Original bleibt als unveränderte Bildquelle erhalten.
 Aktuell/veraltet
 steht als Badge direkt neben „3D-Vorschau“.
 
@@ -466,13 +469,13 @@ sodass keine doppelte Linie entsteht.
 Die Methodenwahl beginnt links neben dem Menübereich direkt am oberen
 Fensterrand. In der Kartenansicht bleibt dieser Bereich ausgeblendet.
 Nach der Wahl erscheint `HeaderMethodSelection` als verbundenes
-Element: oben die zentrierte Textüberschrift „Erstellungsmethode“, unmittelbar
-darunter nebeneinander „Iterativ“ und „Manuell“. Die Buttons behalten die
+Element: oben „Erstellungsmethode“ als zentrierte Aktion zur Kartenübersicht,
+unmittelbar darunter „Iterativ“, „Manuell“ und rechts „Postprozessor“. Die Buttons behalten die
 Höhe des Menübuttons; die Überschriftenfläche wächst bis zur Höhe der Infofläche,
 sodass beide Bereiche bündig an der gemeinsamen Header-Trennlinie enden.
 Layoutabstände sind null. Alle Ecken der Methodenfläche und ihrer Buttons sind
-rechtwinklig. Die Buttons verwenden die violetten
-bzw. blauen Verläufe der Methodenkarten. Die aktive Methode ist exklusiv
+rechtwinklig. Die Buttons verwenden die violetten, blauen
+und grünen Verläufe der Methodenkarten. Die aktive Methode ist exklusiv
 ausgewählt und wirkt durch einen hellen umgekehrten Verlauf, eine dünne obere
 Schattenkante und eine helle Unterkante eingedrückt. Beide Beschriftungen verwenden
 normale Schriftstärke. Nach dem Klick bleibt kein Fokusrahmen zurück. Tab und Leertaste
@@ -567,7 +570,8 @@ darunterliegenden Geometrie- und Berechnungswerte sind im standardmäßig
 geöffneten Unterbereich „Erweiterte Turmeinstellungen“ ein- und ausklappbar.
 Er ist in „Turmgeometrie“ und „Generierung“ unterteilt. Dezente Überschriften
 stehen jeweils knapp über einer horizontalen Trennlinie. „Turmgeometrie“
-enthält die Abmessungen, Standfuß-, Überhang- und Ausschlussbereicheinstellungen.
+beginnt mit den Wandlinien; anschließend folgen Abmessungen, Standfuß-,
+Überhang- und Ausschlussbereicheinstellungen.
 „Generierung“ enthält Layerzeit-Toleranz, maximale getrennte und gemeinsame
 Slices sowie das lokale Zeitfenster. Alle vier Optionen besitzen Einzelresets
 und gehören zum Reset der Turmeinstellungen. Die gespeicherten Werte und ihre
@@ -577,24 +581,31 @@ sind dauerhaft geöffnet und besitzen keine Aufklappdreiecke, seitlichen Rahmen
 oder abgerundeten Ecken. Beide schließen ohne oberen oder seitlichen Außenabstand
 an den Programmheader und die nutzbaren Fensterränder an; der Headerschatten
 liegt über ihren Überschriften. In der zweispaltigen Ansicht trennt eine
-ein Pixel breite vertikale Linie die unmittelbar angrenzenden Bereiche bis zur
-Unterkante des höheren Bereichs. In schmalen Fenstern bleiben sie ohne
+verschiebbare Trennleiste wie im Postprozessor die Bereiche bis zur gemeinsamen
+Unterkante. Anfangs belegt die linke Spalte ihre inhaltlich erforderliche Mindestbreite;
+eine manuell gewählte Aufteilung bleibt beim Ändern der Fenstergröße erhalten.
+Ein Doppelklick stellt gleiche Breiten her. Die Mindestbreite berücksichtigt
+auch die vollständige Profilwinkel-Unterzeile; Funktionsnamen werden nicht
+mit Auslassungspunkten gekürzt. Die Zahleneingaben teilen eine kompakte,
+nach sichtbaren Werten und Einheiten bemessene Breite. In schmalen Fenstern bleiben sie ohne
 Zwischenabstand gestapelt, mit „Generierung und Vorschau“ an erster Stelle;
 die vertikale Linie wird dabei ausgeblendet. Innere Inhaltsabstände und der
 untere Seitenabstand bleiben erhalten.
 Die Dropdown-Köpfe verwenden einheitliche, selbst gezeichnete Dreiecke ohne
 eigenen Rahmen, Hintergrund oder Hover-Effekt. Beide Richtungen entstehen
 durch Drehung um die Mitte desselben festen Symbolbereichs.
-Die Checkboxen für die 100-%-Turmfüllung, die Turmstützen und die automatische Standfußbreite
-zeigen den Haken rechts neben ihrem Text. Der Text mit Checkbox der
-automatischen Standfußbreite beginnt mit dem gleichen Abstand zum Info-Hinweis
-wie die übrigen Einstellungsnamen; Breitenfeld und Reset behalten die
-rechtsbündigen Spalten der übrigen Zahleneinstellungen.
+Die Checkboxen für die 100-%-Turmfüllung und die Turmstützen zeigen den Haken
+weiterhin rechts neben ihrem Text. Standfußbreite, Turm-Kreissegmente und
+Verjüngungswinkel besitzen direkt vor dem Eingabefeld „Auto“ mit einer
+Checkbox im Standarddesign. Abstände und vertikale Ausrichtung entsprechen
+dem Postprozessor. Vor „Auto“ und zwischen Profilwinkel-Checkbox und
+Eingabefeld gelten mindestens 106 Pixel. Die Profilwinkel-Checkbox bleibt als
+Unterzeile erhalten.
 Die automatische Standfußbreite ist
 standardmäßig aktiv; Checkbox, Breitenfeld und Reset stehen in einer Zeile.
 Bei aktiver Automatik zeigt das deaktivierte, leicht ausgegraute Feld den
 berechneten Wert. Bei deaktivierter Automatik ist es normal editierbar; die
-Breite liegt zwischen 20 und 100 mm. Der stets sichtbare Reset setzt auf den
+Breite liegt zwischen 20 und 80 mm. Der stets sichtbare Reset setzt auf den
 derzeit berechneten Automatikwert zurück. Ein vor dem Umschalten eingegebener
 manueller Wert bleibt für die laufende Sitzung erhalten.
 Entspricht der angezeigte Wert dem auf zwei Nachkommastellen gerundeten

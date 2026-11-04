@@ -76,6 +76,8 @@ class NativeGenerationSettings:
     maximum_expansion_angle_deg: float
     maximum_contraction_angle_deg: float
     limit_expansion_to_profile: bool
+    automatic_contraction_angle: bool
+    tower_wall_count: int
     automatic_circle_segments: bool
     circle_segments: int
 
@@ -118,6 +120,8 @@ class NativeGenerationSettings:
         maximum_expansion_angle_deg: float = GENERATION_DEFAULTS["maximum_expansion_angle_deg"],
         maximum_contraction_angle_deg: float = GENERATION_DEFAULTS["maximum_contraction_angle_deg"],
         limit_expansion_to_profile: bool = GENERATION_DEFAULTS["limit_expansion_to_profile"],
+        automatic_contraction_angle: bool = GENERATION_DEFAULTS["automatic_contraction_angle"],
+        tower_wall_count: int = GENERATION_DEFAULTS["tower_wall_count"],
         automatic_circle_segments: bool = GENERATION_DEFAULTS["automatic_circle_segments"],
         circle_segments: int = GENERATION_DEFAULTS["circle_segments"],
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
@@ -165,6 +169,8 @@ class NativeGenerationSettings:
             "maximum_expansion_angle_deg": maximum_expansion_angle_deg,
             "maximum_contraction_angle_deg": maximum_contraction_angle_deg,
             "limit_expansion_to_profile": limit_expansion_to_profile,
+            "automatic_contraction_angle": automatic_contraction_angle,
+            "tower_wall_count": tower_wall_count,
             "automatic_circle_segments": automatic_circle_segments,
             "circle_segments": circle_segments,
             "local_reference_window": local_reference_window,

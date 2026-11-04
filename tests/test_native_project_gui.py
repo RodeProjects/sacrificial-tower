@@ -367,7 +367,7 @@ class NativePageRoutingTests(unittest.TestCase):
         flag.setChecked(False)
         self.assertEqual(base.text(),'42')
         contraction = editor.inputs['maximum_contraction_angle_deg'][0]
-        infill = editor.inputs['simulate_full_tower_infill'][0]
+        infill = editor.automatic['automatic_contraction_angle']
         infill.setChecked(False)
         contraction.setValue(43.)
         infill.setChecked(True)

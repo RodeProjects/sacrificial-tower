@@ -1,5 +1,5 @@
 {
-  "settings_schema_version": 28,
+  "settings_schema_version": 29,
   "maximum_separate_slices": 6,
   "maximum_joint_slices": 12,
   "layer_time_tolerance_s": 0.25,
@@ -22,5 +22,7 @@
   "minimum_radius_height_factor": 0.04,
   "simulate_full_tower_infill": false,
   "simulate_tower_without_supports": false,
-  "target_layer_time_s": 9.0
+  "target_layer_time_s": 9.0,
+  "automatic_contraction_angle": true,
+  "tower_wall_count": 2
 }

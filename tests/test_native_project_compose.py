@@ -56,6 +56,22 @@ class NativeComposeTests(unittest.TestCase):
                 self.assertEqual(archive.read('Metadata/project_settings.config'),
                                  original.read('Metadata/project_settings.config'))
 
+    def test_wall_count_changes_only_the_new_tower_and_is_ignored_for_full_infill(self):
+        from dataclasses import replace
+        for adapter in ('bambu_studio', 'prusa_slicer'):
+            for full in (False, True):
+                context = replace(self.session.context, adapter_id=adapter)
+                before = self.path.read_bytes()
+                composed = append_tower(context, '1', self.mesh, workspace=self.work,
+                    name=f'{adapter}-{full}.3mf', center_mm=(25,25), full_infill=full, wall_count=4)
+                config = 'Metadata/Slic3r_PE_model.config' if adapter == 'prusa_slicer' else 'Metadata/model_settings.config'
+                with zipfile.ZipFile(composed.path) as archive:
+                    obj = ET.fromstring(archive.read(config)).findall('object')[-1]
+                    values = {node.get('key'): node.get('value') for node in obj.findall('metadata')}
+                    key = 'perimeters' if adapter == 'prusa_slicer' else 'wall_loops'
+                    self.assertEqual(values.get(key), None if full else '4')
+                self.assertEqual(self.path.read_bytes(), before)
+
     def test_restoration_is_exact_per_original_entry_and_prevents_tower_accumulation(self):
         composed=self.compose()
         second=NativeProjectSession(composed.path);self.addCleanup(second.close)

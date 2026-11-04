@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from cooling_tower.settings_defaults import GENERATION_DEFAULTS
 from cooling_tower.models import (
     FeasibilityIssue,
     GenerationSettings,
@@ -88,6 +89,10 @@ class ProfileFeasibilityError(ValueError):
 
 
 def validate_solid_settings(settings: GenerationSettings) -> None:
+    if not isinstance(settings.automatic_contraction_angle, bool):
+        raise ValueError("Automatic contraction angle must be a boolean.")
+    if type(settings.tower_wall_count) is not int or not 1 <= settings.tower_wall_count <= 10:
+        raise ValueError("Tower wall count must be an integer from 1 to 10.")
     if not isinstance(settings.automatic_circle_segments, bool):
         raise ValueError("Automatic circle segments must be a boolean.")
     if (isinstance(settings.circle_segments, bool)
@@ -104,9 +109,9 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
         raise ValueError("Tower support simulation must be a boolean value.")
 
     for name, value in settings.to_dict().items():
-        if name in {"automatic_base_width", "automatic_circle_segments", "simulate_full_tower_infill", "simulate_tower_without_supports", "limit_expansion_to_profile"}:
+        if name in {"automatic_base_width", "automatic_contraction_angle", "automatic_circle_segments", "simulate_full_tower_infill", "simulate_tower_without_supports", "limit_expansion_to_profile"}:
             continue
-        if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+        if name == "maximum_contraction_angle_deg" and settings.automatic_contraction_angle:
             continue
         if not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Generation setting {name} must be finite.")
@@ -145,7 +150,7 @@ def validate_solid_settings(settings: GenerationSettings) -> None:
             "Der Aufweitungswinkel zur Horizontalen liegt außerhalb des zulässigen Bereichs."
         )
     angle_to_radial_slope(settings.maximum_expansion_angle_deg)
-    if not settings.simulate_full_tower_infill:
+    if not settings.automatic_contraction_angle:
         angle_to_radial_slope(settings.maximum_contraction_angle_deg)
 
 
@@ -165,6 +170,8 @@ def build_solid_tower_profile(
     """
 
     validate_solid_settings(settings)
+    if settings.automatic_contraction_angle:
+        settings = replace(settings, maximum_contraction_angle_deg=GENERATION_DEFAULTS["maximum_contraction_angle_deg"])
     if not phase2_profile.layers:
         raise ValueError("A solid profile requires at least one layer.")
 
@@ -301,9 +308,9 @@ def build_solid_tower_profile(
         base_radius=15.0 if tiered_foot else base_outer,
         minimum_radius=minimum_outer,
         expansion_slope=angle_to_radial_slope(settings.maximum_expansion_angle_deg),
-        contraction_slope=(1.0 if settings.simulate_full_tower_infill else
+        contraction_slope=(1.0 if settings.simulate_full_tower_infill and settings.automatic_contraction_angle else
                            angle_to_radial_slope(settings.maximum_contraction_angle_deg)),
-        allow_steps=settings.simulate_full_tower_infill,
+        allow_steps=settings.simulate_full_tower_infill and settings.automatic_contraction_angle,
         base_taper_height=base_taper_height,
         abrupt_drop_indices=frozenset(abrupt_drops),
         excluded_indices=frozenset(

@@ -7,11 +7,13 @@ from pathlib import Path
 from PySide6.QtCore import QEasingCurve, QEvent, QSignalBlocker, QSize, QTimer, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QBoxLayout, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle,
-    QStyleOptionSpinBox, QVBoxLayout, QWidget,
+    QBoxLayout, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
+    QVBoxLayout, QWidget,
 )
 
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.numeric_field_widths import fit_numeric_fields
+from cooling_tower.gui.widgets.automatic_setting import add_automatic_control
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 from cooling_tower.gui.widgets.footer_actions import fit_footer_actions
 from cooling_tower.gui.widgets.info_tool_button import InfoToolButton
@@ -480,7 +482,10 @@ class PostprocessorPanel(QWidget):
             return
         self._fit_numeric_fields()
         for row in self.rows.values():
-            row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 30))
+            if hasattr(row, "_automatic_label_minimum"):
+                row._automatic_label_minimum.refresh()
+            else:
+                row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 30))
         self.positions_label.setMinimumWidth(self.positions_label.fontMetrics().horizontalAdvance(self.positions_label.text()) + 30)
         positions_row = self.positions_label.parentWidget()
         positions_row.layout().invalidate()
@@ -578,10 +583,9 @@ class PostprocessorPanel(QWidget):
         if side_by_side and not self.timing_panel.isHidden():
             details_width -= chart_width+12
         self.legend.setFixedHeight(self.legend.heightForWidth(max(1, details_width)))
-        whole_width = self.width()-margins.left()-margins.right()
-        minimum = (preferred_pair if not self.timing_panel.isHidden() and whole_width >= preferred_pair else
-            minimum_left)
-        self.preview_display.setMinimumWidth(minimum)
+        # The chart can stack inside the preview. Its side-by-side preference
+        # must not force the outer splitter to reparent a focused settings field.
+        self.preview_display.setMinimumWidth(minimum_left)
         self.display_layout.invalidate()
         self.preview_display.updateGeometry()
 
@@ -633,7 +637,7 @@ class PostprocessorPanel(QWidget):
         row = NumericSettingWidget(setting_name=name, label=label, editor=spin,
             default_provider=lambda: getattr(defaults, name), unit=unit, info_text=setting_hint(label, name))
         spin.setKeyboardTracking(False)
-        spin.lineEdit().setStyleSheet("QLineEdit { padding: 0; border: 0; background: transparent; }")
+        spin.lineEdit().setStyleSheet("QLineEdit { min-height: 0; padding: 0; border: 0; background: transparent; }")
         row.label.setWordWrap(False)
         self.rows[name] = row
         self.reset_buttons[name], self.info_buttons[name] = row.reset_button, row.info_button
@@ -644,17 +648,7 @@ class PostprocessorPanel(QWidget):
             checkbox.setChecked(getattr(defaults, automatic))
             checkbox.setAccessibleName(label + " automatisch berechnen")
             self.automatic[automatic] = checkbox
-            grid = row.layout()
-            for widget in (spin, row.reset_button, row.range_label, row.message_container):
-                grid.removeWidget(widget)
-            automatic_label = QLabel("Auto")
-            automatic_label.setBuddy(checkbox)
-            grid.addWidget(automatic_label, 0, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(checkbox, 0, 3, Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(spin, 0, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(row.reset_button, 0, 5, Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(row.range_label, 1, 1, 1, 4, Qt.AlignmentFlag.AlignRight)
-            grid.addWidget(row.message_container, 2, 0, 1, 6)
+            add_automatic_control(row, checkbox)
             checkbox.toggled.connect(self._changed)
         spin.valueChanged.connect(self._changed)
         spin.lineEdit().textChanged.connect(lambda _: self._layout_timer.start(0))
@@ -663,39 +657,7 @@ class PostprocessorPanel(QWidget):
         layout.addWidget(row)
 
     def _fit_numeric_fields(self):
-        """Share the smallest width that fits every current value and its unit."""
-        for row in self.rows.values():
-            row.unit_label.ensurePolished()
-        previous_unit_width = max(row.unit_label.fontMetrics().horizontalAdvance(row.unit_label.text())+4
-            for row in self.rows.values())
-        unit_width = max(previous_unit_width, *(row.unit_label.minimumSizeHint().width()
-            for row in self.rows.values()))
-        # The label's style padding and glyph bearings need real space too.
-        # Take it equally from both value gaps, retaining the existing box budget.
-        extra = unit_width-previous_unit_width
-        reduction = min(4, (extra+1)//2)
-        left_gap, right_gap = 8-reduction, 4-reduction
-        width_budget = max(0, 2*reduction-extra)
-        required = []
-        for row in self.rows.values():
-            spin = row.editor
-            spin.ensurePolished()
-            row.unit_label.setFixedWidth(unit_width)
-            padding = f"QDoubleSpinBox, QSpinBox {{ padding: 0 {unit_width+right_gap}px 0 {left_gap}px; }}"
-            if spin.styleSheet() != padding:
-                spin.setStyleSheet(padding)
-            option = QStyleOptionSpinBox()
-            spin.initStyleOption(option)
-            field = spin.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,
-                option, QStyle.SubControl.SC_SpinBoxEditField, spin)
-            margins = spin.lineEdit().textMargins()
-            text_width = spin.lineEdit().fontMetrics().horizontalAdvance(spin.lineEdit().text() or "0")
-            required.append(text_width+margins.left()+margins.right()+4+spin.width()-field.width()+width_budget)
-        width = max(required)
-        for row in self.rows.values():
-            row.editor.setFixedWidth(width)
-            row.range_label.setFixedWidth(width+30)
-            row._position_unit_label()
+        fit_numeric_fields(self.rows.values())
 
     def _positions_row(self):
         # Keep independent editor drafts internally; the settings row controls

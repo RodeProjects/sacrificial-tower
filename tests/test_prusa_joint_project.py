@@ -85,6 +85,20 @@ class PrusaJointProjectTests(unittest.TestCase):
             path or self.root / "joint.3mf", occupied=self.occupied, placement=self.placement,
             tower_full_infill=True, **options)
 
+    def test_wall_count_is_scoped_to_tower(self):
+        before = {p: p.read_bytes() for p in (self.source, self.tower)}
+        result = build_prusa_joint_project(self.fixture.adapter, self.request, self.source, self.tower,
+            self.root / 'walls.3mf', occupied=self.occupied, placement=self.placement,
+            tower_full_infill=False, tower_wall_count=4)
+        self.assertEqual(validate_prusa_joint_project(result.path, tower_full_infill=False, tower_wall_count=4), (1,2))
+        with zipfile.ZipFile(result.path) as archive:
+            objects = ET.fromstring(archive.read(MODEL_CONFIG_PATH)).findall('object')
+            values = [{node.get('key'): node.get('value') for node in obj.findall('metadata')} for obj in objects]
+            self.assertNotIn('perimeters', values[0])
+            self.assertEqual(values[1]['perimeters'], '4')
+        for path, data in before.items():
+            self.assertEqual(path.read_bytes(), data)
+
     def test_native_opc_mesh_connectivity_placement_and_object_overrides(self):
         before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
         result = self.build(tower_supports_disabled=True, source_supports_enabled=True)

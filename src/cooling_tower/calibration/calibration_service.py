@@ -116,6 +116,7 @@ class _DeferredJointProjectExport:
     occupied: OccupiedBounds
     placement: object
     tower_full_infill: bool
+    tower_wall_count: int | None = None
     tower_supports_disabled: bool = False
     source_supports_enabled: bool = False
 
@@ -434,6 +435,7 @@ class CalibrationService:
             isolated_profile, isolated_overrides = build_calibration_profile(
                 profile,
                 initial_profile_root,
+                **({"tower_wall_count": settings.tower_wall_count} if not joint_only and not settings.simulate_full_tower_infill else {}),
                 simulate_full_tower_infill=(
                     settings.simulate_full_tower_infill and not joint_only
                 ),
@@ -447,10 +449,6 @@ class CalibrationService:
                 not joint_only
                 and joint_source_stl is not None
                 and config.perform_joint_final_slice
-                and (
-                    settings.simulate_full_tower_infill
-                    or settings.simulate_tower_without_supports
-                )
             ):
                 joint_profile, joint_overrides = build_calibration_profile(
                     profile,
@@ -649,6 +647,7 @@ class CalibrationService:
                                 iteration_root / "candidate.bambu-assemble.json",
                                 occupied=occupied_bounds,
                                 placement=placement,
+                                **({"tower_wall_count": settings.tower_wall_count} if not settings.simulate_full_tower_infill else {}),
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
@@ -673,6 +672,7 @@ class CalibrationService:
                                 source_model_path=joint_source_stl,
                                 occupied=occupied_bounds,
                                 placement=placement,
+                                **({"tower_wall_count": settings.tower_wall_count} if not settings.simulate_full_tower_infill else {}),
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
@@ -692,6 +692,7 @@ class CalibrationService:
                                 candidate_project,
                                 occupied=occupied_bounds,
                                 placement=placement,
+                                **({"tower_wall_count": settings.tower_wall_count} if not settings.simulate_full_tower_infill else {}),
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
@@ -716,6 +717,7 @@ class CalibrationService:
                                 candidate_project,
                                 occupied=occupied_bounds,
                                 placement=placement,
+                                **({"tower_wall_count": settings.tower_wall_count} if not settings.simulate_full_tower_infill else {}),
                                 tower_full_infill=(
                                     settings.simulate_full_tower_infill
                                 ),
@@ -1584,6 +1586,7 @@ class CalibrationService:
                         final_project,
                         occupied=deferred_project.occupied,
                         placement=deferred_project.placement,
+                        **({"tower_wall_count": deferred_project.tower_wall_count} if deferred_project.tower_wall_count is not None else {}),
                         tower_full_infill=(
                             deferred_project.tower_full_infill
                         ),

@@ -216,6 +216,27 @@ class PlacementAndProjectTests(unittest.TestCase):
             TOWER_FULL_INFILL_PATTERN,
         )
 
+    def test_wall_override_survives_native_finalization_and_leaves_model_unchanged(self):
+        source, tower = self.root / "source.stl", self.root / "tower.stl"
+        trimesh.creation.box(extents=(10, 10, 5)).export(source)
+        trimesh.creation.cylinder(radius=4, height=5, sections=25).export(tower)
+        before = {p: p.read_bytes() for p in (source, tower)}
+        placement = TowerPlacement(80., 80., 4., BedBounds(0, 200, 0, 200), 25.)
+        initial, final = self.root / "walls.3mf", self.root / "walls-final.3mf"
+        options = dict(occupied=OccupiedBounds(40, 50, 40, 50), placement=placement,
+                       tower_full_infill=False, tower_wall_count=4)
+        build_joint_project(source, tower, initial, **options)
+        finalize_slicer_project(initial, source, tower, final, **options)
+        for path in (initial, final):
+            self.assertEqual(validate_joint_project(path, tower_full_infill=False, tower_wall_count=4), (2, 4))
+            with zipfile.ZipFile(path) as archive:
+                objects = ElementTree.fromstring(archive.read(MODEL_SETTINGS_PATH)).findall('object')
+                values = [{node.get('key'): node.get('value') for node in obj.findall('metadata')} for obj in objects]
+                self.assertNotIn('wall_loops', values[0])
+                self.assertEqual(values[1]['wall_loops'], '4')
+        for path, data in before.items():
+            self.assertEqual(path.read_bytes(), data)
+
     def test_support_override_is_only_on_tower_in_joint_project(self) -> None:
         source = self.root / "source_support.stl"
         tower = self.root / "tower_support.stl"

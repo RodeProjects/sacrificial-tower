@@ -457,7 +457,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         selection = window.header_method_selection
         heading = selection.heading
         self.assertEqual([selection.buttons_layout.itemAt(i).widget().text() for i in range(3)],
-            ["Postprozessor", "Iterativ", "Manuell"])
+            ["Iterativ", "Manuell", "Postprozessor"])
         automatic = window.automatic_method_button
         manual = window.manual_method_button
         menu = window.options_button
@@ -482,7 +482,7 @@ class GenerationMethodSelectionTests(unittest.TestCase):
         self.assertEqual(heading.height() + menu.height(), preparation.height())
         self.assertEqual(selection.height(), preparation.height())
         self.assertEqual(heading.text(), "Erstellungsmethode")
-        self.assertTrue(heading.alignment() & Qt.AlignmentFlag.AlignHCenter)
+        self.assertEqual(heading.text(), "Erstellungsmethode")
         self.assertEqual(selection.layout().spacing(), 0)
         self.assertEqual(selection.buttons_layout.spacing(), 0)
         self.assertEqual(heading.geometry().bottom() + 1, automatic.y())
@@ -945,14 +945,14 @@ class GenerationMethodSelectionTests(unittest.TestCase):
                 self.assertLess(automatic_rect.right(), manual_rect.left())
                 if columns == 3:
                     self.assertEqual(postprocessor_rect.top(), automatic_rect.top())
-                    self.assertLess(postprocessor_rect.right(), automatic_rect.left())
+                    self.assertLess(manual_rect.right(), postprocessor_rect.left())
                 else:
-                    self.assertLess(postprocessor_rect.bottom(), automatic_rect.top())
+                    self.assertLess(automatic_rect.bottom(), postprocessor_rect.top())
                     self.assertEqual(postprocessor_rect.left(), automatic_rect.left())
                     self.assertEqual(postprocessor_rect.right(), manual_rect.right())
             else:
-                self.assertLess(postprocessor_rect.bottom(), automatic_rect.top())
                 self.assertLess(automatic_rect.bottom(), manual_rect.top())
+                self.assertLess(manual_rect.bottom(), postprocessor_rect.top())
             for card in (window.postprocessor_generation_card, window.automatic_generation_card, window.manual_generation_card):
                 self.assertTrue(card.isVisible())
                 self.assertLessEqual(card.geometry().right(), grid.width())

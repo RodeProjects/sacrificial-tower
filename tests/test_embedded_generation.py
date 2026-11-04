@@ -150,7 +150,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertIn("#22854b", p.best_deviation_value.styleSheet())
 
     def test_manual_mode_hint_follows_retained_result_lifecycle(self):
-        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png")
         self.addCleanup(dispose_test_widget, panel)
         self.assertTrue(panel.manual_mode_hint.isHidden())
         panel.begin(10, .2, 0, 10)
@@ -186,7 +186,7 @@ class EmbeddedGenerationTests(unittest.TestCase):
         self.assertTrue(panel.manual_mode_hint.isHidden())
 
     def test_best_layer_time_caption_wraps_without_clipping_in_shared_metrics(self):
-        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png")
         self.addCleanup(panel.close)
         panel.resize(900, 300)
         panel.begin(11, .25, 0, 10)

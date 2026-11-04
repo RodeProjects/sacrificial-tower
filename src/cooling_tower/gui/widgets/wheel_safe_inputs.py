@@ -81,6 +81,29 @@ class WheelSafeSpinBox(QSpinBox):
         event.ignore()
 
 
+class AutomaticSpinBox(WheelSafeSpinBox):
+    """Display a disabled mode name while retaining the manual integer."""
+
+    _automatic_text = None
+
+    def textFromValue(self, value):  # noqa: N802
+        return self._automatic_text if self._automatic_text is not None else super().textFromValue(value)
+
+    def valueFromText(self, text):  # noqa: N802
+        return self.value() if self._automatic_text is not None else super().valueFromText(text)
+
+    def validate(self, text, position):
+        if self._automatic_text is not None and text == self._automatic_text:
+            return QValidator.State.Acceptable, text, position
+        return super().validate(text, position)
+
+    def set_automatic_display(self, automatic, text="auto"):
+        self._automatic_text = text if automatic else None
+        with QSignalBlocker(self), QSignalBlocker(self.lineEdit()):
+            self.setEnabled(not automatic)
+            self.lineEdit().setText(self.textFromValue(self.value()))
+
+
 class WheelSafeDoubleSpinBox(QDoubleSpinBox):
     """Keep decimal values stable when the surrounding form is scrolled."""
 

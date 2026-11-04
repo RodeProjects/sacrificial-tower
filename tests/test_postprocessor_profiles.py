@@ -64,12 +64,12 @@ class PostprocessorProfileTests(unittest.TestCase):
         self.assertEqual(actual.target_layer_time_s, PostprocessorSettings().target_layer_time_s)
         self.assertEqual(actual.unretract_speed_mm_s, 22)
 
-    def test_default_minimum_time_is_manual_ten_seconds_even_with_profile_value(self):
+    def test_default_minimum_time_is_manual_nine_seconds_even_with_profile_value(self):
         settings = PostprocessorSettings()
-        self.assertEqual(settings.target_layer_time_s, 10)
+        self.assertEqual(settings.target_layer_time_s, 9)
         self.assertFalse(settings.automatic_target_time)
         effective, _ = resolve_profile_settings(settings, {"slow_down_layer_time": 18})
-        self.assertEqual(effective.target_layer_time_s, 10)
+        self.assertEqual(effective.target_layer_time_s, 9)
         automatic, _ = resolve_profile_settings(replace(settings, automatic_target_time=True), {"slow_down_layer_time": 18})
         self.assertEqual(automatic.target_layer_time_s, 18)
 

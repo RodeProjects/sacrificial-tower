@@ -29,6 +29,7 @@ class UiMetrics:
     card_body_vertical_padding_px: int = 10
     form_row_vertical_padding_px: int = 1
     form_control_gap_px: int = 6
+    form_auto_label_gap_px: int = 106
     form_editor_width_px: int = 150
     form_control_height_px: int = 36
     form_unit_width_px: int = 44

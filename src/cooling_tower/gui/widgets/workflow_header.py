@@ -170,9 +170,10 @@ class PreparationFactsButton(QPushButton):
 
 
 class HeaderMethodSelection(QWidget):
-    """A single edge-attached element with two integrated method actions."""
+    """A single edge-attached element with three integrated method actions."""
 
     method_selected = Signal(str)
+    overview_requested = Signal()
 
     def __init__(self, button_height: int) -> None:
         super().__init__()
@@ -180,9 +181,10 @@ class HeaderMethodSelection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.heading = QLabel("Erstellungsmethode")
+        self.heading = QPushButton("Erstellungsmethode")
+        self.heading.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.heading.clicked.connect(self.overview_requested)
         self.heading.setObjectName("headerMethodHeading")
-        self.heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.heading.setFixedHeight(button_height)
         layout.addWidget(self.heading)
         self.buttons_layout = QHBoxLayout()
@@ -190,7 +192,7 @@ class HeaderMethodSelection(QWidget):
         self.buttons_layout.setSpacing(0)
         self.group = QButtonGroup(self)
         self.buttons: dict[str, QPushButton] = {}
-        for mode, text in (("postprocessor", "Postprozessor"), ("automatic", "Iterativ"), ("manual", "Manuell")):
+        for mode, text in (("automatic", "Iterativ"), ("manual", "Manuell"), ("postprocessor", "Postprozessor")):
             button = QPushButton(text)
             button.setObjectName("headerMethodButton")
             button.setProperty("generationMode", mode)

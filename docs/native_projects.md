@@ -118,8 +118,10 @@ jeweiligen Turmdurchmesser angepasst.
 
 Bei aktivierter Profilbegrenzung stammt der Aufweitungswinkel aus dem
 eingebetteten Stützwinkel. Das gesperrte Eingabefeld zeigt den wirksamen Winkel;
-der manuelle Wert bleibt erhalten. Bei 100 % Turmfüllung wird die Verjüngung
-automatisch bestimmt.
+der manuelle Wert bleibt erhalten. Der Verjüngungswinkel besitzt eine eigene,
+standardmäßig aktive Auto-Checkbox. Die Wandlinien werden nur am neuen Turm
+gesetzt und sind bei 100-%-Turmfüllung deaktiviert. Die gemeinsamen Regeln
+stehen unter [Turmgeometrie](tower_geometry.md).
 
 Konstante Schichten übernehmen die eingebetteten Höhen unmittelbar. Für eine
 abweichende Schichtfolge wird ein natives Höhenprofil des Turms ergänzt.

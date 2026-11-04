@@ -43,6 +43,7 @@ def _connected_mesh(path: Path) -> trimesh.Trimesh:
 def build_prusa_joint_project(
     adapter, request: SliceRequest, source_model_path, tower_model_path,
     destination, *, occupied, placement, tower_full_infill: bool,
+    tower_wall_count: int | None = None,
     tower_supports_disabled: bool = False, source_supports_enabled: bool = False,
 ) -> JointProjectResult:
     """Build our own interoperable archive; read both slicer inputs only."""
@@ -79,6 +80,8 @@ def build_prusa_joint_project(
             for key, value in simulated_support_settings(request.profile.installation.version).items():
                 setting(key, value)
         if identifier == 2:
+            if tower_wall_count is not None and not tower_full_infill:
+                setting("perimeters", str(tower_wall_count))
             if tower_full_infill:
                 setting("fill_density", "100%")
                 setting("fill_pattern", "rectilinear")
@@ -143,6 +146,7 @@ def build_prusa_joint_project(
                 archive.writestr(path, ET.tostring(document, encoding="utf-8", xml_declaration=True))
             archive.writestr(PRINT_CONFIG_PATH, project_config.encode("utf-8"))
         validate_prusa_joint_project(staged, tower_full_infill=tower_full_infill,
+                                     tower_wall_count=tower_wall_count,
                                      tower_supports_disabled=tower_supports_disabled,
                                      source_supports_enabled=source_supports_enabled,
                                      source_support_settings=simulated_support_settings(request.profile.installation.version))
@@ -153,7 +157,7 @@ def build_prusa_joint_project(
 
 
 def validate_prusa_joint_project(
-    path, *, tower_full_infill: bool, tower_supports_disabled: bool = False,
+    path, *, tower_full_infill: bool, tower_wall_count: int | None = None, tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
     source_support_settings: dict[str, str] | None = None,
 ) -> tuple[int, int]:
@@ -205,6 +209,8 @@ def validate_prusa_joint_project(
                 raise ValueError("Eine Objektgeometrie enthält ungültige Dreiecke")
         if tower_full_infill and (objects["2"].get("fill_density") != "100%" or objects["2"].get("fill_pattern") != "rectilinear"):
             raise ValueError("Die 100-%-Turmfüllung fehlt")
+        if tower_wall_count is not None and not tower_full_infill and objects["2"].get("perimeters") != str(tower_wall_count):
+            raise ValueError("Die Turm-Wandlinien fehlen")
         if tower_supports_disabled and objects["2"].get("support_material") != "0":
             raise ValueError("Die deaktivierten Turmstützen fehlen")
         if source_supports_enabled and objects["1"].get("support_material") != "1":

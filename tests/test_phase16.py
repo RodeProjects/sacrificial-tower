@@ -822,6 +822,44 @@ class Phase16Tests(unittest.TestCase):
             )
         )
 
+    def test_07ec_joint_deficit_preserves_prior_layer_widths(self) -> None:
+        profile = self._radius_profile()
+        held_radius = profile.config.minimum_radius_mm + 2.0
+        profile = replace(
+            profile,
+            layers=tuple(
+                replace(
+                    layer,
+                    radius_mm=held_radius,
+                    calculated_radius_mm=held_radius,
+                )
+                for layer in profile.layers
+            ),
+        )
+        source_layers = tuple(
+            replace(layer, total_time_s=6.0)
+            for layer in self.snapshot.layers
+        )
+        combined = {
+            layer.index: 4.0 if position == 0 else 5.5
+            for position, layer in enumerate(source_layers)
+        }
+        adjusted, _ = adjust_radius_profile(
+            profile,
+            source_layers,
+            {layer.index: 0.0 for layer in source_layers},
+            target_time_s=5.0,
+            combined_layer_times_s=combined,
+            coupled_radius_scale=1.1,
+            config=CalibrationConfig(time_tolerance_s=0.2),
+        )
+        self.assertTrue(
+            all(
+                new.radius_mm >= old.radius_mm
+                for old, new in zip(profile.layers, adjusted.layers, strict=True)
+            )
+        )
+
     def test_07f_joint_scale_uses_direct_critical_layer_time(self) -> None:
         config = CalibrationConfig(time_tolerance_s=0.2)
         self.assertAlmostEqual(

@@ -262,7 +262,7 @@ class CircleSegmentsUiTests(unittest.TestCase):
         w.automatic_generation_card.click()
         for _ in range(5):
             self.app.processEvents()
-        controls = (w.profile_angle_limit, w.circle_segments_setting.automatic_control)
+        controls = (w.profile_angle_limit,)
         self.assertEqual(w.profile_angle_limit.checkbox.accessibleName(),
             "Threshold-angle des Slicer-Profils verwenden")
         self.assertEqual(w.profile_angle_limit.prefix.text(), "")
@@ -274,9 +274,9 @@ class CircleSegmentsUiTests(unittest.TestCase):
             text_bottom = (label.mapToGlobal(QPoint()).y()
                            + (label.height() + label.fontMetrics().height()) // 2)
             offsets.append(control.mapToGlobal(QPoint()).y() - text_bottom)
-        self.assertEqual(offsets, [0, 0])
+        self.assertEqual(offsets, [0])
         for label in (w.profile_angle_limit.prefix, w.profile_angle_limit.threshold_hint,
-                      w.profile_angle_limit.suffix, controls[1].text_label):
+                      w.profile_angle_limit.suffix):
             self.assertEqual(label.font().pointSizeF(), 9)
 
     def test_footer_right_buttons_keep_original_height_and_left_messages_stay_at_top(self):

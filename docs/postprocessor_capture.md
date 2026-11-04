@@ -31,7 +31,7 @@ absichtlich gegen feste Wände.
 Die Turmbreite `D` bezeichnet die lange Achse der Kapsel. Der automatische
 Richtwert verwendet das größte ursprüngliche Schichtzeitdefizit `R`:
 
-`D = min(100 mm, max(12 mm, 0,10 × Turmhöhe, 12 mm × sqrt(1 + R / 90 s)))`
+`D = min(100 mm, 2 × max(12 mm, 0,10 × Turmhöhe, 12 mm × sqrt(1 + R / 90 s)))`
 
 Die Tiefe beträgt zunächst `max(5 mm, 0,35 × D)`. Ausreichender Platz für die
 Profil-Wandstärke und offene Kammern hat Vorrang. Beide Größen bleiben über den

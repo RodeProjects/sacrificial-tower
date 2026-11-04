@@ -740,3 +740,17 @@ dem Kompatibilitätstoken `method-export-directory-path-v1`. Für Downgrade und
 Wiederübernahme gelten dieselbe explizite Typ-/Pfadprüfung, Sicherung und
 atomare Speicherung wie für die bestehenden Methodenpfade. Unbekannte neuere,
 beschädigte oder extern geänderte Einstellungen werden weiterhin geschützt.
+
+## Schema 29: Verjüngungsautomatik und Turm-Wandlinien
+
+28→29 ergänzt `automatic_contraction_angle` und `tower_wall_count` in
+`generation`. Neue Einstellungen starten mit aktiver Verjüngungsautomatik und
+zwei Wandlinien. Bei bestehenden Einstellungen bleiben individuelle manuelle
+Winkel aktiv; der bisherige Standardwinkel und die bisher automatisch geregelte
+100-%-Turmfüllung wechseln zur Automatik. Gespeicherte Winkel werden erhalten.
+
+Die stabilen Kennungen verwenden `automatic-contraction-angle-v1` (Boolean)
+und `tower-wall-count-v1` (Ganzzahl von 1 bis 10). Downgrade-Übernahmen prüfen
+Typ, Einheit und Grenzen pro Einstellung. Vor der atomaren Migration wird die
+Originaldatei gesichert; neuere, beschädigte und extern geänderte Dateien bleiben
+geschützt. Sämtliche älteren Migrationsschritte bleiben registriert.

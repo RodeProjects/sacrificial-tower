@@ -43,6 +43,7 @@ def build_calibration_profile(
     profile: EffectiveProfile,
     working_directory: Path,
     *,
+    tower_wall_count: int | None = None,
     simulate_full_tower_infill: bool = False,
     simulate_tower_without_supports: bool = False,
     resolved_profiles: Sequence[ResolvedProfile] | None = None,
@@ -68,6 +69,11 @@ def build_calibration_profile(
         values["skirt_loops"] = applied["skirt_loops"] = "0"
         if "draft_shield" in values or profile.installation.adapter_id == "anycubic_slicer_next":
             values["draft_shield"] = applied["draft_shield"] = "disabled"
+    if tower_wall_count is not None and not simulate_full_tower_infill:
+        if type(tower_wall_count) is not int or not 1 <= tower_wall_count <= 10:
+            raise ValueError("Ungültige Anzahl Turm-Wandlinien.")
+        key = "perimeters" if profile.installation.adapter_id == "prusa_slicer" else "wall_line_count" if profile.installation.adapter_id == "cura" else "wall_loops"
+        values[key] = applied[key] = _profile_override_value(str(tower_wall_count), values.get(key), orca_family=orca_family)
     if simulate_full_tower_infill:
         overrides = FULL_INFILL_OVERRIDES_BY_ADAPTER.get(
             profile.installation.adapter_id

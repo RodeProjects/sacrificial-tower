@@ -60,7 +60,7 @@ SUPPORTED_SLICERS = frozenset({"prusa_slicer", "orca_slicer", "bambu_studio", "a
 
 @dataclass(frozen=True, slots=True)
 class PostprocessorSettings:
-    target_layer_time_s: float = 10.0
+    target_layer_time_s: float = 9.0
     automatic_height: bool = True
     height_mm: float = 50.0
     automatic_diameter: bool = True

@@ -36,7 +36,7 @@ class GenerationMetricsLayoutTests(unittest.TestCase):
             QFontDatabase.removeApplicationFont(font_id)
 
     def setUp(self):
-        self.panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+        self.panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png")
         self.addCleanup(dispose_test_widget, self.panel)
         self.panel.setStyleSheet((ROOT / "src/cooling_tower/gui/styles.qss").read_text(encoding="utf-8"))
         self.panel.set_context(("Turmfüllung: 100 %", "Turmstützen: deaktiviert"))

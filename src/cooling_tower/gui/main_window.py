@@ -91,12 +91,15 @@ from cooling_tower.gui.background_jobs import (
     JobKind,
 )
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.automatic_setting import add_automatic_control
+from cooling_tower.gui.widgets.numeric_field_widths import fit_numeric_fields
+from cooling_tower.gui.widgets.resizable_preview_columns import ResizablePreviewColumns
 from cooling_tower.gui.widgets.circle_segments_setting import (
     CIRCLE_SEGMENTS_HINT, CircleSegmentsSetting, CircleSegmentsSpinBox,
 )
 from cooling_tower.gui.widgets.profile_preparation_hint import ProfilePreparationHint
 from cooling_tower.gui.widgets.prefix_button import PrefixButton
-from cooling_tower.gui.widgets.wheel_safe_inputs import AutomaticDoubleSpinBox
+from cooling_tower.gui.widgets.wheel_safe_inputs import AutomaticDoubleSpinBox, AutomaticSpinBox
 from cooling_tower.gui.widgets.preparation_requirements_layout import PreparationRequirementsLayout
 from cooling_tower.gui.widgets.indicator_only_checkbox import IndicatorOnlyCheckBox
 from cooling_tower.gui.feasibility_worker import FeasibilityWorker
@@ -111,6 +114,7 @@ from cooling_tower.gui.widgets.header_update_controls import HeaderUpdateControl
 from cooling_tower.gui.widgets.content_transition import ContentTransition
 from cooling_tower.gui.widgets.stl_validation_feedback import StlValidationFeedback
 from cooling_tower.gui.generation_progress_dialog import (
+    GENERATION_IMAGE_PATH,
     JointSliceSettingsDialog,
     MINIMUM_JOINT_SLICES_BEFORE_ACCEPT,
     JOINT_SLICE_HINT,
@@ -2539,7 +2543,7 @@ class MainWindow(QMainWindow):
             self.target_time_spin,
         )
         self.full_infill_checkbox = QCheckBox(
-            "100% Turmfüllung simulieren (empfohlen)"
+            "100% Turmfüllung simulieren"
         )
         self.full_infill_checkbox.setObjectName("simulateFullTowerInfill")
         self.full_infill_checkbox.setLayoutDirection(
@@ -2707,20 +2711,7 @@ class MainWindow(QMainWindow):
         stability_fields_layout.setSpacing(6)
         stability_fields_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         stability_layout.addWidget(stability_fields)
-        self.automatic_base_checkbox = QCheckBox(
-            "Standfußbreite automatisch berechnen"
-        )
-        self.automatic_base_checkbox.setObjectName("automaticBaseWidth")
-        self.automatic_base_checkbox.setLayoutDirection(
-            Qt.LayoutDirection.RightToLeft
-        )
-        self.automatic_base_checkbox.setSizePolicy(
-            QSizePolicy.Policy.Fixed,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.automatic_base_checkbox.setFixedHeight(
-            METRICS.form_control_height_px
-        )
+        self.automatic_base_checkbox = QCheckBox()
         self.automatic_base_error_label = QLabel()
         self.automatic_base_error_label.setObjectName("settingMessage")
         self.automatic_base_error_label.setWordWrap(True)
@@ -2781,19 +2772,7 @@ class MainWindow(QMainWindow):
         )
         self.manual_base_width_setting = manual_base_setting
         manual_base_setting.default_provider = self._automatic_base_width_mm
-        manual_base_setting.label.hide()
-        manual_base_setting.layout().removeWidget(manual_base_setting.label)
-        manual_base_setting.layout().addWidget(
-            self.automatic_base_checkbox,
-            0,
-            1,
-            Qt.AlignmentFlag.AlignLeft
-            | Qt.AlignmentFlag.AlignAbsolute
-            | Qt.AlignmentFlag.AlignVCenter,
-        )
-        self.automatic_base_checkbox.setAccessibleName(
-            "Standfußbreite automatisch berechnen"
-        )
+        add_automatic_control(manual_base_setting, self.automatic_base_checkbox)
         self.automatic_base_info_button = manual_base_setting.info_button
         self.automatic_base_info_button.setAccessibleName(
             "Informationen zur automatischen und manuellen Standfußbreite"
@@ -2850,12 +2829,15 @@ class MainWindow(QMainWindow):
         self.profile_angle_limit = ProfileAngleLimitControl(self.maximum_expansion_angle_setting)
         self.profile_angle_limit.setProperty("automaticMode", True)
         self.profile_angle_limit.checkbox.toggled.connect(self._on_profile_angle_limit_toggled)
-        self._add_numeric_setting(
+        contraction_setting = self._add_numeric_setting(
             overhang_layout,
             "maximum_contraction_angle_deg",
             "Maximaler Verjüngungswinkel",
             self.maximum_contraction_angle_spin,
         )
+        self.automatic_contraction_checkbox = add_automatic_control(contraction_setting)
+        self.automatic_contraction_checkbox.setChecked(True)
+        self.automatic_contraction_checkbox.toggled.connect(self._on_contraction_automatic_toggled)
         overhang_group.refresh_collapsed_state()
         self.content_layout.addWidget(overhang_group)
 
@@ -3171,6 +3153,14 @@ class MainWindow(QMainWindow):
         geometry_layout.addWidget(self.layer_range_button_row)
         self.tower_geometry_heading = self._settings_subsection_heading("Turmgeometrie")
         geometry_layout.insertWidget(0, self.tower_geometry_heading)
+        self.tower_wall_count_spin = AutomaticSpinBox()
+        self.tower_wall_count_spin.setObjectName("towerWallCount")
+        self.tower_wall_count_spin.setRange(1, 10)
+        self.tower_wall_count_spin.setProperty("validationMinimum", 1)
+        self.tower_wall_count_spin.setProperty("validationMaximum", 10)
+        self._add_numeric_setting(geometry_layout, "tower_wall_count", "Wandlinien", self.tower_wall_count_spin)
+        geometry_layout.removeWidget(self._setting_widgets["tower_wall_count"])
+        geometry_layout.insertWidget(1, self._setting_widgets["tower_wall_count"])
         self.generation_settings_heading = self._settings_subsection_heading("Generierung")
         geometry_layout.addSpacing(10)
         geometry_layout.addWidget(self.generation_settings_heading)
@@ -3214,17 +3204,6 @@ class MainWindow(QMainWindow):
                 "geometry_settings", expanded
             )
         )
-        self.ready_grid = ResponsiveCardGrid(
-            horizontal_spacing_px=0, vertical_spacing_px=0,
-        )
-        self.ready_grid.setObjectName("readySettingsGrid")
-        self.ready_columns_divider = QFrame()
-        self.ready_columns_divider.setObjectName("readyColumnsDivider")
-        self.ready_columns_divider.setFixedWidth(1)
-        self.ready_columns_divider.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding,
-        )
-        self.ready_grid.set_vertical_separator(self.ready_columns_divider)
         self.ready_left_column = QWidget()
         self.ready_left_column.setObjectName("readyLeftColumn")
         ready_left_layout = QVBoxLayout(self.ready_left_column)
@@ -3232,12 +3211,13 @@ class MainWindow(QMainWindow):
         ready_left_layout.setSpacing(METRICS.card_spacing_px)
         ready_left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         ready_left_layout.addWidget(self.geometry_settings_group)
-        self.ready_grid.add_pair(
-            self.ready_left_column,
-            self.prediction_frame,
-            equal_height=False,
-            stacked_right_first=True,
-        )
+        self.ready_grid = ResizablePreviewColumns(self.ready_left_column, self.prediction_frame)
+        self.ready_grid.setObjectName("readySettingsGrid")
+        self._ready_columns_resize_timer = QTimer(self)
+        self._ready_columns_resize_timer.setSingleShot(True)
+        self._ready_columns_resize_timer.timeout.connect(lambda: self._refresh_geometry_section_layout(
+            self.geometry_settings_group.isChecked()))
+        self.ready_grid.layout_changed.connect(lambda: self._ready_columns_resize_timer.start(0))
         self.generation_workspace = QWidget()
         self.generation_workspace.setObjectName("generationWorkspace")
         self.generation_workspace.setSizePolicy(
@@ -3254,6 +3234,7 @@ class MainWindow(QMainWindow):
         self.manual_method_button = self.header_method_selection.buttons["manual"]
         self.postprocessor_method_button = self.header_method_selection.buttons["postprocessor"]
         self.header_method_selection.method_selected.connect(self.select_generation_mode)
+        self.header_method_selection.overview_requested.connect(self.show_generation_method_selection)
         self.generation_method_recommendation = QLabel("(Zweispaltige Ansicht empfohlen - Fenster verbreitern)")
         self.generation_method_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.generation_method_recommendation.setWordWrap(True)
@@ -3306,8 +3287,8 @@ class MainWindow(QMainWindow):
         self.postprocessor_generation_card.clicked.connect(
             lambda: self.select_generation_mode(GenerationMode.POSTPROCESSOR)
         )
-        self.generation_method_grid.set_cards(self.postprocessor_generation_card,
-            self.automatic_generation_card, self.manual_generation_card)
+        self.generation_method_grid.set_cards(self.automatic_generation_card,
+            self.manual_generation_card, self.postprocessor_generation_card)
         picker_layout.addWidget(
             self.generation_method_grid, alignment=Qt.AlignmentFlag.AlignHCenter
         )
@@ -4789,6 +4770,10 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(style)
         except OSError:
             pass
+        self.maximum_expansion_angle_setting.label.ensurePolished()
+        extra_gap = METRICS.form_auto_label_gap_px - METRICS.form_control_gap_px
+        self.maximum_expansion_angle_setting.label.setContentsMargins(0, 0, extra_gap, 0)
+        self.maximum_expansion_angle_setting.label.setMinimumWidth(self.profile_angle_limit.minimum_text_width()+extra_gap)
         self.layer_range_button.ensurePolished()
         self.layer_range_button.setFixedWidth(
             self.layer_range_button.sizeHint().width()
@@ -5325,6 +5310,7 @@ class MainWindow(QMainWindow):
     def _refresh_phase17_actions(self) -> None:
         if not hasattr(self, "preview_button"):
             return
+        self._update_tower_wall_clearance_warning()
         self._refresh_profile_angle_binding()
         from cooling_tower.slicers.support_simulation import global_supports_disabled, OBJECT_SUPPORT_ADAPTERS
         result = self.profile_match_result
@@ -8864,10 +8850,11 @@ class MainWindow(QMainWindow):
             self.prediction_preview_divider.setVisible(
                 not overview_visible or actions_visible
             )
+        fit_numeric_fields((*self._setting_widgets.values(), *self.slice_budget_settings.values()))
         self.ready_grid.setMinimumHeight(0)
         self.ready_grid.setMaximumHeight(16777215)
         self.ready_grid.refresh_layout()
-        self.ready_grid.grid.invalidate()
+        self.ready_grid.stack.invalidate()
         # A first height query can still contain a child's old geometry when
         # the first joint result reveals the preview and changes several labels
         # at once. Applying that height lays out the children; measure again so
@@ -8877,10 +8864,10 @@ class MainWindow(QMainWindow):
             if required_grid_height <= 0:
                 break
             self.ready_grid.setFixedHeight(required_grid_height)
-            self.ready_grid.grid.activate()
+            self.ready_grid.stack.activate()
             if self.ready_grid.content_height_hint() == required_grid_height:
                 break
-        self.ready_grid.grid.activate()
+        self.ready_grid.stack.activate()
         self.ready_grid.updateGeometry()
         # The method navigation adds a parent layout with its own cached
         # height-for-width. Refresh it before measuring the scroll content,
@@ -10274,6 +10261,7 @@ class MainWindow(QMainWindow):
     def _on_value_changed(self, value) -> None:
         if self._closing:
             return
+        self._update_tower_wall_clearance_warning()
         sender = self.sender()
         changed_setting_name = self._last_changed_setting_name
         if sender is self.layer_time_tolerance_spin:
@@ -10327,6 +10315,8 @@ class MainWindow(QMainWindow):
         self.validate_form()
 
     def _on_individual_reset(self, _setting_name: str) -> None:
+        if _setting_name == "maximum_contraction_angle_deg":
+            self.automatic_contraction_checkbox.setChecked(True)
         if _setting_name == "manual_base_width_mm":
             self._manual_base_width_session_value = (
                 self._automatic_base_width_mm()
@@ -10522,6 +10512,7 @@ class MainWindow(QMainWindow):
     def _on_full_infill_changed(self, _checked: bool) -> None:
         if self._closing:
             return
+        self._update_tower_wall_clearance_warning()
         self._refresh_contraction_angle_display()
         self._last_changed_setting_name = "simulate_full_tower_infill"
         self._pending_reset_setting_name = None
@@ -12733,6 +12724,8 @@ class MainWindow(QMainWindow):
             minimum_base_radius_mm=self.minimum_base_spin.value(),
             base_margin_mm=self.base_margin_spin.value(),
             base_height_factor=self.base_height_factor_spin.value(),
+            automatic_contraction_angle=self.automatic_contraction_checkbox.isChecked(),
+            tower_wall_count=self.tower_wall_count_spin.value(),
             automatic_base_width=self.automatic_base_checkbox.isChecked(),
             manual_base_width_mm=manual_base_width,
             minimum_radius_height_factor=(
@@ -12797,6 +12790,7 @@ class MainWindow(QMainWindow):
             ),
             (self.local_window_spin, settings.local_reference_window),
             (self.circle_segments_spin, settings.circle_segments),
+            (self.tower_wall_count_spin, settings.tower_wall_count),
         )
         for widget, value in values:
             widget.blockSignals(True)
@@ -12819,6 +12813,8 @@ class MainWindow(QMainWindow):
             settings.simulate_tower_without_supports
         )
         self.simulate_tower_without_supports_checkbox.blockSignals(False)
+        with QSignalBlocker(self.automatic_contraction_checkbox):
+            self.automatic_contraction_checkbox.setChecked(settings.automatic_contraction_angle)
         self._refresh_contraction_angle_display()
         self.manual_base_width_spin.setEnabled(
             not settings.automatic_base_width
@@ -12837,14 +12833,46 @@ class MainWindow(QMainWindow):
         self._update_automatic_base_width_preview()
 
     def _refresh_contraction_angle_display(self) -> None:
-        automatic = self.full_infill_checkbox.isChecked()
+        automatic = self.automatic_contraction_checkbox.isChecked()
+        self.tower_wall_count_spin.set_automatic_display(self.full_infill_checkbox.isChecked(), "solid")
+        wall_row = self._setting_widgets["tower_wall_count"]
+        wall_row.label.setEnabled(not self.full_infill_checkbox.isChecked())
+        wall_row.refresh_reset_state()
+        if self.full_infill_checkbox.isChecked():
+            wall_row.reset_button.setEnabled(False)
+        wall_row.refresh_input_state()
         self.maximum_contraction_angle_spin.set_automatic_display(automatic)
         setting = self._setting_widgets["maximum_contraction_angle_deg"]
         setting.unit_label.setVisible(not automatic)
         setting.refresh_reset_state()
-        if automatic:
-            setting.reset_button.setEnabled(False)
+        setting.reset_button.setEnabled(not automatic)
+        setting.reset_button.setProperty("modified", not automatic)
         setting.refresh_input_state()
+
+    def _update_tower_wall_clearance_warning(self) -> None:
+        if not hasattr(self, 'tower_wall_count_spin'):
+            return
+        row = self._setting_widgets['minimum_outer_diameter_mm']
+        message = ''
+        if not self.full_infill_checkbox.isChecked():
+            from cooling_tower.tower.wall_clearance import wall_clearance_hint
+            result = getattr(self, 'profile_match_result', None)
+            profile = getattr(getattr(result, 'selected', None), 'effective_profile', None)
+            values = getattr(profile, 'effective_values', {}) if profile else {}
+            adapter = getattr(getattr(profile, 'installation', None), 'adapter_id', '')
+            message = wall_clearance_hint(values, adapter, self.tower_wall_count_spin.value(),
+                                          self.minimum_outer_spin.value(),
+                                          circle_segments=None if self.automatic_circle_segments_checkbox.isChecked()
+                                          else self.circle_segments_spin.value())
+        if row._helper_text != message:
+            row.set_warning(message)
+            if hasattr(self, 'geometry_settings_group'):
+                self._refresh_geometry_section_layout(self.geometry_settings_group.isChecked())
+
+    def _on_contraction_automatic_toggled(self, _checked: bool) -> None:
+        self._refresh_contraction_angle_display()
+        self._last_changed_setting_name = "automatic_contraction_angle"
+        self._on_value_changed(None)
 
     def _on_circle_segments_automatic_toggled(self, _checked: bool) -> None:
         self._last_changed_setting_name = "circle_segments"
@@ -13135,7 +13163,7 @@ class MainWindow(QMainWindow):
                 continue
             if name == "manual_base_width_mm" and settings.automatic_base_width:
                 continue
-            if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+            if name == "maximum_contraction_angle_deg" and settings.automatic_contraction_angle:
                 continue
             if diameter_order_invalid and name in {
                 "minimum_outer_diameter_mm",
@@ -13187,7 +13215,7 @@ class MainWindow(QMainWindow):
                 "Max. Turmdurchmesser muss größer als Min. Turmdurchmesser sein.",
             )
         for name in self._incomplete_setting_names:
-            if name == "maximum_contraction_angle_deg" and settings.simulate_full_tower_infill:
+            if name == "maximum_contraction_angle_deg" and settings.automatic_contraction_angle:
                 continue
             setting = self._setting_widgets.get(name)
             message = (
@@ -13267,7 +13295,7 @@ class MainWindow(QMainWindow):
                 ),
             )
         if (
-            not settings.simulate_full_tower_infill
+            not settings.automatic_contraction_angle
             and "maximum_contraction_angle_deg" not in range_invalid_names
             and not 0.0 < settings.maximum_contraction_angle_deg < 90.0
         ):
@@ -13611,7 +13639,7 @@ class MainWindow(QMainWindow):
     def joint_generation_dialog(self) -> GenerationPanel:
         if self._joint_generation_dialog is None:
             dialog = GenerationPanel(
-                GUI_ASSET_ROOT / "tower_gen_finished.webp",
+                GENERATION_IMAGE_PATH,
                 self,
             )
             dialog.accept_requested.connect(self._accept_joint_candidate)

@@ -54,7 +54,7 @@ class CaptureDesign:
 def capture_design(height, waits, *, diameter=None):
     reserve = max(waits, default=0.0)
     automatic = max(12.0, height*.10, 12.0*math.sqrt(1+reserve/90.0))
-    width = min(100., automatic) if diameter is None else diameter
+    width = min(100., 2.0*automatic) if diameter is None else diameter
     return CaptureDesign(width, reserve, 1, min(width-1., max(5., .35*width)))
 
 

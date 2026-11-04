@@ -155,7 +155,7 @@ class ManualGenerationPanel(QWidget):
             if title == "Turmform und Bearbeitung":
                 from cooling_tower.gui.widgets.simulation_option import SimulationOption
                 from cooling_tower.gui.texts import FULL_INFILL_HINT_HTML, FULL_INFILL_HINT_ACCESSIBLE, SOURCE_SUPPORT_HINT_HTML
-                self.full_infill_option = SimulationOption("100% Turmfüllung simulieren (empfohlen)", FULL_INFILL_HINT_HTML,
+                self.full_infill_option = SimulationOption("100% Turmfüllung simulieren", FULL_INFILL_HINT_HTML,
                                                           accessible_hint=FULL_INFILL_HINT_ACCESSIBLE)
                 self.full_infill_checkbox = self.full_infill_option.checkbox
                 self.source_support_option = SimulationOption("Stützen für STL-Objekt simulieren", SOURCE_SUPPORT_HINT_HTML)
@@ -184,6 +184,7 @@ class ManualGenerationPanel(QWidget):
                 self.layer_time_controls.interaction_started.connect(self._begin_interaction)
                 self.layer_time_controls.interaction_finished.connect(self._end_interaction)
                 card.content_layout.addWidget(self.layer_time_controls)
+        self.color_scale_spin.lineEdit().textChanged.connect(lambda _: QTimer.singleShot(0, self, self._sync_input_widths))
         self._sync_input_widths()
         self.reset_button = QPushButton("Alles zurücksetzen")
         self.reset_button.clicked.connect(self.reset_all)
@@ -387,6 +388,7 @@ class ManualGenerationPanel(QWidget):
         row.reset_button.clicked.disconnect()
         row.reset_button.clicked.connect(lambda:(self.reset_value(name),row.set_error(None)))
         spin.setKeyboardTracking(False)
+        spin.lineEdit().textChanged.connect(lambda _: QTimer.singleShot(0, self, self._sync_input_widths))
         spin.valueChanged.connect(lambda value:self._numeric_changed(
             name, complementary_angle(value) if name in MANUAL_ANGLE_FIELDS else value))
         spin.limit_attempted.connect(lambda value:row.set_error(boundary_message(spin,value,"Segmente" if name=="circle_segments" else "Winkel" if unit=="°" else "Wert")))
@@ -395,9 +397,11 @@ class ManualGenerationPanel(QWidget):
         return row
 
     def _sync_input_widths(self):
-        spins=tuple(self.editors.values())
+        spins=(*self.editors.values(), self.color_scale_spin)
         width=compact_manual_width(spins)
         for spin in spins:spin.setFixedWidth(width)
+        self.layer_time_controls.range_slider.numeric_field_width = width
+        self.layer_time_controls.range_slider._layout_parts()
 
     def changeEvent(self,event):
         super().changeEvent(event)
@@ -570,6 +574,7 @@ class ManualGenerationPanel(QWidget):
         self.rows["expansion_angle_deg"].refresh_content_height()
         self._apply_view_editability()
         self.point_editor.sync_fields(self.canvas.information_identity(),self._point_fields(),self.canvas.selected_handle_text(),not self._busy)
+        self._sync_input_widths()
 
     def _point_fields(self):
         if self.draft is None:return ()

@@ -5,10 +5,12 @@ from pathlib import Path
 from PySide6.QtCore import QEasingCurve, QEvent, QSignalBlocker, QSize, QTimer, Qt, Signal, QVariantAnimation
 from PySide6.QtGui import QIcon, QValidator
 from PySide6.QtWidgets import (QBoxLayout, QCheckBox, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOptionSpinBox, QVBoxLayout, QWidget)
+    QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from cooling_tower.angles import complementary_angle
 from cooling_tower.gui.design_tokens import METRICS
+from cooling_tower.gui.widgets.numeric_field_widths import fit_numeric_fields
+from cooling_tower.gui.widgets.automatic_setting import add_automatic_control
 from cooling_tower.gui.widgets.activity_progress_bar import ActivityProgressBar
 from cooling_tower.gui.widgets.committed_numeric_inputs import CommittedDoubleSpinBox, CommittedSpinBox
 from cooling_tower.gui.widgets.footer_actions import fit_footer_actions
@@ -90,10 +92,11 @@ class NativeEditorPanel(QWidget):
         left.addWidget(self.input_group)
         self._numeric(self.input_group.content_layout, 'target_layer_time_s', 'Mindest-Layerzeit', 's', 5, 30)
         self._numeric(self.input_group.content_layout, 'layer_time_tolerance_s', 'Layerzeit-Toleranz (±)', 's', .1, 3)
-        self._check(self.input_group.content_layout, 'simulate_full_tower_infill', '100% Turmfüllung simulieren (empfohlen)')
+        self._check(self.input_group.content_layout, 'simulate_full_tower_infill', '100% Turmfüllung simulieren')
         self._check(self.input_group.content_layout, 'simulate_tower_without_supports', 'Deaktivierte Turmstützen simulieren')
         self.advanced_group = SectionCard('Erweiterte Turmeinstellungen')
         left.addWidget(self.advanced_group)
+        self._numeric(self.advanced_group.content_layout, 'tower_wall_count', 'Wandlinien', '', 1, 10, integer=True)
         for key, label, unit, low, high in (
             ('minimum_outer_diameter_mm', 'Minimaler Turmdurchmesser', 'mm', 3, 99),
             ('maximum_outer_diameter_mm', 'Maximaler Turmdurchmesser', 'mm', 5, 200),
@@ -103,7 +106,7 @@ class NativeEditorPanel(QWidget):
             ('maximum_contraction_angle_deg', 'Verjüngungswinkel', '°', 5, 89),
             ('circle_segments', 'Turm-Kreissegmente', '', 4, 256),
         ):
-            automatic = {'manual_base_width_mm':'automatic_base_width', 'circle_segments':'automatic_circle_segments'}.get(key)
+            automatic = {'manual_base_width_mm':'automatic_base_width', 'circle_segments':'automatic_circle_segments', 'maximum_contraction_angle_deg':'automatic_contraction_angle'}.get(key)
             self._numeric(self.advanced_group.content_layout, key, label, unit, low, high,
                           automatic=automatic, integer=key == 'circle_segments', angle=key.endswith('_angle_deg'))
         self._check(self.advanced_group.content_layout, 'limit_expansion_to_profile', 'Aufweitung auf Profil begrenzen')
@@ -289,15 +292,7 @@ class NativeEditorPanel(QWidget):
             flag.setAccessibleName(label+' automatisch berechnen')
             self.automatic[automatic] = flag
             self.inputs[automatic] = (flag, False)
-            grid = row.layout()
-            for widget in (spin,row.reset_button,row.range_label,row.message_container):
-                grid.removeWidget(widget)
-            grid.addWidget(QLabel('Auto'),0,2,Qt.AlignmentFlag.AlignRight)
-            grid.addWidget(flag,0,3)
-            grid.addWidget(spin,0,4,Qt.AlignmentFlag.AlignRight)
-            grid.addWidget(row.reset_button,0,5)
-            grid.addWidget(row.range_label,1,1,1,4,Qt.AlignmentFlag.AlignRight)
-            grid.addWidget(row.message_container,2,0,1,6)
+            add_automatic_control(row, flag)
             flag.toggled.connect(self._sync_automatic)
             flag.toggled.connect(self.changed)
         layout.addWidget(row)
@@ -342,10 +337,15 @@ class NativeEditorPanel(QWidget):
                 spin.show_automatic_value(automatic,self._automatic_values.get(field))
                 spin.setEnabled(not automatic)
         if 'maximum_contraction_angle_deg' in self.inputs:
-            automatic = self.inputs['simulate_full_tower_infill'][0].isChecked()
+            automatic = self.automatic['automatic_contraction_angle'].isChecked()
             spin = self.inputs['maximum_contraction_angle_deg'][0]
             spin.show_automatic_value(automatic, 'auto')
             spin.setEnabled(not automatic)
+        if 'tower_wall_count' in self.inputs:
+            enabled = not self.inputs['simulate_full_tower_infill'][0].isChecked()
+            self.inputs['tower_wall_count'][0].show_automatic_value(not enabled, 'solid')
+            self.inputs['tower_wall_count'][0].setEnabled(enabled)
+            self.rows['tower_wall_count'].label.setEnabled(enabled)
         if 'limit_expansion_to_profile' in self.inputs:
             automatic = self.inputs['limit_expansion_to_profile'][0].isChecked() and self._profile_angle is not None
             spin = self.inputs['maximum_expansion_angle_deg'][0]
@@ -477,7 +477,10 @@ class NativeEditorPanel(QWidget):
             return
         self._fit_numeric_fields()
         for row in self.rows.values():
-            row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 30))
+            if hasattr(row, "_automatic_label_minimum"):
+                row._automatic_label_minimum.refresh()
+            else:
+                row.label.setMinimumWidth(max(150, row.label.fontMetrics().horizontalAdvance(row.label.text()) + 30))
         for card in (self.input_group, self.advanced_group, self.preview_group):
             card.content_layout.invalidate()
             card.layout().invalidate()
@@ -559,10 +562,9 @@ class NativeEditorPanel(QWidget):
         if side_by_side and not self.timing_panel.isHidden():
             details_width -= chart_width+12
         self.legend.setFixedHeight(self.legend.heightForWidth(max(1, details_width)))
-        whole_width = self.width()-margins.left()-margins.right()
-        minimum = (preferred_pair if not self.timing_panel.isHidden() and whole_width >= preferred_pair else
-            minimum_left)
-        self.preview_display.setMinimumWidth(minimum)
+        # The chart can stack inside the preview. Its side-by-side preference
+        # must not force the outer splitter to reparent a focused settings field.
+        self.preview_display.setMinimumWidth(minimum_left)
         self.display_layout.invalidate()
         self.preview_display.updateGeometry()
 
@@ -602,40 +604,7 @@ class NativeEditorPanel(QWidget):
 
 
     def _fit_numeric_fields(self):
-        """Share the smallest width that fits every current value and its unit."""
-        for row in self.rows.values():
-            row.unit_label.ensurePolished()
-        previous_unit_width = max(row.unit_label.fontMetrics().horizontalAdvance(row.unit_label.text())+4
-            for row in self.rows.values())
-        unit_width = max(previous_unit_width, *(row.unit_label.minimumSizeHint().width()
-            for row in self.rows.values()))
-        # The label's style padding and glyph bearings need real space too.
-        # Take it equally from both value gaps, retaining the existing box budget.
-        extra = unit_width-previous_unit_width
-        reduction = min(4, (extra+1)//2)
-        left_gap, right_gap = 8-reduction, 4-reduction
-        width_budget = max(0, 2*reduction-extra)
-        required = []
-        for row in self.rows.values():
-            spin = row.editor
-            spin.ensurePolished()
-            row.unit_label.setFixedWidth(unit_width)
-            padding = f"QDoubleSpinBox, QSpinBox {{ padding: 0 {unit_width+right_gap}px 0 {left_gap}px; }}"
-            if spin.styleSheet() != padding:
-                spin.setStyleSheet(padding)
-            option = QStyleOptionSpinBox()
-            spin.initStyleOption(option)
-            field = spin.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,
-                option, QStyle.SubControl.SC_SpinBoxEditField, spin)
-            margins = spin.lineEdit().textMargins()
-            text_width = spin.lineEdit().fontMetrics().horizontalAdvance(spin.lineEdit().text() or "0")
-            required.append(text_width+margins.left()+margins.right()+4+spin.width()-field.width()+width_budget)
-        width = max(required)
-        for row in self.rows.values():
-            row.editor.setFixedWidth(width)
-            row.range_label.setFixedWidth(width+30)
-            row._position_unit_label()
-
+        fit_numeric_fields(self.rows.values())
 
     def _build_footer(self):
         self.footer_widget = NativeFooter()

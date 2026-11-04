@@ -66,6 +66,7 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertEqual(w.maximum_expansion_angle_spin.value(), 40)
         self.assertEqual(w.maximum_contraction_angle_spin.value(), 35)
         w.maximum_expansion_angle_spin.setValue(30)
+        w.automatic_contraction_checkbox.setChecked(False)
         w.maximum_contraction_angle_spin.setValue(25)
         settings = w.collect_settings()
         self.assertEqual(settings.maximum_expansion_angle_deg, 60)
@@ -76,7 +77,7 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertEqual(w.maximum_contraction_angle_spin.value(), 25)
         w._setting_widgets['maximum_contraction_angle_deg'].reset_button.click()
         self.assertEqual(w.maximum_contraction_angle_spin.value(), 35)
-        w.full_infill_checkbox.setChecked(True)
+        w.automatic_contraction_checkbox.setChecked(True)
         self.assertFalse(w.maximum_contraction_angle_spin.isEnabled())
         self.assertEqual(w.maximum_contraction_angle_spin.text(), 'auto')
         self.assertEqual(w.collect_settings().maximum_contraction_angle_deg, 55)
@@ -87,7 +88,7 @@ class HorizontalAngleTests(unittest.TestCase):
         row = w._setting_widgets['maximum_contraction_angle_deg']
         for full_infill in (True, False, True):
             with self.subTest(full_infill=full_infill):
-                w.apply_settings(replace(w.collect_settings(), simulate_full_tower_infill=full_infill,
+                w.apply_settings(replace(w.collect_settings(), automatic_contraction_angle=full_infill, simulate_full_tower_infill=True,
                                          maximum_contraction_angle_deg=63))
                 self.assertEqual(spin.isEnabled(), not full_infill)
                 self.assertEqual(spin.text(), 'auto' if full_infill else '27,0')
@@ -97,7 +98,7 @@ class HorizontalAngleTests(unittest.TestCase):
                 self.assertEqual(w.collect_settings().maximum_contraction_angle_deg, 63)
                 spin.interpretText()
                 self.assertEqual(spin.value(), 27)
-                w.full_infill_checkbox.setChecked(False)
+                w.automatic_contraction_checkbox.setChecked(False)
                 self.assertTrue(spin.isEnabled())
                 self.assertEqual(spin.value(), 27)
                 spin.setFocus()
@@ -105,16 +106,16 @@ class HorizontalAngleTests(unittest.TestCase):
                 QTest.keyClicks(spin.lineEdit(), '29')
                 QTest.keyClick(spin, Qt.Key.Key_Enter)
                 self.assertEqual(spin.value(), 29)
-                w.full_infill_checkbox.setChecked(True)
+                w.automatic_contraction_checkbox.setChecked(True)
                 self.assertEqual(spin.text(), 'auto')
                 self.assertEqual(spin.value(), 29)
                 self.assertFalse(row.reset_button.isEnabled())
-                w.full_infill_checkbox.setChecked(False)
+                w.automatic_contraction_checkbox.setChecked(False)
                 self.assertEqual(spin.text(), '29,0')
                 self.assertTrue(row.reset_button.isEnabled())
                 row.reset_button.click()
                 self.assertEqual(spin.value(), 35)
-                self.assertTrue(spin.isEnabled())
+                self.assertFalse(spin.isEnabled())
 
     def test_contraction_auto_display_is_gray_and_preserves_saved_numeric_precision(self):
         w = self.ready_angle_window()
@@ -134,7 +135,7 @@ class HorizontalAngleTests(unittest.TestCase):
         self.assertEqual(spin.text(), 'auto')
         spin.interpretText()
         self.assertEqual(spin.value(), 27.125)
-        w.full_infill_checkbox.setChecked(False)
+        w.automatic_contraction_checkbox.setChecked(False)
         self.assertEqual(spin.value(), 27.125)
         self.assertEqual(spin.text(), '27,1')
         self.assertFalse(row.unit_label.isHidden())
@@ -144,10 +145,10 @@ class HorizontalAngleTests(unittest.TestCase):
     def test_contraction_help_explains_auto_and_keeps_steps_without_threshold_paragraph(self):
         from cooling_tower.gui.texts import SETTING_INFO_TEXTS
         hint = SETTING_INFO_TEXTS['maximum_contraction_angle_deg']
-        self.assertIn('nach eigenen Regeln', hint)
-        self.assertIn('„auto“', hint)
-        self.assertIn('bleibt aber erhalten', hint)
-        self.assertIn('Direkte Absätze nach innen', hint)
+        self.assertIn('Auto verwendet', hint)
+        self.assertIn('Ohne Auto', hint)
+        self.assertIn('bleibt beim Umschalten erhalten', hint)
+        self.assertIn('100-%-Turmfüllung', hint)
         self.assertNotIn('Threshold angle', hint)
         self.assertNotIn('Stütz-Erkennung', hint)
 

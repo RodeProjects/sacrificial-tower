@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QWidget
 
 from cooling_tower.angles import ProfileAngleBinding, profile_binding_angle
+from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.widgets.hint_popover import hide_window_hint, show_window_hint
 
 
@@ -119,13 +120,13 @@ class SettingSubline(QWidget):
             self.setParent(parent)
         self.setEnabled(self.row.isEnabled())
         self.setVisible(not self.row.isHidden() and not label.isHidden())
-        available = max(1, label.width())
+        available = max(1, label.contentsRect().width())
         fit_key = (available, label.font().toString())
         if fit_key != self._fit_key:
             self._fit_key = fit_key
             self._fit_text(available)
         height = max(self.fontMetrics().height(), self.checkbox.height())
-        origin = label.mapTo(parent, QPoint())
+        origin = label.mapTo(parent, label.contentsRect().topLeft())
         text_bottom = origin.y()+(label.height()+label.fontMetrics().height())//2
         self.setGeometry(origin.x(), text_bottom, available, height)
         self.raise_()
@@ -167,6 +168,14 @@ class ProfileAngleLimitControl(SettingSubline):
         layout.addStretch(1)
         self._attach_to_row(row)
 
+    def minimum_text_width(self):
+        for label in (self.prefix, self.threshold_hint, self.suffix):
+            label.ensurePolished()
+        self.suffix.setText(self._suffix_text)
+        self._fit_key = None
+        self.layout().invalidate()
+        return self.layout().sizeHint().width()
+
     def refresh(self, current, requested, threshold):
         with QSignalBlocker(self.checkbox):
             self.checkbox.setChecked(requested)
@@ -190,6 +199,11 @@ class ProfileAngleLimitControl(SettingSubline):
         return effective
 
     def _fit_text(self, available):
+        if self.property("automaticMode"):
+            # The resizable iterative column reserves the complete subline.
+            self.suffix.setText(self._suffix_text)
+            self.suffix.setToolTip("")
+            return
         # Elide only the trailing explanation on narrow forms. The full wording
         # remains accessible; neither the editor nor the following row moves.
         self.suffix.setText(self._suffix_text)

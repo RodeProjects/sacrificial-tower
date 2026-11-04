@@ -60,10 +60,11 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def test_image_progress_and_best_timing_are_presented(self) -> None:
         dialog = TowerGenerationDialog(
-            PROJECT_ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp"
+            PROJECT_ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png"
         )
         dialog.setWindowState(Qt.WindowState.WindowMaximized)
         dialog.begin(9.0, 0.25, 0, 10)
+        self.assertFalse(dialog.image_progress._pixmap.isNull())
         self.app.processEvents()
         self.assertFalse(dialog.isMaximized())
         self.assertEqual(dialog.width(), 610)
@@ -156,7 +157,7 @@ class GenerationProgressDialogTests(unittest.TestCase):
 
     def test_stop_reason_uses_warning_state_outside_tolerance(self) -> None:
         dialog = TowerGenerationDialog(
-            PROJECT_ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp"
+            PROJECT_ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png"
         )
         dialog.begin(9.0, 0.25, 0, 10)
         iteration = SimpleNamespace(

@@ -2618,6 +2618,7 @@ QWidget#layerTimeColorControls QPushButton[rangeCompactReset="true"] {
     min-height: 0; padding: 0;
 }
 
+QSpinBox#towerWallCount:disabled,
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"],
 QDoubleSpinBox#maximumContractionAngle[automaticPreview="true"],
 QDoubleSpinBox#maximumExpansionAngle:disabled,
@@ -2627,6 +2628,8 @@ QDoubleSpinBox[manualCompactInput="true"][profileAngleBound="true"]:disabled {
     border-color: #d6dee4;
 }
 
+QSpinBox#towerWallCount::up-button:disabled,
+QSpinBox#towerWallCount::down-button:disabled,
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::up-button,
 QDoubleSpinBox#manualBaseWidth[automaticPreview="true"]::down-button,
 QDoubleSpinBox#maximumContractionAngle[automaticPreview="true"]::up-button,
@@ -2851,7 +2854,9 @@ QPushButton#preparationViewButton:focus {
     border-right-width: 1px;
     outline: none;
 }
-QLabel#headerMethodHeading {
+QPushButton#headerMethodHeading {
+    border-radius: 0;
+    min-height: 0;
     color: #40576a;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #eef7fc, stop:1 #cfe3ef);
@@ -2880,7 +2885,7 @@ QPushButton#headerMethodButton[generationMode="automatic"] {
 QPushButton#headerMethodButton[generationMode="manual"] {
     color: #22486f;
     border-color: #91aecb;
-    border-right: 1px solid #91b69e;
+    border-right: 0;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f4f9fe, stop:0.45 #e0eaf5, stop:1 #bad0e7);
 }
@@ -2931,7 +2936,7 @@ QPushButton#headerMethodButton[generationMode="manual"]:focus {
 QPushButton#headerMethodButton[generationMode="postprocessor"] {
     color: #245b3b;
     border-color: #91b69e;
-    border-right: 0;
+    border-right: 1px solid #9fb6c5;
     background: qlineargradient(x1:0, y1:0, x2:0.2, y2:1,
         stop:0 #f3fcf6, stop:0.45 #dfefe4, stop:1 #b8d9c3);
 }
@@ -3139,18 +3144,6 @@ QCheckBox#showAllProfilesCheckBox:pressed {
 QCheckBox#simulateFullTowerInfill::indicator,
 QCheckBox#simulateTowerWithoutSupports::indicator,
 QCheckBox#showAllProfilesCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-}
-
-QCheckBox#automaticBaseWidth,
-QCheckBox#automaticBaseWidth:hover {
-    border: 1px solid transparent;
-    border-radius: 5px;
-    padding: 4px 7px 4px 0;
-}
-
-QCheckBox#automaticBaseWidth::indicator {
     width: 16px;
     height: 16px;
 }

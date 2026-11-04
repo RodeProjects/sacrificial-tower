@@ -385,6 +385,20 @@ class FullInfillProfileTests(unittest.TestCase):
             effective_values={"sparse_infill_density": "12%"},
         )
 
+    def test_wall_count_uses_disposable_profile_and_full_infill_keeps_profile_walls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = self._profile(root, "anycubic_slicer_next")
+            before = {p: p.read_bytes() for p in root.iterdir() if p.is_file()}
+            copied, overrides = build_calibration_profile(profile, root / "walls", tower_wall_count=4)
+            self.assertEqual(str(overrides["wall_loops"]), "4")
+            self.assertEqual(json.loads(copied.process.path.read_text())["wall_loops"], "4")
+            for path, data in before.items():
+                self.assertEqual(path.read_bytes(), data)
+            copied, overrides = build_calibration_profile(profile, root / "full", tower_wall_count=4,
+                simulate_full_tower_infill=True)
+            self.assertNotIn("wall_loops", overrides)
+
     def test_supported_orca_family_full_infill_uses_only_temporary_profile_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

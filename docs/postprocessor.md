@@ -113,7 +113,7 @@ separate Schaltfläche Übernehmen übernimmt geprüfte Positionen in die Einste
 
 ### Profilvorgaben und Geschwindigkeitsgrenzen
 
-Die Mindest-Layerzeit beträgt standardmäßig manuelle **10 Sekunden**. Einzelreset
+Die Mindest-Layerzeit beträgt standardmäßig manuelle **9 Sekunden**. Einzelreset
 und Standardwerte stellen diesen Wert mit deaktivierter Automatik wieder her.
 Die optionale Automatik liest die Kühlungsvorgabe des bestätigten Profils.
 Turmdrucktempo, Fahrtempo sowie gekoppelte Rückzugslänge und Rückzugstempo

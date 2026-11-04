@@ -202,6 +202,7 @@ def _settings_xml(
     tower_id: int,
     *,
     tower_full_infill: bool,
+    tower_wall_count: int | None = None,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
 ) -> bytes:
@@ -242,6 +243,8 @@ def _settings_xml(
                 "metadata",
                 {"key": key, "value": value},
             )
+    if tower_wall_count is not None and not tower_full_infill:
+        ElementTree.SubElement(tower, "metadata", {"key": "wall_loops", "value": str(tower_wall_count)})
     if tower_supports_disabled:
         ElementTree.SubElement(
             tower, "metadata", {"key": "enable_support", "value": "0"}
@@ -581,6 +584,7 @@ def validate_joint_project(
     path: str | Path,
     *,
     tower_full_infill: bool,
+    tower_wall_count: int | None = None,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
     source_support_settings: Mapping[str, str] | None = None,
@@ -641,6 +645,8 @@ def validate_joint_project(
             "Das mit vollständiger Turmfüllung kompatible Füllmuster wurde "
             "nicht korrekt übernommen."
         )
+    if tower_wall_count is not None and not tower_full_infill and tower_values.get("wall_loops") != str(tower_wall_count):
+        raise JointProjectError("Die Turm-Wandlinien wurden nicht korrekt übernommen.")
     if tower_supports_disabled and tower_values.get("enable_support") != "0":
         raise JointProjectError("Die Stützen des Kühlturms wurden nicht deaktiviert.")
     if source_supports_enabled and source_values.get("enable_support") != "1":
@@ -660,6 +666,7 @@ def build_joint_project(
     occupied: OccupiedBounds,
     placement: TowerPlacement,
     tower_full_infill: bool,
+    tower_wall_count: int | None = None,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
 ) -> JointProjectResult:
@@ -696,6 +703,7 @@ def build_joint_project(
             source_id,
             tower_id,
             tower_full_infill=tower_full_infill,
+            tower_wall_count=tower_wall_count,
             tower_supports_disabled=tower_supports_disabled,
             source_supports_enabled=source_supports_enabled,
         ),
@@ -703,6 +711,7 @@ def build_joint_project(
     validated_source, validated_tower = validate_joint_project(
         destination_path,
         tower_full_infill=tower_full_infill,
+        tower_wall_count=tower_wall_count,
         tower_supports_disabled=tower_supports_disabled,
         source_supports_enabled=source_supports_enabled,
     )
@@ -728,6 +737,7 @@ def finalize_slicer_project(
     occupied: OccupiedBounds,
     placement: TowerPlacement,
     tower_full_infill: bool,
+    tower_wall_count: int | None = None,
     tower_supports_disabled: bool = False,
     source_supports_enabled: bool = False,
     source_support_settings: Mapping[str, str] | None = None,
@@ -856,6 +866,11 @@ def finalize_slicer_project(
                         "metadata",
                         {"key": key, "value": value},
                     )
+            if identifier == tower_id and tower_wall_count is not None and not tower_full_infill:
+                for node in list(object_element.findall("metadata")):
+                    if node.get("key") == "wall_loops":
+                        object_element.remove(node)
+                ElementTree.SubElement(object_element, "metadata", {"key": "wall_loops", "value": str(tower_wall_count)})
             if identifier == tower_id and tower_supports_disabled:
                 ElementTree.SubElement(
                     object_element, "metadata",
@@ -906,6 +921,7 @@ def finalize_slicer_project(
     validated_source, validated_tower = validate_joint_project(
         destination_path,
         tower_full_infill=tower_full_infill,
+        tower_wall_count=tower_wall_count,
         tower_supports_disabled=tower_supports_disabled,
         source_supports_enabled=source_supports_enabled,
         source_support_settings=source_support_settings,

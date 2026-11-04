@@ -126,6 +126,15 @@ def adjust_radius_profile(
         else 0.0
     )
     source_by_index = _layer_by_index(source_layers)
+    joint_deficit_active = False
+    if combined_layer_times_s is not None:
+        joint_deficit_active = any(
+            layer_index not in profile.config.excluded_layer_indices
+            and layer_index in source_by_index
+            and math.isfinite(float(combined_time))
+            and float(combined_time) < target_time_s - config.time_tolerance_s
+            for layer_index, combined_time in combined_layer_times_s.items()
+        )
     realized_by_index = realized_outer_radii_mm or {}
     adjusted: list[LayerRadiusRecord] = []
     maximum_radius_change = 0.0
@@ -232,6 +241,14 @@ def adjust_radius_profile(
                 and combined_time > target_time_s + config.time_tolerance_s
             ):
                 requested_radius = min(requested_radius, coupled_radius)
+
+        # Complete-plate slicing can move the critical layer after every
+        # geometry update. While any included layer is still short of target,
+        # keep the joint-phase high-water radius on the other layers so the
+        # feedback loop cannot undo progress just as the slicer moves its
+        # cooling/speed plan elsewhere.
+        if joint_deficit_active and not excluded:
+            requested_radius = max(old_radius, requested_radius)
 
         radius = min(
             maximum_radius,

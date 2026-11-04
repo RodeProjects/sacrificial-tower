@@ -290,7 +290,7 @@ class LayerTimeRangeSlider(QWidget):
             for handle,x in zip((self.red_handle,self.green_handle),centers):
                 handle.setGeometry(round(x-self.HANDLE_SIZE/2),round(dot_y-self.HANDLE_SIZE/2),self.HANDLE_SIZE,self.HANDLE_SIZE)
             value_y=round(dot_y+12)
-            self.end_spin.setFixedWidth(max(72,self.end_spin.sizeHint().width()))
+            self.end_spin.setFixedWidth(getattr(self, "numeric_field_width", max(72,self.end_spin.sizeHint().width())))
             self.end_spin.move(self.width()-self.end_spin.width(),value_y-3)
             self.zero_label.adjustSize();self.zero_label.move(0,value_y+2)
             label_x=[max(0,min(self.width()-item.width(),x-item.width()/2)) for x,item in zip(centers,labels)]

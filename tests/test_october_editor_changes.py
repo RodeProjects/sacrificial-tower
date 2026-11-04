@@ -226,7 +226,7 @@ class EditorChangesTests(unittest.TestCase):
         dialog.reject()
 
     def test_idle_tower_artwork_preserves_progress_and_displays_complete(self):
-        image = Path(__file__).resolve().parents[1] / "src/cooling_tower/gui/assets/tower_gen_finished.webp"
+        image = Path(__file__).resolve().parents[1] / "src/cooling_tower/gui/assets/tower_gen_finished.png"
         panel = GenerationPanel(image)
         self.addCleanup(dispose_test_widget, panel)
         panel.begin(10, .25, 0, 12)

@@ -6,6 +6,10 @@ bestätigte Quelle und Profilbindung. Datei-/Slicervorbereitung und iterative
 Formberechnung bleiben eigenständige bestehende Abläufe. Ein Methodenwechsel
 erhält die Entwürfe und ihre getrennten Ergebnis- und Exportstände.
 
+Die numerischen Einstellungsboxen einschließlich des Farbskalen-Endwerts teilen
+eine aus den aktuell angezeigten Inhalten berechnete Breite. Einheiten stehen
+mit einem kurzen Abstand am Wert; längere Werte verbreitern die Boxen gemeinsam.
+
 ## Inhalt
 
 - [Voraussetzungen und getrennte Methoden](#voraussetzungen-und-getrennte-methoden)

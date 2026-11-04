@@ -1,10 +1,9 @@
 """Automatic tessellation display with an independently retained manual value."""
 from PySide6.QtCore import QEvent, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QValidator
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QLayout
 
 from cooling_tower.gui.widgets.numeric_setting import NumericSettingWidget
-from cooling_tower.gui.widgets.profile_angle_limit import _CornerArrow, SettingSubline
+from cooling_tower.gui.widgets.automatic_setting import add_automatic_control
 from cooling_tower.gui.widgets.wheel_safe_inputs import WheelSafeSpinBox
 
 
@@ -93,43 +92,12 @@ class CircleSegmentsSpinBox(WheelSafeSpinBox):
         self.setEnabled(not automatic)
 
 
-class CircleSegmentsAutomaticControl(SettingSubline):
-    def __init__(self, row):
-        super().__init__(row)
-        self.setObjectName("circleSegmentsAutomaticLine")
-        layout = QHBoxLayout(self)
-        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.arrow = _CornerArrow(self)
-        self.text_label = QLabel("Automatisch berechnen", self)
-        self.checkbox = QCheckBox(self)
-        self.checkbox.setObjectName("automaticCircleSegments")
-        self.checkbox.setFixedSize(15, 15)
-        self.checkbox.setAccessibleName("Turm-Kreissegmente automatisch berechnen")
-        self.checkbox.setChecked(True)
-        self.text_label.setBuddy(self.checkbox)
-        layout.addWidget(self.arrow)
-        layout.addWidget(self.text_label)
-        layout.addSpacing(5)
-        layout.addWidget(self.checkbox)
-        layout.addStretch(1)
-        self._attach_to_row(row)
-
-    def _fit_text(self, available):
-        text = "Automatisch berechnen"
-        remaining = max(0, available - self.arrow.width() - self.checkbox.width() - 5)
-        self.text_label.setText(self.text_label.fontMetrics().elidedText(
-            text, Qt.TextElideMode.ElideRight, remaining))
-        self.text_label.setToolTip(text)
-
-
 class CircleSegmentsSetting(NumericSettingWidget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.accepted_count = None
-        self.automatic_control = CircleSegmentsAutomaticControl(self)
-        self.automatic_checkbox = self.automatic_control.checkbox
+        self.automatic_checkbox = add_automatic_control(self)
+        self.automatic_checkbox.setChecked(True)
         self.automatic_checkbox.toggled.connect(self.refresh)
         self.editor.input_reinterpreted.connect(self.refresh_input_state)
         self.refresh()

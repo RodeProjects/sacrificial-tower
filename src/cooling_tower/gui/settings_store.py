@@ -518,6 +518,21 @@ def _migrate_settings_27_to_28(payload: dict[str, Any], *, default_base: Path) -
     return migrated
 
 
+def _migrate_settings_28_to_29(payload: dict[str, Any]) -> dict[str, Any]:
+    """Retain custom manual taper angles and add independent wall selection."""
+    migrated = dict(payload)
+    raw = migrated.get("generation")
+    generation = dict(raw) if isinstance(raw, Mapping) else {}
+    generation.setdefault("automatic_contraction_angle", (
+        generation.get("simulate_full_tower_infill") is True
+        or generation.get("maximum_contraction_angle_deg", 55.0) == 55.0
+    ))
+    generation.setdefault("tower_wall_count", 2)
+    migrated["generation"] = generation
+    migrated["setting_compatibility"] = dict(SETTING_COMPATIBILITY_CATALOG)
+    return migrated
+
+
 def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
     nested = _nest_legacy_generation(payload)
     generation = _generation_values(nested.get("generation"))
@@ -528,6 +543,7 @@ def _normalize_user_settings(payload: dict[str, Any]) -> dict[str, Any]:
         ("maximum_outer_diameter_mm", 5.0, 100.0),
         ("manual_base_width_mm", 20.0, 80.0),
         ("circle_segments", 4, 256),
+        ("tower_wall_count", 1, 10),
     ):
         value = generation.get(name)
         if value is not None and not minimum <= value <= maximum:
@@ -671,6 +687,7 @@ _USER_SETTINGS_MIGRATIONS = {
     24: _migrate_settings_24_to_25,
     25: _migrate_settings_25_to_26,
     26: _migrate_settings_26_to_27,
+    28: _migrate_settings_28_to_29,
 }
 
 

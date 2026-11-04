@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from cooling_tower.gui.iterative_hints import CONTRACTION_ANGLE_HINT, TOWER_WALL_COUNT_HINT
 
 
 SUPPORT_DIAGNOSE_MENU_LABEL = "Hilfe & Feedback"
@@ -56,7 +57,15 @@ SETTING_INFO_TEXTS = {
     ),
     "minimum_outer_diameter_mm": (
         "Kleinster zulässiger Außendurchmesser oberhalb des Standfußes. "
-        "Entfällt der Kühlbedarf dauerhaft, endet der Turm vorzeitig."
+        "Entfällt der Kühlbedarf dauerhaft, endet der Turm vorzeitig.<br><br>"
+        "Bei deaktivierter Vollfüllung berücksichtigt die Durchmesserempfehlung "
+        "die Wandlinien, Linienbreiten und die Profil-Flächengrenze für massive "
+        "Füllung kleiner Querschnitte. Sie wird auf die nächste Zehntelmillimeter-Stufe "
+        "aufgerundet. Bei automatischen Kreissegmenten wird vorsichtig mit deren "
+        "Mindestanzahl gerechnet.<br><br>"
+        "Boden- und Deckschichten sowie schräge Bereiche können im Slicer weiterhin "
+        "massiv werden. Die Empfehlung gilt für den inneren Turmquerschnitt "
+        "oberhalb des Standfußes."
     ),
     "maximum_outer_diameter_mm": (
         "Größter regulärer Außendurchmesser des Kühlturms oberhalb des "
@@ -80,18 +89,8 @@ SETTING_INFO_TEXTS = {
         "Slicer einen Stützbedarf und versucht bei aktivierten Stützen dort "
         "Stützmaterial zu erzeugen. Weitere Stützeinstellungen beeinflussen das Ergebnis.</p>"
     ),
-    "maximum_contraction_angle_deg": (
-        "<p><b>Verjüngung begrenzen</b></p>"
-        "<p>• Der Winkel wird zur Horizontalen (Druckbett) gemessen.<br>"
-        "• Ein kleinerer Wert erlaubt eine flachere, stärkere Verjüngung je Schicht; "
-        "ein größerer Wert erzwingt steilere Übergänge.<br>"
-        "• Bei 100 % Turmfüllung bestimmt das Programm die Verjüngung nach eigenen Regeln. "
-        "Das Feld ist dann gesperrt und zeigt „auto“. Der manuell eingestellte Winkel "
-        "wird dabei nicht verwendet, bleibt aber erhalten und ist nach dem Ausschalten "
-        "der Füllungssimulation wieder einstellbar.<br>"
-        "• Direkte Absätze nach innen sind bei 100 % Turmfüllung nur vor einem Objektlayer "
-        "mit ausreichender eigener Layerzeit möglich.</p>"
-    ),
+    "maximum_contraction_angle_deg": CONTRACTION_ANGLE_HINT,
+    "tower_wall_count": TOWER_WALL_COUNT_HINT,
     "local_reference_window": (
         "Ungerade Anzahl benachbarter Layer für die lokale Zeitreferenz. "
         "Größere Fenster glätten kurze Schwankungen stärker. Nach der "

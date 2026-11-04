@@ -179,6 +179,7 @@ class NativeAutomaticService:
                 with OwnedWorkspace(prefix='nc_') as composed_work:
                     project = append_tower(session.context, prepared.plate_id, mesh, workspace=composed_work,
                         center_mm=center, full_infill=settings.simulate_full_tower_infill,
+                        wall_count=None if settings.simulate_full_tower_infill else settings.tower_wall_count,
                         supports_disabled=settings.simulate_tower_without_supports,
                         layer_print_z=object_heights, filament=space.filament)
                     candidate = session.slice(prepared.installation, prepared.plate_id, composed=project,

@@ -85,16 +85,49 @@ jeder slicerbasierten Kalibrierungsiteration erneut verwendet.
    begrenztem `t`. Der Radius fällt anfangs stärker und nähert sich flach dem
    Mindestdurchmesser. Die Kurve wird über den gesamten absteigenden Abschnitt
    geplant und nicht an jedem Layer neu gestartet. Ihre Dauer wird so gewählt,
-   dass ein späterer Radiusbedarf erhalten bleibt. Ohne 100-%-Turmfüllung gilt
-   zusätzlich die eingestellte maximale Verjüngungsneigung. Bei 100-%-Turmfüllung
-   wird dieser Eingabewert ignoriert: Gekrümmte Übergänge ohne Absatz erhalten
-   stattdessen eine feste maximale Radiusabnahme von 1 mm pro mm Höhe; der
-   Standfußübergang behält seine eigene Höhenregel.
+   dass ein späterer Radiusbedarf erhalten bleibt. Die standardmäßig aktive
+   Verjüngungsautomatik verwendet ohne 100-%-Turmfüllung den Standardwinkel
+   von 35° zur Horizontalen. Mit 100-%-Turmfüllung begrenzt sie gekrümmte
+   Übergänge auf 1 mm Radiusabnahme pro mm Höhe; der Standfuß behält seine
+   eigene Höhenregel. Die dafür vorgesehenen inneren Absätze bleiben möglich.
 
-   In der Oberfläche ist der Verjüngungswinkel bei aktivierter 100-%-Turmfüllung
-   gesperrt und ausgegraut; das Feld zeigt „auto“ ohne Gradzeichen. Der Reset
-   ist ebenfalls gesperrt. Der manuelle Winkel bleibt numerisch gespeichert
-   und erscheint wieder, sobald die Füllungssimulation ausgeschaltet wird.
+   Ohne „Auto“ gilt der manuelle Verjüngungswinkel auch mit 100-%-Turmfüllung;
+   direkte innere Absätze werden dann nicht verwendet. Der manuelle Wert bleibt
+   beim Umschalten gespeichert. Das automatische Feld zeigt ausgegraut „auto“.
+
+Die iterativen **Wandlinien** lassen sich von 1 bis 10 einstellen. Getrennte
+Turmprüfungen verwenden dafür eigene Profilkopien; gemeinsame Slices und
+3MF-Exporte überschreiben ausschließlich den Turm. Linienbreiten, Schichthöhen
+und Druckgeschwindigkeiten stammen aus dem gewählten Profil und gehen über
+die realen Slicerbahnen in die Zeitbewertung ein. Bei 100-%-Turmfüllung ist die
+Wandwahl ausgegraut und zeigt „solid“: Dann gelten die ursprünglichen Profil-Wandvorgaben. Der
+manuelle Wert bleibt für das spätere Ausschalten der Füllungssimulation erhalten.
+
+Bei gemeinsamen Slicer-Slices bleiben erreichte Layerbreiten erhalten, solange
+irgendein nicht ausgeschlossener Layer noch unter der Zielzeit liegt. Der Slicer
+kann die kritische Stelle beim Neuplanen der Kühlung verschieben; dadurch wird
+verhindert, dass die nächste lokale Korrektur bereits erreichte Breiten wieder
+abbaut. Erst wenn alle berücksichtigten Layer die Zielzeit erreichen, darf die
+Kalibrierung nachweislichen Überschuss reduzieren. Der Maximaldurchmesser bleibt
+dabei eine Obergrenze; ein verbleibendes Defizit wird als solches ausgewiesen.
+
+Bei deaktivierter Vollfüllung nennt die Oberfläche unter dem Mindestdurchmesser
+eine Empfehlung, wenn der gewählte Wert kleine Querschnitte massiv werden lässt.
+Die Berechnung reserviert die Summe der Profil-Linienbreiten für beide Wände und
+fordert im verbleibenden regelmäßigen Polygon mehr Fläche als die Profilgrenze
+`minimum_sparse_infill_area` (Orca-Familie) bzw. `solid_infill_below_area` (Prusa).
+Die empfohlene Eingabe wird strikt auf die nächste Zehntelmillimeter-Stufe
+aufgerundet. Manuelle Kreissegmente gehen direkt ein; die automatische Variante
+verwendet konservativ deren Mindestanzahl. Die Warnung entfällt, sobald die
+Empfehlung erreicht wird. Bei 0 % Fülldichte wird die Flächengrenze ignoriert.
+Bei 100 % Füllung im Profil fordert der Hinweis stattdessen eine niedrigere
+Profil-Fülldichte. Fehlende Profilwerte ergeben keine Zahlenempfehlung.
+
+Die Flächenregel ist in der [Anycubic-Implementierung](https://github.com/ANYCUBIC-3D/AnycubicSlicerNext/blob/main/src/libslic3r/LayerRegion.cpp)
+und der [Orca-Dokumentation](https://github.com/OrcaSlicer/OrcaSlicer/wiki/strength_settings_advanced)
+beschrieben. Die Empfehlung ersetzt keine Slicerbahnbewertung: Boden-, Deck- und
+Schrägflächen können weiterhin massiv gefüllt werden. Details stehen im
+Informationssymbol der Einstellung.
 
 ### Automatischer Standfuß
 
@@ -497,7 +530,7 @@ Mindestabstände diese Seite, wird die nächste freie Seite geprüft. Zu Objekt 
 Druckbettrand bleiben jeweils mindestens 5 mm frei. Der Turm darf seinen
 maximalen Außendurchmesser auch bei späterer Kalibrierung nicht überschreiten.
 
-Die standardmäßig aktivierte Option „Turm-Kreissegmente → Automatisch berechnen“
+Die standardmäßig aktivierte Option „Auto“ neben „Turm-Kreissegmente“
 berechnet die Kreissegmentzahl pro Kandidat aus dessen größtem aktuellen
 Durchmesser: `max(30, ceil(1,0 × Durchmesser in mm))`. Damit haben
 kleine Türme mindestens 30 Segmente; bei größeren Durchmessern gilt

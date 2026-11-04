@@ -259,9 +259,9 @@ class PostprocessorTests(unittest.TestCase):
 
     def test_manual_park_outside_model_and_tower_and_rejects_unsafe_positions(self):
         settings = replace(PostprocessorSettings(), automatic_position=False, center_x_mm=30, center_y_mm=40,
-            automatic_wait_position=False, wait_x_mm=60, wait_y_mm=40)
+            automatic_wait_position=False, wait_x_mm=75, wait_y_mm=40)
         result = self.prepare(self.request(settings=settings))
-        self.assertEqual(result.scene.wait_position_xy_mm, (60, 40))
+        self.assertEqual(result.scene.wait_position_xy_mm, (75, 40))
         for x, y in ((105, 105), (30, 40), (39, 40), (0, 0)):
             with self.subTest(position=(x, y)), self.assertRaisesRegex(ValueError, "Warteposition"):
                 self.prepare(self.request(settings=replace(settings, wait_x_mm=x, wait_y_mm=y)))

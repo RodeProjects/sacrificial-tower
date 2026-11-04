@@ -117,7 +117,7 @@ def _declare_parts(data: bytes | None, parts: dict[str, str]) -> bytes:
 
 
 def _tower_config(identifier: int, face_count: int, *, prusa: bool, full_infill: bool,
-                  supports_disabled: bool, filament: int, height_settings=None) -> bytes:
+                  supports_disabled: bool, filament: int, height_settings=None, wall_count=None) -> bytes:
     obj = ET.Element('object', {'id': str(identifier), **({'instances_count': '1'} if prusa else {})})
     kind = 'object' if prusa else None
     _metadata(obj, 'name', 'Sacrificial Tower', kind=kind)
@@ -126,6 +126,10 @@ def _tower_config(identifier: int, face_count: int, *, prusa: bool, full_infill:
     _metadata(obj, 'brim_width', '0', kind=kind)
     for key, value in (height_settings or {}).items():
         _metadata(obj, key, value, kind=kind)
+    if wall_count is not None and not full_infill:
+        if type(wall_count) is not int or not 1 <= wall_count <= 10:
+            raise ValueError("Ungültige Anzahl Turm-Wandlinien.")
+        _metadata(obj, "perimeters" if prusa else "wall_loops", wall_count, kind=kind)
     if full_infill:
         _metadata(obj, 'fill_density' if prusa else 'sparse_infill_density', '100%', kind=kind)
         _metadata(obj, 'fill_pattern' if prusa else 'sparse_infill_pattern', 'rectilinear' if prusa else 'zig-zag', kind=kind)
@@ -156,7 +160,7 @@ class ComposedProject:
 def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMesh, *,
                  workspace: OwnedWorkspace, name: str = 'combined.3mf', center_mm: tuple[float, float],
                  full_infill: bool = True, supports_disabled: bool = True, filament: int = 1,
-                 layer_print_z: tuple[float, ...] | None = None) -> ComposedProject:
+                 layer_print_z: tuple[float, ...] | None = None, wall_count: int | None = None) -> ComposedProject:
     context.snapshot.verify()
     plate = context.plate(plate_id)
     if not plate.build_indices:
@@ -199,7 +203,7 @@ def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMes
             changed[ranges_path] = insert_xml(ranges, ('objects',), tower_ranges)
         config = insert_xml(config, ('config',), _tower_config(identifier, len(mesh.faces), prusa=prusa,
             full_infill=full_infill, supports_disabled=supports_disabled, filament=filament,
-            height_settings=heights))
+            height_settings=heights, wall_count=wall_count))
         if not prusa:
             root = parse_xml(config)
             plates = root.findall('plate')

@@ -7,7 +7,7 @@ from cooling_tower.export_io import generated_file
 from cooling_tower.models import GenerationSettings
 
 
-SETTINGS_SCHEMA_VERSION = 28
+SETTINGS_SCHEMA_VERSION = 29
 _CONFIG_METADATA_KEYS = {
     "angle_storage_reference",
     "settings_schema_version",

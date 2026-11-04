@@ -175,39 +175,39 @@ class PostprocessorNumericInputTests(unittest.TestCase):
             self.spin.selectAll()
             QTest.keyClick(self.spin, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
             self.assertEqual(self.spin.lineEdit().text(), "20.3450")
-            self.assertEqual(self.spin.value(), 10)
+            self.assertEqual(self.spin.value(), 9)
             QTest.keyClick(self.spin, Qt.Key.Key_Return)
             self.assertEqual(self.spin.value(), 20.35)
         finally:
             self.app.clipboard().setText(previous)
 
-    def test_manual_ten_second_default_and_both_reset_paths_survive_profile_changes(self):
+    def test_manual_nine_second_default_and_both_reset_paths_survive_profile_changes(self):
         panel, editor = self.panel, self.spin
         automatic = panel.automatic["automatic_target_time"]
         reset = panel.reset_buttons["target_layer_time_s"]
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         self.assertFalse(automatic.isChecked())
         self.assertTrue(editor.isEnabled())
         self.assertFalse(reset.isEnabled())
         panel.set_profile_values({"slow_down_layer_time": 18})
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         automatic.setChecked(True)
         self.assertEqual(editor.value(), 18)
         self.assertFalse(editor.isEnabled())
         self.assertTrue(reset.isEnabled())
         reset.click()
         self.assertFalse(automatic.isChecked())
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         self.assertTrue(editor.isEnabled())
         self.assertFalse(reset.isEnabled())
         editor.setValue(22)
         self.assertTrue(reset.isEnabled())
         reset.click()
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         automatic.setChecked(True)
         panel.reset()
         self.assertFalse(automatic.isChecked())
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         self.assertFalse(reset.isEnabled())
 
     def test_integer_and_layer_values_commit_once_and_remain_in_bounds(self):

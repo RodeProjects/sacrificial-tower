@@ -147,6 +147,8 @@ SETTING_COMPATIBILITY_RULES = (
     _generation_rule(
         "local_reference_window", "layer-window-count-v1", "int", minimum=1, maximum=999
     ),
+    _generation_rule("automatic_contraction_angle", "automatic-contraction-angle-v1", "bool"),
+    _generation_rule("tower_wall_count", "tower-wall-count-v1", "int", minimum=1, maximum=10),
     _generation_rule(
         "automatic_circle_segments", "automatic-circle-segments-v1", "bool",
         group="generation.circle-segments-v1",

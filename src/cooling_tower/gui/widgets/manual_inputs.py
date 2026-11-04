@@ -112,22 +112,27 @@ def boundary_message(editor,value,name):
 
 
 def compact_manual_width(editors):
-    """Measure native value/suffix, text insets, caret and arrow column once."""
+    """Fit the displayed native value/suffix inside the real text viewport."""
     widths=[]
     for editor in editors:
         editor.ensurePolished()
-        metrics=editor.lineEdit().fontMetrics()
-        digit=max("0123456789",key=metrics.horizontalAdvance)
-        samples=[editor.prefix()+editor.textFromValue(value)+editor.suffix() for value in (editor.minimum(),editor.maximum())]
-        samples=[re.sub(r"\d",digit,text) for text in samples]
-        option=QStyleOptionSpinBox();editor.initStyleOption(option)
+        edit=editor.lineEdit()
+        input_style = "QLineEdit { min-height: 0; padding: 0; border: 0; background: transparent; }"
+        if edit.styleSheet() != input_style:
+            edit.setStyleSheet(input_style)
+        metrics=edit.fontMetrics()
+        text=edit.text() or editor.prefix()+editor.textFromValue(editor.value())+editor.suffix()
+        option=QStyleOptionSpinBox()
+        editor.initStyleOption(option)
         option.rect=QRect(0,0,1000,editor.height())
         field=editor.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,option,QStyle.SubControl.SC_SpinBoxEditField,editor)
-        line_option=QStyleOptionFrame();editor.lineEdit().initStyleOption(line_option)
-        line_option.rect=option.rect
-        contents=editor.lineEdit().style().subElementRect(QStyle.SubElement.SE_LineEditContents,line_option,editor.lineEdit())
-        margins=editor.lineEdit().textMargins()
-        widths.append(max(metrics.horizontalAdvance(text) for text in samples)+2000-field.width()-contents.width()+margins.left()+margins.right()+4)
+        frame=QStyleOptionFrame()
+        edit.initStyleOption(frame)
+        frame.rect=option.rect
+        contents=edit.style().subElementRect(QStyle.SubElement.SE_LineEditContents,frame,edit)
+        margins=edit.textMargins()
+        text_width=max(metrics.horizontalAdvance(text),metrics.boundingRect(text).width())
+        widths.append(2000-field.width()-contents.width()+margins.left()+margins.right()+text_width+4)
     return max(widths,default=80)
 
 

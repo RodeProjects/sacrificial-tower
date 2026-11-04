@@ -103,7 +103,7 @@ class JointTimingConsistencyTests(unittest.TestCase):
         iteration = SimpleNamespace(evaluation=evaluation)
         self.assertEqual(minimum_combined_layer_time(evaluation), .5)
         for widget_type in (GenerationPanel, TowerGenerationDialog):
-            widget = widget_type(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+            widget = widget_type(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png")
             self.addCleanup(widget.close)
             widget.begin(8, .2, 0, 3)
             widget.complete_slice(1, 3, iteration, 8)
@@ -158,7 +158,7 @@ class JointTimingConsistencyTests(unittest.TestCase):
         expected = measured.minimum_layer_time_s
         self.assertLess(expected, request.settings.target_layer_time_s)
         self.assertAlmostEqual(preview.minimum_verified_layer_time_s, expected)
-        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.webp")
+        panel = GenerationPanel(ROOT / "src/cooling_tower/gui/assets/tower_gen_finished.png")
         self.addCleanup(panel.close)
         panel.begin(8, .01, 0, 3)
         panel.complete_slice(2, 3, updates[-1].best_iteration, 8)

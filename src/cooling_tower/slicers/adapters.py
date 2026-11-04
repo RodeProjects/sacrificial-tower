@@ -105,6 +105,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_wall_count: int | None = None,
         tower_supports_disabled: bool = False,
         source_supports_enabled: bool = False,
     ) -> object:
@@ -129,6 +130,8 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             if tower_full_infill
             else {}
         )
+        if tower_wall_count is not None and not tower_full_infill:
+            tower_params["wall_loops"] = str(tower_wall_count)
         if tower_supports_disabled:
             tower_params["enable_support"] = "0"
         payload = {
@@ -185,6 +188,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
         occupied: object,
         placement: object,
         tower_full_infill: bool,
+        tower_wall_count: int | None = None,
         tower_supports_disabled: bool = False,
         source_supports_enabled: bool = False,
     ) -> object:
@@ -198,6 +202,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             occupied=occupied,
             placement=placement,
             tower_full_infill=tower_full_infill,
+            tower_wall_count=tower_wall_count,
             tower_supports_disabled=tower_supports_disabled,
             source_supports_enabled=source_supports_enabled,
         )
@@ -222,6 +227,7 @@ class BambuStudioAdapter(OrcaFamilyAdapter):
             occupied=occupied,
             placement=placement,
             tower_full_infill=tower_full_infill,
+            tower_wall_count=tower_wall_count,
             tower_supports_disabled=tower_supports_disabled,
             source_supports_enabled=source_supports_enabled,
         )
