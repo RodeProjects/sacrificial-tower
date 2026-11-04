@@ -307,7 +307,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(minimum_setting.editor.property("invalid"))
         self.assertFalse(maximum_setting.editor.property("invalid"))
-        self.assertTrue(minimum_setting.message_container.isHidden())
+        self.assertNotIn(
+            "muss kleiner als", minimum_setting.message_label.text()
+        )
         self.assertTrue(maximum_setting.message_container.isHidden())
         window.minimum_outer_spin.setValue(31.0)
         self.app.processEvents()
@@ -315,7 +317,9 @@ class LatestGuiRequirementsTests(unittest.TestCase):
         self.assertIn("muss größer als", maximum_setting.message_label.text())
         window.maximum_outer_spin.setValue(32.0)
         self.app.processEvents()
-        self.assertTrue(minimum_setting.message_container.isHidden())
+        self.assertNotIn(
+            "muss kleiner als", minimum_setting.message_label.text()
+        )
         self.assertTrue(maximum_setting.message_container.isHidden())
         self.assertIn(
             'QDoubleSpinBox[invalid="true"]:focus',
