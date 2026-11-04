@@ -76,12 +76,10 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(grid.is_two_column())
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.ready_left_column))[:2],
-            (0, 0),
+            grid.splitter.widget(0), window.ready_left_column
         )
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.prediction_frame))[:2],
-            (0, 2),
+            grid.splitter.widget(1), window.prediction_frame
         )
         self.assertTrue(
             window.ready_left_column.isAncestorOf(window.timing_group)
@@ -96,12 +94,10 @@ class RemainingUiOverhaulTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(grid.is_two_column())
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.prediction_frame))[:2],
-            (0, 0),
+            grid.stack.itemAt(0).widget(), window.prediction_frame
         )
         self.assertEqual(
-            grid.grid.getItemPosition(grid.grid.indexOf(window.ready_left_column))[:2],
-            (1, 0),
+            grid.stack.itemAt(1).widget(), window.ready_left_column
         )
         window.close()
 
