@@ -202,13 +202,13 @@ class NumericSettingWidget(QWidget):
             editor,
             0,
             2,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         layout.addWidget(
             self.reset_button,
             0,
             3,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         layout.addWidget(
             self.range_label,
