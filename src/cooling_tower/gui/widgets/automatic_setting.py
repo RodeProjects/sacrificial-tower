@@ -3,6 +3,8 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QCheckBox, QLabel
 from cooling_tower.gui.design_tokens import METRICS
 
+_LABEL_CONTROL_MIN_GAP_PX = 30
+
 
 class _AutomaticLabelMinimum(QObject):
     """Reserve the complete styled name before the shared gap to Auto."""
@@ -14,7 +16,11 @@ class _AutomaticLabelMinimum(QObject):
         self.refresh()
 
     def refresh(self):
-        self.label.setMinimumWidth(max(150, self.label.fontMetrics().horizontalAdvance(self.label.text())))
+        self.label.setMinimumWidth(max(
+            150,
+            self.label.fontMetrics().horizontalAdvance(self.label.text())
+            + _LABEL_CONTROL_MIN_GAP_PX,
+        ))
 
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange, QEvent.Type.Polish):
@@ -31,7 +37,13 @@ def add_automatic_control(row, checkbox=None):
     for widget in (row.editor, row.reset_button, row.range_label, row.message_container):
         grid.removeWidget(widget)
     label = QLabel("Auto")
-    label.setContentsMargins(METRICS.form_auto_label_gap_px - METRICS.form_control_gap_px, 0, 0, 0)
+    auto_text_gap = max(
+        0,
+        METRICS.form_auto_label_gap_px
+        - METRICS.form_control_gap_px
+        - _LABEL_CONTROL_MIN_GAP_PX,
+    )
+    label.setContentsMargins(auto_text_gap, 0, 0, 0)
     label.setBuddy(checkbox)
     center = Qt.AlignmentFlag.AlignVCenter
     grid.addWidget(label, 0, 2, Qt.AlignmentFlag.AlignRight | center)
