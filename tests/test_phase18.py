@@ -161,20 +161,23 @@ class Phase18UiTests(unittest.TestCase):
         self.assertIsNone(slicer._state_transition)
         host.close()
 
-    def test_form_rows_are_left_right_aligned_and_editors_equal_sized(self) -> None:
+    def test_form_rows_are_left_right_aligned_and_editors_share_size(self) -> None:
         window = self.window()
-        editors = (
-            window.target_time_spin,
-            window.maximum_outer_spin,
+        editors = tuple(
+            row.editor
+            for row in (
+                *window._setting_widgets.values(),
+                *window.slice_budget_settings.values(),
+            )
+        )
+        self.assertEqual(len({editor.width() for editor in editors}), 1)
+        self.assertEqual(
+            {editor.height() for editor in editors},
+            {METRICS.form_control_height_px},
         )
         self.assertEqual(
-            {(editor.width(), editor.height()) for editor in editors},
-            {
-                (
-                    METRICS.form_editor_width_px,
-                    METRICS.form_control_height_px,
-                )
-            },
+            window.target_time_spin.width(),
+            window.maximum_outer_spin.width(),
         )
         row = window._setting_widgets["target_layer_time_s"]
         grid = row.layout()
