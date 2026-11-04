@@ -19,6 +19,7 @@ from cooling_tower.tower.mesh_generator import (
 )
 from cooling_tower.tower.profile import TowerRadiusProfile, TowerProfileConfig
 from cooling_tower.tower.solid_profile import build_solid_tower_profile
+from cooling_tower.tower.spline_profile import angle_to_radial_slope
 from test_phase9 import make_snapshot
 from test_solid_tower_changes import radius_layer
 
@@ -122,7 +123,10 @@ class GenerationRefinementTests(unittest.TestCase):
             self.assertGreater(b.z_mm, a.z_mm)
             if a.z_mm >= profile.effective_base_height_mm:
                 slopes.append((b.outer_radius_mm - a.outer_radius_mm) / (b.z_mm - a.z_mm))
-        self.assertGreaterEqual(min(slopes), -1.0 - 1e-8)
+        maximum_contraction_slope = angle_to_radial_slope(
+            profile.settings.maximum_contraction_angle_deg
+        )
+        self.assertGreaterEqual(min(slopes), -maximum_contraction_slope - 1e-8)
         self.assertTrue(all(b >= a - 1e-8 for a, b in zip(slopes, slopes[1:])))
         self.assertAlmostEqual(profile.points[-1].outer_radius_mm, 2)
 
