@@ -4209,7 +4209,7 @@ QSpinBox#circleSegments::up-button:disabled, QSpinBox#circleSegments::down-butto
 QWidget#circleSegmentsAutomaticLine,
 QWidget#circleSegmentsAutomaticLine QLabel,
 QWidget#profileAngleLimit[automaticMode="true"],
-QWidget#profileAngleLimit[automaticMode="true"] QLabel { font-size: 7.5pt; }
+QWidget#profileAngleLimit[automaticMode="true"] QLabel { font-size: 9pt; }
 QWidget#circleSegmentsAutomaticLine QCheckBox::indicator { width: 12px; height: 12px; }
 QWidget#embeddedPreviewPanel QLabel#previewStateLabel {
     padding: 3px 8px;

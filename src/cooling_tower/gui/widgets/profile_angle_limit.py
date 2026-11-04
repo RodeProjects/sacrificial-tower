@@ -2,7 +2,7 @@
 from decimal import Decimal
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSignalBlocker, Qt
 from PySide6.QtGui import QFont, QPainter, QPalette, QPen, QPolygonF
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from cooling_tower.angles import ProfileAngleBinding, profile_binding_angle
 from cooling_tower.gui.design_tokens import METRICS
@@ -125,7 +125,8 @@ class SettingSubline(QWidget):
         if fit_key != self._fit_key:
             self._fit_key = fit_key
             self._fit_text(available)
-        height = max(self.fontMetrics().height(), self.checkbox.height())
+        line_height = max(self.fontMetrics().height(), self.checkbox.height())
+        height = line_height * (2 if getattr(self, "_two_line_layout", False) else 1)
         origin = label.mapTo(parent, label.contentsRect().topLeft())
         text_bottom = origin.y()+(label.height()+label.fontMetrics().height())//2
         self.setGeometry(origin.x(), text_bottom, available, height)
@@ -148,9 +149,6 @@ class ProfileAngleLimitControl(SettingSubline):
         font.setPointSizeF(max(7.0, font.pointSizeF()-1.5))
         self._base_point_size = font.pointSizeF()
         self.setFont(font)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
         self.arrow = _CornerArrow(self)
         self.prefix = QLabel(prefix_text, self)
         self.threshold_hint = _ThresholdHint(self)
@@ -161,11 +159,45 @@ class ProfileAngleLimitControl(SettingSubline):
         self.checkbox.setFixedSize(15, 15)
         self.checkbox.setAccessibleName(self._label_text)
         self.checkbox.setToolTip(PROFILE_ANGLE_HINT)
-        for child in (self.arrow, self.prefix, self.threshold_hint, self.suffix):
-            layout.addWidget(child)
-        layout.addSpacing(5)
-        layout.addWidget(self.checkbox)
-        layout.addStretch(1)
+        self._two_line_layout = not compact
+        if self._two_line_layout:
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            self.primary_line = QWidget(self)
+            primary = QHBoxLayout(self.primary_line)
+            primary.setContentsMargins(0, 0, 0, 0)
+            primary.setSpacing(0)
+            for child in (self.arrow, self.prefix, self.threshold_hint):
+                primary.addWidget(child)
+            primary.addStretch(1)
+            self.secondary_line = QWidget(self)
+            secondary = QHBoxLayout(self.secondary_line)
+            secondary.setContentsMargins(0, 0, 0, 0)
+            secondary.setSpacing(0)
+            secondary.addSpacing(self.arrow.width())
+            secondary.addWidget(self.suffix)
+            secondary.addSpacing(5)
+            secondary.addWidget(self.checkbox)
+            secondary.addStretch(1)
+            layout.addWidget(self.primary_line)
+            layout.addWidget(self.secondary_line)
+            # The second line sits below the editor, within the label column.
+            # Aligning the title to the top keeps both sublines inside this row.
+            row.layout().setAlignment(
+                row.label,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
+            row.setMinimumHeight(METRICS.form_control_height_px + 20)
+        else:
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            for child in (self.arrow, self.prefix, self.threshold_hint, self.suffix):
+                layout.addWidget(child)
+            layout.addSpacing(5)
+            layout.addWidget(self.checkbox)
+            layout.addStretch(1)
         self._attach_to_row(row)
 
     def minimum_text_width(self):
@@ -174,6 +206,9 @@ class ProfileAngleLimitControl(SettingSubline):
         self.suffix.setText(self._suffix_text)
         self._fit_key = None
         self.layout().invalidate()
+        if self._two_line_layout:
+            return max(self.primary_line.layout().sizeHint().width(),
+                       self.secondary_line.layout().sizeHint().width())
         return self.layout().sizeHint().width()
 
     def refresh(self, current, requested, threshold):
