@@ -12,6 +12,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QStyle, QStyleOptionFrame
+from cooling_tower.gui.design_tokens import METRICS
 from cooling_tower.gui.generation_session import GenerationMode
 from cooling_tower.postprocessor_safety import ExclusionRect
 
@@ -86,7 +87,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         QTest.keyClicks(editor, "1234,56")
         wait_for_layout()
         self.assertEqual(editor.lineEdit().text(), "1234,56")
-        self.assertEqual(editor.value(), 10)
+        self.assertEqual(editor.value(), 9)
         self.assertGreater(editor.width(), initial)
         self.assertEqual({row.editor.width() for row in panel.rows.values()}, {editor.width()})
         for row in panel.rows.values():
@@ -227,7 +228,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertFalse(self.panel.timing_panel.isVisible())
         self.panel.reset_field("target_layer_time_s")
         self.assertFalse(self.panel.automatic["automatic_target_time"].isChecked())
-        self.assertEqual(self.panel.settings().target_layer_time_s, 10)
+        self.assertEqual(self.panel.settings().target_layer_time_s, 9)
 
     def test_scale_normalization_control_preserves_layer_data_and_resets_to_dynamic_default(self):
         result = self.harness.wait_for_result()
@@ -242,7 +243,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertTrue(panel.normalized_scale.isChecked())
         self.assertTrue(chart.normalized)
         self.assertEqual(chart.original, original)
-        self.assertAlmostEqual(chart._maximum, 10*1.05)
+        self.assertAlmostEqual(chart._maximum, 9*1.05)
         layout = panel.timing_panel.layout()
         row = panel.normalized_scale.parentWidget()
         self.assertEqual(layout.indexOf(row), layout.indexOf(panel.logarithmic_scale.parentWidget())+1)
@@ -563,7 +564,7 @@ class PostprocessorUpgradeGuiTests(unittest.TestCase):
         self.assertTrue(panel.columns.is_two_column())
         self.assertTrue(canvas.navigation_enabled)
         for _ in range(2):
-            self.window.resize(1100, 1000)
+            self.window.resize(METRICS.responsive_breakpoint_px - 40, 1000)
             QTest.qWait(100)
             self.assertFalse(panel.columns.is_two_column())
             self.assertFalse(canvas.navigation_enabled)
