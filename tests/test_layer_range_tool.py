@@ -35,6 +35,7 @@ from cooling_tower.services import GenerationService
 from cooling_tower.services import GCodeAnalysisService
 from cooling_tower.services.tower_need_service import assess_tower_need
 from cooling_tower.tower.profile import TowerProfileConfig, TowerRadiusProfile, build_tower_radius_profile
+from cooling_tower.tower.spline_profile import angle_to_radial_slope
 from cooling_tower.tower.diameter_transitions import plan_diameter_transitions
 from cooling_tower.tower.solid_profile import build_solid_tower_profile, ProfileFeasibilityError
 from cooling_tower.tower.mesh_generator import TowerMeshConfig, generate_solid_tower_mesh, validate_triangle_mesh
@@ -194,7 +195,13 @@ class LayerRangeDomainTests(unittest.TestCase):
                 for previous, current in zip(profile.layers, profile.layers[1:]):
                     self.assertLessEqual(current.outer_radius_mm - previous.outer_radius_mm, current.z - previous.z + 1e-7)
                     if not full:
-                        self.assertLessEqual(previous.outer_radius_mm - current.outer_radius_mm, current.z - previous.z + 1e-7)
+                        contraction_slope = angle_to_radial_slope(
+                            profile.settings.maximum_contraction_angle_deg
+                        )
+                        self.assertLessEqual(
+                            previous.outer_radius_mm - current.outer_radius_mm,
+                            contraction_slope * (current.z - previous.z) + 1e-7,
+                        )
                 validate_triangle_mesh(generate_solid_tower_mesh(profile, TowerMeshConfig(32)))
 
     def test_calibration_does_not_regrow_an_excluded_layer(self):
