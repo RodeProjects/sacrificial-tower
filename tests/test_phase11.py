@@ -473,7 +473,7 @@ class NumericSettingWidgetTests(GuiCase):
             "minimum_outer_diameter_mm", "maximum_outer_diameter_mm",
             "manual_base_width_mm", "circle_segments",
             "maximum_expansion_angle_deg", "maximum_contraction_angle_deg",
-            "local_reference_window",
+            "local_reference_window", "tower_wall_count",
         })
         for setting in self.window._setting_widgets.values():
             self.assertFalse(setting.reset_button.isEnabled())
@@ -671,20 +671,19 @@ class NumericSettingWidgetTests(GuiCase):
             self.assertGreaterEqual(setting.reset_button.width(), 32)
             self.assertGreaterEqual(setting.reset_button.height(), 32)
 
-    def test_numeric_editors_use_equal_fixed_phase18_size(self) -> None:
-        for setting in self.window._setting_widgets.values():
-            self.assertEqual(
-                setting.editor.minimumWidth(),
-                METRICS.form_editor_width_px,
+    def test_numeric_editors_share_dynamic_phase18_size(self) -> None:
+        editors = tuple(
+            row.editor
+            for row in (
+                *self.window._setting_widgets.values(),
+                *self.window.slice_budget_settings.values(),
             )
-            self.assertEqual(
-                setting.editor.maximumWidth(),
-                METRICS.form_editor_width_px,
-            )
-            self.assertEqual(
-                setting.editor.height(),
-                METRICS.form_control_height_px,
-            )
+        )
+        self.assertEqual(len({editor.width() for editor in editors}), 1)
+        self.assertEqual(
+            {editor.height() for editor in editors},
+            {METRICS.form_control_height_px},
+        )
 
     def test_spin_arrow_icons_are_resolved_and_rendered(self) -> None:
         style = self.window.styleSheet()
