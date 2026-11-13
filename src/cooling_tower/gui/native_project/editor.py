@@ -26,7 +26,9 @@ from cooling_tower.gui.native_project.footer import NativeFooter
 from cooling_tower.gui.native_project.hints import SETTING_INFO_TEXTS, chart_hint, EXPANSION_ANGLE_CAUTION
 from cooling_tower.gui.native_project.time_chart import NativeTimeChart
 from cooling_tower.gui.native_project.styles import EDITOR_STYLE, FOOTER_STYLE
-from cooling_tower.native_project.defaults import GENERATION_DEFAULTS
+from cooling_tower.native_project.defaults import DEFAULT_JOINT_SLICES, DEFAULT_SEPARATE_SLICES, GENERATION_DEFAULTS
+from cooling_tower.native_project.settings import embedded_expansion_threshold, embedded_shell_layers
+from cooling_tower.tower.wall_clearance import wall_clearance_hint
 
 
 class _NativeAutomaticText:
@@ -46,9 +48,14 @@ class _NativeAutomaticText:
         return self.value() if self._automatic_text is not None else super().valueFromText(text)
 
     def show_automatic_value(self,enabled,value=None):
-        self._automatic_text = (('—' if value is None else value if isinstance(value,str) else
+        text = (('—' if value is None else value if isinstance(value,str) else
             self.locale().toString(int(value)) if self._integer else self.locale().toString(float(value),'f',self.decimals()))
             if enabled else None)
+        if text == self._automatic_text:
+            return
+        if (text is None) != (self._automatic_text is None):
+            self.input_pending = False
+        self._automatic_text = text
         self.lineEdit().setText(self.textFromValue(self.value()))
         self.setToolTip('Automatischer Wert steht nach der Turmgenerierung fest.' if enabled and value is None else '')
 
@@ -73,7 +80,9 @@ class NativeEditorPanel(QWidget):
         self.setStyleSheet(EDITOR_STYLE)
         self.inputs, self.rows, self.automatic = {}, {}, {}
         self._automatic_values = {}
+        self._project_context = None
         self._profile_angle = None
+        self._profile_shells = {}
         self._layout_timer = QTimer(self)
         self._layout_timer.setSingleShot(True)
         self._layout_timer.timeout.connect(self.refresh_layout)
@@ -92,6 +101,12 @@ class NativeEditorPanel(QWidget):
         left.addWidget(self.input_group)
         self._numeric(self.input_group.content_layout, 'target_layer_time_s', 'Mindest-Layerzeit', 's', 5, 30)
         self._numeric(self.input_group.content_layout, 'layer_time_tolerance_s', 'Layerzeit-Toleranz (±)', 's', .1, 3)
+        for surface, label in (('top', 'Top'), ('bottom', 'Bottom')):
+            self._numeric(self.input_group.content_layout, f'{surface}_shell_layers',
+                          f'{label}-Shell-Layers für Turm simulieren', '', 0, 5,
+                          automatic=f'automatic_{surface}_shell_layers', integer=True)
+        self._check(self.input_group.content_layout, 'extra_top_layer',
+                    'Turm +1 Layer höher generieren (druck endet am Turm)')
         self._check(self.input_group.content_layout, 'simulate_full_tower_infill', '100% Turmfüllung simulieren')
         self._check(self.input_group.content_layout, 'simulate_tower_without_supports', 'Deaktivierte Turmstützen simulieren')
         self.advanced_group = SectionCard('Erweiterte Turmeinstellungen')
@@ -106,20 +121,21 @@ class NativeEditorPanel(QWidget):
             ('maximum_contraction_angle_deg', 'Verjüngungswinkel', '°', 5, 89),
             ('circle_segments', 'Turm-Kreissegmente', '', 4, 256),
         ):
-            automatic = {'manual_base_width_mm':'automatic_base_width', 'circle_segments':'automatic_circle_segments', 'maximum_contraction_angle_deg':'automatic_contraction_angle'}.get(key)
+            automatic = {'manual_base_width_mm':'automatic_base_width', 'circle_segments':'automatic_circle_segments',
+                         'maximum_contraction_angle_deg':'automatic_contraction_angle',
+                         'maximum_expansion_angle_deg':'limit_expansion_to_profile'}.get(key)
             self._numeric(self.advanced_group.content_layout, key, label, unit, low, high,
                           automatic=automatic, integer=key == 'circle_segments', angle=key.endswith('_angle_deg'))
-        self._check(self.advanced_group.content_layout, 'limit_expansion_to_profile', 'Aufweitung auf Profil begrenzen')
-        self.iterations = CommittedSpinBox()
-        self.iterations.setRange(1, 50)
-        self.iterations.setValue(12)
-        self.iterations.valueChanged.connect(self.changed)
-        self.iterations.lineEdit().textEdited.connect(self.changed)
-        self.iterations.editingFinished.connect(self.changed)
-        iteration_row = NumericSettingWidget(setting_name='maximum_iterations', label='Maximale gemeinsame Slices',
-            editor=self.iterations, default_provider=lambda: 12,
-            info_text='Begrenzt die gemeinsam geslicten Iterationen. Jeder Durchlauf beginnt mit derselben importierten Projektbasis.')
-        self.advanced_group.content_layout.addWidget(iteration_row)
+            if key == 'manual_base_width_mm':
+                self.concave_base_row = self._check(
+                    self.advanced_group.content_layout, 'concave_base', 'Standfuß konkav erstellen')
+        self.separate_iterations = self._iteration_limit(
+            'maximum_separate_iterations', 'Maximale getrennte Slices', DEFAULT_SEPARATE_SLICES, 0,
+            'Begrenzt die Vorabkalibrierung mit separat geslictem Turm. 0 überspringt diese Phase.')
+        self.iterations = self._iteration_limit(
+            'maximum_iterations', 'Maximale gemeinsame Slices', DEFAULT_JOINT_SLICES, 1,
+            'Begrenzt die gemeinsamen Kalibrierungsdurchläufe. Ein zusätzlicher Turmlayer '
+            'erfordert eigene Prüfslices innerhalb des jeweiligen Durchlaufs.')
         self.preview_group = SectionCard('G-Code-Vorschau')
         self.preview_group.content_layout.setAlignment(Qt.AlignmentFlag(0))
         for card in (self.input_group, self.advanced_group, self.preview_group):
@@ -168,7 +184,6 @@ class NativeEditorPanel(QWidget):
         self.timing_toggle = QPushButton()
         self.timing_toggle.setObjectName('previewLayerTimesToggle')
         self.timing_toggle.setCheckable(True)
-        self.timing_toggle.setChecked(True)
         self.timing_toggle.setFixedSize(32,32)
         self.timing_toggle.setIconSize(QSize(22,22))
         self.timing_toggle.setIcon(QIcon(str(Path(__file__).parents[1]/'assets/layer_times_panel.svg')))
@@ -264,6 +279,22 @@ class NativeEditorPanel(QWidget):
         self.time_chart.layer_selected.connect(self.layer_selected)
         self._build_footer()
         self._sync_automatic()
+        self.changed.connect(self._sync_wall_clearance_warning)
+        self.set_timing_available(False)
+
+    def _iteration_limit(self, key, label, default, minimum, hint):
+        spin = CommittedSpinBox()
+        spin.setRange(minimum, 50)
+        spin.setValue(default)
+        spin.valueChanged.connect(self.changed)
+        spin.lineEdit().textEdited.connect(self.changed)
+        spin.editingFinished.connect(self.changed)
+        row = NumericSettingWidget(setting_name=key, label=label, editor=spin,
+                                   default_provider=lambda: default, info_text=hint)
+        spin.setKeyboardTracking(False)
+        self.rows[key] = row
+        self.advanced_group.content_layout.addWidget(row)
+        return spin
 
     def _numeric(self, layout, key, label, unit, low, high, *, automatic=None, integer=False, angle=False):
         spin = NativeIntegerSpinBox() if integer else NativeDoubleSpinBox()
@@ -289,10 +320,12 @@ class NativeEditorPanel(QWidget):
         if automatic:
             flag = QCheckBox()
             flag.setChecked(GENERATION_DEFAULTS[automatic])
-            flag.setAccessibleName(label+' automatisch berechnen')
+            from_profile = automatic == 'limit_expansion_to_profile' or key.endswith('_shell_layers')
             self.automatic[automatic] = flag
             self.inputs[automatic] = (flag, False)
             add_automatic_control(row, flag)
+            if from_profile:
+                flag.setAccessibleName(label+' aus Projektprofil übernehmen')
             flag.toggled.connect(self._sync_automatic)
             flag.toggled.connect(self.changed)
         layout.addWidget(row)
@@ -302,7 +335,8 @@ class NativeEditorPanel(QWidget):
         box.setChecked(GENERATION_DEFAULTS[key])
         box.setObjectName('native_'+key)
         self.inputs[key] = (box,False)
-        row = QHBoxLayout()
+        container = QWidget()
+        row = QHBoxLayout(container)
         row.setContentsMargins(0,2,0,2)
         row.setSpacing(METRICS.setting_info_text_gap_px)
         info = InfoToolButton(SETTING_INFO_TEXTS.get(key,label), object_name='settingInfoButton',
@@ -310,12 +344,11 @@ class NativeEditorPanel(QWidget):
         row.addWidget(info)
         row.addWidget(box)
         row.addStretch(1)
-        layout.addLayout(row)
-        box.toggled.connect(self.changed)
+        layout.addWidget(container)
         if key == 'simulate_full_tower_infill':
             box.toggled.connect(self._sync_automatic)
-        if key == 'limit_expansion_to_profile':
-            box.toggled.connect(self._sync_automatic)
+        box.toggled.connect(self.changed)
+        return container
 
     def _chart_check(self, layout, title, hint, checked):
         row = QHBoxLayout()
@@ -346,18 +379,45 @@ class NativeEditorPanel(QWidget):
             self.inputs['tower_wall_count'][0].show_automatic_value(not enabled, 'solid')
             self.inputs['tower_wall_count'][0].setEnabled(enabled)
             self.rows['tower_wall_count'].label.setEnabled(enabled)
+            self.concave_base_row.setVisible(enabled)
+        for surface in ('top', 'bottom'):
+            field = f'{surface}_shell_layers'
+            flag = self.automatic[f'automatic_{field}']
+            value = self._profile_shells.get(surface)
+            flag.setEnabled(value is not None)
+            automatic = flag.isChecked() and value is not None
+            spin = self.inputs[field][0]
+            spin.show_automatic_value(automatic, value)
+            spin.setEnabled(not automatic)
         if 'limit_expansion_to_profile' in self.inputs:
-            automatic = self.inputs['limit_expansion_to_profile'][0].isChecked() and self._profile_angle is not None
+            flag = self.automatic['limit_expansion_to_profile']
+            flag.setEnabled(self._profile_angle is not None)
+            automatic = flag.isChecked() and self._profile_angle is not None
             spin = self.inputs['maximum_expansion_angle_deg'][0]
             spin.show_automatic_value(automatic, self._profile_angle)
             spin.setEnabled(not automatic)
             self.rows['maximum_expansion_angle_deg'].set_warning(
                 EXPANSION_ANGLE_CAUTION if not automatic and spin.value() <= 29. else '')
 
-    def set_profile_angle(self, angle):
-        self._profile_angle = angle
-        self.inputs['limit_expansion_to_profile'][0].setEnabled(angle is not None)
+    def set_project_profile(self, context):
+        self._project_context = context
+        self._profile_angle = embedded_expansion_threshold(context) if context is not None else None
+        self._profile_shells = ({surface: embedded_shell_layers(context, surface)
+                                 for surface in ('top', 'bottom')} if context is not None else {})
         self._sync_automatic()
+        self._sync_wall_clearance_warning()
+
+    def _sync_wall_clearance_warning(self):
+        message = ''
+        context = self._project_context
+        row = self.rows['minimum_outer_diameter_mm']
+        if context is not None and not self.inputs['simulate_full_tower_infill'][0].isChecked():
+            segments = None if self.automatic['automatic_circle_segments'].isChecked() else self.inputs['circle_segments'][0].value()
+            message = wall_clearance_hint(context.settings, context.adapter_id,
+                self.inputs['tower_wall_count'][0].value(), row.editor.value(), circle_segments=segments)
+        if message != row._helper_text:
+            row.set_warning(message)
+            self._layout_timer.start(0)
 
     def show_automatic_values(self,values):
         self._automatic_values = dict(values)
@@ -367,6 +427,18 @@ class NativeEditorPanel(QWidget):
         self.timing_panel.setVisible(visible)
         self.timing_toggle.setToolTip('Layerzeiten ausblenden' if visible else 'Layerzeiten anzeigen')
         self._layout_timer.start(0)
+
+    def set_timing_available(self, available):
+        was_available = self.timing_toggle.isEnabled()
+        self.timing_toggle.setEnabled(available)
+        if not available or not was_available:
+            self.timing_toggle.setChecked(available)
+            self._toggle_timing(available)
+
+    def set_timing_estimated(self, estimated):
+        label = 'Mit Turm (geschätzt)' if estimated else 'Mit Turm'
+        self.time_legend.labels[1].setText(label)
+        self.time_legend.swatches[1].setAccessibleName(label)
 
     def top_view(self):
         self.canvas.apply_camera_state({**self.canvas.camera_state(),'yaw_deg':0,'pitch_deg':-89})
@@ -383,7 +455,8 @@ class NativeEditorPanel(QWidget):
                 widget.setChecked(value)
             else:
                 widget.setValue(complementary_angle(value) if angle else value)
-        self.iterations.setValue(12)
+        self.separate_iterations.setValue(DEFAULT_SEPARATE_SLICES)
+        self.iterations.setValue(DEFAULT_JOINT_SLICES)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -622,10 +695,16 @@ class NativeEditorPanel(QWidget):
         self.status = QLabel("Einstellungen wählen und die Erzeugung starten.")
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
+        self.best_status = QLabel()
+        self.best_status.setWordWrap(True)
+        self.best_status.hide()
         self.progress = ActivityProgressBar()
-        self.progress.setObjectName("mainProgressBar")
+        self.progress.setObjectName("nativeProjectProgressBar")
+        self.progress.setRange(0, 0)
+        self.progress.hide()
         messages.addWidget(self.progress)
         messages.addWidget(self.status)
+        messages.addWidget(self.best_status)
         messages.addStretch(1)
         resets = QHBoxLayout()
         self.reset_button = QPushButton("Standardwerte")
@@ -659,6 +738,14 @@ class NativeEditorPanel(QWidget):
         self.prepare_button.setObjectName("previewButton")
         self.generate_button = QPushButton("Turm generieren")
         self.generate_button.setObjectName("previewButton")
+        self.accept_button = QPushButton("Bisheriges Ergebnis übernehmen")
+        self.accept_button.setObjectName("generationAcceptButton")
+        self.accept_button.setToolTip("Übernimmt den geprüften Durchlauf mit der geringsten Abweichung von der Zielzeit.")
+        self.accept_button.hide()
+        self.continue_button = QPushButton("Angleichen fortsetzen")
+        self.continue_button.setObjectName("generationContinueButton")
+        self.continue_button.setToolTip("Setzt die Kalibrierung beim ersten noch offenen gemeinsamen Slice fort.")
+        self.continue_button.hide()
         self.export_button = QPushButton("Projekt exportieren")
         self.export_button.setObjectName("exportButton")
         self.cancel_button = QPushButton("Abbrechen")
@@ -666,7 +753,8 @@ class NativeEditorPanel(QWidget):
         self.cancel_button.hide()
         self.export_button.hide()
         for column, button in enumerate((self.open_output_button, self.open_last_button,
-                self.open_report_button, self.prepare_button, self.generate_button, self.cancel_button, self.export_button)):
+                self.open_report_button, self.prepare_button, self.generate_button,
+                self.accept_button, self.cancel_button, self.continue_button, self.export_button)):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             actions.addWidget(button, 0, column if column < 3 else column+1,
                 Qt.AlignmentFlag.AlignBottom)
@@ -680,8 +768,9 @@ class NativeEditorPanel(QWidget):
         self.footer_columns.set_stacked_separator(horizontal)
         self.footer_columns.add_pair(self.footer_message_area, self.footer_action_area)
         self.footer_widget.watch_content(self.footer_columns, self.footer_action_area, (self.footer_message_area, self.footer_action_area,
-            self.status, self.progress, self.export_actions, self.open_last_button, self.open_report_button,
-            self.prepare_button, self.generate_button, self.cancel_button, self.export_button), fit_actions=self._fit_footer_actions)
+            self.status, self.best_status, self.progress, self.export_actions, self.open_last_button,
+            self.open_report_button, self.prepare_button, self.generate_button, self.accept_button,
+            self.cancel_button, self.continue_button, self.export_button), fit_actions=self._fit_footer_actions)
         self.footer_widget.hide()
 
 
@@ -692,8 +781,11 @@ class NativeEditorPanel(QWidget):
             self.open_report_button.setText(("Letzten Exportbericht öffnen", "Exportbericht öffnen", "Exportbericht")[report_level])
             self.prepare_button.setText("Druckplatte vorbereiten")
             self.generate_button.setText("Turm generieren")
+            self.accept_button.setText("Ergebnis übernehmen" if shorten_actions else "Bisheriges Ergebnis übernehmen")
+            self.continue_button.setText("Fortsetzen" if shorten_actions else "Angleichen fortsetzen")
             self.export_button.setText("Projekt exportieren")
         narrow, self._footer_actions_layout_mode = fit_footer_actions(self.footer_actions_layout,
             (self.open_output_button, self.open_last_button, self.open_report_button),
-            (self.prepare_button, self.generate_button, self.cancel_button, self.export_button), max(0, width-24), set_labels)
+            (self.prepare_button, self.generate_button, self.accept_button, self.cancel_button,
+             self.continue_button, self.export_button), max(0, width-24), set_labels)
         return narrow

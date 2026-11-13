@@ -3738,6 +3738,7 @@ class MainWindow(QMainWindow):
             export_directory=lambda:self.export_roots['native_project'])
         self.native_project_page.source_selected.connect(self.drop_zone.set_file)
         self.native_project_page.back_requested.connect(self._back_to_native_handover)
+        self.native_project_page.report_requested.connect(self._show_export_success_dialog)
         self.native_project_page.controller.imported_ready.connect(self._native_project_imported)
         self.native_project_page.controller.failed.connect(self._native_project_import_failed)
         self.native_project_page.controller.status_changed.connect(self._native_project_import_status)
@@ -10717,7 +10718,7 @@ class MainWindow(QMainWindow):
     def _back_to_native_handover(self):
         self._native_import_pending = False
         if self.native_project_page.controller.busy:
-            self.native_project_page.controller.cancel()
+            self.native_project_page.cancel()
         self._show_native_handover()
 
     def _prepare_for_replaced_source(self, reason: str) -> None:
@@ -12000,6 +12001,8 @@ class MainWindow(QMainWindow):
         result: PreviewExportResult,
     ) -> None:
         dialog = self.export_success_dialog
+        self._report_dialog_directory = Path(result.output_path).parent.resolve()
+        method = getattr(result, "generation_method", None)
         self.export_success_check_hint.setVisible(
             getattr(result, "generation_method", None) != "postprocessor"
         )
@@ -12105,7 +12108,14 @@ class MainWindow(QMainWindow):
             "Einstellungen.</p>"
         )
         self.export_success_deviation_label.show()
-        if getattr(result, "generation_method", None) == "manual":
+        if method == "native_project":
+            self.export_success_usage_label.setText(
+                "Öffnen Sie die exportierte 3MF im zugehörigen Slicer. Das Projekt "
+                "enthält die gewählte Druckplatte mit Kühlturm und eingebetteten Druckeinstellungen."
+                + (" Der zusätzliche Turmlayer bleibt bei der erreichten Mindest-Layerzeit unberücksichtigt."
+                   if result.extra_layer else "")
+            )
+        elif method == "manual":
             self.manual_controller.describe_export(result)
         elif getattr(result, "generation_method", None) == "postprocessor":
             self.export_success_usage_label.setText(
@@ -12164,7 +12174,7 @@ class MainWindow(QMainWindow):
         self._place_dialog_centered(dialog, allow_hidden=True)
 
     def _open_export_directory_from_success_dialog(self) -> None:
-        directory = self._latest_export_directory
+        directory = getattr(self, "_report_dialog_directory", self._latest_export_directory)
         if directory is None:
             self.export_success_error_label.setText(
                 "Der Exportordner ist nicht mehr verfügbar."

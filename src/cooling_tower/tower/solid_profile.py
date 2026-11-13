@@ -63,6 +63,7 @@ class SolidTowerProfile:
     initial_geometry_limitations: tuple[FeasibilityIssue, ...] = ()
     support_point_count: int = 0
     maximum_spline_error_mm: float = SPLINE_RADIAL_ERROR_MM
+    base_taper_end_z_mm: float = 0.0
 
     @property
     def printable_layer_count(self) -> int:
@@ -161,6 +162,7 @@ def build_solid_tower_profile(
     tower_end_z_mm: float | None = None,
     object_height_mm: float | None = None,
     allow_wide_base: bool = False,
+    concave_base: bool = False,
 ) -> SolidTowerProfile:
     """Build a closed, cavity-free tower controlled only by outer diameter.
 
@@ -233,6 +235,7 @@ def build_solid_tower_profile(
     base_outer = max(calculated_base_outer, minimum_outer)
     tiered_foot = (
         not settings.simulate_full_tower_infill
+        and not concave_base
         and base_outer > 15.0 + EPSILON
         and minimum_outer <= 15.0 + EPSILON
         and len(phase2_profile.layers) >= 2
@@ -249,7 +252,7 @@ def build_solid_tower_profile(
         last_layer_z - taper_start_z,
         max(6.0, minimum_layer_height, 0.025 * base_reference_height),
     )
-    if settings.simulate_full_tower_infill:
+    if settings.simulate_full_tower_infill or concave_base:
         base_taper_height = full_infill_foot_taper(
             tuple(layer.z_mm for layer in phase2_profile.layers),
             base_outer, minimum_outer, base_reference_height,
@@ -308,9 +311,10 @@ def build_solid_tower_profile(
         base_radius=15.0 if tiered_foot else base_outer,
         minimum_radius=minimum_outer,
         expansion_slope=angle_to_radial_slope(settings.maximum_expansion_angle_deg),
-        contraction_slope=(1.0 if settings.simulate_full_tower_infill and settings.automatic_contraction_angle else
+        contraction_slope=(1.0 if (settings.simulate_full_tower_infill or concave_base) and settings.automatic_contraction_angle else
                            angle_to_radial_slope(settings.maximum_contraction_angle_deg)),
         allow_steps=settings.simulate_full_tower_infill and settings.automatic_contraction_angle,
+        steep_foot=concave_base and settings.automatic_contraction_angle,
         base_taper_height=base_taper_height,
         abrupt_drop_indices=frozenset(abrupt_drops),
         excluded_indices=frozenset(
@@ -395,6 +399,11 @@ def build_solid_tower_profile(
         feasibility_issues=(),
         initial_geometry_limitations=unique_limitations,
         support_point_count=len(support_points),
+        base_taper_end_z_mm=max(
+            (segment.taper.start_z + segment.taper.duration for segment in segments
+             if segment.taper is not None and segment.taper.foot_curve_power is not None),
+            default=0.0,
+        ),
     )
 
 

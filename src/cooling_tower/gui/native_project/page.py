@@ -1,6 +1,5 @@
 """Independent native-project editing page and worker presentation."""
 from pathlib import Path
-import json
 from PySide6.QtCore import Qt, QSize, QPoint, Signal, QSignalBlocker, QUrl
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QToolButton, QVBoxLayout,
@@ -13,10 +12,12 @@ from cooling_tower.gui.native_project.editor import NativeEditorPanel
 from cooling_tower.gui.native_project.header import NativeWorkflowHeader
 from cooling_tower.gui.native_project.plate_selector import NativePlateSelector
 from cooling_tower.gui.widgets.section_card import SectionCard
+from cooling_tower.native_project.automatic import NativeSlicePreview
 from cooling_tower.native_project.context import ProjectProblem
 from cooling_tower.native_project.defaults import GENERATION_DEFAULTS
+from cooling_tower.native_project.export import NativeExportReport
 from cooling_tower.native_project.options import NativeCalibrationOptions
-from cooling_tower.native_project.settings import NativeGenerationSettings, embedded_expansion_threshold
+from cooling_tower.native_project.settings import NativeGenerationSettings
 from cooling_tower.preview.models import PreviewScene
 from cooling_tower.tower.solid_profile import validate_solid_settings
 from cooling_tower.version import APP_NAME, APP_SUBTITLE, APP_VERSION_LABEL
@@ -34,6 +35,7 @@ def _label(text='', *, name=None, wrap=True):
 class NativeProjectPage(QWidget):
     source_selected = Signal(str)
     back_requested = Signal()
+    report_requested = Signal(object)
 
     def __init__(self, manager, parent=None, *, controller=None, export_directory=None):
         super().__init__(parent)
@@ -87,15 +89,16 @@ class NativeProjectPage(QWidget):
         self.header.method_selection.back_button.clicked.connect(self.back_requested)
         self.header.preparation_button.clicked.connect(self.back_requested)
         self.options_button.clicked.connect(self._show_options_menu)
-        self.project_group = SectionCard('Datei und eingebettete Projekteinstellungen',collapsible=False)
+        self.project_group = SectionCard('Druckplatten',collapsible=False)
+        self.project_group.header.hide()
         info = self.project_group.content_layout
-        self.file_label = _label()
-        self.context_label = _label()
         self.notice_label = _label(name='nativeNotice')
-        info.addWidget(self.file_label); info.addWidget(self.context_label); info.addWidget(self.notice_label)
+        self.notice_label.hide()
+        info.addWidget(self.notice_label)
         self.plates = NativePlateSelector()
+        self.plates.hide()
         self.plates.currentRowChanged.connect(self._plate_changed)
-        info.addWidget(self.plates)
+        root.addWidget(self.plates)
         self.error_label = _label(name='errorLabel')
         self.error_label.hide()
         info.addWidget(self.error_label)
@@ -107,6 +110,7 @@ class NativeProjectPage(QWidget):
             'Anycubic Slicer Next <small>(2.0.0.3)</small><br>Bambu Studio <small>(02.08.02.61)</small><br>'
             'PrusaSlicer <small>(2.9.6)</small><br>OrcaSlicer <small>(Engine 2.4.2 · Paket 2.4.3.0)</small>')
         self.guide.hide(); info.addWidget(self.guide)
+        self.project_group.hide()
         root.addWidget(self.project_group)
         self.editor = NativeEditorPanel()
         self.splitter = self.editor
@@ -115,8 +119,6 @@ class NativeProjectPage(QWidget):
         self._inputs = self.editor.inputs
         self.iterations = self.editor.iterations
         self.canvas, self.chart = self.editor.canvas, self.editor.time_chart
-        self.chart_label = QLabel('Layerzeiten',self)
-        self.chart_label.hide()
         self.layer_spin, self.layer_value = self.editor.layer_spin, self.editor.layer_details
         self.status, self.progress = self.editor.status, self.editor.progress
         self.prepare_button, self.generate_button = self.editor.prepare_button, self.editor.generate_button
@@ -134,17 +136,21 @@ class NativeProjectPage(QWidget):
         root.addWidget(self.editor.footer_widget)
         self.prepare_button.clicked.connect(lambda:self.controller.prepare(self.plate_id()))
         self.generate_button.clicked.connect(self._generate)
-        self.cancel_button.clicked.connect(self.controller.cancel)
+        self.editor.accept_button.clicked.connect(self.controller.accept_best)
+        self.editor.continue_button.clicked.connect(self.controller.continue_generation)
+        self.cancel_button.clicked.connect(self.cancel)
         self.export_button.clicked.connect(self._export)
         self.editor.changed.connect(self._settings_changed)
         self.editor.layer_selected.connect(self._select_layer)
         self.editor.layer_reset_requested.connect(self._reset_layer)
         self.editor.open_output_button.clicked.connect(lambda:self._open_path(self._export_root()))
         self.editor.open_last_button.clicked.connect(lambda:self._open_path(self._last_export.parent if self._last_export else None))
-        self.editor.open_report_button.clicked.connect(lambda:self._open_path(self._last_export.parent/'Projektbericht.txt' if self._last_export else None))
+        self.editor.open_report_button.clicked.connect(self._show_last_report)
         self.controller.imported_ready.connect(self._imported)
         self.controller.prepared_ready.connect(self._prepared)
         self.controller.generated_ready.connect(self._generated)
+        self.controller.iteration_ready.connect(self._iteration)
+        self.controller.best_changed.connect(self._best_changed)
         self.controller.exported.connect(self._exported)
         self.controller.busy_changed.connect(self._set_busy)
         self.controller.status_changed.connect(self.status.setText)
@@ -179,6 +185,13 @@ class NativeProjectPage(QWidget):
         self._last_export_root = self._export_root().absolute()
         self.status.setText('Geprüftes natives Projekt exportiert')
         self._refresh_export_actions()
+        self._show_last_report()
+
+    def _show_last_report(self):
+        if self._last_export is not None and self._last_export.is_file():
+            report = NativeExportReport.read(self._last_export)
+            if report is not None:
+                self.report_requested.emit(report)
 
     def _refresh_export_actions(self):
         root = self._export_root().absolute()
@@ -187,15 +200,9 @@ class NativeProjectPage(QWidget):
             candidates = []
             try:
                 for project in root.glob('Projekt_*/Projekt_mit_Turm.3mf'):
-                    report = project.parent/'Projektbericht.json'
-                    if project.parent.resolve().parent != root.resolve() or not project.is_file() or not report.is_file() or report.stat().st_size > 1024*1024:
-                        continue
-                    try:
-                        metadata = json.loads(report.read_text(encoding='utf-8'))
-                        if isinstance(metadata, dict) and metadata.get('native_project_report_version') == 1:
-                            candidates.append((project.stat().st_mtime_ns,project))
-                    except (OSError,ValueError,TypeError):
-                        continue
+                    if (project.parent.resolve().parent == root.resolve() and project.is_file()
+                            and NativeExportReport.read(project) is not None):
+                        candidates.append((project.stat().st_mtime_ns,project))
                 if candidates:
                     self._last_export = max(candidates,key=lambda item:(item[0],str(item[1])))[1]
             except OSError:
@@ -204,7 +211,8 @@ class NativeProjectPage(QWidget):
         self.editor.open_output_button.setEnabled(root.is_dir())
         available = self._last_export is not None and self._last_export.is_file()
         self.editor.open_last_button.setVisible(available)
-        self.editor.open_report_button.setVisible(available and (self._last_export.parent/'Projektbericht.txt').is_file())
+        self.editor.open_report_button.setVisible(
+            available and self._last_export.with_name('Projektbericht.json').is_file())
         self.editor.footer_widget._fit_timer.start(0)
 
     def _export(self):
@@ -218,6 +226,9 @@ class NativeProjectPage(QWidget):
                 raise ValueError('Bitte den eingegebenen Zahlenwert bestätigen oder korrigieren.')
             value = widget.isChecked() if isinstance(widget, QCheckBox) else widget.value()
             values[key] = complementary_angle(value) if angle else value
+        if any(spin.isEnabled() and (spin.input_pending or not spin.hasAcceptableInput())
+               for spin in (self.iterations, self.editor.separate_iterations)):
+            raise ValueError('Bitte die eingegebene Durchlaufgrenze bestätigen oder korrigieren.')
         settings = NativeGenerationSettings.from_mapping(values)
         validate_solid_settings(settings)
         return settings
@@ -232,8 +243,7 @@ class NativeProjectPage(QWidget):
         self._input_signature = signature
         self.editor.show_automatic_values({})
         if self.controller.generated is not None:
-            self.controller.generated.close()
-            self.controller.generated = None
+            self.controller.invalidate_generation()
             if self.controller.prepared:
                 self._show_result(self.controller.prepared)
             self.status.setText('Einstellungen geändert · erneut berechnen')
@@ -246,7 +256,8 @@ class NativeProjectPage(QWidget):
                 values.append((key,widget.isChecked()))
             else:
                 values.append((key,widget.value(),widget.isEnabled() and widget.input_pending))
-        return (*values,('iterations',self.iterations.value(),self.iterations.input_pending))
+        return (*values, *((spin.value(), spin.isEnabled() and spin.input_pending)
+                          for spin in (self.iterations, self.editor.separate_iterations)))
 
     def choose_source(self):
         selected, _ = QFileDialog.getOpenFileName(self, 'STL oder natives 3MF-Projekt auswählen',
@@ -256,9 +267,11 @@ class NativeProjectPage(QWidget):
 
     def open_source(self, path):
         self._path = Path(path)
-        self.file_label.setText(self._path.name)
-        self.context_label.clear()
+        self.editor.set_project_profile(None)
+        self.header.set_facts((('Dateiname', self._path.name),))
         self.notice_label.clear()
+        self.notice_label.hide()
+        self.project_group.hide()
         self.error_label.hide()
         self.guide.hide()
         self.splitter.hide()
@@ -270,18 +283,25 @@ class NativeProjectPage(QWidget):
 
     def _imported(self, imported):
         context = imported.session.context
-        self.editor.set_profile_angle(embedded_expansion_threshold(context))
+        self.editor.set_project_profile(context)
         installation = imported.installation
         product = installation.display_name if installation else {
             'anycubic_slicer_next':'Anycubic Slicer Next', 'bambu_studio':'Bambu Studio',
             'orca_slicer':'OrcaSlicer', 'prusa_slicer':'PrusaSlicer'}[context.adapter_id]
-        self.context_label.setText('Iterativ · Druckplatte auswählen und vorbereiten')
-        self.header.set_facts((('Dateiname',self._path.name),('Slicer',product)))
-        self.notice_label.setText(f'Projekt erstellt mit {context.producer_version} · {len(context.plates)} Druckplatte(n)')
+        if installation and getattr(installation, 'version', None) == context.producer_version:
+            product = getattr(installation, 'product_name', product)
         thumbnails = dict(imported.thumbnails)
-        self.plates.setVisible(len(context.plates) > 1 or bool(thumbnails))
-        if len(context.plates) == 1:
-            self.notice_label.setText(f'Projekt erstellt mit {context.producer_version} · {context.plates[0].name} · {context.plates[0].object_count} Objektinstanz(en)')
+        show_plates = len(context.plates) > 1 or bool(thumbnails)
+        self.plates.setVisible(show_plates)
+        facts = [('Dateiname', self._path.name), ('Slicer', product), ('Methode', 'Iterativ'),
+                 ('Projektversion', context.producer_version)]
+        if len(context.plates) == 1 and not show_plates:
+            plate = context.plates[0]
+            objects = 'Objekt' if plate.object_count == 1 else 'Objekte'
+            facts.append(('Druckplatte', f'{plate.name} · {plate.object_count} {objects}'))
+        else:
+            facts.append(('Druckplatten', str(len(context.plates))))
+        self.header.set_facts(tuple(facts))
         with QSignalBlocker(self.plates):
             self.plates.clear()
             for plate in context.plates:
@@ -309,6 +329,7 @@ class NativeProjectPage(QWidget):
         self.controller.select_plate()
         self._clear_display()
         self.error_label.hide()
+        self.project_group.setVisible(not self.notice_label.isHidden())
         self.status.setText('Druckplatte geändert · erneut vorbereiten')
         self._update_controls()
 
@@ -322,29 +343,57 @@ class NativeProjectPage(QWidget):
         self.layer_spin.setEnabled(False)
         self.editor.layer_reset.setEnabled(False)
         self.editor.set_preview_available(False)
+        self.editor.set_timing_available(False)
         with QSignalBlocker(self.editor.normalized_scale):
             self.editor.normalized_scale.setChecked(False)
 
     def _prepared(self, result):
         self._show_result(result)
         self.error_label.hide()
+        self.project_group.setVisible(not self.notice_label.isHidden())
         self.status.setText(f'{result.analysis.layer_count} Schichten vorbereitet · Turm generieren verfügbar')
         if self.controller.imported.session.original_changed():
             self.notice_label.setText('Die Originaldatei wurde extern geändert. Weiterverarbeitet wird die unveränderte importierte Momentaufnahme.')
+            self.notice_label.show()
+            self.project_group.show()
+
+    def _iteration(self, preview):
+        if self.controller.prepared is not None:
+            self._show_result(preview, generated=preview)
+
+    def _best_changed(self, candidate):
+        if candidate is not None:
+            minimum = f'{candidate.minimum_layer_time_s:.2f}'.replace('.', ',')
+            target = f'{candidate.target_layer_time_s:.2f}'.replace('.', ',')
+            self.editor.best_status.setText(
+                f'Beste bisherige Mindest-Layerzeit: {minimum} s · Ziel: {target} s · Durchlauf {candidate.number}')
+        else:
+            self.editor.best_status.clear()
+        self._update_controls()
 
     def _generated(self, generated):
         self.editor.show_automatic_values({'manual_base_width_mm':getattr(generated,'base_width_mm',None),
                                           'circle_segments':getattr(generated,'circle_segments',None)})
         if generated.prepared:
             self._show_result(generated.prepared, generated=generated)
+        else:
+            self._restore_prepared()
         self.status.setText(generated.message)
 
     def _show_result(self, result, *, generated=None):
+        previous_number = self.layer_spin.value()
+        following_top = self.canvas.scene is None or previous_number == self.layer_spin.maximum()
+        previous_full_view = self.canvas.scene is None or self.canvas.layer_height_mm is None
+        normalized = self.chart.normalized if self.editor.timing_toggle.isEnabled() else None
+        was_isolated = isinstance(self._displayed, NativeSlicePreview) and self._displayed.tower_only
         self._displayed = result
         self.layer_spin.setEnabled(True)
         self.editor.layer_reset.setEnabled(True)
         self.editor.set_preview_available(True)
+        basis = self.controller.prepared
+        isolated = isinstance(result, NativeSlicePreview) and result.tower_only
         paths = result.toolpaths
+        analysis = basis.analysis if isolated else result.analysis
         source, tower = [], []
         source_heights, tower_heights = [], []
         center = generated.tower_center_mm if generated else None
@@ -352,45 +401,62 @@ class NativeProjectPage(QWidget):
         logical_heights = paths.segment_layer_z or tuple(segment.end.z for segment in paths.object_segments)
         for segment, logical_z in zip(paths.object_segments, logical_heights, strict=True):
             in_tower = center and all((point.x-center[0])**2+(point.y-center[1])**2 <= (radius+1.)**2 for point in (segment.start,segment.end))
+            if isolated and not in_tower:
+                continue
             (tower if in_tower else source).append(segment)
             (tower_heights if in_tower else source_heights).append(logical_z)
         bed = parse_bed_geometry(result.context.settings.as_dict())
-        layer_indices={round(layer.z_mm,5):index for index,layer in enumerate(result.analysis.layers)}
+        layers = analysis.layers
+        layer_indices = {round(layer.z_mm,5):index for index,layer in enumerate(layers)}
         travels=getattr(paths,'travel_segments',())
         travel_heights=getattr(paths,'travel_layer_z',())
+        travel_pairs = tuple((segment, layer_indices[round(z,5)]) for segment, z in zip(travels, travel_heights)
+                             if round(z,5) in layer_indices)
+        seams = paths.seam_points
+        seam_heights = paths.seam_layer_z
         scene = PreviewScene(tuple(source), tuple(tower), bed.bounds, center or (0.,0.),
-            paths.source_segment_count, len(paths.object_segments), result.analysis.maximum_print_z_mm if generated else 0.,
-            object_height_mm=result.analysis.maximum_print_z_mm, object_layer_count=result.analysis.layer_count,
+            paths.source_segment_count,
+            len(source)+len(tower), result.analysis.maximum_print_z_mm if generated else 0.,
+            object_height_mm=0. if isolated else (basis or result).analysis.maximum_print_z_mm,
+            object_layer_count=0 if isolated else (basis or result).analysis.layer_count,
             tower_layer_count=result.analysis.layer_count if generated else 0, bed_geometry=bed,
-            layer_z_mm=tuple(layer.z_mm for layer in result.analysis.layers), seam_points=paths.seam_points,
-            tower_travel_segments=travels,
-            tower_travel_layer_indices=tuple(layer_indices[round(z,5)] for z in travel_heights))
-        initial_view=self.canvas.scene is None
-        self.canvas.set_scene(scene, preserve_view=self.canvas.scene is not None,
+            layer_z_mm=tuple(layer.z_mm for layer in layers), seam_points=seams,
+            tower_travel_segments=tuple(pair[0] for pair in travel_pairs),
+            tower_travel_layer_indices=tuple(pair[1] for pair in travel_pairs))
+        initial_view = self.canvas.scene is None
+        self.canvas.set_scene(scene, preserve_view=not initial_view and was_isolated == isolated,
             object_layer_heights=source_heights, tower_layer_heights=tower_heights,
-            seam_layer_heights=paths.seam_layer_z)
+            seam_layer_heights=seam_heights)
         if initial_view:self.editor.three_quarter_view()
-        self.chart_label.setText('Gemeinsam geslicte Schichtzeit' if generated else 'Schichtzeit der ursprünglichen Druckplatte')
-        layers = result.analysis.layers
         target = self._inputs['target_layer_time_s'][0].value()
-        if generated is None:
+        if isolated:
+            self.chart.set_comparison(tuple(layer.total_time_s for layer in layers), result.estimated_times,
+                                      tuple(layer.z_mm for layer in layers), target)
+        elif generated is None:
             self.chart.set_data(tuple(layer.total_time_s for layer in layers), (0.,)*len(layers), (0.,)*len(layers),
                                 tuple(layer.z_mm for layer in layers), target)
         else:
             original = {round(layer.z_mm,5): layer.total_time_s for layer in self.controller.prepared.analysis.layers}
             self.chart.set_comparison(tuple(original.get(round(layer.z_mm,5),0.) for layer in layers),
                 tuple(layer.total_time_s for layer in layers), tuple(layer.z_mm for layer in layers), target)
+        if normalized is not None and self.chart.normalized != normalized:
+            self.chart.set_normalized(normalized)
+        has_times = any(self.chart.original) or any(self.chart.combined or ())
+        self.editor.set_timing_available(has_times)
+        self.editor.set_timing_estimated(isolated)
         with QSignalBlocker(self.editor.normalized_scale):
             self.editor.normalized_scale.setChecked(self.chart.normalized)
         with QSignalBlocker(self.layer_spin):
             self.layer_spin.setRange(1, len(layers))
-        self._select_layer(len(layers),activate_transparency=False)
-        self.canvas.set_layer_height(None)
+        self._select_layer(len(layers) if following_top else previous_number,activate_transparency=False)
+        if previous_full_view:
+            self.canvas.set_layer_height(None)
 
     def _select_layer(self, number, *, activate_transparency=True):
         if self._displayed is None:
             return
-        layers = self._displayed.analysis.layers
+        isolated = isinstance(self._displayed, NativeSlicePreview) and self._displayed.tower_only
+        layers = (self.controller.prepared if isolated else self._displayed).analysis.layers
         number = max(1, min(int(number), len(layers)))
         with QSignalBlocker(self.layer_spin):
             self.layer_spin.setValue(number)
@@ -401,7 +467,8 @@ class NativeProjectPage(QWidget):
         if activate_transparency:
             self.editor.transparency_toggle.setChecked(True)
         self.canvas.set_layer_transparency_enabled(self.editor.transparency_toggle.isChecked())
-        self.layer_value.setText(f'Z {layer.z_mm:.2f} mm · {layer.total_time_s:.2f} s')
+        seconds = self._displayed.estimated_times[number-1] if isolated else layer.total_time_s
+        self.layer_value.setText(f'Z {layer.z_mm:.2f} mm · {seconds:.2f} s')
 
     def _reset_layer(self):
         self._select_layer(self.layer_spin.maximum(),activate_transparency=False)
@@ -411,7 +478,10 @@ class NativeProjectPage(QWidget):
         try:
             settings = self.collect_settings()
             self.error_label.hide()
-            self.controller.generate(settings, NativeCalibrationOptions(maximum_iterations=self.iterations.value(), time_tolerance_s=settings.layer_time_tolerance_s))
+            self.project_group.setVisible(not self.notice_label.isHidden())
+            self.controller.generate(settings, NativeCalibrationOptions(
+                maximum_iterations=self.iterations.value(), time_tolerance_s=settings.layer_time_tolerance_s,
+                maximum_separate_iterations=self.editor.separate_iterations.value()))
         except ValueError as error:
             self._failed(str(error), '', None)
 
@@ -420,6 +490,7 @@ class NativeProjectPage(QWidget):
         self.progress.setVisible(self._busy)
         self.settings_group.setEnabled(not self._busy)
         self.advanced_group.setEnabled(not self._busy)
+        self.editor.reset_button.setEnabled(not self._busy)
         self._update_controls()
 
     def _update_controls(self):
@@ -438,21 +509,41 @@ class NativeProjectPage(QWidget):
         self.generate_button.setEnabled(prepared and valid and not self._busy)
         self.export_button.setVisible(generated and not self._busy)
         self.export_button.setEnabled(generated and not self._busy)
+        can_accept = self._busy and self.controller.can_accept_best
+        self.editor.accept_button.setVisible(can_accept)
+        self.editor.accept_button.setEnabled(can_accept)
+        can_continue = not self._busy and self.controller.can_continue
+        self.editor.continue_button.setVisible(can_continue)
+        self.editor.continue_button.setEnabled(can_continue and valid)
+        self.editor.best_status.setVisible(
+            self._busy and self.controller.calibrating and self.controller.best_candidate is not None)
         self.cancel_button.setVisible(self._busy)
         self.cancel_button.setEnabled(self._busy)
         self.editor.footer_widget.setVisible(ready)
         self._refresh_export_actions()
 
     def _failed(self, message, details, problem):
+        self._restore_prepared()
         self.error_label.setText(message)
         self.error_label.setToolTip(details)
         self.error_label.show()
+        self.project_group.show()
         self.guide.setVisible(problem is ProjectProblem.INCOMPLETE)
         self.status.setText('Verarbeitung nicht abgeschlossen')
         self._update_controls()
 
+    def _restore_prepared(self):
+        if (self.controller.generated is None and self.controller.prepared is not None
+                and self._displayed is not self.controller.prepared):
+            self._show_result(self.controller.prepared)
+
+    def cancel(self):
+        self.controller.cancel()
+        self._restore_prepared()
+
     def deactivate(self):
         self.controller.deactivate()
+        self.editor.set_project_profile(None)
         self._clear_display()
 
     def close_after_shutdown(self):

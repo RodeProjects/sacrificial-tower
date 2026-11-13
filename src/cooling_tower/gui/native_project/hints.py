@@ -159,8 +159,20 @@ SETTING_INFO_TEXTS['circle_segments'] = (
     'zeigt die Segmentzahl des übernommenen Turms, vorher <b>—</b>.</p>'
     '<p>Ohne Automatik sind <b>4 bis 256</b> Segmente möglich. Die Auswahl gilt '
     'für die gemeinsame Slicerprüfung, die Vorschau und den Export.</p>')
-SETTING_INFO_TEXTS['limit_expansion_to_profile'] = (
-    '<p><b>Aufweitung auf Profil begrenzen</b></p>'
-    '<p>Verwendet den horizontalen Stützwinkel aus den eingebetteten Projekteinstellungen '
-    'als Grenze für den Aufweitungswinkel. Ein niedrigerer Winkel erlaubt flachere Überhänge. '
-    'Ohne Profilbegrenzung gilt der manuell eingestellte Winkel.</p>')
+SETTING_INFO_TEXTS['maximum_expansion_angle_deg'] += (
+    '<p><b>Auto</b> übernimmt den horizontalen Stützwinkel aus dem eingebetteten '
+    'Prozessprofil. Ohne Auto gilt der manuell eingestellte Winkel.</p>')
+for surface, location in (('top', 'Oberseiten'), ('bottom', 'Unterseiten')):
+    SETTING_INFO_TEXTS[f'{surface}_shell_layers'] = (
+        f'Legt fest, wie viele geschlossene Layer der Slicer an den {location} des Turms erzeugt. '
+        'Manuell sind 0 bis 5 möglich. Der Standardwert ist 1. '
+        'Auto übernimmt den Wert aus dem eingebetteten Prozessprofil, auch wenn er über 5 liegt.')
+SETTING_INFO_TEXTS['extra_top_layer'] = (
+    'Erzeugt genau einen zusätzlichen Layer auf dem Turm. Die kleinste Kappe wird mittig oder '
+    'an der nächstgelegenen ausreichend gefüllten Stelle platziert. Bei zu wenig Füllung '
+    'liegt der zusätzliche Layer auf der vorherigen Turmwand. '
+    'Sacrificial Tower lässt diesen Layer bei der Ermittlung der Mindest-Layerzeit absichtlich '
+    'aus. Der Slicer wird deshalb wahrscheinlich eine weitaus kürzere Mindest-Layerzeit anzeigen.')
+SETTING_INFO_TEXTS['concave_base'] = (
+    'Formt den Standfuß wie bei 100 % Turmfüllung konkav. Wo den nach innen wandernden '
+    'Wänden Auflage fehlt, füllt der Slicer den Standfuß bis zum Erreichen des Verjüngungswinkels massiv.')

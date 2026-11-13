@@ -19,7 +19,10 @@ from xml.parsers import expat
 from cooling_tower.native_project.archive import ProjectArchive, parse_xml
 from cooling_tower.native_project.context import NativeProjectContext, NativeProjectError, ProjectProblem
 from cooling_tower.native_project.graph import CORE_NAMESPACE, UNIT_SCALE_MM
-from cooling_tower.native_project.layer_profile import encode_tower_profile, inherited_tower_profile, inherited_height_inputs, uses_embedded_layer_schedule
+from cooling_tower.native_project.layer_profile import (
+    encode_tower_profile, inherited_tower_profile, inherited_height_inputs,
+    solid_foot_ranges, uses_embedded_layer_schedule,
+)
 from cooling_tower.protected_io import OwnedWorkspace
 from cooling_tower.tower.mesh_generator import TriangleMesh, validate_triangle_mesh
 
@@ -28,8 +31,8 @@ PROVENANCE = 'Metadata/SacrificialTower/manifest.json'
 PATCH_ROOT = 'Metadata/SacrificialTower/base/'
 
 
-def xml_span(data: bytes, path: tuple[str, ...], occurrence: int = 0) -> tuple[int, int, int, bool]:
-    """Locate an XML element by parsed structure, including self-closing tags."""
+def xml_spans(data: bytes, path: tuple[str, ...]) -> list[tuple[int, int, int, bool]]:
+    """Locate XML elements by parsed structure, including self-closing tags."""
     parser = expat.ParserCreate()
     stack, starts, matches = [], [], []
 
@@ -60,6 +63,11 @@ def xml_span(data: bytes, path: tuple[str, ...], occurrence: int = 0) -> tuple[i
     parser.StartElementHandler, parser.EndElementHandler = start, end
     parser.StartDoctypeDeclHandler = lambda *_: (_ for _ in ()).throw(ValueError('DTD is forbidden'))
     parser.Parse(data, True)
+    return matches
+
+
+def xml_span(data: bytes, path: tuple[str, ...], occurrence: int = 0) -> tuple[int, int, int, bool]:
+    matches = xml_spans(data, path)
     if occurrence < 0 or occurrence >= len(matches):
         raise NativeProjectError(ProjectProblem.DAMAGED, 'Eine benötigte native XML-Struktur fehlt.')
     return matches[occurrence]
@@ -117,7 +125,8 @@ def _declare_parts(data: bytes | None, parts: dict[str, str]) -> bytes:
 
 
 def _tower_config(identifier: int, face_count: int, *, prusa: bool, full_infill: bool,
-                  supports_disabled: bool, filament: int, height_settings=None, wall_count=None) -> bytes:
+                  supports_disabled: bool, filament: int, height_settings=None, wall_count=None,
+                  shell_layers=()) -> bytes:
     obj = ET.Element('object', {'id': str(identifier), **({'instances_count': '1'} if prusa else {})})
     kind = 'object' if prusa else None
     _metadata(obj, 'name', 'Sacrificial Tower', kind=kind)
@@ -135,6 +144,12 @@ def _tower_config(identifier: int, face_count: int, *, prusa: bool, full_infill:
         _metadata(obj, 'fill_pattern' if prusa else 'sparse_infill_pattern', 'rectilinear' if prusa else 'zig-zag', kind=kind)
     if supports_disabled:
         _metadata(obj, 'support_material' if prusa else 'enable_support', '0', kind=kind)
+    for surface, layers, profile_thickness in shell_layers:
+        suffix = 'solid_layers' if prusa else 'shell_layers'
+        _metadata(obj, f'{surface}_{suffix}', layers, kind=kind)
+        if not profile_thickness:
+            suffix = 'solid_min_thickness' if prusa else 'shell_thickness'
+            _metadata(obj, f'{surface}_{suffix}', '0', kind=kind)
     if prusa:
         part = ET.SubElement(obj, 'volume', {'firstid': '0', 'lastid': str(face_count - 1)})
         _metadata(part, 'name', 'Sacrificial Tower', kind='volume')
@@ -155,18 +170,24 @@ class ComposedProject:
     plate_id: str
     placement_mm: tuple[float, float]
     mesh_sha256: str
+    extra_layer_base_z: float | None = None
 
 
 def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMesh, *,
                  workspace: OwnedWorkspace, name: str = 'combined.3mf', center_mm: tuple[float, float],
                  full_infill: bool = True, supports_disabled: bool = True, filament: int = 1,
-                 layer_print_z: tuple[float, ...] | None = None, wall_count: int | None = None) -> ComposedProject:
+                 layer_print_z: tuple[float, ...] | None = None, wall_count: int | None = None,
+                 shell_layers: tuple[tuple[str, int, bool], ...] = (),
+                 extra_layer_base_z: float | None = None, solid_foot_top_mm: float = 0.) -> ComposedProject:
     context.snapshot.verify()
     plate = context.plate(plate_id)
     if not plate.build_indices:
         raise NativeProjectError(ProjectProblem.INCOMPLETE, 'Die ausgewählte Druckplatte enthält kein druckbares Objekt.')
     if not validate_triangle_mesh(mesh).is_valid:
         raise ValueError('Der ergänzte Turm ist kein gültiges geschlossenes Mesh.')
+    top_mm = max(point[2] for point in mesh.vertices)
+    if extra_layer_base_z is not None and not 0 < extra_layer_base_z < top_mm:
+        raise ValueError('Der zusätzliche Turmlayer fehlt im Turm-Mesh.')
     if not all(math.isfinite(value) for value in center_mm) or len(center_mm) != 2:
         raise ValueError('Ungültige Turmposition.')
     if not 1 <= filament <= len(context.materials):
@@ -199,11 +220,14 @@ def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMes
                        else 'Metadata/layer_config_ranges.xml')
         ranges = archive.read(ranges_path, metadata=True) if ranges_path in archive.names else b''
         heights, tower_ranges = inherited_height_inputs(context, plate_id, config, ranges)
+        inherited_ranges = bool(tower_ranges)
+        if solid_foot_top_mm > 0 and not full_infill:
+            tower_ranges = solid_foot_ranges(context, heights, tower_ranges, solid_foot_top_mm)
         if tower_ranges:
-            changed[ranges_path] = insert_xml(ranges, ('objects',), tower_ranges)
+            changed[ranges_path] = insert_xml(ranges or b'<objects/>', ('objects',), tower_ranges)
         config = insert_xml(config, ('config',), _tower_config(identifier, len(mesh.faces), prusa=prusa,
             full_infill=full_infill, supports_disabled=supports_disabled, filament=filament,
-            height_settings=heights, wall_count=wall_count))
+            height_settings=heights, wall_count=wall_count, shell_layers=shell_layers))
         if not prusa:
             root = parse_xml(config)
             plates = root.findall('plate')
@@ -242,9 +266,13 @@ def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMes
             profile_path = ('Metadata/Slic3r_PE_layer_heights_profile.txt' if prusa
                             else 'Metadata/layer_heights_profile.txt')
             profile = archive.read(profile_path, metadata=True) if profile_path in archive.names else b''
-            top_mm = max(point[2] for point in mesh.vertices)
-            tower_profile = inherited_tower_profile(context, plate_id, profile, top_mm)
-            if tower_profile is None and not (heights or tower_ranges):
+            base_top = extra_layer_base_z if extra_layer_base_z is not None else top_mm
+            tower_profile = inherited_tower_profile(context, plate_id, profile, base_top)
+            if tower_profile is not None and extra_layer_base_z is not None:
+                height = layer_print_z[-1] - layer_print_z[-2]
+                tower_profile = tower_profile.rstrip(b'\n') + (
+                    f';{base_top:.12g};{height:.12g};{top_mm:.12g};{height:.12g}\n'.encode('ascii'))
+            if tower_profile is None and not (heights or inherited_ranges):
                 tower_profile = encode_tower_profile(context, layer_print_z, top_mm)
             if tower_profile is not None:
                 changed[profile_path] = profile + (b'\n' if profile and not profile.endswith(b'\n') else b'') + tower_profile
@@ -276,6 +304,8 @@ def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMes
             for index, entry in enumerate(archive.names)
             if entry in changed or entry in removed or entry == content_types})
         own_parts.update({entry: 'text/plain' for entry in changed if entry not in archive.names and entry.endswith('.txt')})
+        if ranges_path in changed and ranges_path not in archive.names:
+            own_parts[ranges_path] = 'application/xml'
         changed[content_types] = _declare_parts(
             archive.read(content_types, metadata=True) if content_types in archive.names else None, own_parts)
         base_hashes, result_hashes, patches = {}, {}, []
@@ -317,7 +347,8 @@ def append_tower(context: NativeProjectContext, plate_id: str, mesh: TriangleMes
                         'plate_id': plate_id, 'tower_object_id': identifier,
                         'mesh_sha256': hashlib.sha256(mesh_bytes).hexdigest()}
             output.writestr(PROVENANCE, json.dumps(manifest, sort_keys=True, ensure_ascii=True))
-    return ComposedProject(target, identifier, plate_id, center_mm, hashlib.sha256(mesh_bytes).hexdigest())
+    return ComposedProject(target, identifier, plate_id, center_mm,
+                           hashlib.sha256(mesh_bytes).hexdigest(), extra_layer_base_z)
 
 
 def restore_basis(source: Path, *, workspace: OwnedWorkspace) -> Path | None:

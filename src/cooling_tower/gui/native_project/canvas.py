@@ -789,6 +789,10 @@ class NativePreviewCanvas(QWidget):
             self._layer_colours_highlight,
         )
 
+    @property
+    def layer_height_mm(self):
+        return self._layer_z
+
     def set_layer_height(self, z):
         """Filter one planar deposition layer without changing camera or fitting."""
         self._layer_z = z

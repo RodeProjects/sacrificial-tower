@@ -3557,7 +3557,8 @@ QLabel#progressBarActivity {
     border: none;
     padding: 0;
 }
-QProgressBar#sourceValidationProgressBar::chunk {
+QProgressBar#sourceValidationProgressBar::chunk,
+QProgressBar#nativeProjectProgressBar::chunk {
     background: #26965f;
     border-radius: 5px;
 }

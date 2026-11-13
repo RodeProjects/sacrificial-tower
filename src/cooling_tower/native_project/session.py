@@ -147,7 +147,8 @@ class NativeProjectSession:
 
     def slice(self, installation: SlicerInstallation, plate_id: str, *,
               cancellation_event: Event | None = None, timeout_s: float = 480.,
-              composed: ComposedProject | None = None, notify=None) -> NativePreparedResult:
+              composed: ComposedProject | None = None, notify=None,
+              tower_only: bool = False) -> NativePreparedResult:
         if self.closed:
             raise NativeSliceError('Die native Projektsitzung wurde geschlossen.')
         context = self.context
@@ -156,6 +157,8 @@ class NativeProjectSession:
             raise NativeProjectError(ProjectProblem.MISSING_SLICER, 'Der zum nativen Projekt gehörende Slicer ist nicht ausführbar vorhanden.')
         if not plate.build_indices:
             raise NativeProjectError(ProjectProblem.INCOMPLETE, 'Die ausgewählte Druckplatte enthält keine druckbaren Objekte.')
+        if tower_only and composed is None:
+            raise ValueError('Ein getrennter Slice benötigt ein Projekt mit Turm.')
         values = context.settings
         overrides = dict(plate.metadata)
         sequence = overrides.get('print_sequence', values.get('print_sequence', 'by layer'))
@@ -167,6 +170,8 @@ class NativeProjectSession:
         identity = _engine_identity(installation)
         options = {'output': 'plain_gcode', 'joint': composed.mesh_sha256 if composed else None,
                    'tower_placement': composed.placement_mm if composed else None}
+        if tower_only:
+            options['tower_only'] = True
         binding = context.binding(plate_id, engine_version=(installation.version or '') + ':' + identity, options=options)
         work = OwnedWorkspace(prefix='ns_')
         try:
@@ -175,7 +180,7 @@ class NativeProjectSession:
             if composed:
                 binding = context.binding(plate_id, engine_version=(installation.version or '') + ':' + identity,
                     options={**options, 'joint_project_sha256': model_snapshot.sha256})
-            execution_model = execution_project(context, model, work, plate_id=plate_id)
+            execution_model = execution_project(context, model, work, plate_id=plate_id, tower_only=tower_only)
             output, data = work.child('out'), work.child('data')
             output.mkdir()
             data.mkdir()

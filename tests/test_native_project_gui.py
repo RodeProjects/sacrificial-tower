@@ -5,6 +5,7 @@ import sys
 import tempfile
 from threading import Event
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -81,12 +82,72 @@ class NativeControllerTests(unittest.TestCase):
 
     def test_late_success_after_shutdown_releases_resources(self):
         controller=NativeProjectController(self.manager)
+        previews = []
+        controller.iteration_ready.connect(previews.append)
         request=controller.request_id
         controller.close_after_shutdown()
         result=Resource()
         controller._succeeded(request,result)
+        controller._preview(request, object())
         self.assertTrue(result.closed)
         self.assertIsNone(controller.prepared)
+        self.assertEqual(previews, [])
+
+    def test_accept_keeps_verified_result_and_continue_transfers_it_to_worker(self):
+        from cooling_tower.native_project.automatic import NativeAutomaticResult, NativeAutomaticState
+        from cooling_tower.native_project.options import NativeCalibrationOptions
+
+        controller = NativeProjectController(self.manager)
+        session, source, candidate = Resource(), Resource(), Resource()
+        controller.imported = NativeImported(session, object(), ())
+        controller.prepared = source
+        settings = NativeGenerationSettings(target_layer_time_s=11.)
+        options = NativeCalibrationOptions()
+        paused = NativeAutomaticResult(NativeAutomaticState.PAUSED, candidate, (), settings, 'Vorläufig',
+            (50., 50.), 5., minimum_layer_time_s=10.96, best_iteration=2,
+            continuation=SimpleNamespace(options=options))
+        resumed = Event()
+        resume_inputs = []
+        genuine_cancellation = []
+
+        def generate(*_, cancellation_event, acceptance_event, preview, resume, **_kwargs):
+            if resume is None:
+                preview(SimpleNamespace(best_candidate=paused.best_candidate))
+                if not acceptance_event.wait(3.):
+                    raise RuntimeError('Accept was not delivered.')
+                genuine_cancellation.append(cancellation_event.is_set())
+                return paused
+            resume_inputs.append(resume)
+            resumed.set()
+            cancellation_event.wait(3.)
+            return resume
+
+        with patch('cooling_tower.gui.native_project.controller.NativeAutomaticService.run', side_effect=generate):
+            controller.generate(settings, options)
+            self.wait(lambda: controller.can_accept_best)
+            self.assertEqual(controller.best_candidate, paused.best_candidate)
+            self.assertIsNone(controller.generated)
+            controller.accept_best()
+            self.assertFalse(controller.can_accept_best)
+            self.wait(lambda: not controller.busy)
+            self.assertEqual(genuine_cancellation, [False])
+            self.assertIs(controller.generated, paused)
+            self.assertTrue(controller.can_continue)
+            self.assertFalse(candidate.closed)
+
+            controller.continue_generation()
+            self.wait(resumed.is_set)
+            self.assertEqual(resume_inputs, [paused])
+            self.assertIsNone(controller.generated)
+            self.assertTrue(controller.can_accept_best)
+            self.assertFalse(candidate.closed)
+            controller.select_plate()
+            self.wait(lambda: not self.manager.has_active())
+            self.assertTrue(source.closed)
+            self.assertTrue(candidate.closed)
+            self.assertIsNone(controller.best_candidate)
+            self.assertFalse(controller.can_continue)
+        controller.close_after_shutdown()
 
 
 class NativePageRoutingTests(unittest.TestCase):
@@ -269,7 +330,7 @@ class NativePageRoutingTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(self.window.native_drop_zone.isVisible())
 
-    def test_native_header_has_only_identity_and_handover_lists_profiles_vertically(self):
+    def test_native_header_combines_project_facts_and_handover_lists_profiles_vertically(self):
         from types import SimpleNamespace
         from cooling_tower.native_project.session import NativeProjectSession
         source=self.root/'neutral.3mf'
@@ -280,13 +341,18 @@ class NativePageRoutingTests(unittest.TestCase):
         imported=NativeImported(NativeProjectSession(source),SimpleNamespace(display_name='Bambu Studio'),())
         page._path=source;page.controller.imported=imported;page._imported(imported)
         self.window.native_drop_zone.show_imported(imported)
-        self.assertEqual(page.header.facts,(('Dateiname','neutral.3mf'),('Slicer','Bambu Studio')))
-        self.assertEqual(set(page.header.fact_labels),{'Dateiname','Slicer'})
+        self.assertEqual(dict(page.header.facts), {
+            'Dateiname': 'neutral.3mf', 'Slicer': 'Bambu Studio', 'Methode': 'Iterativ',
+            'Projektversion': '02.08.02.61', 'Druckplatte': 'Druckplatte 1 · 1 Objekt',
+        })
+        self.assertTrue(page.project_group.isHidden())
+        self.assertEqual({key for key, label in page.header.fact_labels.items() if not label.isHidden()},
+                         set(dict(page.header.facts)))
         fields=self.window.native_drop_zone.project_fields
         self.assertEqual(fields['Filamentprofile'][1].text(),'Alpha\nBeta\nGamma')
         self.assertEqual(fields['Maschinenprofil'][1].text(),'Machine Profile')
         self.assertEqual(fields['Prozessprofil'][1].text(),'Process Profile')
-        self.assertNotIn('Alpha',page.context_label.text())
+        self.assertNotIn('Alpha',str(page.header.facts))
         from dataclasses import replace
         prusa=replace(imported.session.context,adapter_id='prusa_slicer',
             settings={'filament_settings_id':'"Alpha; special";"Beta"'})
@@ -338,6 +404,192 @@ class NativePageRoutingTests(unittest.TestCase):
         self.assertFalse(page.cancel_button.isHidden())
         self.assertTrue(page.export_button.isHidden())
 
+    def test_shell_settings_restore_manual_values_after_auto_and_reset(self):
+        page = self.window.native_project_page
+        editor = page.editor
+        self.assertTrue(page.collect_settings().simulate_tower_without_supports)
+        settings_layout = editor.input_group.content_layout
+        tolerance = editor.rows['layer_time_tolerance_s']
+        top_shell = editor.rows['top_shell_layers']
+        bottom_shell = editor.rows['bottom_shell_layers']
+        extra = editor.inputs['extra_top_layer'][0]
+        self.assertEqual(extra.text(), 'Turm +1 Layer höher generieren (druck endet am Turm)')
+        self.assertEqual(settings_layout.indexOf(top_shell), settings_layout.indexOf(tolerance) + 1)
+        self.assertEqual(settings_layout.indexOf(bottom_shell), settings_layout.indexOf(top_shell) + 1)
+        self.assertEqual(settings_layout.indexOf(extra.parentWidget()), settings_layout.indexOf(bottom_shell) + 1)
+        self.assertEqual(page.layout().indexOf(page.plates), page.layout().indexOf(page.main_header) + 1)
+        self.assertTrue(editor.timing_panel.isHidden())
+        self.assertFalse(editor.timing_toggle.isEnabled())
+        self.assertFalse(editor.timing_toggle.isChecked())
+        editor.set_project_profile(SimpleNamespace(adapter_id='bambu_studio', settings={
+            'support_threshold_angle': 28., 'top_shell_layers': 12, 'bottom_shell_layers': 0,
+        }))
+        for surface, automatic_value in (('top', 12), ('bottom', 0)):
+            field = f'{surface}_shell_layers'
+            spin = editor.inputs[field][0]
+            flag = editor.automatic[f'automatic_{field}']
+            self.assertEqual((spin.minimum(), spin.value(), spin.maximum()), (0, 1, 5))
+            spin.setValue(4)
+            flag.setChecked(True)
+            self.assertFalse(spin.isEnabled())
+            self.assertEqual(spin.text(), str(automatic_value))
+            self.assertEqual(getattr(page.collect_settings(), field), 4)
+            flag.setChecked(False)
+            self.assertEqual(spin.value(), 4)
+            editor.rows[field].reset_button.click()
+            self.assertEqual(spin.value(), 1)
+        concave = editor.concave_base_row
+        self.assertFalse(concave.isHidden())
+        editor.inputs['simulate_full_tower_infill'][0].setChecked(True)
+        self.assertTrue(concave.isHidden())
+        editor.reset()
+        self.assertFalse(concave.isHidden())
+        editor.refresh_layout()
+
+    def test_numeric_drafts_survive_live_refresh_and_commit_only_when_confirmed(self):
+        page = self.window.native_project_page
+        self.window.input_pages.setCurrentWidget(page)
+        self.window.show()
+        self.app.processEvents()
+        editor = page.editor
+        fields = (
+            (editor.inputs['top_shell_layers'][0], '3', 3),
+            (editor.inputs['bottom_shell_layers'][0], '04', 4),
+            (editor.inputs['target_layer_time_s'][0], '12.50', 12.5),
+            (editor.iterations, '24', 24),
+            (editor.separate_iterations, '10', 10),
+        )
+        for spin, draft, value in fields:
+            with self.subTest(field=spin.accessibleName()):
+                old = spin.value()
+                spin.setFocus()
+                spin.selectAll()
+                for index, character in enumerate(draft, 1):
+                    QTest.keyClicks(spin, character)
+                    self.app.processEvents()
+                    self.assertEqual(spin.lineEdit().text(), draft[:index])
+                    self.assertEqual(spin.lineEdit().cursorPosition(), index)
+                    self.assertEqual(spin.value(), old)
+                    self.assertTrue(spin.input_pending)
+                if spin is editor.separate_iterations:
+                    QTest.keyClick(spin, Qt.Key.Key_Tab)
+                else:
+                    QTest.keyClick(spin, Qt.Key.Key_Return)
+                self.assertEqual(spin.value(), value)
+                self.assertFalse(spin.input_pending)
+
+    def test_native_minimum_diameter_warns_using_embedded_profile_and_current_settings(self):
+        from cooling_tower.native_project.session import NativeProjectSession
+
+        source = self.root/'wall-clearance.3mf'
+        write_native(source, values={
+            'outer_wall_line_width': '0.42', 'inner_wall_line_width': '0.45',
+            'minimum_sparse_infill_area': '20', 'sparse_infill_density': '12%',
+        })
+        page = self.window.native_project_page
+        page._path = source
+        page.controller.imported = NativeImported(
+            NativeProjectSession(source), SimpleNamespace(display_name='Bambu Studio'), ())
+        page._imported(page.controller.imported)
+        editor = page.editor
+        diameter = editor.rows['minimum_outer_diameter_mm']
+        full = editor.inputs['simulate_full_tower_infill'][0]
+        self.assertIn('mindestens 6,9 mm', diameter.message_label.text())
+        full.setChecked(True)
+        self.assertTrue(diameter.message_container.isHidden())
+        full.setChecked(False)
+        self.assertIn('mindestens 6,9 mm', diameter.message_label.text())
+        editor.inputs['tower_wall_count'][0].setValue(1)
+        self.assertIn('mindestens 6,0 mm', diameter.message_label.text())
+        diameter.editor.setValue(6.)
+        self.assertTrue(diameter.message_container.isHidden())
+        editor.inputs['circle_segments'][0].setValue(4)
+        editor.automatic['automatic_circle_segments'].setChecked(False)
+        self.assertIn('massiv', diameter.message_label.text())
+        page.deactivate()
+        self.assertTrue(diameter.message_container.isHidden())
+
+    def test_slice_previews_update_chart_and_canvas_then_cancel_restores_basis(self):
+        from types import SimpleNamespace
+        from cooling_tower.native_project.automatic import NativeSlicePreview
+        from cooling_tower.native_project.toolpath import DepositionToolpathAnalysis
+        from cooling_tower.preview.models import LineSegment3D, Point3D
+        from test_phase2 import make_layer
+
+        page = self.window.native_project_page
+        settings = SimpleNamespace(as_dict=lambda: {
+            'printable_area': ['0x0', '200x0', '200x200', '0x200'],
+        })
+        context = SimpleNamespace(settings=settings)
+        analysis = SimpleNamespace(layers=tuple(make_layer(i, total_time_s=2.,
+            deposition_time_s=1., deposition_path_mm=10.) for i in range(1, 4)),
+            layer_count=3, maximum_print_z_mm=.6)
+        def paths(x):
+            return DepositionToolpathAnalysis(
+                (LineSegment3D(Point3D(x,10,.2), Point3D(x+1,10,.2)),), 1, None)
+        basis = Resource()
+        basis.context, basis.analysis, basis.toolpaths = context, analysis, paths(10)
+        page.controller.prepared = basis
+        page._show_result(basis)
+        self.assertTrue(page.editor.timing_toggle.isChecked())
+        page._select_layer(2)
+        page._iteration(NativeSlicePreview(context, analysis, paths(20), (20.,10.), 5., True, (4., 5., 6.)))
+        self.assertEqual(page.layer_spin.value(), 2)
+        self.assertEqual(page.chart.combined, (4., 5., 6.))
+        self.assertEqual(len(page.canvas.scene.tower_segments), 1)
+        self.assertEqual(page.canvas.scene.object_segments, ())
+        self.assertIn('geschätzt', page.editor.time_legend.labels[1].text())
+        page.cancel()
+        self.assertIs(page._displayed, basis)
+        self.assertIsNone(page.chart.combined)
+        page._clear_display()
+        self.assertFalse(page.editor.timing_toggle.isChecked())
+
+    def test_native_header_facts_can_be_clicked_without_taking_focus(self):
+        from PySide6.QtTest import QSignalSpy
+        from cooling_tower.gui.native_project.header import NativePreparationFactsButton
+
+        facts = NativePreparationFactsButton()
+        self.addCleanup(dispose_test_widget, facts)
+        facts.set_facts((('Dateiname', 'neutral.3mf'),))
+        facts.show()
+        spy = QSignalSpy(facts.clicked)
+        facts.clearFocus()
+        QTest.mouseClick(facts, Qt.MouseButton.LeftButton)
+        self.assertEqual(spy.count(), 1)
+        self.assertFalse(facts.hasFocus())
+
+    def test_native_report_reuses_export_dialog_and_native_folder(self):
+        import json
+        page = self.window.native_project_page
+        root = self.root/'native-exports'
+        folder = root/'Projekt_test'
+        folder.mkdir(parents=True)
+        project = folder/'Projekt_mit_Turm.3mf'
+        project.touch()
+        (folder/'Projektbericht.json').write_text(json.dumps({
+            'native_project_report_version': 1,
+            'target_layer_time_s': 9.0,
+            'minimum_layer_time_s': 8.9,
+            'layer_time_tolerance_s': .25,
+            'extra_layer_z_mm': 24.2,
+        }), encoding='utf-8')
+        page._export_directory = root
+        self.window.show()
+        page._exported(str(project))
+        self.app.processEvents()
+        dialog = self.window.export_success_dialog
+        self.assertTrue(dialog.isVisible())
+        self.assertIn('8,9 von 9', self.window.export_success_achieved_label.text())
+        self.assertIn('zusätzliche Turmlayer', self.window.export_success_usage_label.text())
+        dialog.accept()
+        page.editor.open_report_button.click()
+        self.app.processEvents()
+        self.assertTrue(dialog.isVisible())
+        with patch('cooling_tower.gui.main_window.open_directory') as open_directory:
+            self.window._open_export_directory_from_success_dialog()
+        open_directory.assert_called_once_with(folder.resolve())
+
     def test_shifted_paths_and_seams_select_by_their_print_layer(self):
         from cooling_tower.preview.models import PreviewScene,LineSegment3D,Point3D
         from cooling_tower.models import BedBounds
@@ -378,7 +630,9 @@ class NativePageRoutingTests(unittest.TestCase):
         self.assertEqual(contraction.value(),43.)
         expansion = editor.inputs['maximum_expansion_angle_deg'][0]
         expansion.setValue(40.)
-        editor.set_profile_angle(25.5)
+        editor.set_project_profile(SimpleNamespace(adapter_id='bambu_studio', settings={
+            'support_threshold_angle': 25.5,
+        }))
         self.assertFalse(expansion.isEnabled())
         self.assertEqual(expansion.text(),'25,50')
         self.assertEqual(expansion.value(),40.)
@@ -578,10 +832,21 @@ class NativePlateSelectorTests(unittest.TestCase):
     def test_click_drag_and_keyboard_are_distinct_and_cards_stay_readable(self):
         from types import SimpleNamespace
         from PySide6.QtGui import QPixmap, QColor
-        from cooling_tower.gui.native_project.plate_selector import NativePlateSelector
+        from cooling_tower.gui.native_project.plate_selector import NativePlateSelector, _thumbnail_content
         picker=NativePlateSelector()
         self.addCleanup(dispose_test_widget,picker)
-        thumbnail=QPixmap(200,160);thumbnail.fill(QColor('#586b80'))
+        from PySide6.QtGui import QPainter
+        thumbnail = QPixmap(200,160)
+        thumbnail.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(thumbnail)
+        painter.fillRect(80, 40, 40, 80, QColor('#586b80'))
+        painter.end()
+        opaque = QPixmap(200, 160)
+        opaque.fill(QColor('#ffffff'))
+        painter = QPainter(opaque)
+        painter.fillRect(80, 40, 40, 80, QColor('#586b80'))
+        painter.end()
+        self.assertEqual((_thumbnail_content(opaque).width(), _thumbnail_content(opaque).height()), (40, 80))
         for number in range(8):
             picker.add_plate(SimpleNamespace(identifier=str(number),
                 name=f'Druckplatte {number+1} mit lesbarem Namen',object_count=number+1),thumbnail)
@@ -593,9 +858,13 @@ class NativePlateSelectorTests(unittest.TestCase):
         second=picker.itemWidget(picker.item(1))
         self.assertTrue(first.property('selected'))
         self.assertFalse(second.property('selected'))
-        self.assertEqual(first.thumbnail.pixmap().size().width(),96)
+        self.assertEqual((first.thumbnail.pixmap().width(), first.thumbnail.pixmap().height()), (38, 76))
+        self.assertEqual(picker.height(), 125)
         self.assertIn('lesbarem Namen',first.title.text())
         position=picker.visualItemRect(picker.item(1)).center()
+        QTest.mouseMove(picker.viewport(), position)
+        self.assertTrue(second.property('hovered'))
+        self.assertEqual(picker.currentRow(), 0)
         QTest.mousePress(picker.viewport(),Qt.MouseButton.LeftButton,pos=position)
         self.assertEqual(picker.currentRow(),0)
         QTest.mouseRelease(picker.viewport(),Qt.MouseButton.LeftButton,pos=position)

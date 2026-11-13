@@ -134,6 +134,7 @@ def plan_diameter_transitions(
     contraction_slope: float,
     allow_steps: bool,
     base_taper_height: float | None = None,
+    steep_foot: bool = False,
     abrupt_drop_indices: frozenset[int] = frozenset(),
     excluded_indices: frozenset[int] = frozenset(),
 ) -> tuple[tuple[float, ...], tuple[int, ...], tuple[DiameterSegment, ...]]:
@@ -157,7 +158,8 @@ def plan_diameter_transitions(
     taper: Taper | None = None
     base_taper = None
     if base_taper_height is not None and base_taper_height > EPSILON:
-        if not allow_steps:
+        unrestricted_foot = allow_steps or steep_foot
+        if not unrestricted_foot:
             base_taper_height = max(
                 base_taper_height,
                 2.0 * (base_radius - minimum_radius) / contraction_slope,
@@ -165,9 +167,9 @@ def plan_diameter_transitions(
         # Fitted to the two annotated outlines at half their radial span:
         # 100% infill rises by about 6%, normal infill by about 13% of the
         # transition height.  A larger power keeps the outer foot flatter.
-        foot_curve_power = 3.2 if allow_steps else 2.15
+        foot_curve_power = 3.2 if unrestricted_foot else 2.15
         foot_start_fraction = max(
-            0.0 if allow_steps else NORMAL_FOOT_START_FRACTION,
+            0.0 if unrestricted_foot else NORMAL_FOOT_START_FRACTION,
             _foot_start_fraction(z[base_index:], base_taper_height),
         )
         end_z = z[base_index] + base_taper_height
@@ -175,7 +177,7 @@ def plan_diameter_transitions(
         for j in range(base_index + 1, len(z)):
             t = min(1.0, (z[j] - z[base_index]) / base_taper_height)
             if t > 0:
-                if (not allow_steps and demand[j] <= base_radius -
+                if (not unrestricted_foot and demand[j] <= base_radius -
                         contraction_slope * (z[j] - z[base_index])):
                     continue
                 weight = 1.0 - _foot_radial_fraction(
@@ -192,7 +194,7 @@ def plan_diameter_transitions(
                 z[base_index], base_radius, target_radius,
                 base_taper_height, foot_curve_power=foot_curve_power,
                 foot_start_fraction=foot_start_fraction,
-                maximum_contraction_slope=None if allow_steps else contraction_slope,
+                maximum_contraction_slope=None if unrestricted_foot else contraction_slope,
             )
         else:
             base_taper = None

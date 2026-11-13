@@ -28,6 +28,23 @@ def effective_generation_settings(settings, context):
     if settings.limit_expansion_to_profile and threshold is not None:
         return replace(settings, maximum_expansion_angle_deg=complementary_angle(threshold))
     return settings
+
+
+def embedded_shell_layers(context, surface: str) -> int | None:
+    suffix = 'solid_layers' if context.adapter_id == 'prusa_slicer' else 'shell_layers'
+    value = context.settings.get(f'{surface}_{suffix}')
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        if parsed >= 0:
+            return parsed
+    return None
+
+
 _LEGACY_HOLLOW_DEFAULTS: Mapping[str, float] = {
     "minimum_wall_thickness_mm": 0.80,
     "maximum_wall_thickness_mm": 4.20,
@@ -63,6 +80,12 @@ class NativeGenerationSettings:
     simulate_full_tower_infill: bool
     simulate_tower_without_supports: bool
     simulate_source_supports: bool
+    top_shell_layers: int
+    bottom_shell_layers: int
+    automatic_top_shell_layers: bool
+    automatic_bottom_shell_layers: bool
+    extra_top_layer: bool
+    concave_base: bool
 
     minimum_base_radius_mm: float
     _legacy_base_height_mm: float = field(repr=False, compare=False)
@@ -127,8 +150,20 @@ class NativeGenerationSettings:
         local_reference_window: int = GENERATION_DEFAULTS["local_reference_window"],
         layer_time_tolerance_s: float = GENERATION_DEFAULTS["layer_time_tolerance_s"],
         excluded_layer_ranges: tuple[LayerRange, ...] = (),
+        top_shell_layers: int = GENERATION_DEFAULTS["top_shell_layers"],
+        bottom_shell_layers: int = GENERATION_DEFAULTS["bottom_shell_layers"],
+        automatic_top_shell_layers: bool = GENERATION_DEFAULTS["automatic_top_shell_layers"],
+        automatic_bottom_shell_layers: bool = GENERATION_DEFAULTS["automatic_bottom_shell_layers"],
+        extra_top_layer: bool = GENERATION_DEFAULTS["extra_top_layer"],
+        concave_base: bool = GENERATION_DEFAULTS["concave_base"],
         **legacy: Any,
     ) -> None:
+        for value in (top_shell_layers, bottom_shell_layers):
+            if type(value) is not int or not 0 <= value <= 5:
+                raise ValueError("Manuelle Shell-Layer-Anzahlen müssen zwischen 0 und 5 liegen.")
+        for value in (automatic_top_shell_layers, automatic_bottom_shell_layers, extra_top_layer, concave_base):
+            if type(value) is not bool:
+                raise ValueError("Die Turmoption benötigt einen gültigen Ein-/Aus-Wert.")
         legacy_base_height = legacy.pop("base_height_mm", legacy.pop("_legacy_base_height_mm", 1.0))
         object.__setattr__(self, "_legacy_base_height_mm", float(legacy_base_height))
         legacy_minimum_radius = legacy.pop("minimum_outer_radius_mm", _UNSET)
@@ -159,6 +194,12 @@ class NativeGenerationSettings:
             "simulate_full_tower_infill": simulate_full_tower_infill,
             "simulate_tower_without_supports": simulate_tower_without_supports,
             "simulate_source_supports": simulate_source_supports,
+            "top_shell_layers": top_shell_layers,
+            "bottom_shell_layers": bottom_shell_layers,
+            "automatic_top_shell_layers": automatic_top_shell_layers,
+            "automatic_bottom_shell_layers": automatic_bottom_shell_layers,
+            "extra_top_layer": extra_top_layer,
+            "concave_base": concave_base,
             "minimum_base_radius_mm": minimum_base_radius_mm,
             "base_margin_mm": base_margin_mm,
             "base_height_factor": base_height_factor,

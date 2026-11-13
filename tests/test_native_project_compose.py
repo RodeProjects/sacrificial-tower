@@ -72,6 +72,28 @@ class NativeComposeTests(unittest.TestCase):
                     self.assertEqual(values.get(key), None if full else '4')
                 self.assertEqual(self.path.read_bytes(), before)
 
+    def test_shell_overrides_and_supports_are_written_only_to_the_tower(self):
+        from dataclasses import replace
+        for adapter in ('bambu_studio', 'prusa_slicer'):
+            prusa = adapter == 'prusa_slicer'
+            context = replace(self.session.context, adapter_id=adapter)
+            composed = append_tower(context, '1', self.mesh, workspace=self.work,
+                name=f'{adapter}-shells.3mf', center_mm=(25,25), full_infill=False,
+                shell_layers=(('top', 0, False), ('bottom', 12, True)))
+            config = 'Metadata/Slic3r_PE_model.config' if prusa else 'Metadata/model_settings.config'
+            with zipfile.ZipFile(composed.path) as archive, zipfile.ZipFile(self.path) as original:
+                tower = ET.fromstring(archive.read(config)).findall('object')[-1]
+                values = {node.get('key'): node.get('value') for node in tower.findall('metadata')}
+                count = 'solid_layers' if prusa else 'shell_layers'
+                thickness = 'solid_min_thickness' if prusa else 'shell_thickness'
+                self.assertEqual(values[f'top_{count}'], '0')
+                self.assertEqual(values[f'bottom_{count}'], '12')
+                self.assertEqual(values[f'top_{thickness}'], '0')
+                self.assertNotIn(f'bottom_{thickness}', values)
+                self.assertEqual(values['support_material' if prusa else 'enable_support'], '0')
+                self.assertEqual(archive.read('Metadata/project_settings.config'),
+                                 original.read('Metadata/project_settings.config'))
+
     def test_restoration_is_exact_per_original_entry_and_prevents_tower_accumulation(self):
         composed=self.compose()
         second=NativeProjectSession(composed.path);self.addCleanup(second.close)
@@ -152,6 +174,46 @@ class NativeComposeTests(unittest.TestCase):
             center_mm=(25,25), layer_print_z=tuple(.2*(index+1) for index in range(20)))
         with zipfile.ZipFile(composed.path) as archive:
             self.assertNotIn('Metadata/layer_heights_profile.txt',archive.namelist())
+
+    def test_extra_layer_extends_only_the_tower_copy_of_an_embedded_height_curve(self):
+        source = self.work.child('adaptive.3mf')
+        curve = b'0;0.2;0.2;0.2;1;0.12;4;0.16'
+        path = 'Metadata/layer_heights_profile.txt'
+        with zipfile.ZipFile(self.path) as original, zipfile.ZipFile(source, 'x') as archive:
+            for name in original.namelist():
+                archive.writestr(name, original.read(name))
+            archive.writestr(path, b'object_id=1|'+curve+b'\n')
+        session = NativeProjectSession(source)
+        self.addCleanup(session.close)
+        mesh = TriangleMesh(tuple((x,y,4.16 if z else 0.) for x,y,z in VERTICES), FACES, 2, 4)
+        composed = append_tower(session.context, '1', mesh, workspace=self.work,
+            center_mm=(25,25), layer_print_z=(.2,.32,.44,4.,4.16), extra_layer_base_z=4.,
+            full_infill=False, solid_foot_top_mm=.44)
+        with zipfile.ZipFile(composed.path) as archive:
+            self.assertEqual(archive.read(path).splitlines(),
+                [b'object_id=1|'+curve, b'object_id=2|'+curve+b';4;0.16;4.16;0.16'])
+
+    def test_solid_foot_has_its_own_range_and_retains_requested_bottom_shells(self):
+        from dataclasses import replace
+        for adapter in ('bambu_studio', 'prusa_slicer'):
+            prusa = adapter == 'prusa_slicer'
+            context = replace(self.session.context, adapter_id=adapter)
+            composed = append_tower(context, '1', self.mesh, workspace=self.work,
+                name=f'{adapter}-solid-foot.3mf', center_mm=(25,25), full_infill=False,
+                shell_layers=(('bottom', 1, False),), solid_foot_top_mm=2.4)
+            config = 'Metadata/Slic3r_PE_model.config' if prusa else 'Metadata/model_settings.config'
+            ranges = ('Metadata/Prusa_Slicer_layer_config_ranges.xml' if prusa
+                      else 'Metadata/layer_config_ranges.xml')
+            with zipfile.ZipFile(composed.path) as archive:
+                obj = ET.fromstring(archive.read(config)).findall('object')[-1]
+                values = {node.get('key'): node.get('value') for node in obj.findall('metadata')}
+                self.assertEqual(values['bottom_solid_layers' if prusa else 'bottom_shell_layers'], '1')
+                region = ET.fromstring(archive.read(ranges)).find('object/range')
+                self.assertEqual((region.get('min_z'), region.get('max_z')), ('0', '2.4'))
+                options = {node.get('opt_key'): node.text for node in region}
+                self.assertEqual(options['fill_density' if prusa else 'sparse_infill_density'], '100%')
+                self.assertEqual(options['layer_height'], '0.2')
+                self.assertIn(f'PartName="/{ranges}"'.encode(), archive.read('[Content_Types].xml'))
 
     def test_native_inch_mesh_keeps_millimetre_instance_and_tower_translations(self):
         source = self.work.child('inch.3mf')

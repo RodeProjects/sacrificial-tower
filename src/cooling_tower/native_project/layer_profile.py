@@ -203,6 +203,39 @@ def inherited_height_inputs(context, plate_id, model_config: bytes, ranges: byte
     return values, ET.tostring(target) if len(target) else b''
 
 
+def solid_foot_ranges(context, height_settings, tower_ranges: bytes, foot_top_mm: float) -> bytes:
+    """Apply dense infill only inside the foot, retaining inherited height overrides."""
+    inherited = ET.fromstring(tower_ranges).findall('range') if tower_ranges else ()
+    target = ET.Element('object', {'id': str(tower_model_index(context))})
+    prusa = context.adapter_id == 'prusa_slicer'
+    density_key = 'fill_density' if prusa else 'sparse_infill_density'
+    pattern_key = 'fill_pattern' if prusa else 'sparse_infill_pattern'
+    pattern = 'rectilinear' if prusa else 'zig-zag'
+
+    def add_range(low, high, options, *, dense):
+        item = ET.SubElement(target, 'range', {'min_z': format(low, '.12g'), 'max_z': format(high, '.12g')})
+        if dense:
+            options = {**options, density_key: '100%', pattern_key: pattern}
+        for key, value in options.items():
+            ET.SubElement(item, 'option', {'opt_key': key}).text = value
+
+    regular = {'layer_height': str(height_settings.get('layer_height', context.layer_height)), 'extruder': '0'}
+    covered = 0.
+    for item in sorted(inherited, key=lambda item: float(item.get('min_z'))):
+        low, high = float(item.get('min_z')), float(item.get('max_z'))
+        options = {node.get('opt_key'): node.text for node in item.findall('option')}
+        if covered < min(low, foot_top_mm):
+            add_range(covered, min(low, foot_top_mm), regular, dense=True)
+        if low < foot_top_mm:
+            add_range(low, min(high, foot_top_mm), options, dense=True)
+        if high > foot_top_mm:
+            add_range(max(low, foot_top_mm), high, options, dense=False)
+        covered = max(covered, high)
+    if covered < foot_top_mm:
+        add_range(covered, foot_top_mm, regular, dense=True)
+    return ET.tostring(target)
+
+
 def tower_geometry_height(context: NativeProjectContext, plate_id: str, layers) -> float:
     """Retain a native curve's true object top past its last rounded print Z."""
     from cooling_tower.native_project.archive import ProjectArchive

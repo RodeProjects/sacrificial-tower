@@ -50,12 +50,17 @@ class _FactLabel(QLabel):
 
 
 class NativePreparationFactsButton(QPushButton):
-    """Keep only source identity in the native editor's compact corner action."""
+    """Show project facts in the native editor's corner action."""
 
-    NAMES = ("Dateiname", "Slicer")
+    NAMES = ("Dateiname", "Slicer", "Methode", "Projektversion", "Druckplatten", "Druckplatte")
 
     def __init__(self) -> None:
         super().__init__()
+        self.setStyleSheet(
+            "QPushButton { border-radius: 0; }"
+            "QPushButton:focus { border: 1px solid #c5d0d8; outline: none; }"
+        )
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setAccessibleName("Zurück zur Dateiübergabe")
         self.setToolTip("Datei- und Projekteinstellungen in der Dateiübergabe anzeigen")
         self.setCheckable(True)

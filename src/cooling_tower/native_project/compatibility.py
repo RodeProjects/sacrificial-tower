@@ -6,7 +6,7 @@ import zipfile
 from xml.etree import ElementTree as ET
 
 from cooling_tower.native_project.archive import ProjectArchive, parse_xml
-from cooling_tower.native_project.compose import xml_span
+from cooling_tower.native_project.compose import xml_span, xml_spans
 from cooling_tower.native_project.context import NativeProjectContext
 from cooling_tower.protected_io import OwnedWorkspace
 
@@ -138,34 +138,57 @@ def _freeze_metadata(archive, config_path, config, name):
     return changes
 
 
-def execution_project(context: NativeProjectContext, source: Path, workspace: OwnedWorkspace, *, plate_id: str) -> Path:
+def _tower_only_model(context, archive, plate_id):
+    data = archive.read(context.graph.main_path)
+    spans = xml_spans(data, ('model', 'build', 'item'))
+    for index in reversed(context.plate(plate_id).build_indices):
+        first, last, _, _ = spans[index]
+        item = data[first:last]
+        match = re.match(rb'<[^\s/>]+(?P<attributes>(?:[^"\'>]|"[^"]*"|\'[^\']*\')*)>', item)
+        if match is None:
+            raise ValueError('Der native Druckplatteneintrag konnte nicht isoliert werden.')
+        attributes = match['attributes']
+        # Match attributes as complete name/value pairs so a quoted value
+        # containing the word printable cannot be mistaken for the flag.
+        token = next((attribute for attribute in re.finditer(
+            rb'\s+([^\s=]+)\s*=\s*(?:"[^"]*"|\'[^\']*\')', attributes)
+            if attribute[1] == b'printable'), None)
+        if token is None:
+            start = end = match.start('attributes')
+        else:
+            start = match.start('attributes') + token.start()
+            end = match.start('attributes') + token.end()
+        data = data[:first+start] + b' printable="0"' + data[first+end:]
+    return data
+
+
+def execution_project(context: NativeProjectContext, source: Path, workspace: OwnedWorkspace, *,
+                      plate_id: str, tower_only: bool = False) -> Path:
     # Anycubic 2.0.0.3 PartPlate::set_plate_name unconditionally creates a GUI
     # text texture. Its CLI has no Plater and crashes even on a neutral named
     # plate. Preserve the selected name's native G-code placeholder semantics
     # before bypassing that GUI path. Basis and exported project stay unchanged.
-    if context.adapter_id != 'anycubic_slicer_next':
+    if context.adapter_id != 'anycubic_slicer_next' and not tower_only:
         return source
     with ProjectArchive(source) as archive:
+        changes = {context.graph.main_path: _tower_only_model(context, archive, plate_id)} if tower_only else {}
         config_path = 'Metadata/model_settings.config'
-        if config_path not in archive.names:
+        if context.adapter_id == 'anycubic_slicer_next' and config_path in archive.names:
+            config = archive.read(config_path, metadata=True)
+            original = config
+            plates = parse_xml(config).findall('plate')
+            for index, plate in reversed(tuple(enumerate(plates))):
+                names = [node for node in plate.findall('metadata') if node.get('key') == 'plater_name' and node.get('value')]
+                if names:
+                    for node in names:
+                        node.set('value', '')
+                    first, last, _, _ = xml_span(config, ('config', 'plate'), index)
+                    config = config[:first] + ET.tostring(plate, encoding='utf-8') + config[last:]
+            if config != original:
+                selected_name = dict(context.plate(plate_id).metadata).get('plater_name', '')
+                changes.update(_freeze_metadata(archive, config_path, config, selected_name))
+        if not changes:
             return source
-        config = archive.read(config_path, metadata=True)
-        root = parse_xml(config)
-        plates = root.findall('plate')
-        changed = False
-        for index in reversed(range(len(plates))):
-            plate = plates[index]
-            names = [node for node in plate.findall('metadata') if node.get('key') == 'plater_name' and node.get('value')]
-            if names:
-                for node in names:
-                    node.set('value', '')
-                first, last, _, _ = xml_span(config, ('config', 'plate'), index)
-                config = config[:first] + ET.tostring(plate, encoding='utf-8') + config[last:]
-                changed = True
-        if not changed:
-            return source
-        selected_name = dict(context.plate(plate_id).metadata).get('plater_name', '')
-        changes = _freeze_metadata(archive, config_path, config, selected_name)
         target = workspace.child('cli-project.3mf')
         with zipfile.ZipFile(target, 'x', zipfile.ZIP_DEFLATED) as output:
             for name in archive.names:

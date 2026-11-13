@@ -11,15 +11,20 @@ from cooling_tower.tower.profile import (
 )
 
 
-def joint_growth_scale(combined_times_s, *, target_time_s, config):
+def joint_radius_scale(combined_times_s, *, target_time_s, config):
     """Bound the correction for a cooling plan shared by the whole plate."""
     finite = tuple(value for value in combined_times_s.values()
                    if math.isfinite(value) and value > 1e-9)
-    if not finite or min(finite) + config.time_tolerance_s >= target_time_s:
+    if not finite:
         return 1.
-    reserve = min(1., max(config.time_tolerance_s, target_time_s * .05))
-    return min(math.sqrt(config.maximum_path_growth_factor),
-               math.sqrt((target_time_s + reserve) / min(finite)))
+    minimum = min(finite)
+    difference = minimum - target_time_s
+    if abs(difference) <= config.time_tolerance_s:
+        return 1.
+    reserve = (min(1., max(config.time_tolerance_s, target_time_s * .05))
+               if difference < 0. else 0.)
+    requested = math.sqrt((target_time_s + reserve) / minimum)
+    return min(math.sqrt(config.maximum_path_growth_factor), max(.5, requested))
 
 
 def _history_radius_estimate(
